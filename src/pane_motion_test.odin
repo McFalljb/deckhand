@@ -546,3 +546,122 @@ pane_zoom_small_windows :: proc(t: ^testing.T) {
 	}
 	core.run_command(core.Zoom_Pane{zoom = false}, PT_UI)
 }
+
+// ---- review fixes (#100) ----
+
+// A split restored in a window narrowed while zoomed is laid out clamped at once: the small side
+// keeps its minimum on the first layout, and its terminal is sized once (the next layout agrees).
+@(test)
+pane_zoom_restore_clamped :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer centre_reset()
+	defer clear(&term_fits)
+	s := pt_one(2)
+	state.layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true}
+	r := core.run_command(core.Split_Pane{direction = .Right, tab_id = s.tabs[2].id}, PT_UI)
+	if !testing.expectf(t, r.ok, "split: %s", r.error) do return
+	b := r.created_id
+	for &tab in s.tabs do tab.has_term = true
+	lay :: proc(s: ^core.Open_Session, w: f32) {
+		_ = ui_layout(w, 860)
+		ui_pane_rects(s)
+		panes_fit_terms()
+	}
+	lay(s, 1400)
+	testing.expect(t, core.run_command(core.Set_Split{split = s.nodes[s.root].id, ratio = 0.8}, PT_UI).ok)
+	lay(s, 1400)
+	lay(s, 1400)
+	testing.expect(t, core.run_command(core.Zoom_Pane{pane = s.tabs[0].pane}, PT_UI).ok, "zoom A")
+	lay(s, 900)
+	lay(s, 900)
+	testing.expect(t, core.run_command(core.Zoom_Pane{zoom = false}, PT_UI).ok, "restore")
+	lay(s, 900) // the first layout after the restore
+	pb := core.session_pane(s, b)
+	testing.expectf(t, pb.rect.z >= core.PANE_MIN_W - 1, "B at least its minimum at once: %v", pb.rect)
+	first := term_fits[s.tabs[2].id]
+	lay(s, 900)
+	testing.expect_value(t, term_fits[s.tabs[2].id].cols, first.cols)
+	testing.expect_value(t, core.session_pane(s, b).rect, pb.rect)
+}
+
+// A press held in pane A while B is zoomed: A is not drawn, so its capture goes; moves and the
+// wheel go to what is drawn.
+@(test)
+pane_zoom_drops_hidden_capture :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	defer pane_release()
+	pointer_capture = {pane = x.a}
+	core.run_command(core.Focus_Pane{pane = x.b}, PT_UI)
+	core.run_command(core.Zoom_Pane{pane = x.b}, PT_UI)
+	for ty in ([]sapp.Event_Type{.MOUSE_MOVE, .MOUSE_SCROLL}) {
+		pointer_capture = {pane = x.a}
+		e := sapp.Event{type = ty, mouse_x = 10, mouse_y = 10}
+		p := event_pane(&e)
+		testing.expectf(t, p != nil && p.id == x.b, "%v goes to B", ty)
+		testing.expect_value(t, pointer_capture.pane, u64(0))
+	}
+	pointer_capture = {pane = x.a}
+	e := sapp.Event{type = .MOUSE_MOVE, mouse_x = 10, mouse_y = 10}
+	pane_pointer_moved(&e)
+	testing.expect_value(t, pointer_capture.pane, u64(0))
+	testing.expect(t, pointer_pane != x.a, "not over hidden A")
+}
+
+// Restoring shows the hidden panes' tabs: a tab that finished while hidden is seen, and its
+// session's bell entries are read, as when a tab comes on screen any other way; also when the
+// zoom ends because a pane went.
+@(test)
+pane_zoom_restore_marks_seen :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	s := x.s
+	core.session_show_tab(s, x.pi, focus = false) // A shows the pi tab
+	core.run_command(core.Zoom_Pane{pane = x.b}, PT_UI)
+	tab_of :: proc(s: ^core.Open_Session, id: u64) -> ^core.Tab {
+		for &tb in s.tabs do if tb.id == id do return &tb
+		return nil
+	}
+	tab_of(s, x.pi).unseen = true // finished while hidden
+	append(&state.notices.items, core.Notice{id = core.new_id(), session = s.id, tab_id = x.pi})
+	testing.expect(t, core.run_command(core.Zoom_Pane{zoom = false}, PT_UI).ok, "restore")
+	testing.expect(t, !tab_of(s, x.pi).unseen, "seen once back on screen")
+	testing.expect(t, state.notices.items[len(state.notices.items) - 1].read, "its bell entry read")
+	// the zoom ended by a pane going: hidden A closed, its tabs join B showing A's pi tab
+	core.run_command(core.Zoom_Pane{pane = x.b}, PT_UI)
+	tab_of(s, x.pi).unseen = true
+	core.run_command(core.Focus_Tab{tab_id = x.editor}, PT_UI) // within B: still zoomed
+	testing.expect(t, tab_of(s, x.pi).unseen, "still hidden: unseen")
+	core.run_command(core.Close_Pane{pane = x.a}, PT_UI)
+	testing.expect_value(t, s.zoomed_pane, u64(0))
+	testing.expect(t, core.session_tab_shown(s, x.pi), "pi shown in B")
+	testing.expect(t, !tab_of(s, x.pi).unseen, "seen when it is drawn again")
+}
+
+// ⌥⌘A to a tab in a pane hidden by a zoom: the layout comes back, the tab is shown and focused
+// (never focused but hidden); to another tab of the zoomed pane: the zoom stays.
+@(test)
+pane_zoom_next_needing_you :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	s := x.s
+	core.run_command(core.Zoom_Pane{pane = x.b}, PT_UI)
+	for &tb in s.tabs do if tb.id == x.shell do tb.unseen = true
+	r := core.run_command(core.Next_Needing_You{}, PT_UI)
+	testing.expectf(t, r.ok, "next: %s", r.error)
+	testing.expect_value(t, core.session_focused_id(s), x.shell)
+	testing.expect(t, core.session_tab_shown(s, x.shell), "shown")
+	testing.expect_value(t, core.session_zoomed(s), u64(0))
+	// within the zoomed pane
+	core.run_command(core.Zoom_Pane{pane = x.b}, PT_UI)
+	for &tb in s.tabs do if tb.id == x.editor do tb.prog.state = .Error
+	r = core.run_command(core.Next_Needing_You{}, PT_UI)
+	testing.expectf(t, r.ok, "next: %s", r.error)
+	testing.expect_value(t, core.session_focused_id(s), x.editor)
+	testing.expect(t, core.session_tab_shown(s, x.editor), "shown")
+	testing.expect_value(t, core.session_zoomed(s), x.b)
+}

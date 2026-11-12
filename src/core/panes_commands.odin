@@ -114,13 +114,14 @@ panes_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 		want := c.zoom.? or_else (zoomed != p.id) // unset: toggle this pane's zoom
 		if !want {
 			if zoomed == 0 do return {ok = true}, false
-			s.zoomed_pane = 0 // the layout comes back (whichever pane was zoomed)
+			pane_zoom_end(s) // the layout comes back (whichever pane was zoomed)
+			pane_zoom_seen(s)
 			return {ok = true}, true
 		}
 		if len(s.panes) <= 1 do return fail("one pane: nothing to zoom"), false
 		if zoomed == p.id do return {ok = true}, false
-		pane_focus(s, p.id) // the zoomed pane has the keyboard (another's zoom ends here)
-		s.zoomed_pane = p.id
+		s.zoomed_pane = p.id // set first: moving from another pane's zoom shows nothing in between
+		pane_focus(s, p.id) // the zoomed pane has the keyboard
 		focus_session(s.id, caller)
 		return {ok = true}, true
 	}
@@ -189,6 +190,7 @@ pane_has_room_leaving :: proc(s: ^Open_Session, pane: u64, d: Pane_Dir, leaving:
 	c.panes = slice.clone_to_dynamic(s.panes[:])
 	c.nodes = slice.clone_to_dynamic(s.nodes[:])
 	c.pane_mru = slice.clone_to_dynamic(s.pane_mru[:])
+	c.zoomed_pane = 0 // a room check: nothing is shown or seen
 	pane_remove(&c, leaving) // touches only the copies (and s.tabs, not at all)
 	defer {
 		delete(c.panes)

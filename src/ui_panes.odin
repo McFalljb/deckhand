@@ -43,8 +43,8 @@ event_pane :: proc(e: ^sapp.Event) -> ^core.Pane {
 	#partial switch e.type {
 	case .MOUSE_DOWN, .MOUSE_UP, .MOUSE_MOVE, .MOUSE_SCROLL, .MOUSE_ENTER, .MOUSE_LEAVE:
 		if pointer_capture.pane != 0 {
-			if p := core.session_pane(s, pointer_capture.pane); p != nil do return p
-			pointer_capture = {} // its pane went
+			if p := core.session_pane(s, pointer_capture.pane); p != nil && !core.pane_zoom_hidden(s, p.id) do return p
+			pointer_capture = {} // its pane went, or a zoom hides it (not drawn: nothing to drag in)
 		}
 		if p := pane_at(e.mouse_x, e.mouse_y); p != nil do return p
 	}
@@ -84,6 +84,7 @@ pointer_pane: u64
 
 pane_pointer_moved :: proc(e: ^sapp.Event) {
 	now: u64
+	if pointer_capture.pane != 0 && core.pane_zoom_hidden(core.cur(), pointer_capture.pane) do pointer_capture = {} // not drawn
 	if pointer_capture.pane != 0 do now = pointer_capture.pane
 	else if p := pane_at(e.mouse_x, e.mouse_y); p != nil do now = p.id
 	if now == pointer_pane do return

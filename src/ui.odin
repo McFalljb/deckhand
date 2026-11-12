@@ -803,11 +803,17 @@ pane_tree_layout :: proc(cs: ^core.Open_Session, n: int) {
 	th := theme()
 	across := node.dir == .Right
 	ratio := pane_drag_ratio(node.id, node.ratio) // a divider being dragged: where it is now
-	// kept off the panes' minimum sizes at the split's last laid-out size (pane_rects does the same)
+	// kept off the panes' minimum sizes at the split's last laid-out size (pane_rects does the same);
+	// not laid out last frame (a zoom just ended): its place in the tree inside the last centre
 	if d := clay.GetElementData(clay.ID("pane_split", u32(node.id))); d.found {
 		kept := core.pane_split_share(cs, n, ratio, (across ? d.boundingBox.width : d.boundingBox.height) - px(core.BORDER_W), app.dpi)
 		if abs(kept - ratio) > 0.0005 do app.redraw = true // laid out at last frame's size: once more at this one's
 		ratio = kept
+	} else if app.centre.z > 0 {
+		div, mw, mh := core.pane_mins(app.dpi)
+		if r, ok := core.pane_split_rect(cs, node.id, {0, 0, app.centre.z, app.centre.w}, div, mw, mh); ok {
+			ratio = core.pane_split_share(cs, n, ratio, (across ? r.z : r.w) - div, app.dpi)
+		}
 	}
 	sz_a := across ? clay.Sizing{clay.SizingPercent(ratio), clay.SizingGrow()} : clay.Sizing{clay.SizingGrow(), clay.SizingPercent(ratio)}
 	sz_div := across ? clay.Sizing{clay.SizingFixed(px(core.BORDER_W)), clay.SizingGrow()} : clay.Sizing{clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}

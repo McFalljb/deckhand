@@ -12,8 +12,13 @@ they work with, in one window.
 
 - **Close the window, agents keep running.** Sessions run in a background process, Deckhand
   Core, and keep running through updates too. Open the window again and they are there.
-- **Each agent in its own full terminal UI**, as in a terminal, with a status dot per session:
-  working, waiting for you, finished.
+- **Each agent in its own full terminal UI**, as in a terminal, with a status mark per session
+  (working, waiting for you, finished, error) and how long it has been so.
+- **See what needs you, on every machine.** ⌥⌘A goes to the next session waiting for you, the
+  Attention view (⌥⌘.) lists them all by urgency, and the Deck view (⇧⌘\) shows every open
+  session as a card.
+- **Other machines.** Sessions on your other Macs and Linux machines in the same sidebar, over
+  your own `ssh`.
 - **Split panes.** Drag a tab to a pane's edge to put a shell, the editor, a Markdown file, a
   browser or an app beside the agent.
 - **Browser and app tabs the agent can use.** A built-in Chromium the agent can read and act on,
@@ -40,6 +45,8 @@ and protocol between releases.
 
   With both, **New session** asks which one to start. Atlas and jobs need pi. Setup can install
   either one for you (see [First run](#first-run)).
+- Optional, for other machines: another Mac with Apple silicon, or Linux on x86_64, that you can
+  reach with `ssh` (Deckhand installs its core there for you).
 
 ## Install
 
@@ -100,7 +107,7 @@ have several. You can skip it and reopen it from **Deckhand › Set up Deckhand�
 - **Claude Code.** Deckhand starts your own `claude` with its bundled plugin (`--plugin-dir`),
   with your own account and settings.
 
-Both get status dots, comments, and tools for the browser and app tabs you give them. See
+Both get status marks, comments, and tools for the browser and app tabs you give them. See
 [docs/HARNESSES.md](docs/HARNESSES.md).
 
 ## Sessions keep running
@@ -114,8 +121,14 @@ everything. See [How Deckhand runs](docs/GUIDE.md#how-deckhand-runs).
 
 ![Deckhand with three sessions open: projects and sessions with status dots on the left, a pi session in a split pane with a browser tab on a demo app beside it, and pi's todo list on the right](docs/images/deckhand.png)
 
-- **Agent tabs**: pi and Claude Code in their full terminal UIs, with a status dot per tab and
-  session (working, waiting for you, finished, error).
+- **Agent tabs**: pi and Claude Code in their full terminal UIs, with a status mark per tab and
+  session (working, waiting for you, finished, error), how long it has been so and what it asks.
+- **What needs you**: ⌥⌘A goes to the next session that needs you, on any machine; a fleet pill in
+  the top bar and the Dock badge count them; the Attention view (⌥⌘.) and the Deck view (⇧⌘\)
+  show them all; Peek (⌃⌥⌘A) shows one in a panel without leaving your session (look only: to
+  answer, open it). Per kind: the bell, a macOS notification and a sound.
+- **Keyboard first**: every action has a menu item or a palette entry, and most have a shortcut
+  (reopen a closed tab ⇧⌘T, recent session `` ⌥⌘` ``, open session ⌥⌘1–6, zoom a pane ⇧⌘↩).
 - **Tabs per session**: shells, a code editor, a Markdown viewer, browser tabs and app tabs, next
   to the agent's tab, in split panes if you like.
 - **Projects and sessions**: a sidebar with projects, sessions and chats, pins and a filter.
@@ -130,7 +143,9 @@ everything. See [How Deckhand runs](docs/GUIDE.md#how-deckhand-runs).
 - **Jobs**: pi prompts that run on a schedule, written as notes in your main folder.
 - **Other machines**: sessions on your other Macs and Linux machines in the same sidebar, over
   your own `ssh`. Deckhand installs and updates their core; Atlas works there too, and their
-  jobs and bells ring here.
+  jobs and bells ring here. **New session on nuc in api** starts a session in the same project
+  there (nothing of this Mac's goes with it). A machine you allow to connect to this one acts as
+  you here ([Machines](docs/GUIDE.md#the-settings-tab)).
 - **Control socket**: a local JSON protocol for scripts and agents
   ([docs/PROTOCOL.md](docs/PROTOCOL.md)).
 

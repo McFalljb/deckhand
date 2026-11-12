@@ -105,7 +105,11 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   for an older entry, which means the default account as resolved when it is used, never stamped
   at load). `transcript` may be under any account's `projects/`. Restored with
   `claude_restore_history` (internal).
-- `current_session` and `active_tab` are positions in the saved lists (left out if none).
+- `current_session` and `active_tab` are positions in the saved lists (left out if none). While
+  the Deck view shows no session (`show_no_session`), `current_session` is the session that was
+  current before it (`shown_before`), so a relaunch shows that one.
+- Other machines' projects and open sessions (Machines over SSH) are never saved here: each
+  machine saves its own. `selected_project` is saved only when it is this Mac's.
 - `home`: `{"pi_session_id", "model_applied"?}` of the Home session, once it was opened. Its
   session dir (`<data dir>/home`) and cwd (the main folder when set and reachable, else
   `<data dir>/home`; never `~`, for macOS privacy prompts; looked up at each start) are
@@ -136,7 +140,15 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   `settings.tidy_projects: false` (when off), `settings.keep_sessions` (only once you changed it;
   absent: the default, on; the session holder's `tokens.json` is its own file, above),
   `settings.separate_core` (only when it differs from the default, on: read by the window at
-  launch, to run the core in its own process or not). The tidy list's state (temp, missing, nesting) is
+  launch, to run the core in its own process or not), `settings.remote_machines` and
+  `settings.machines_reachable` (Machines over SSH, Allow other machines to connect: only when
+  they differ from the defaults, on and off), `settings.dim_panes: false` (when off), and
+  `settings.bell` (the gear's *Notify me about* grid, `set_notifications`; only once something
+  differs from the defaults): `finished`, `waiting`, `errors`, `jobs` (`false`: the bell does not
+  collect it), `macos` and `sound` (`{"<group>": …}`, only groups not at their default), `dock:
+  false`, and `os: false` while every group's macOS notification is never (what an older build
+  reads). A file from before per-group settings (`os` and the four groups, no `macos`) gives a
+  group the bell did not collect `never` and no sound. The tidy list's state (temp, missing, nesting) is
   derived at each scan and not saved. A project added by hand is saved in `projects` with
   `"added": true`, so a subfolder you added stays a top-level row across restarts (as pinned
   ones do); restored as saved (`added` absent: a found row that nests), never selected one by
@@ -167,7 +179,8 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
 - `sidebar`: only what differs from the defaults. Pins (in pinned order) and hidden items by
   identity (project cwd with symlinks resolved, pi session id or a Claude row's Claude session id), so they survive rescans; project
   entries whose folder no longer exists are dropped at save;
-  the sort per section (`projects`, `sessions`, `chats`; default `recent`), folded sections,
+  the sort per section (`projects`, `sessions`, `chats`; default `recent`), folded sections
+  (`open`, `projects`, `chats`, and `this_mac`: this Mac's header while Machines over SSH is on),
   `view` (`attention`: the Sessions column's Attention view; default `projects`, not written) and
   `show_hidden`. The filter text and quick filters are not saved. Restored with the internal
   `restore_sidebar`, then `set_sort`, `set_sidebar_folded`, `set_sidebar_view`, `set_filter`.
@@ -176,7 +189,9 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
 - Focus always comes back to the terminal (a text field's content is not saved).
 - Not saved: runtime ids, `version`, the session list (rescanned), pending confirmations and their
   tokens, socket tokens, pi status and blockers, panel contents, the command log, text-field
-  contents, terminal scrollback.
+  contents, terminal scrollback, a zoomed pane (`zoom_pane`), which tabs were seen
+  (`set_unread`, `mark_all_read`), the bell's entries, and the window's list of closed tabs for
+  **Reopen Closed Tab** (⇧⌘T: in the window's memory only, `src/closed_tabs.odin`).
 
 ## Kept sessions
 
@@ -218,6 +233,14 @@ Other files of the core and the window:
   that starts again still refuses an older window (PROTOCOL.md §5a).
 - `<data dir>/background-core-noticed`: an empty marker, written by the window once the first
   ⌘Q's notice (the sessions run on) was shown.
+- `<data dir>/machines.json` (`0600`): the machines added in Settings › Machines
+  (`src/core/machines.odin`): `{"next": N, "machines": [{no, name, target, os, arch, core_path,
+  via?}]}`; numbers come from `next` and are never reused. Written atomically when a machine is
+  added, removed or renamed, and when its link first learns its OS. A file that cannot be read gives no machines, and adding
+  one is refused until it is fixed or removed. Their status, version and linger are not saved:
+  each link finds them again.
+- `<data dir>/machine-install/`: temporary downloads of an install or update on another machine
+  (`machine_install`), removed when it ends and at the next start.
 - `<data dir>/core/`: the installed copies of Deckhand Core.app, `current` and `previous`, and
   `use-previous` while the user chose **Use previous core**
   ([background-core.md](plans/background-core.md) §7.1).
@@ -227,7 +250,7 @@ Other files of the core and the window:
 When the core starts, after the store scan and before `deckhand DIR`, the file is replayed as
 ordinary commands with caller `internal` (so they appear in the command log): `set_theme`,
 `set_reduce_motion`, `set_dim_panes`, `set_appearance`, `set_text_size`, `set_terminal_text_size`,
-`set_confirm_policy`, `set_close_confirm`, `add_project` (projects the scan did not find),
+`set_notifications`, `set_confirm_policy`, `set_close_confirm`, `add_project` (projects the scan did not find),
 `rename_project`, `restore_session` (internal only: an open session with its tabs `not_started`;
 with `"home": true` the Home session), `set_panel`, `set_panel_collapsed`, `set_left_tab`,
 `set_layout`, `files_expand`, `restore_sidebar` (internal only), `set_sort`,

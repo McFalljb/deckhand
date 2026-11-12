@@ -13,8 +13,9 @@ across projects, with the feel of the Codex desktop app (smooth, mouse-friendly,
 stays itself, unchanged, as the engine: the conversation happens in a real terminal running the
 agent's own TUI, and everything around it is native UI.
 
-- **Native.** No Electron, no browser engine for the app shell. macOS today; Linux and Windows
-  are planned (phase 5).
+- **Native.** No Electron, no browser engine for the app shell. The app is macOS today; a
+  headless Linux core serves sessions to it over SSH. A Linux and a Windows app are planned
+  (phase 5).
 - **Agents stay themselves.** pi and Claude Code keep working in any plain terminal. Deckhand adds
   a frame around them and brings its own integration for each (loaded at start, nothing written
   into their config); it never forks them. [pi-kit](https://github.com/McFalljb/pi-kit) is
@@ -55,8 +56,8 @@ agent's own TUI, and everything around it is native UI.
 | G10 | Everything is an interface (principle 1). | all |
 | G11 | Hot reload: reload agent tabs when extensions or settings change; restart them when the agent itself updates. | 2 |
 | G12 | Safe agent updates: a tested minimum version per harness, a nightly canary, one-click install and update. | 1–2 |
-| G13 | Sessions outlive the window: closing, crashing or updating Deckhand never stops an agent. | 6 |
-| G14 | Every machine in one sidebar: sessions on remote hosts over SSH ([#5](https://github.com/McFalljb/deckhand/issues/5)). | 6 |
+| G13 | Sessions outlive the window: closing, crashing or updating Deckhand never stops an agent. ✅ | 6 |
+| G14 | Every machine in one sidebar: sessions on remote hosts over SSH ([#5](https://github.com/McFalljb/deckhand/issues/5)). ✅ | 6 |
 
 ## 4. Architecture
 
@@ -101,6 +102,17 @@ agent's own TUI, and everything around it is native UI.
 
 ## 5. Phases
 
+### Next
+
+In this order:
+
+1. ⬜ **Codex CLI harness:** Codex CLI as a third coding agent beside pi and Claude Code, with
+   its own integration ([HARNESSES.md](HARNESSES.md)).
+2. ❓ **Moving a live conversation between machines:** design only so far. Today **New session
+   on another machine** starts a fresh session in the same project there; nothing of the
+   conversation crosses.
+3. Then the open items below, phase by phase.
+
 ### Phases 0–1: the shell ✅
 
 The window, pi's TUI in libghostty-vt, tabs per session, the command layer and state, the control
@@ -121,7 +133,8 @@ nightly canary and CI on macOS.
 - ✅ Split panes ([plans/split-panes.md](plans/split-panes.md)): nested splits, a tab strip per
   pane, drag tabs to move and split, saved per session.
 - ⬜ Step 2: LSP, multi-cursor, one file in two panes, project-wide search, a fuller diff view.
-- ⬜ A maximize-pane toggle; agents opening tabs beside themselves.
+- ✅ Zoom pane (⇧⌘↩, a maximize toggle) and dimmed inactive panes.
+- ⬜ Agents opening tabs beside themselves.
 
 ### Phase 2: Atlas, settings, Markdown, changes
 
@@ -149,6 +162,14 @@ rows at parity with pi's ([CLAUDE.md](CLAUDE.md)).
 
 - ⬜ Deckhand without pi: Atlas and jobs on Claude.
 
+### Many sessions on many machines ✅
+
+What needs you, across every machine ([GUIDE.md](GUIDE.md)): status marks and how long, next
+needing you (⌥⌘A), the Attention view (⌥⌘.), the fleet pill, the Deck view (`⇧⌘\`), Peek (look
+only), sounds and per-kind notifications, the Dock badge, new session on another machine, and a
+keyboard pack (reopen closed tab, recent session, mark unread and mark all read, open session
+1–6).
+
 ### Phase 4: games and the engine bridge
 
 - ✅ App tabs: a program's frames in a tab, input forwarded, `app_call` and friends
@@ -158,6 +179,8 @@ rows at parity with pi's ([CLAUDE.md](CLAUDE.md)).
 
 ### Phase 5: Linux and Windows
 
+- ✅ A headless Linux core (x86_64): the core and session holder as a systemd user unit, a signed
+  release tarball, installed and updated from a Mac over SSH (M6-L1–L4, M6-E). No Linux window yet.
 - ⬜ ConPTY on Windows; Windows linking.
 - ⬜ Text rendering and input methods per OS.
 - ⬜ CI builds and packaging for all three.

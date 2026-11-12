@@ -53,7 +53,14 @@ setting's opt-out). `--separate-core` forces a separate core and leaves out scen
 - `holder-rev`: the holder's code changed only with a `HOLDER_REV` bump;
 - `core-boundary`: the core and holder link no window code;
 - `unit`: `./build.sh test`;
+- `linux`: the core and the session holder built on Ubuntu, their wire, trust, holder and core unit
+  tests, then `tests/linux-core-smoke.py` (also `--default-dirs`), `tests/linux-holder-smoke.py`
+  (also `--systemd`) and `tests/linux-systemd-check.sh --real`
+  ([the Linux core](DEVELOPING.md#building-the-linux-core));
 - `scenes`: the required scenes, separate core, in four shards, two at a time per runner.
+
+`release-linux.yml` builds the Linux release tarball and installs it once
+(`tests/linux-release-check.sh`).
 
 `scenes-full.yml` (nightly and on demand, **Actions › Scenes (full) › Run workflow**): required +
 full in four shards, where a full-tier failure is only a warning; the required scenes
@@ -74,7 +81,7 @@ All of these run in `./build.sh test`.
 | `src/holderwire`, `src/corewire`, `src/trust` | the holder wire and the window/core wire (golden vectors, fuzz, transports); who may talk to whom | seconds |
 | `src/holder` | the holder in process with a fake core, and the upgrade with real processes (`build/deckhand-core-hooks`: re-execs under load, refusals, the keeper adopting) | seconds |
 | `scripts/check-core-boundary.sh` and its test | the core and holder link no window code | <1 s |
-| `src/*_test.odin`, `src/core/*_test.odin` (`tests/unit.py`) | the command layer: every command, callers, confirmations, persistence, the socket, the replica, quit routes, idle exit, Claude and pi launches, jobs, the editor, the layout audit, the docs listing every action and command | ~30–40 s on 6 processes |
+| `src/*_test.odin`, `src/core/*_test.odin` (`tests/unit.py`) | the command layer: every command, callers, confirmations, persistence, the socket, the replica, quit routes, idle exit, Claude and pi launches, jobs, the editor, the layout audit, the docs listing every action and command; other machines (`machines*_test`, `machine_install_test`, `machine_page_test`, `machine_route_test`, `machine_mirror_test`, `remote_view_test`, `machine_rows_test`, `machine_header_test`); what needs you and the views over it (`needing_you_test`, `attention_view_test`, `fleet_test`, `deck_view_test`, `deck_modal_test`, `peek_test`, `status_marks_test`, `flash_test`); `keyboard_pack_test`, `pane_motion_test`, `border_draw_test`, `handoff_test` | ~30–40 s on 6 processes |
 | `tests/scenes_test.py`, `scripts/check-env-reads.py` | the `--changed` selection; every environment read names a known variable | <1 s |
 | `tools/deckhand-cli` tests | the `deckhand` CLI: arguments, the read-only guard (`tests/readonly-vectors.json`) | <1 s |
 | the fake app (`tests/fake-app`) | builds the app-tab stand-in the scenes need | ~5 s |
@@ -133,6 +140,7 @@ Typical times and tags are in `tests/scenes.txt`; each script's header says what
 | `polish`, `polish-beep`, `buttons` | palette, title bar, text input; no AppKit beep; every button |
 | `login-path`, `fish-shell`, `pi-login-lookup`, `harness-setup` | the GUI launch environment, non-POSIX shells, finding pi, the coding agents checklist |
 | `update`, `release-checks` | self-update from local fixtures; `release.sh`'s and `update-sign`'s refusals |
+| `remote-link`, `remote-sidebar`, `remote-terms`, `remote-page`, `remote-install`, `remote-atlas` | other machines, with a second core on this Mac reached through `--via` (no ssh or sshd: `DECKHAND_HUB_WITHOUT_SSHD=1`): the link, online and offline; its sessions in the sidebar; its terminals relayed; a machine's web page in a local tab; install and one-click update; Atlas and jobs across machines. Real `ssh` is not covered |
 
 ### Manual (tools, not tests: run by name)
 

@@ -133,7 +133,7 @@ last), Esc goes back, ↑↓ change the choice.
 ### pi in Deckhand
 
 Deckhand brings its own pi integration, so a pi tab needs nothing else installed: the status
-dots, Atlas's tools, waits and prompts between tabs, reloads, comments for the agent, the Todos
+marks, Atlas's tools, waits and prompts between tabs, reloads, comments for the agent, the Todos
 and Subagents panels, and the agents' browser and app-tab tools all come from it. It ships inside
 `Deckhand.app` and Deckhand loads it into every pi it starts (`pi -e`, for that run only). Nothing
 is installed into pi or written to `~/.pi`: pi outside Deckhand runs exactly as before.
@@ -253,7 +253,7 @@ The Sessions tab has three sections:
 the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
 Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter
 (for another port, add a `Host` entry with its `Port` to `~/.ssh/config` and type that name).
-Deckhand calls it by its host's name (`nuc` for `jb@nuc.home.arpa`); once it is added, the
+Deckhand calls it by its host's name (`nuc` for `me@nuc.local`); once it is added, the
 column goes back to Sessions, where it shows (an add started in Settings stays there).
 **Rename…** changes the name.
 While Machines over SSH is on, this Mac's own sections (Open, Projects, Chats) sit under a header
@@ -580,7 +580,7 @@ and **Close**; a session waiting for you says "Open to answer" under it.
 - **To come back to a session later**, use its **…** → **Mark as unread**, or press ⇧⌘U in it
   (Window menu or the palette: the tab you are in, if it is a terminal, else the session's; a
   session on this Mac, not another machine's): it
-  keeps the accent-coloured dot until you look at it again. ⌥⇧⌘U (**Mark all as read**) clears
+  keeps the finished check mark (the accent) until you look at it again. ⌥⇧⌘U (**Mark all as read**) clears
   finished and not seen on every open session on this Mac and says how many ("Marked 2 as read",
   or "Nothing unread"); a tab waiting for you, with an error or a question stays exactly as it
   is until you look at it. Other machines' sessions keep theirs.
@@ -922,10 +922,10 @@ config). The plugin gives Claude:
   scheduled wakeups, as of Claude's last turn), shown in the right column while its tab is the
   one on screen (the same look as pi's Todos and Subagents; on pi's tab you see pi's). Deckhand
   can't stop Claude's background shells: ask Claude to, or restart it. Background work doesn't
-  change Claude's dot: when its turn ends, it is done (a restart names what would stop).
+  change Claude's status mark: when its turn ends, it is done (a restart names what would stop).
   These hooks run in the background and add nothing to Claude's conversation.
 
-**When something is missing.** On a Claude Code older than 2.1.295 the dots come from these
+**When something is missing.** On a Claude Code older than 2.1.295 the status marks come from these
 hooks (Claude Code's own status reports came later), and a bar says so with **Copy update
 command** (the right one for how Claude Code was installed) and **Dismiss** (remembered for that
 version). If Claude Code's
@@ -946,8 +946,8 @@ tab closes with the session (the **×** on its row). **New chat** does the same 
 Every Claude conversation Deckhand ran in a project is a row of that project's session list,
 beside the pi sessions, marked **Claude**: its title is your first message (or the name you gave
 it with **Rename…** in the row's menu; Claude Code shows that name too the next time the session
-starts), its time is when you last used it, and its dot shows Claude's status while it is open
-(also the softer question dot when Claude's last answer asked you something, and the error dot
+starts), its time is when you last used it, and its mark shows Claude's status while it is open
+(also the faint **?** when Claude's last answer asked you something, and the red **!**
 when its turn ended on an error such as a rate limit). Its **ⓘ** and menu have **Copy session
 info**, **Send to Atlas**, **Reveal in Finder** and **Copy path** (Claude Code's transcript file
 for it), as a pi row's; the info also names its model. Hover a Claude tab to see its model. **Pin**,
@@ -1339,7 +1339,7 @@ pi is installed; Claude Code's once it has been used:
   button is the sidebar's: **Connect** tries now, **Log in…**, **Take back** takes it from whoever
   showed it last, and so on. The **×** removes it after you confirm: nothing on it is deleted, and
   its sessions keep running there. **Add a machine…**: type `user@host` or a name from
-  `~/.ssh/config`, then Enter (a pasted `ssh jb@nuc` or `ssh://jb@nuc` works too). Deckhand runs
+  `~/.ssh/config`, then Enter (a pasted `ssh me@nuc.local` or `ssh://me@nuc.local` works too). Deckhand runs
   your own `ssh` with your `~/.ssh/config` (never edited), without prompts (`BatchMode`), and
   starts that machine's Deckhand there. The newest
   connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
@@ -1946,7 +1946,7 @@ as `deckhand-<version>-macos-arm64.zip`.
 working, so your data and setup carry over and nothing you rely on breaks:
 
 - the data dir: Deckhand uses `~/Library/Application Support/pi-desk` while that is where your data
-  is (0.2.1 moves it to `…/Deckhand`; see [Where it lives](#where-it-lives));
+  is (a later release moves it to `…/Deckhand`; see [Where it lives](#where-it-lives));
 - the environment variables Deckhand sets in Claude tabs, app tabs and job runs are set under both
   names, `DECKHAND_*` and the old `PI_DESK_*`, for three releases after 0.2.0; `DECKHAND_GUI_LAUNCH` and
   `DECKHAND_CEF_SHARED_TEXTURE` are read under their old names too;
@@ -1955,8 +1955,8 @@ working, so your data and setup carry over and nothing you rely on breaks:
   (Deckhand never moves it: `git mv` it when you like);
 - your main folder, wherever it is (`~/pi-desk` stays `~/pi-desk`).
 
-The bundle id is still `dev.pi-desk.app` in 0.2.0; 0.2.1 changes it to `dev.deckhand.app`, and macOS
-then asks once more for folder access and notifications.
+The bundle id is still `dev.pi-desk.app` (0.2.0 and 0.3.0); a later release changes it to
+`dev.deckhand.app`, and macOS then asks once more for folder access and notifications.
 
 Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
 download or install one: only you can.
@@ -1968,7 +1968,7 @@ download or install one: only you can.
 Deckhand's data dir is `~/Library/Application Support/Deckhand` on macOS (Linux:
 `~/.local/share/deckhand`; a release build always uses this one; a development build can move it,
 docs/DEVELOPING.md). An install from before the rename keeps using `~/Library/Application
-Support/pi-desk` (Linux: `~/.local/share/pi-desk`) until 0.2.1 moves it
+Support/pi-desk` (Linux: `~/.local/share/pi-desk`) until a later release moves it
 ([From pi-desk to Deckhand](#from-pi-desk-to-deckhand)). It is private
 to you (`0700`), and its files are `0600`:
 
@@ -2146,6 +2146,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Menu item | Shortcut | Notes |
 |---|---|---|
 | About Deckhand |  | |
+| Check for Updates… |  | checks now, whatever the setting ([Updates](#updates)) |
 | Settings… | ⌘, | the left column's Settings tab (again: back to Sessions) |
 | Set up Deckhand… |  | the first-run sheet: coding agents, main folder, chats (see [the first run](#the-first-run)) |
 | Hide Deckhand | ⌘H | |
@@ -2191,9 +2192,10 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Menu item | Shortcut | Notes |
 |---|---|---|
 | Toggle left column | ⌘B | |
-| Sessions, Files, Settings | ⇧⌘E (Files) | the left column's tabs (⇧⌘E again: back to Sessions) |
+| Sessions |  | the left column's Sessions tab |
 | Attention view | ⌥⌘. | the Sessions tab as one list across every machine, by what needs you, or back to the tree ([The Attention view](#what-needs-you-everywhere)) |
 | Deck view | ⇧⌘\ | the centre as a grid of cards, one per open session on every machine, or back to the session ([The Deck view](#what-needs-you-everywhere)) |
+| Files, Settings | ⇧⌘E (Files) | the left column's Files and Settings tabs (⇧⌘E again: back to Sessions; ⌘, is Deckhand › Settings…) |
 | Jobs |  | the left column's Jobs tab (Atlas's jobs) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Toggle right panels | ⌥⌘B | the right column |
@@ -2218,18 +2220,18 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Zoom |  | |
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | round the tabs of the pane with the keyboard |
 | Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | the pane with the keyboard's tabs; in the palette: run its rows |
-| Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
-| Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | waiting for you, then errors, then finished and not seen, on every online machine, the longest first: the [Attention view](#what-needs-you-everywhere)'s order ([To go to what needs you](#tabs)) |
-| Peek at next needing you | ⌃⌥⌘A | where ⌥⌘A would go, in a panel over the centre, without leaving the session on screen ([Peek](#peek)) |
-| Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | the last one you looked at; the oldest |
-| Go to open session 1–6 | ⌥⌘1–⌥⌘6 | the Open section's rows |
-| Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | this tab; this Mac's sessions |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | a new shell in the new pane |
 | Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |
 | Even out panes |  | every pane gets equal room |
 | Zoom pane, Restore panes | ⇧⌘↩ | the pane with the keyboard fills the pane area; pressed again, the layout comes back |
 | Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | the neighbouring pane gets the keyboard |
 | Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⌃⇧⌘←, ⌃⇧⌘→, ⌃⇧⌘↑, ⌃⇧⌘↓ | or into a new pane that way |
+| Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
+| Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | waiting for you, then errors, then finished and not seen, on every online machine, the longest first: the [Attention view](#what-needs-you-everywhere)'s order ([To go to what needs you](#tabs)) |
+| Peek at next needing you | ⌃⌥⌘A | where ⌥⌘A would go, in a panel over the centre, without leaving the session on screen; look only, nothing you type reaches it ([Peek](#peek)) |
+| Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | the last one you looked at; the oldest |
+| Go to open session 1–6 | ⌥⌘1–⌥⌘6 | the Open section's rows |
+| Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | this Mac only: the tab (or session) on screen; every open session on this Mac |
 | Bring all to front |  | |
 
 **Help**

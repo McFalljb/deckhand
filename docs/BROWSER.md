@@ -105,7 +105,7 @@ No public off-screen rendering (Deckhand could not draw over it) and no DevTools
 
 ```
 Deckhand.app/Contents/
-  Info.plist                                CFBundleIdentifier dev.pi-desk.app (dev.deckhand.app from 0.2.1), KSBrandID ""
+  Info.plist                                CFBundleIdentifier dev.pi-desk.app (dev.deckhand.app after the rename's flip), KSBrandID ""
   MacOS/Deckhand                            the window
   MacOS/deckhand-cli                        the CLI (pi-desk-cli links to it: older tabs run it by path)
   Frameworks/

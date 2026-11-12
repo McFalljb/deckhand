@@ -2048,8 +2048,8 @@ write_machine_jobs :: proc(b: ^strings.Builder, rows: []Job_Row) {
 		kv_str(&w, "id", r.id)
 		kv_str(&w, "machine", machine_name(r.machine))
 		kv_str(&w, "name", r.name)
-		kv_str(&w, "owner", JOB_OWNER_NAMES[r.owner])
-		kv_str(&w, "project", r.owner == .Project ? r.project : "") // its project there: display text
+		kv_str(&w, "owner", r.owner_name != "" ? JOB_OWNER_NAMES[r.owner] : "") // as that machine groups it ("" = an older core)
+		kv_str(&w, "owner_name", r.owner_name) // display text, cleaned
 		kv_str(&w, "schedule", r.schedule)
 		kv_bool(&w, "enabled", r.enabled)
 		kv_bool(&w, "paused", r.paused)

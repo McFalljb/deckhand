@@ -193,11 +193,8 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		if j.status == .Needs_You do kind = .Job_Needs_You
 		if j.status == .Failed do kind = .Job_Failed
 		title := j.title != "" ? j.title : j.job_id
-		// its project (or Atlas, Chats) first, as another machine's say theirs (machine_mirror.odin)
-		for r in state.jobs do if r.id == j.job_id {
-			o := job_owner_of(r, owner_projects())
-			if o.kind != .Other do title = fmt.tprintf("%s · %s", job_owner_label(o), title)
-		}
+		// its owner first (its project, Atlas, Chats), as another machine's say theirs (machine_mirror.odin)
+		for r in state.jobs do if r.id == j.job_id do if owner := job_owner_title(r); owner != "" do title = fmt.tprintf("%s · %s", owner, title)
 		n := Notice {
 			kind    = kind,
 			title   = notice_text(title),

@@ -343,12 +343,14 @@ machine_jobs_sections :: proc(row_w: f32, a: runtime.Allocator) {
 		if jobs_machine_folded(m.no) do continue
 		k := 0
 		for g in machine_job_groups(m.no) {
-			key := machine_group_key(m.no, g.kind, g.label)
-			folded := core.list_index(ju.folded[:], key) >= 0
-			unread := false
-			for i in g.rows do if state.machine_jobs[i].unread > 0 do unread = true
-			machine_job_group_row(strings.clone(key, a), g.kind, g.label, len(g.rows), unread, folded, live, row_w)
-			if folded do continue
+			if g.label != "" { 	// "": an older core's flat list
+				key := machine_group_key(m.no, g.kind, g.label)
+				folded := core.list_index(ju.folded[:], key) >= 0
+				unread := false
+				for i in g.rows do if state.machine_jobs[i].unread > 0 do unread = true
+				machine_job_group_row(strings.clone(key, a), g.kind, g.label, len(g.rows), unread, folded, live, row_w)
+				if folded do continue
+			}
 			for i in g.rows {
 				r := state.machine_jobs[i]
 				k += 1
@@ -380,12 +382,20 @@ Machine_Job_Group :: struct {
 	rows:  [dynamic]int,
 }
 
-// Machine no's jobs by owner, in this Mac's order: projects by name, then Atlas, Chats, Other (temp).
+// Machine no's jobs by owner as that machine groups them (Job_Row.owner, owner_name), in this
+// Mac's order: projects by name, then Atlas, Chats, Other. An older core that sends no owner: one
+// group with no label, drawn as a flat list (temp).
 @(private = "file")
 machine_job_groups :: proc(no: u64) -> []Machine_Job_Group {
 	groups := make([dynamic]Machine_Job_Group, context.temp_allocator)
+	for r in state.machine_jobs do if r.machine == no && r.owner_name == "" {
+		flat := Machine_Job_Group{rows = make([dynamic]int, context.temp_allocator)}
+		for x, i in state.machine_jobs do if x.machine == no do append(&flat.rows, i)
+		append(&groups, flat)
+		return groups[:]
+	}
 	for r, i in state.machine_jobs do if r.machine == no {
-		label := r.owner == .Project ? r.project : core.job_owner_label(core.Job_Owner{kind = r.owner})
+		label := r.owner_name
 		at := -1
 		for g, j in groups do if g.kind == r.owner && g.label == label do at = j
 		if at < 0 {

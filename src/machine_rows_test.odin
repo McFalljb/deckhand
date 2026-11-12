@@ -133,8 +133,8 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	// offline: one word, here and in the Jobs tab
 	state.machines[0].status, state.machines[0].error = .Offline, ""
 	testing.expect(t, strings.contains(drawn_text(), "nuc\nOffline\n"), "offline header")
-	append(&state.machine_jobs, core.Job_Row{id = "m3:nightly", machine = 3, name = "Nightly", owner = .Other})
-	append(&state.machine_jobs, core.Job_Row{id = "m3:beds", machine = 3, name = "Weed the beds", owner = .Project, project = "garden"})
+	append(&state.machine_jobs, core.Job_Row{id = "m3:nightly", machine = 3, name = "Nightly", owner = .Other, owner_name = "Other"})
+	append(&state.machine_jobs, core.Job_Row{id = "m3:beds", machine = 3, name = "Weed the beds", owner = .Project, owner_name = "garden"})
 	state.settings.home_dir = "/tmp/pd-mrows-notes"
 	state.layout.left_tab = .Jobs
 	got = drawn_text()
@@ -142,6 +142,10 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	// under their owner there, as this Mac's: On nuc › garden › Weed the beds, then Other
 	at_g, at_o := strings.index(got, "garden\n1\nWeed the beds\n"), strings.index(got, "Other\n1\nNightly\n")
 	testing.expectf(t, at_g >= 0 && at_o > at_g, "grouped by owner: %q", got)
+	// an older core sends no owner: a flat list under its name, as before
+	state.machine_jobs[0].owner_name, state.machine_jobs[1].owner_name = "", ""
+	got = drawn_text()
+	testing.expectf(t, strings.contains(got, "On nuc\nOffline\nNightly\n") && !strings.contains(got, "\ngarden\n"), "flat: %q", got)
 	state.layout.left_tab = .Sessions
 
 	// the palette names the machine its items are on

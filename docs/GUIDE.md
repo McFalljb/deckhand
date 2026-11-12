@@ -1372,9 +1372,9 @@ Deckhand…**. The header has **New job** (+, the [job sheet](#the-job-sheet)), 
 
 **Other machines' jobs** run on their own machine, on its schedule, even while this Mac sleeps.
 They are listed after this Mac's, under each machine's name (greyed while it is not online, with its
-status, such as *Offline*, where the count goes), then under whose they are there, as this Mac's
-are grouped: its project, Atlas, Chats or Other (a click folds one). So every job reads
-*On machine › project › job*:
+status, such as *Offline*, where the count goes), then under whose they are there, as that machine's own Jobs tab groups them: its project, its
+Atlas, Chats or Other (a click folds one). So every job reads *On machine › project › job* (a
+machine with an older Deckhand: one list under its name):
 what each is up to and, when a run needs you, what for. They are read-only here: run, edit or
 pause them from a session on that machine. A run there that needs you rings the bell here.
 While Machines over SSH is on, this Mac's own jobs sit under a header of the same kind: *On* this

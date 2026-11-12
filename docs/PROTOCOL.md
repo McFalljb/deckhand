@@ -1313,12 +1313,13 @@ mark without ringing: a reconnect or a fresh `state.full` never rings what it ha
 the newest 20 entries are read per state, and at most 4 ring per machine a minute (the rest are
 dropped). Its entries are in `notifications_list` with `"machine"`: the title and `place` start
 with the machine's name, its `session_id`/`tab_id` are packed ids of its mirrored session (else 0),
-its `job_id` reads `m<no>:<its id>` (and a job's title is `<machine> · <project> · <job>` when its
-owner is known), and no `pi_session_id` or run folder is kept. Its jobs (at most
+its `job_id` reads `m<no>:<its id>` (and a job's title is `<machine> · <owner_name> · <job>`, without the owner
+for `other` or when none was sent), and no `pi_session_id` or run folder is kept. Its jobs (at most
 100) are in `get_state`'s `machine_jobs` (`id` `m<no>:<its id>`, `machine`, `name`, `owner` (`project`,
-`atlas`, `chats`, `other`: whose it is there, worked out on this Mac from that machine's job and
-projects), `project` (with owner `project`: its name there, display text only, never one of this
-Mac's projects; else ""), `schedule`,
+`atlas`, `chats`, `other`: whose it is, as that machine's own Jobs tab groups it and sends it; any
+other value is `other`; `""` from an older core that sends none) and `owner_name` (that group's label
+there: the project's name, its agent's name, `Chats`, `Other`; display text only, never one of this
+Mac's projects), `schedule`,
 `enabled`, `paused`, `running`, `next_due`, `last_at`, `last_status` (a known word, else
 `unknown`), `last_headline`, `unread`, `needs_you`: at most 5 lines): read-only, no paths; no job
 command finds one. Every string is one line without control, bidi or invisible characters, and

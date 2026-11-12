@@ -82,7 +82,7 @@ Job_Row :: struct {
 	id:            string,
 	name:          string,
 	path:          string, // the note
-	project:       string, // for_project as written ("" = none; the owner: jobs_owner.odin); another machine's: its owner's name as that machine has it (owner .Project; display text only, cleaned)
+	project:       string, // for_project as written ("" = none; the owner: jobs_owner.odin)
 	folder:        string, // where it runs (absolute)
 	schedule:      string,
 	enabled:       bool,
@@ -101,7 +101,10 @@ Job_Row :: struct {
 	recent:        [dynamic]string, // the note's run lines, newest first
 	needs_you:     [dynamic]string, // the last run's
 	machine:       u64, // another machine's (State.machine_jobs, machine_mirror.odin: read-only, its strings cleaned; 0 = this Mac's)
-	owner:         Job_Owner_Kind, // another machine's: whose it is there (machine_job_owner); unused for this Mac's
+	// whose it is, as its own machine's Jobs tab groups it (jobs_owners_refresh): display only. Another
+	// machine's: as that machine sent them, cleaned; owner_name "" = an older core that sends none
+	owner:         Job_Owner_Kind,
+	owner_name:    string, // the group's label there: the project's shown name, its agent's name, Chats, Other
 }
 
 // ---- runtime ----
@@ -1604,6 +1607,7 @@ jobs_rows_build :: proc() -> bool {
 		append(&state.jobs, row)
 	}
 	state.jobs_unread = unread
+	jobs_owners_refresh()
 	return jobs_rows_json(state.jobs[:], context.temp_allocator) != before || unread != before_unread
 }
 
@@ -1616,6 +1620,7 @@ jobs_rows_free :: proc() {
 		delete(r.name)
 		delete(r.path)
 		delete(r.project)
+		delete(r.owner_name)
 		delete(r.folder)
 		delete(r.schedule)
 		delete(r.paused_why)

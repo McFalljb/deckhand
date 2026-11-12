@@ -923,6 +923,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 	s.next_id = get_u64(&r, "next_id")
 	s.selected_project = get_u64(&r, "selected_project")
 	s.current_session = get_u64(&r, "current_session")
+	s.shown_before = get_u64(&r, "shown_before")
 	for pv in arr(obj, "projects") {
 		p := Rd{obj = pv.(json.Object) or_else nil, a = allocator}
 		group := get_str(&p, "group", optional = true) == "chats" ? Sidebar_Group.Chats : .Projects

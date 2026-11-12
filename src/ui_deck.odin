@@ -32,10 +32,10 @@ package main
 // The deck is the centre with no session shown (core Show_No_Session: none is current, as with
 // none open), its cards in the empty centre's place. Every open session runs on; no pane is laid
 // out, drawn, hit, typed into or seen, and nothing has to be told: there is no current session.
-// Going back is Focus_Session of the session it was opened from (still open: else the deck goes
-// and the empty centre stays). Showing any session by any way (a card, its row, ⌥⌘A, a
-// notification, an agent) ends it: deck_sync. A window flag with the remembered session; not
-// saved.
+// The core remembers the session it took off screen (state.shown_before; saved as the current
+// one, so a relaunch shows it; a reattached window shows the deck again). Going back is
+// Focus_Session of it (still open: else the deck goes and the empty centre stays). Showing any
+// session by any way (a card, its row, ⌥⌘A, a notification, an agent) ends it.
 
 import "base:runtime"
 import "core:fmt"
@@ -55,14 +55,13 @@ Deck_Card :: struct {
 }
 
 Deck :: struct {
-	on:      bool, // opened (shows while no session is current: deck_shown)
-	opening: bool, // Show_No_Session sent, its answer not seen yet (deck_sync keeps it until then)
-	back:    u64, // the session it was opened from (0: none): Esc goes back to it, its card is outlined
-	sel:     u64, // the keyboard's card (an open session id; 0: none yet)
-	scroll:  bool, // sel moved: into view after the layout that draws it (deck_scroll_to)
-	top:     bool, // just opened: the grid from its top
-	cards:   [dynamic]Deck_Card, // the last layout's, in order (hits, the keys); grows with the sessions only
-	cols:    int, // the last layout's columns
+	on:     bool, // shows with no session under it: opened from the empty centre, or that session closed
+	under:  bool, // the last layout's: a session under it (state.shown_before, still open)
+	sel:    u64, // the keyboard's card (an open session id; 0: none yet)
+	scroll: bool, // sel moved: into view after the layout that draws it (deck_scroll_to)
+	top:    bool, // just opened: the grid from its top
+	cards:  [dynamic]Deck_Card, // the last layout's, in order (hits, the keys); grows with the sessions only
+	cols:   int, // the last layout's columns
 }
 
 deck: Deck
@@ -70,48 +69,51 @@ deck: Deck
 // Its button shows in the top bar (fleet_pill_decide: it gives way in a bar too narrow for it).
 deck_btn_shown := true
 
-// Whether the deck shows: opened, and no session is current.
-deck_shown :: proc() -> bool {return deck.on && core.cur_view() == nil}
+// The session it was opened from (the core's state.shown_before: Show_No_Session), while open.
+deck_under :: proc() -> u64 {
+	if state.shown_before != 0 && find_session(state.shown_before) != nil do return state.shown_before
+	return 0
+}
 
-// Toggle Deck view (⇧⌘\, the top bar's button, View menu, palette).
+// Whether the deck shows: no session current, and one taken off screen by it (the core keeps which,
+// so a second window or a reattached one shows it too) or opened from the empty centre.
+deck_shown :: proc() -> bool {return core.cur_view() == nil && (deck_under() != 0 || deck.on)}
+
+// Toggle Deck view (⇧⌘\, the top bar's button, View menu, palette). Pressed again before the core
+// answered (a separate core): Show_No_Session again, which does nothing; the deck shows.
 deck_toggle :: proc() {
-	if deck.on {
+	if deck_shown() {
 		deck_back()
 		return
 	}
 	peek_close() // one look at a time: the deck shows them all (ui_peek.odin)
-	deck.on, deck.back = true, state.current_session
 	deck.sel, deck.scroll, deck.top = 0, false, true
 	ui_hover = nil // the pane's hover is not the deck's
 	if state.focus_widget != "" && state.focus_widget != "agent_input" do ui_do(core.Set_Focus{""}) // a field of the panes goes with them; the drawer's stays
-	deck.opening = core.cur_view() != nil
-	if deck.opening do ui_do(core.Show_No_Session{})
+	if core.cur_view() != nil do ui_do(core.Show_No_Session{})
+	else do deck.on = true
 	app.redraw = true
 }
 
-// Back to the session it was opened from (Esc, the toggle, the button), if it is still open.
+// Back to the session it was opened from (Esc, the toggle, the button), if it is still open; else
+// the empty centre.
 deck_back :: proc() {
-	back := deck.back
-	deck_end()
-	if back != 0 && core.cur_view() == nil && find_session(back) != nil do ui_do(core.Focus_Session{session = back})
-}
-
-// The deck goes (the centre shows what is current: a session, or the empty centre).
-@(private = "file")
-deck_end :: proc() {
-	deck.on, deck.opening, deck.back, deck.sel = false, false, 0, 0
+	back := deck_under()
+	deck.on, deck.sel = false, 0
+	if back != 0 do ui_do(core.Focus_Session{session = back})
 	app.redraw = true
 }
 
-// Each layout, first: once no session is current the deck shows; a session shown again (by any
-// way) ends it.
+// Each layout, first: a session shown (by any way) ends it; the session under it closed, it stays
+// (Esc then leaves it for the empty centre).
 deck_sync :: proc() {
-	if !deck.on do return
-	if core.cur_view() == nil {
-		deck.opening = false
+	if core.cur_view() != nil {
+		deck.on, deck.under = false, false
 		return
 	}
-	if !deck.opening do deck_end()
+	under := deck_under() != 0
+	if deck.under && !under do deck.on = true
+	deck.under = under
 }
 
 // The columns that fit in w px (at least one): each card at least DECK_CARD_MIN_W wide.
@@ -233,7 +235,7 @@ deck_layout :: proc() {
 				cfg.wrapMode = .Newlines
 				clay.TextDynamic(lines, cfg)
 			}
-			if deck.back == 0 || len(rows) == 0 do deck_buttons(inner) // opened with no session shown
+			if deck_under() == 0 || len(rows) == 0 do deck_buttons(inner) // opened with no session shown
 		}
 		if len(rows) == 0 do return
 		if clay.UI(clay.ID("deckscroll"))({
@@ -299,7 +301,7 @@ deck_card :: proc(r: core.Attention_Row, i: int, w, h: f32) {
 	more_id := clay.ID("deckmore", u32(i))
 	v, from := card_view(r)
 	remote := s.machine != 0
-	current := s.id == deck.back // the session it was opened from
+	current := s.id == deck_under() // the session it was opened from
 	more_hover := !remote && ui_hover == Hit(Hit_Deck_More(s.id))
 	hovered := ui_hover == Hit(Hit_Deck_Card(s.id)) || more_hover
 	key_sel := s.id == deck.sel
@@ -428,7 +430,7 @@ deck_step :: proc(dx, dy: int) {
 	for c, i in deck.cards do if c.sid == deck.sel do at = i
 	if at < 0 {
 		k := 0
-		for c, i in deck.cards do if c.sid == deck.back do k = i
+		for c, i in deck.cards do if c.sid == deck_under() do k = i
 		deck.sel, deck.scroll = deck.cards[k].sid, true
 		return
 	}
@@ -475,14 +477,14 @@ deck_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL:
-		if !inside(clay.ID("deck"), e.mouse_x, e.mouse_y) do return false
+		if !inside(clay.ID("deck"), e.mouse_x, e.mouse_y) || deck_under_drawer(e) do return false
 		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
 		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
 		app.redraw = true
 		return true
 	case .MOUSE_DOWN:
 		right := e.mouse_button == .RIGHT || (e.mouse_button == .LEFT && mods & sapp.MODIFIER_CTRL != 0)
-		if !right || !inside(clay.ID("deck"), e.mouse_x, e.mouse_y) do return false
+		if !right || !inside(clay.ID("deck"), e.mouse_x, e.mouse_y) || deck_under_drawer(e) do return false
 		p := [2]f32{e.mouse_x, e.mouse_y}
 		clay.SetPointerState(p, false)
 		if x, ok := deck_hit().(Hit_Deck_Card); ok {
@@ -492,3 +494,7 @@ deck_event :: proc(e: ^sapp.Event) -> bool {
 	}
 	return false
 }
+
+// The pointer is over Atlas's drawer (open, sliding over the centre): its, not the cards'.
+@(private = "file")
+deck_under_drawer :: proc(e: ^sapp.Event) -> bool {return state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)}

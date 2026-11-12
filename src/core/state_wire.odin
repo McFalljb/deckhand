@@ -88,7 +88,7 @@ State_Section :: struct {
 
 STATE_SECTIONS := [?]State_Section {
 	{"projects", {"projects", "selected_project"}},
-	{"sessions", {"sessions", "chats", "open_sessions", "current_session", "home"}},
+	{"sessions", {"sessions", "chats", "open_sessions", "current_session", "shown_before", "home"}},
 	{"view", {"sidebar", "files", "focus_widget", "layout", "home_open", "system_light", "home_dir_prev"}},
 	{"settings", {"settings"}},
 	{"jobs", {"jobs", "jobs_unread", "jobs_notified", "machine_jobs"}},

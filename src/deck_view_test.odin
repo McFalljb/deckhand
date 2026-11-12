@@ -471,8 +471,9 @@ deck_toggle_and_navigation :: proc(t: ^testing.T) {
 	_ = ui_layout(1600, 900)
 	testing.expect(t, !dk_shown() && !deck.on, "another session on screen")
 
-	// opened with no session shown: in the empty centre's place, its summary line and buttons kept
-	core.run_command(core.Show_No_Session{}, {kind = .UI})
+	// opened with no session shown (none current, none taken off screen by it): in the empty
+	// centre's place, its summary line and buttons kept
+	state.current_session = 0
 	_ = ui_layout(1600, 900)
 	_, rows := dk_box("fleetrow", 0)
 	testing.expect(t, rows, "the empty centre's rows without the deck")

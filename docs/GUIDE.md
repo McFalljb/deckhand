@@ -505,7 +505,7 @@ NEEDS YOU  2
   ⌘T, split…) do nothing, as with no session open; the ones that go somewhere (⌥⌘A, the session
   shortcuts, ⌥⌘`) go there, and the deck goes. The window's title is "Deckhand" and the Open
   section has no current row while it shows. If you quit with the deck showing, Deckhand opens
-  next time with no session on screen.
+  next time on the session you were in.
 - [Peek](#peek) works over the deck: **Peek** in a card's **…** menu, or ⌃⌥⌘A, shows that session
   in its panel over the cards (the session you were in too); Esc closes the peek and leaves the
   deck, **Open** (⌘↩) goes to the session and the deck goes too. Opening the deck closes a peek.

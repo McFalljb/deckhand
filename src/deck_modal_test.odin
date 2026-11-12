@@ -359,3 +359,118 @@ deck_modal_peek :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.current_session, u64(200))
 	testing.expect(t, !deck_shown() && !deck.on, "and the deck goes with it")
 }
+
+// Round 3, 1: ⇧⌘\ pressed twice before the core answered (a separate core: the window still sees
+// the session): the deck shows and still knows the session it was opened from (Esc goes back).
+@(test)
+deck_modal_toggle_twice_before_the_core :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	dc_reset()
+	defer dc_reset()
+	dc_session(100, dc_tab(101))
+	dc_session(200, dc_tab(201, "waiting"))
+	state.current_session = 100
+	_ = ui_layout(1600, 900)
+	deck_toggle()
+	deck_toggle() // the core has not answered the first
+	core.inbox_drain()
+	_ = ui_layout(1600, 900)
+	testing.expect(t, deck_shown(), "the deck shows")
+	dc_key(.ESCAPE)
+	core.inbox_drain()
+	_ = ui_layout(1600, 900)
+	testing.expect_value(t, state.current_session, u64(100)) // not forgotten
+}
+
+// Round 3, 2: an agent's focus_session lands after show_no_session, before the window's next
+// layout: the deck is over, and does not come back by itself when no session is current later.
+@(test)
+deck_modal_agent_focus_before_layout :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	dc_reset()
+	defer dc_reset()
+	dc_session(100, dc_tab(101))
+	dc_session(200, dc_tab(201, "waiting"))
+	state.current_session = 100
+	_ = ui_layout(1600, 900)
+	deck_toggle()
+	core.inbox_drain() // show_no_session applied
+	_ = core.run_command(core.Focus_Session{session = 200}, core.Caller{kind = .Control})
+	_ = ui_layout(1600, 900)
+	testing.expect_value(t, state.current_session, u64(200))
+	testing.expect(t, !deck_shown(), "the agent's session shows")
+	state.current_session = 0 // later, no session current (another machine's went: machine_mirror)
+	_ = ui_layout(1600, 900)
+	testing.expect(t, !deck_shown(), "the deck does not come back by itself")
+}
+
+// Round 3, 3: with Atlas's drawer open over the centre, the wheel and a right-click over the
+// drawer are the drawer's, never the cards'.
+@(test)
+deck_modal_drawer_over_the_deck :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	dc_reset()
+	defer dc_reset()
+	for i in 0 ..< 12 do dc_session(u64(100 + 10 * i), dc_tab(u64(101 + 10 * i)))
+	state.current_session = 100
+	_ = ui_layout(1600, 900)
+	dc_open()
+	// Atlas: a Home session with its pi tab (never started here), its drawer open in place
+	home := dc_session(900, core.Tab{id = 901, kind = core.Pi_Tab{}, title = strings.clone("Atlas", runtime.heap_allocator()), status = .Not_Started})
+	home.home = true
+	state.home, state.home_open = 900, true
+	_ = ui_layout(1600, 900)
+	d := clay.GetElementData(clay.ID("drawer"))
+	if !testing.expect(t, d.found, "the fixture: the drawer is laid out") do return
+	p := [2]f32{d.boundingBox.x + d.boundingBox.width / 2, d.boundingBox.y + d.boundingBox.height / 2}
+	if !testing.expect(t, inside(clay.ID("deck"), p.x, p.y), "the fixture: the drawer over the deck") do return
+	wheel := sapp.Event{type = .MOUSE_SCROLL, mouse_x = p.x, mouse_y = p.y, scroll_y = -3}
+	testing.expect(t, !deck_event(&wheel), "the wheel over the drawer is not the deck's")
+	// a card under the drawer: its part there
+	db := d.boundingBox
+	on := false
+	for _, i in deck.cards {
+		cb := clay.GetElementData(clay.ID("deckcard", u32(i))).boundingBox
+		x0, x1 := max(cb.x, db.x), min(cb.x + cb.width, db.x + db.width)
+		y0, y1 := max(cb.y, db.y), min(cb.y + cb.height, db.y + db.height)
+		if x1 - x0 > 4 && y1 - y0 > 4 {
+			p, on = {(x0 + x1) / 2, (y0 + y1) / 2}, true
+			break
+		}
+	}
+	if !testing.expect(t, on, "the fixture: a card under the drawer") do return
+	right := sapp.Event{type = .MOUSE_DOWN, mouse_x = p.x, mouse_y = p.y, mouse_button = .RIGHT}
+	testing.expect(t, !deck_event(&right), "a right-click over the drawer is not the deck's")
+	state.home_open = false
+	_ = ui_layout(1600, 900) // shut, slid out at once (reduce motion): later layouts start without it
+}
+
+// Round 3, 4: saved while the deck shows, the session it was opened from is the current one (a
+// relaunch shows it), and a window that comes back to the core (its deck state lost) shows the
+// deck again over it.
+@(test)
+deck_modal_saved_and_reattached :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	dc_reset()
+	defer dc_reset()
+	dc_session(100, dc_tab(101))
+	dc_session(200, dc_tab(201, "waiting"))
+	state.current_session = 200
+	_ = ui_layout(1600, 900)
+	before := strings.clone(core.workspace_json())
+	defer delete(before)
+	testing.expect(t, strings.contains(before, `"current_session"`), "the fixture: the current session is saved")
+	dc_open()
+	testing.expect(t, deck_shown(), "the deck shows")
+	testing.expect_value(t, core.workspace_json(), before)
+	deck = {cards = deck.cards} // a window attached again: nothing of its own
+	_ = ui_layout(1600, 900)
+	testing.expect(t, deck_shown(), "the deck again, over the session it was opened from")
+	dc_key(.ESCAPE)
+	core.inbox_drain()
+	testing.expect_value(t, state.current_session, u64(200))
+}

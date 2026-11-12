@@ -620,8 +620,17 @@ draw_end :: proc() {
 	sgl.end()
 }
 
+// Every quad below is drawn at this much of its own alpha (1: as given): a whole layer fading
+// in, such as a peek's panel and its terminal (ui_peek.odin), set around its draw calls only.
+draw_alpha: f32 = 1
+
+@(private = "file")
+faded :: #force_inline proc(a: u8) -> u8 {return draw_alpha >= 1 ? a : u8(f32(a) * max(draw_alpha, 0))}
+
 draw_rect :: proc(x, y, w, h: f32, col: core.Rgba) {
 	u := f32(0.5) / f32(font.size)
+	col := col
+	col.a = faded(col.a)
 	sgl.v2f_t2f_c4b(x, y, u, u, col.r, col.g, col.b, col.a)
 	sgl.v2f_t2f_c4b(x + w, y, u, u, col.r, col.g, col.b, col.a)
 	sgl.v2f_t2f_c4b(x + w, y + h, u, u, col.r, col.g, col.b, col.a)
@@ -650,6 +659,7 @@ draw_run :: proc(ri: u32, x, baseline: f32, col: core.Rgba) {
 		ag, ok := raster_get(k)
 		if !ok || ag.w == 0 do continue
 		c := ag.color ? core.Rgba{255, 255, 255, col.a} : col
+		c.a = faded(c.a)
 		gx := ix + f32(ag.x_off)
 		gy := by + math.round(g.y) + f32(ag.y_off)
 		u0, v0 := f32(ag.x) * inv, f32(ag.y) * inv
@@ -666,6 +676,7 @@ draw_run :: proc(ri: u32, x, baseline: f32, col: core.Rgba) {
 // top-left at (x, y) rounded to the pixel grid, faded by alpha a. A mark wider than the square
 // (logo_side) reaches past it equally on both sides.
 draw_logo :: proc(logo: Logo, x, y: f32, n: int, a: u8) {
+	a := faded(a)
 	if logo == .None || n <= 0 || n > 1024 || a == 0 do return
 	ag, ok := raster_get(Raster_Key{glyph = u32(logo), scale_q = u16(n), sprite = LOGO_SPRITE})
 	if !ok || ag.w == 0 do return

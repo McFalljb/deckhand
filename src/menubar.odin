@@ -171,6 +171,7 @@ MENUBAR := [?]Bar_Item {
 		{action = "prev_session"},
 		{action = "next_needing_you"},
 		{action = "prev_needing_you"},
+		{action = "peek_next_needing_you"},
 		{action = "recent_session"},
 		{action = "least_recent_session"},
 		{action = "session_1"},

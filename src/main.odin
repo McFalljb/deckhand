@@ -485,18 +485,21 @@ frame :: proc "c" () {
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)
 	closed_tabs_settle() // the user's closes that went through (closed_tabs.odin)
 	term_views_tick() // hidden tabs' terminal copies detach; a snapshot's history (term_view_stream.odin)
+	peek_tick() // a peek whose tab, session or machine went closes (ui_peek.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
 	t := active_view() // the window's copies of the terminals it shows (term_view_stream.odin)
 	// Output-driven redraws are capped near 60 Hz; input redraws at once.
 	at := agent_view() // Atlas's terminal in the drawer (also while it slides out)
+	pv := peek_view() // a peeked tab's, over the centre (ui_peek.odin)
 	drags_follow_focus()
 	left_down := win_os.left_button == nil || win_os.left_button()
 	if t != nil do term_drag_tick(t, left_down) // a selection dragged past the grid's edge scrolls
 	if at != nil do term_drag_tick(at, left_down)
+	if pv != nil do term_drag_tick(pv, left_down)
 	shown_changed := false // a terminal in another pane on screen (panes.odin)
 	for x in views_on_screen() do if x != t && x.changed do shown_changed = true
-	if ((t != nil && t.changed) || shown_changed || (at != nil && at.changed && drawer_laid_out)) && time.tick_since(app.last_draw) > OUTPUT_FRAME do app.redraw = true
+	if ((t != nil && t.changed) || shown_changed || (at != nil && at.changed && drawer_laid_out) || (pv != nil && pv.changed)) && time.tick_since(app.last_draw) > OUTPUT_FRAME do app.redraw = true
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
@@ -528,6 +531,7 @@ frame :: proc "c" () {
 	term_links_frame() // the link under the pointer, before the layout shows its tip (term_links.odin)
 	cmds := ui_layout(w, h)
 	bar_layout_done()
+	peek_after_layout() // the peeked terminal's place in its panel; a tab never laid out gets its grid (ui_peek.odin)
 	if at != nil {
 		if x, y, tw, th, ok := drawer_term_rect(); ok do term_fit_rect(at.tab_id, x, y, tw, th)
 	}
@@ -560,7 +564,7 @@ frame :: proc "c" () {
 	draw_begin(w, h)
 	// chrome, the current tab, the sliding drawer, then a tab drag's drop indicator and ghost, the palette, menus, popover, sheet, tooltip
 	overlay := cmds.length
-	for name in ([]string{"tab_drop", "tab_ghost", "palette_scrim", "wt_menu_shadow", "wt_menu", "menu_shadow", "menu", "settings_shadow", "settings_pop", "bell_shadow", "bell_pop", "sheet_scrim", "setup_scrim", "jobsheet_scrim", "linktip", "toast", "tooltip"}) do overlay = min(overlay, ui_overlay_start(cmds, name))
+	for name in ([]string{"tab_drop", "tab_ghost", "palette_scrim", "wt_menu_shadow", "wt_menu", "menu_shadow", "menu", "settings_shadow", "settings_pop", "bell_shadow", "bell_pop", "sheet_scrim", "setup_scrim", "jobsheet_scrim", "peek_scrim", "linktip", "toast", "tooltip"}) do overlay = min(overlay, ui_overlay_start(cmds, name))
 	drawer_at := min(ui_overlay_start(cmds, "drawer"), overlay)
 	ui_draw(cmds, 0, drawer_at)
 	typing := state.focus_widget == "" // no text field has the keyboard
@@ -579,7 +583,17 @@ frame :: proc "c" () {
 			if state.focus_widget == "agent_input" do term_draw_marked(at, ime.marked, ime.caret)
 		}
 	}
-	ui_draw(cmds, overlay, cmds.length) // the palette, above the terminals
+	if peek_is_open() {
+		// the palette and popovers, then the peek's scrim and panel with its terminal (all at its
+		// fade), then what is above it (the toast, tooltips)
+		pf, pt := peek_commands(cmds)
+		ui_draw(cmds, overlay, pf)
+		draw_alpha = peek_progress()
+		ui_draw(cmds, pf, pt)
+		peek_draw()
+		draw_alpha = 1
+		ui_draw(cmds, pt, cmds.length)
+	} else do ui_draw(cmds, overlay, cmds.length) // the palette, above the terminals
 	if setup_open() do harness_term_draw() // the setup sheet's install terminal, on the sheet
 	ui_draw_field_cursor(cmds)
 	draw_end()
@@ -599,6 +613,7 @@ frame :: proc "c" () {
 	if t != nil do t.changed = false
 	for x in views_on_screen() do x.changed = false // every pane's terminal was drawn
 	if at != nil do at.changed = false
+	if v := peek_view(); v != nil do v.changed = false // (looked up again: a pump since may have dropped it)
 	app.frames_drawn += 1
 	platform_frame_drawn()
 }
@@ -666,6 +681,9 @@ event :: proc(e: ^sapp.Event) {
 			if e.type == .FILES_DROPPED || job_sheet_event(e) do return // dropped files: sidebar_drop refuses them too
 		}
 	}
+	// a peek (ui_peek.odin) takes every key and click: its terminal and its panel get them, nothing
+	// under it does; a ⌘ chord that is not its own closes it and goes on below
+	if peek_event(e) do return
 	// ⌘K opens the palette from anywhere, and closes it
 	if e.type == .KEY_DOWN && e.key_code == .K && only_cmd {
 		ime_cancel()
@@ -948,6 +966,8 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))
 		case Hit_Fleet_Row: fleet_go(u64(hit)) // as ⌥⌘A would go there (ui_fleet.odin)
+		case Hit_Peek_Row:  peek_open_session(u64(hit)) // a row's eye: Peek (ui_peek.odin)
+		case Hit_Peek: // peek_event takes the panel's clicks
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
 		}
 		clay.SetPointerState(app.pointer, false)
@@ -987,13 +1007,15 @@ event :: proc(e: ^sapp.Event) {
 		// the session on screen is seen now: its bell entries are read
 		if core.notify_wants_seen(state.current_session) do client_internal(core.Notifications_Mark_Read{session = state.current_session})
 		for id in core.status_wants_seen() do client_internal(core.Set_Unread{tab_id = id, unread = false}) // agent_status.odin
-		if kt != nil do term_focus(kt, true)
+		if pv := peek_view(); pv != nil do term_focus(pv, true) // a peek has the keyboard (peek_close gives the one under it back)
+		else if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false
 		for _, x in term_views {
 			term_cancel_drag(x) // its release may go to another app
 			term_link_clear(x) // and ⌘'s
 		}
+		if pv := peek_view(); pv != nil && pv != kt do term_focus(pv, false)
 		if kt != nil do term_focus(kt, false)
 	case .QUIT_REQUESTED:
 		// a separate core: the window closes, the core and its sessions run on (quit_route)
@@ -1169,6 +1191,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		// the filter is State: every edit is a set_filter (agents see it too)
 		if in_filter && state.focus_widget == "sidebar_filter" && tf_text(f) != before do ui_do(core.Set_Filter{text = tf_text(f)})
 		if in_files_filter && state.focus_widget == "files_filter" && tf_text(f) != before do ui_do(core.Set_Files_Filter{text = tf_text(f)})
+		if in_filter && tf_text(f) != before do attention_keyed = false // typed in: Space is a space again
 		platform_ime_caret_moved()
 	}
 	#partial switch e.type {
@@ -1235,6 +1258,8 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		case .DOWN:
 			if in_palette do palette_move(1)
 			else if !(in_filter && attention_step(1)) do tf_end(f, shift)
+		case .SPACE: // the Attention view's keyboard row: Peek (ui_peek.odin); else a space (its CHAR)
+			if in_filter && attention_peek_key() do app.key_taken = true
 		case .PAGE_UP:   if in_palette do palette_move(-PALETTE_ROWS)
 		case .PAGE_DOWN: if in_palette do palette_move(PALETTE_ROWS)
 		case .TAB:       if in_palette do palette_move(shift ? -1 : 1)
@@ -1346,7 +1371,11 @@ utf16_unit :: proc(pending: ^u32, cp: u32) -> (rune, bool) {
 ime_commit :: proc(text: string) {
 	if !autotest_allows_input() do return
 	ime_set_marked("", 0)
-	if f, _, _ := focused_field(); f != nil {
+	if pv := peek_view(); pv != nil { 	// a peek has the keyboard, over any field (ui_peek.odin)
+		_, ptab, _ := find_tab(pv.tab_id)
+		core.claude_note_typed(ptab)
+		term_text_input(pv, text)
+	} else if f, _, _ := focused_field(); f != nil {
 		tf_insert(f, text)
 		if state.focus_widget == "palette" do palette_edited()
 	} else if t := key_view(); t != nil {
@@ -1366,6 +1395,7 @@ ime_set_marked :: proc(text: string, caret: int) {
 	ime.caret = caret
 	app.redraw = true
 	if t := key_view(); t != nil do t.changed = true
+	if pv := peek_view(); pv != nil do pv.changed = true
 }
 
 ime_cancel :: proc() {
@@ -1375,10 +1405,11 @@ ime_cancel :: proc() {
 }
 
 // Option starts dead keys (é, ü) in text fields; in a terminal it is Alt.
-ime_option_composes :: proc() -> bool {return state.focus_widget != "" || active_editor() != nil}
+ime_option_composes :: proc() -> bool {return !peek_is_open() && (state.focus_widget != "" || active_editor() != nil)}
 
 // The candidate window's anchor: the field caret, else the terminal cursor.
 ime_anchor :: proc() -> [4]f32 {
+	if pv := peek_view(); pv != nil do return {pv.cursor_px.x, pv.cursor_px.y, font.cell_w, font.cell_h}
 	if state.focus_widget == "" {
 		if t := key_view(); t != nil do return {t.cursor_px.x, t.cursor_px.y, font.cell_w, font.cell_h}
 	}

@@ -1399,7 +1399,7 @@ app_focus_tick :: proc() {
 // The app has the keyboard: its tab is the focused one (panes.odin), it runs, no widget has the
 // keyboard, the job sheet is shut and the window is in front.
 app_wants_keys :: proc(a: ^App_Proc) -> bool {
-	return core.tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
+	return core.tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && !peek_is_open() && app.window_active
 }
 
 @(private = "file")

@@ -282,6 +282,15 @@ draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba, param: u8 = 0)
 		stroke_line(X(ox, s, sw, 10), P(oy, s, 4), X(ox, s, sw, 10), P(oy, s, 12), sw, col, false)
 	case .Mark_Idle, .Mark_Exited, .Mark_Working, .Mark_Progress, .Mark_Waiting, .Mark_Permission, .Mark_Question, .Mark_Auth, .Mark_Done, .Mark_Error:
 		draw_mark(ic, ox, oy, s, sw, col, param)
+	case .Eye:
+		// two arcs meeting at the corners (the lids), a pupil in the middle
+		cx, cy := P(ox, s, 8), P(oy, s, 8)
+		r := 8.5 * s // the lids' circles, centred above and below so each spans 1.5..14.5 across
+		d := f32(5.5) * s
+		half := math.asin(min(6.5 * s / r, 1))
+		arc(cx, cy + d, r, math.PI / 2 - half, math.PI / 2 + half, sw, col) // the upper lid
+		arc(cx, cy - d, r, -math.PI / 2 - half, -math.PI / 2 + half, sw, col) // the lower lid
+		fill_disc(cx, cy, 2 * s, col)
 	}
 }
 
@@ -361,7 +370,7 @@ draw_mark :: proc(ic: core.Icon, ox, oy, s, sw: f32, col: core.Rgba, param: u8) 
 @(private = "file")
 vtx :: proc(x, y: f32, col: core.Rgba, a: f32) {
 	u := f32(0.5) / f32(font.size) // the atlas's white texel (draw_rect)
-	sgl.v2f_t2f_c4b(x, y, u, u, col.r, col.g, col.b, u8(f32(col.a) * a))
+	sgl.v2f_t2f_c4b(x, y, u, u, col.r, col.g, col.b, u8(f32(col.a) * a * clamp(draw_alpha, 0, 1)))
 }
 
 // A quad with alpha a0 along edge p0-p1 and a1 along edge p3-p2.

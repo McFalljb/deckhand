@@ -17,4 +17,5 @@ Menu_Item :: struct {
 	note:   bool, // a muted line of text, not a choice (the ⓘ menu's info)
 	icon:   Icon, // drawn before the label (the harness picker's)
 	picker: Maybe(Menu_New_Session), // opens the harness picker for this place (harness.odin)
+	peek:   u64, // peeks at this open session (the window's ui_peek.odin)
 }

@@ -192,7 +192,7 @@ pulse :: proc() -> f32 {
 ui_wants_frame :: proc() -> bool {
 	again := panels_clamped
 	panels_clamped = false
-	return again || animating || flash_seen || shine_drawn || pane_motion.moving || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
+	return again || animating || peek_moving || flash_seen || shine_drawn || pane_motion.moving || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
 }
 
 // ---- flash: a one-shot 1 -> 0 ----
@@ -636,6 +636,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 		shortcuts_layout(w, h)
 		setup_layout(w, h) // the first-run sheet (ui_setup.odin)
 		job_sheet_layout(w, h) // the job sheet (ui_job_sheet.odin)
+		peek_layout(w, h) // a peeked tab over the centre (ui_peek.odin)
 		if palette_is_open() do palette_layout(w, h)
 		term_link_tip_layout() // a terminal link's URL while ⌘ is held (term_links.odin)
 		toast_layout(w, h) // a menu choice's outcome (toast.odin)
@@ -1463,6 +1464,8 @@ Hit :: union {
 	Hit_Changes, // the Changes tab and the top bar's "±" (ui_changes.odin)
 	Hit_Fleet_Row, // a row of the empty centre's summary (ui_fleet.odin)
 	Hit_Attention, // the Sessions column's By project | Attention switch, IDLE's header, the footer (ui_sidebar.odin)
+	Hit_Peek, // a peek's header buttons (ui_peek.odin)
+	Hit_Peek_Row, // a row's eye button: peek at its session (ui_peek.odin)
 }
 Hit_Attention :: distinct int // a core.Sidebar_View (the switch), ATTN_HIT_IDLE, ATTN_HIT_FOOTER
 Hit_Editor_Tool :: distinct int // button index
@@ -1517,6 +1520,7 @@ ui_hit :: proc() -> Hit {
 		return nil
 	}
 	if shortcuts_open() do return sheet_hit() // so does the shortcuts sheet
+	if peek_is_open() do return peek_hit() // and a peek's scrim (ui_peek.odin)
 	if setup_open() do return setup_hit() // and the first-run sheet (ui_setup.odin)
 	if job_sheet_open() do return job_sheet_hit() // and the job sheet (ui_job_sheet.odin)
 	if settings_open() do return settings_hit() // and the settings popover

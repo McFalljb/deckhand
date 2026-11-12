@@ -53,4 +53,5 @@ Icon :: enum u8 {
 	Mark_Auth, // a lock
 	Mark_Done, // a check
 	Mark_Error, // "!"
+	Eye, // an eye: Peek (ui_peek.odin)
 }

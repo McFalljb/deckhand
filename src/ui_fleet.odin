@@ -241,6 +241,7 @@ rows_drawn: [FLEET_ROWS]u64
 rows_n: int
 
 fleet_row_hit :: proc() -> Hit {
+	for i in 0 ..< rows_n do if clay.PointerOver(clay.ID("fleetpeek", u32(i))) && peek_tab_of(find_session(rows_drawn[i])) != nil do return Hit_Peek_Row(rows_drawn[i]) // its eye (ui_peek.odin)
 	for i in 0 ..< rows_n do if clay.PointerOver(clay.ID("fleetrow", u32(i))) do return Hit_Fleet_Row(rows_drawn[i])
 	return nil
 }
@@ -280,7 +281,11 @@ fleet_empty_layout :: proc() {
 			rows_drawn[i] = s.id
 			rows_n = i + 1
 			id := clay.ID("fleetrow", u32(i))
-			bg, em := overlay(id, false, ui_hover == Hit(Hit_Fleet_Row(s.id)))
+			// hovered, a row that can be peeked shows an eye at its end (ui_peek.odin)
+			can_peek := peek_tab_of(s) != nil
+			peek_hover := can_peek && ui_hover == Hit(Hit_Peek_Row(s.id))
+			peek_shown := can_peek && (peek_hover || ui_hover == Hit(Hit_Fleet_Row(s.id)))
+			bg, em := overlay(id, false, ui_hover == Hit(Hit_Fleet_Row(s.id)) || peek_hover)
 			if clay.UI(id)(row_cfg(bg)) {
 				tab := core.session_need_tab(s, x.tier)
 				v := tab != nil ? core.tab_status_view(tab^) : core.Tab_Status_View{progress = -1}
@@ -290,6 +295,7 @@ fleet_empty_layout :: proc() {
 				// mark, [place ·], title, spacer, [machine], age
 				room := row_w - px(2 * PAD_ROW) - px(MARK) - age_w - 3 * px(GAP_INLINE)
 				if machines do room -= mach_w + px(GAP_INLINE)
+				if peek_shown do room -= px(ROW_BUTTON) + px(GAP_INLINE)
 				status_mark_el(v)
 				if ic != .Chat {
 					lead := fmt.tprintf("%s ·", place)
@@ -308,6 +314,7 @@ fleet_empty_layout :: proc() {
 				if clay.UI()({layout = {sizing = {clay.SizingFixed(age_w), clay.SizingFit()}, childAlignment = {x = .Right}}}) {
 					if age != "" do clay.TextDynamic(age, txt(th.text_muted, FONT_UI_SMALL))
 				}
+				peek_row_button(clay.ID("fleetpeek", u32(i)), peek_shown, peek_hover)
 			}
 		}
 		if more := len(list) - FLEET_ROWS; more > 0 {

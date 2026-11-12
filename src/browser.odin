@@ -583,7 +583,7 @@ browser_tick :: proc() {
 // The page has Deckhand's keyboard: its tab is the focused one (panes.odin) and no widget has
 // the keyboard.
 browser_wants_keys :: proc(b: ^Browser) -> bool {
-	return core.tab_focused(b.tab_id) && state.focus_widget == ""
+	return core.tab_focused(b.tab_id) && state.focus_widget == "" && !peek_is_open() // a peek has the keyboard (ui_peek.odin)
 }
 
 BROWSER_WAIT_MESSAGE :: "Too many open pages: this one opens when another closes"

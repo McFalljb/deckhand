@@ -20,6 +20,7 @@ Bell_Hit_What :: enum {
 	Row, // an entry (id)
 	Mark_All,
 	Clear,
+	Peek, // an entry's eye: peek at its tab (id; ui_peek.odin)
 }
 Hit_Bell :: struct {
 	what: Bell_Hit_What,
@@ -234,11 +235,16 @@ bell_layout :: proc(w, h: f32) {
 				bell.rows[i] = n.id
 				bell.n += 1
 				rid := clay.ID("bellrow", u32(i))
-				bg, em := overlay(rid, false, ui_hover == Hit(Hit_Bell{what = .Row, id = n.id}) || bell.selected == i)
+				// hovered, an entry whose tab can be peeked shows an eye (ui_peek.odin)
+				ps, _ := bell_peek_tab(n)
+				peek_hover := ps != nil && ui_hover == Hit(Hit_Bell{what = .Peek, id = n.id})
+				peek_shown := ps != nil && (peek_hover || ui_hover == Hit(Hit_Bell{what = .Row, id = n.id}))
+				bg, em := overlay(rid, false, ui_hover == Hit(Hit_Bell{what = .Row, id = n.id}) || peek_hover || bell.selected == i)
 				ic, icol := kind_icon(n.kind)
 				what, where_ := entry_lines(n)
 				ago := bell_ago(n.at)
 				room := row_room - text_w(ago, FONT_UI_SMALL)
+				if peek_shown do room -= px(ROW_BUTTON + SP_2)
 				if clay.UI(rid)({
 					layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BELL_ROW_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 					backgroundColor = bg,
@@ -257,6 +263,7 @@ bell_layout :: proc(w, h: f32) {
 						if where_ != "" do clay.TextDynamic(clip(where_, room, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
 					}
 					clay.TextDynamic(ago, txt(th.text_muted, FONT_UI_SMALL))
+					peek_row_button(clay.ID("bellpeek", u32(i)), peek_shown, peek_hover)
 				}
 			}
 		}
@@ -267,6 +274,7 @@ bell_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("bell_markall")) do return Hit_Bell{what = .Mark_All}
 	if clay.PointerOver(clay.ID("bell_clear")) do return Hit_Bell{what = .Clear}
 	if clay.PointerOver(clay.ID("bell_list")) {
+		for i in 0 ..< bell.n do if clay.PointerOver(clay.ID("bellpeek", u32(i))) && bell_peek_ok(bell.rows[i]) do return Hit_Bell{what = .Peek, id = bell.rows[i]}
 		for i in 0 ..< bell.n do if clay.PointerOver(clay.ID("bellrow", u32(i))) do return Hit_Bell{what = .Row, id = bell.rows[i]}
 	}
 	if clay.PointerOver(clay.ID(BUTTONS[.Bell].element)) do return Hit_Button(.Bell)
@@ -277,6 +285,7 @@ bell_tip :: proc(h: Hit_Bell) -> (label, keys: string) {
 	switch h.what {
 	case .Mark_All: return "Mark every notification read", ""
 	case .Clear:    return "Remove every notification", ""
+	case .Peek:     return PEEK_ROW_TIP, ""
 	case .Row:
 		for n in state.notices.items do if n.id == h.id {
 			if n.job_id != "" do return "", ""
@@ -316,7 +325,31 @@ bell_click :: proc(h: Hit_Bell) {
 	case .Row:      bell_activate(h.id)
 	case .Mark_All: ui_do(core.Notifications_Mark_Read{all = true})
 	case .Clear:    ui_do(core.Notifications_Clear{})
+	case .Peek:     bell_peek(h.id)
 	}
+}
+
+// An entry's eye: its tab in a peek (ui_peek.odin); the entry is read and the popover closes.
+@(private = "file")
+bell_peek :: proc(id: u64) {
+	for n in state.notices.items {
+		if n.id != id do continue
+		s, tab := bell_peek_tab(n)
+		if s == nil do return
+		peek_open_tab(s, tab)
+		ui_do(core.Notifications_Mark_Read{id = id})
+		ui_do(core.Set_Focus{""})
+		return
+	}
+}
+
+@(private = "file")
+bell_peek_ok :: proc(id: u64) -> bool {
+	for n in state.notices.items do if n.id == id {
+		s, _ := bell_peek_tab(n)
+		return s != nil
+	}
+	return false
 }
 
 // Input while the popover is open: it takes everything but shortcuts. Up

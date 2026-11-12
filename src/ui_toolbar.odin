@@ -1034,6 +1034,10 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		}
 	case Hit_Fleet_Row:
 		return fleet_row_tip(u64(x))
+	case Hit_Peek:
+		return peek_tip(x)
+	case Hit_Peek_Row:
+		return PEEK_ROW_TIP, ""
 	case Hit_Attention:
 		switch int(x) {
 		case ATTN_HIT_IDLE:   return attention_idle_open ? "Fold the idle sessions" : "Show the idle sessions", ""

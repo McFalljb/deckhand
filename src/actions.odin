@@ -568,6 +568,8 @@ ACTIONS := [?]Action {
 	// the core picks where (core/needing_you.odin): "Nothing needs you" when nothing does
 	{id = "next_needing_you", label = "Next needing you", keys = "⌥⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{}, true}},
 	{id = "prev_needing_you", label = "Previous needing you", keys = "⌥⇧⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{back = true}, true}},
+	// what ⌥⌘A would go to, in a panel over the centre, without leaving what is on screen (ui_peek.odin)
+	{id = "peek_next_needing_you", label = "Peek at next needing you", keys = "⌃⌥⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{}, true}, ui = proc() {peek_next()}},
 	// "finished, not seen" by hand (core/agent_status.odin's set_unread, as the row menu's Mark as unread)
 	{id = "mark_unread", label = "Mark as unread", keys = "⇧⌘U", make = mark_unread},
 	// the core decides per tab as it applies (core/mark_read.odin): "Marked N as read", "Nothing unread"
@@ -843,6 +845,7 @@ action_run :: proc(id: string, menu := "") {
 	a := action_by_id(id)
 	if a == nil do return
 	if id != "quit" && job_sheet_open() do return // modal: nothing behind it takes over (menubar.odin greys these)
+	if peek_action(id) do return // a peek's own (⌥⌘A, Close tab: the peek's); any other closes it first (ui_peek.odin)
 	if a.pick_folder {
 		for &b, i in ACTIONS do if &b == a do palette.pick_for = i + 1
 		delete(palette.pick_menu)

@@ -20,6 +20,7 @@ Bell_Hit_What :: enum {
 	Row, // an entry (id)
 	Mark_All,
 	Clear,
+	Peek, // an entry's eye: peek at its tab (id; ui_peek.odin)
 }
 Hit_Bell :: struct {
 	what: Bell_Hit_What,
@@ -234,11 +235,16 @@ bell_layout :: proc(w, h: f32) {
 				bell.rows[i] = n.id
 				bell.n += 1
 				rid := clay.ID("bellrow", u32(i))
-				bg, em := overlay(rid, false, ui_hover == Hit(Hit_Bell{what = .Row, id = n.id}) || bell.selected == i)
+				// hovered, an entry whose tab can be peeked shows an eye (ui_peek.odin)
+				ps, _ := bell_peek_tab(n)
+				peek_hover := ps != nil && ui_hover == Hit(Hit_Bell{what = .Peek, id = n.id})
+				peek_shown := ps != nil && (peek_hover || ui_hover == Hit(Hit_Bell{what = .Row, id = n.id}))
+				bg, em := overlay(rid, false, ui_hover == Hit(Hit_Bell{what = .Row, id = n.id}) || peek_hover || bell.selected == i)
 				ic, icol := kind_icon(n.kind)
 				what, where_ := entry_lines(n)
 				ago := bell_ago(n.at)
 				room := row_room - text_w(ago, FONT_UI_SMALL)
+				if peek_shown do room -= px(ROW_BUTTON + SP_2)
 				if clay.UI(rid)({
 					layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BELL_ROW_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 					backgroundColor = bg,
@@ -257,6 +263,7 @@ bell_layout :: proc(w, h: f32) {
 						if where_ != "" do clay.TextDynamic(clip(where_, room, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
 					}
 					clay.TextDynamic(ago, txt(th.text_muted, FONT_UI_SMALL))
+					peek_row_button(clay.ID("bellpeek", u32(i)), peek_shown, peek_hover)
 				}
 			}
 		}
@@ -267,6 +274,7 @@ bell_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("bell_markall")) do return Hit_Bell{what = .Mark_All}
 	if clay.PointerOver(clay.ID("bell_clear")) do return Hit_Bell{what = .Clear}
 	if clay.PointerOver(clay.ID("bell_list")) {
+		for i in 0 ..< bell.n do if clay.PointerOver(clay.ID("bellpeek", u32(i))) && bell_peek_ok(bell.rows[i]) do return Hit_Bell{what = .Peek, id = bell.rows[i]}
 		for i in 0 ..< bell.n do if clay.PointerOver(clay.ID("bellrow", u32(i))) do return Hit_Bell{what = .Row, id = bell.rows[i]}
 	}
 	if clay.PointerOver(clay.ID(BUTTONS[.Bell].element)) do return Hit_Button(.Bell)
@@ -277,6 +285,7 @@ bell_tip :: proc(h: Hit_Bell) -> (label, keys: string) {
 	switch h.what {
 	case .Mark_All: return "Mark every notification read", ""
 	case .Clear:    return "Remove every notification", ""
+	case .Peek:     return PEEK_ROW_TIP, ""
 	case .Row:
 		for n in state.notices.items do if n.id == h.id {
 			if n.job_id != "" do return "", ""
@@ -316,40 +325,80 @@ bell_click :: proc(h: Hit_Bell) {
 	case .Row:      bell_activate(h.id)
 	case .Mark_All: ui_do(core.Notifications_Mark_Read{all = true})
 	case .Clear:    ui_do(core.Notifications_Clear{})
+	case .Peek:     bell_peek(h.id)
 	}
 }
 
-// Input while the popover is open: it takes everything but shortcuts. Up
-// and Down move, Enter opens, Esc or a click outside (or on the bell) closes.
+// An entry's eye: its tab in a peek (ui_peek.odin); the entry is read and the popover closes.
+@(private = "file")
+bell_peek :: proc(id: u64) {
+	for n in state.notices.items {
+		if n.id != id do continue
+		s, tab := bell_peek_tab(n)
+		if s == nil do return
+		peek_open_tab(s, tab)
+		ui_do(core.Notifications_Mark_Read{id = id})
+		ui_do(core.Set_Focus{""})
+		return
+	}
+}
+
+@(private = "file")
+bell_peek_ok :: proc(id: u64) -> bool {
+	for n in state.notices.items do if n.id == id {
+		s, _ := bell_peek_tab(n)
+		return s != nil
+	}
+	return false
+}
+
+// Input while the popover is open (popover_event): Up and Down move, Enter opens, Esc or a click
+// outside (or on the bell) closes; a shortcut closes it and runs as usual.
 bell_event :: proc(e: ^sapp.Event) -> bool {
-	#partial switch e.type {
-	case .KEY_DOWN:
-		app.redraw = true
-		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
-			ui_do(core.Set_Focus{""}) // a shortcut closes it and runs as usual
-			return false
-		}
+	return popover_event(e, close = proc() {ui_do(core.Set_Focus{""})}, keys = proc(e: ^sapp.Event) {
 		#partial switch e.key_code {
-		case .ESCAPE: ui_do(core.Set_Focus{""})
 		case .UP:     if bell.n > 0 do bell.selected = bell.selected <= 0 ? bell.n - 1 : bell.selected - 1
 		case .DOWN, .TAB:
 			if bell.n > 0 do bell.selected = (bell.selected + 1) %% bell.n
 		case .ENTER, .KP_ENTER, .SPACE:
 			if bell.selected >= 0 && bell.selected < bell.n do bell_activate(bell.rows[bell.selected])
 		}
+	}, click = proc(h: Hit) -> bool {
+		b, ok := h.(Hit_Bell)
+		if ok do bell_click(b)
+		return ok
+	}, scroll = proc(e: ^sapp.Event) {
+		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
+		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+	})
+}
+
+// The input of a popover that takes the keys and the pointer while it shows (the bell's, a
+// peek's: ui_peek.odin). A ⌘ chord closes it and goes on below (false: handled as usual); Esc
+// closes it; any other key is its own (keys); a click on its own controls is its (click: true),
+// anywhere else closes it; the wheel is its own (scroll; nil: nothing); releases, characters and
+// pastes go nowhere. True: taken.
+popover_event :: proc(e: ^sapp.Event, close: proc(), keys: proc(e: ^sapp.Event), click: proc(h: Hit) -> bool, scroll: proc(e: ^sapp.Event) = nil) -> bool {
+	#partial switch e.type {
+	case .KEY_DOWN:
+		app.redraw = true
+		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
+			close() // a shortcut closes it and runs as usual
+			return false
+		}
+		app.key_taken = true // its character and release go nowhere
+		if e.key_code == .ESCAPE do close()
+		else do keys(e)
 		return true
 	case .MOUSE_MOVE:
 		set_hover(chrome_hit({e.mouse_x, e.mouse_y}), false)
 		return true
 	case .MOUSE_DOWN:
-		h := chrome_hit({e.mouse_x, e.mouse_y})
-		if b, ok := h.(Hit_Bell); ok do bell_click(b)
-		else do ui_do(core.Set_Focus{""}) // outside (or the bell again): closes
+		if !click(chrome_hit({e.mouse_x, e.mouse_y})) do close() // outside: closes
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL:
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		if scroll != nil do scroll(e)
 		app.redraw = true
 		return true
 	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_UP:

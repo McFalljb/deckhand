@@ -306,6 +306,8 @@ menu_items :: proc() -> []core.Menu_Item {
 			info_items(&items, t)
 		}
 		if len(items) > 0 do sep(&items)
+		// a look at it without leaving the session on screen (ui_peek.odin), when it can be peeked
+		if id := core.open_session_any(t.pi_session_id); id != 0 && peek_tab_of(find_session(id)) != nil do append(&items, core.Menu_Item{label = "Peek", peek = id})
 		if id := core.open_session_any(t.pi_session_id); id != 0 {
 			// "done, not seen yet" by hand (agent_status.odin); looking at it marks it seen
 			unread := false
@@ -392,6 +394,11 @@ menu_run :: proc(i: int) {
 	if t, ok := target.(core.Menu_New_Session); ok && handoff_picker_stale(t) do return // that machine restarted (ui_handoff.odin)
 	if _, ok := target.(core.Menu_New_Session); ok do harness_used(it.cmd) // first next time
 	if n, ok := target.(Menu_New); ok && n.pane != 0 do ui_do(core.Focus_Pane{pane = n.pane}) // new tabs open in the focused pane
+	if it.peek != 0 {
+		menu_close()
+		peek_open_session(it.peek)
+		return
+	}
 	if it.rename {
 		if t, ok := target.(Menu_Session); ok {
 			// a Claude session's row: its field takes the row (claude_rename on Enter)
@@ -798,9 +805,10 @@ open_group :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 // has no buttons (its rows have no menu yet: sidebar_context) and no age (its session file is not
 // on this Mac); while that machine is not online (live false) it is greyed, without a status.
 // The Attention view's rows also name their machine (mach, in a column mach_w wide, before the
-// mark) and show the keyboard's row (key_sel) as hovered.
+// mark) and show the keyboard's row (key_sel) as hovered; a row that can be peeked (peek) shows an
+// eye while hovered, another machine's too (ui_peek.odin).
 @(private = "file")
-open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32, remote := false, live := true, mach := "", mach_w: f32 = 0, key_sel := false, from: ^core.Tab = nil) {
+open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32, remote := false, live := true, mach := "", mach_w: f32 = 0, key_sel := false, from: ^core.Tab = nil, peek := false) {
 	th := theme()
 	mach_w := mach_w
 	append(&drawn.open, s.id)
@@ -810,8 +818,11 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 	close_hover := !remote && ui_hover == Hit(Hit_Close_Session(s.id))
 	more_hover := !remote && ui_hover == Hit(Hit_More_Open(s.id))
 	row_hover := ui_hover == Hit(Hit_Open_Row(s.id))
-	hovered := !remote && (row_hover || close_hover || more_hover) // its buttons show
-	bg, em := overlay(id, current, row_hover || hovered || key_sel)
+	peek_hover := peek && ui_hover == Hit(Hit_Peek_Row(s.id))
+	hovered := !remote && (row_hover || close_hover || more_hover || peek_hover) // its buttons show
+	peek_shown := peek && (row_hover || close_hover || more_hover || peek_hover) // and its eye
+	buttons := hovered || peek_shown
+	bg, em := overlay(id, current, row_hover || hovered || peek_hover || key_sel)
 	v := core.session_row_view(s) // the strongest of its tabs (agent_status.odin)
 	if from != nil do v = core.tab_status_view(from^) // the Attention view's: the tab that put it in its group
 	if !live do v = {progress = -1} // what it showed last: no status
@@ -835,9 +846,15 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		// children: icon, [place ·], harness icon, title, [tag], spacer, then time and mark, or the buttons
 		right := px(MARK) // its mark: always there, so the row never moves when its status changes
 		n := 5 // icon, harness icon, title, spacer, mark
-		if hovered {
-			right += 2 * px(ROW_BUTTON)
-			n += 2
+		if buttons {
+			if hovered {
+				right += 2 * px(ROW_BUTTON)
+				n += 2
+			}
+			if peek_shown {
+				right += px(ROW_BUTTON)
+				n += 1
+			}
 		} else if when_ != "" {
 			n += 1
 		}
@@ -856,7 +873,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		}
 		room := text_w_max - px(KIND_ICON + HARNESS_ICON_SIZE) - right - f32(n - 1) * px(GAP_INLINE)
 		lead := fmt.tprintf("%s ·", place)
-		if !hovered && when_ != "" {
+		if !buttons && when_ != "" {
 			// waiting: what it asks, after its time, in the room the title leaves (the title keeps
 			// 60% of the row, or all it needs; at least 48 px of the message, else only the time)
 			if st == .Waiting && !acting {
@@ -892,7 +909,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		clay.TextDynamic(clip(title, room), txt(live ? mix(th.text_secondary, th.text, em) : th.text_muted))
 		if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 		spacer()
-		if !hovered && when_ != "" do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
+		if !buttons && when_ != "" do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
 		// (not `mach_w > 0 && clay.UI()`: the element's close is deferred, opened or not)
 		if mach_w > 0 {
 			if clay.UI()({layout = {sizing = {clay.SizingFixed(mach_w), clay.SizingFit()}}}) {
@@ -900,6 +917,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 			}
 		}
 		status_mark_el(v, lit)
+		peek_row_button(clay.ID("openpeek", k), peek_shown, peek_hover)
 		row_button(clay.ID("openmore", k), "", hovered, more_hover, .More)
 		row_button(clay.ID("openclose", k), "", hovered, close_hover, .Close)
 	}
@@ -1235,6 +1253,12 @@ session_row_has_info :: proc(s: core.Session) -> bool {
 	return r != nil
 }
 
+// The eye on a hovered row that can be peeked (the Attention view's, the empty centre's, the
+// bell's: ui_peek.odin).
+peek_row_button :: proc(id: clay.ElementId, shown, hovered: bool) {
+	row_button(id, "", shown, hovered, .Eye)
+}
+
 // A small button on a row, shown while the row is hovered (fades).
 @(private = "file")
 row_button :: proc(id: clay.ElementId, glyph: string, shown, hovered: bool, ic := core.Icon.None) {
@@ -1384,6 +1408,7 @@ sidebar_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("newjob")) do return Hit_New_Job_In(state.selected_project)
 	if c := core.chats_project(); c != nil && clay.PointerOver(clay.ID("newchatrow")) do return Hit_New_In(c.id)
 	for id, i in drawn.open {
+		if clay.PointerOver(clay.ID("openpeek", u32(i))) && peek_tab_of(find_session(id)) != nil do return Hit_Peek_Row(id)
 		if clay.PointerOver(clay.ID("openmore", u32(i))) do return Hit_More_Open(id)
 		if clay.PointerOver(clay.ID("openclose", u32(i))) do return Hit_Close_Session(id)
 		if clay.PointerOver(clay.ID("open", u32(i))) do return Hit_Open_Row(id)
@@ -1946,6 +1971,7 @@ ATTN_HIT_FOOTER :: 3
 // and the row the keyboard is on (↑↓ in the filter field; an open session id, 0 = none).
 attention_idle_open: bool
 attention_sel: u64
+attention_keyed: bool // attention_sel was picked with ↑↓ since the field was typed in: Space peeks at it (ui_peek.odin)
 
 // By project | Attention, at the top of the Sessions tab: a two-segment switch in the left tabs'
 // style, a little lower.
@@ -2039,7 +2065,7 @@ attention_list :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 			live := s.machine == 0
 			for m in state.machines do if m.no == s.machine do live = m.status == .Online
 			from := r.tier != core.NEED_NONE ? core.session_tier_tab(s, r.tier) : nil // the tab its place comes from
-			open_row(s, cs, text_w_max, remote = s.machine != 0, live = live, mach = attention_machine(s.machine), mach_w = mach_w, key_sel = keys && s.id == attention_sel, from = from)
+			open_row(s, cs, text_w_max, remote = s.machine != 0, live = live, mach = attention_machine(s.machine), mach_w = mach_w, key_sel = keys && s.id == attention_sel, from = from, peek = peek_tab_of(s) != nil)
 		}
 	}
 }
@@ -2115,6 +2141,7 @@ attention_step :: proc(d: int) -> bool {
 	for r, i in rows do if r.session.id == attention_sel do at = i
 	k := at < 0 ? (d > 0 ? 0 : len(rows) - 1) : (at + d + len(rows)) %% len(rows)
 	attention_sel = rows[k].session.id
+	attention_keyed = true
 	attention_scroll = true
 	return true
 }

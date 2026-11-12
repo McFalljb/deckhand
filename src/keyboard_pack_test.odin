@@ -206,7 +206,7 @@ open_session_nth :: proc(t: ^testing.T) {
 	ids := make([dynamic]string, context.temp_allocator)
 	for it in window do if it.action != "" do append(&ids, it.action)
 	joined := strings.join(ids[:], ",", context.temp_allocator)
-	testing.expect(t, strings.contains(joined, "prev_session,next_needing_you,prev_needing_you,recent_session,least_recent_session,session_1,session_2,session_3,session_4,session_5,session_6,mark_unread,mark_all_read"), joined)
+	testing.expect(t, strings.contains(joined, "prev_session,next_needing_you,prev_needing_you,peek_next_needing_you,recent_session,least_recent_session,session_1,session_2,session_3,session_4,session_5,session_6,mark_unread,mark_all_read"), joined)
 }
 
 // Review round 1. An app's declaration rewritten after its tab closed: ⇧⌘T does not run the

@@ -186,6 +186,20 @@ PANE_DIM := [core.Theme_Id]f32{.Graphite = 0.10, .Warm = 0.10, .Ghostty = 0.12}
 PANE_DIM_LIGHT := [core.Theme_Id]f32{.Graphite = 0.06, .Warm = 0.06, .Ghostty = 0.06}
 ZOOM_GHOST_ALPHA :: 0.55
 ZOOM_GHOST_W :: 2 // its line, logical px
+// Peek (ui_peek.odin): its panel and scrim fade in over DUR_PEEK (ease-out cubic) while the panel
+// rises PEEK_RISE into place; under Reduce motion it is just there.
+DUR_PEEK :: 120 * time.Millisecond
+PEEK_RISE :: SP_2
+// Its panel: PEEK_FRAC of the centre each way, grown to show a terminal's grid whole when it can,
+// at least PEEK_MIN_W x PEEK_MIN_H, at most the centre less PEEK_MARGIN each side (the window's,
+// when the centre is narrower than that); PEEK_PAD inside it; a header PEEK_HEAD_H tall.
+PEEK_FRAC :: 0.7
+PEEK_MIN_W :: 360
+PEEK_MIN_H :: 220
+PEEK_MARGIN :: SP_4
+PEEK_PAD :: SP_1
+PEEK_HEAD_H :: BUTTON_H + SP_2
+PEEK_NOTE_H :: SP_6 // "Open to answer" under the header while its tab waits
 PULSE_FPS :: 10 // "running" dot redraw rate; no redraws without a running dot
 PULSE_PERIOD :: 1600 * time.Millisecond
 PULSE_MIN :: 0.4 // dimmest point of the running dot (alpha)

@@ -723,7 +723,8 @@ eventually
 assert_rows sessions Untitled session,Subagents ran here,Plain session,No header
 rclickid sess 0
 eventually
-assert_menurows Pin|New Claude tab here|-|Mark as unread|Hide|Close session
+# an open session that is not the one on screen can be peeked (ui_peek.odin)
+assert_menurows Pin|New Claude tab here|-|Peek|Mark as unread|Hide|Close session
 clickmenu Close session
 eventually
 assert_state pending_confirmations.# 1
@@ -732,7 +733,7 @@ eventually
 assert_state open_sessions.# 5
 rclickid sess 0
 eventually
-assert_menurows Pin|New Claude tab here|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Mark as unread|Hide|Close session
+assert_menurows Pin|New Claude tab here|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Peek|Mark as unread|Hide|Close session
 clickmenu Close session
 eventually
 assert_state pending_confirmations.# 1

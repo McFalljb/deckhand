@@ -471,6 +471,44 @@ IDLE  4 ›
 - Machine headings, Projects, Chats and **+ Add a machine…** are not shown here. The line at the
   bottom ("3 machines · By project") goes back to the tree.
 
+### Peek
+
+**Peek** shows one tab of another session in a panel over the centre, live, so you can see where
+it is without leaving what you are doing: the session on screen, its panes and its zoom stay as
+they are, dimmed behind the panel. It shows the tab that needs you (the one its Attention row
+shows; for an idle session, its focused tab). The panel's header has its mark, its project and
+title, the machine it runs on when you have more than one, how long it has been so, and **Open**
+and **Close**; a session waiting for you says "Open to answer" under it.
+
+- **To peek**, press Space on the row you picked with ↑ and ↓ in the Attention view (filter field
+  focused, ⇧⌘F); or hover a row of the Attention view, of the centre's list (with no session open)
+  or of the notifications and click its eye; or choose **Peek** in an open session's **…** menu.
+  **Peek at next needing you** (⌃⌥⌘A, Window menu or the palette) peeks at where ⌥⌘A would go.
+- **Peek is for looking**: nothing you type, paste or click reaches the peeked tab. **Open (⌘↩) to
+  answer**. Its keys work like the notifications popover's:
+
+  | Keys | What they do |
+  |---|---|
+  | ⌘↩ | **Open**: the peeked tab becomes the tab on screen, and the peek closes |
+  | Esc | **Close** the peek |
+  | ⌘W | close the peek (never the tab under it) |
+  | ⌥⌘A, ⌃⌥⌘A | peek at the next one that needs you; ⌥⇧⌘A the one before |
+
+  Any other ⌘ shortcut closes the peek and then does what it does; other keys do nothing. A click
+  outside the panel closes it. When it closes, the keyboard is where it was (a terminal, an
+  editor, a field).
+- **What can be peeked**: a pi, Claude Code or shell tab of an open session other than the one on
+  screen, on this Mac or on another machine that is online. Browser, app and editor tabs are not
+  peeked: their rows have no eye, and a click opens them as before. The peek closes by itself
+  when its tab or session closes, or its machine goes offline.
+- Looking counts: a session that finished while you were away is seen once you peek at it (and
+  its notifications are read, another machine's too, and any that come while you look); one
+  waiting for you stays waiting until you answer it.
+- The peeked terminal keeps the size it has in its session, drawn at full sharpness; the panel
+  grows to show it whole when it can, and a terminal larger than the room left shows its bottom
+  left (where an agent's prompt is). A tab this window has never shown takes the panel's size the
+  first time; another machine's keeps its own.
+
 ### Everyday tasks
 
 - **To add a project**, click **+** on the PROJECTS heading and pick a folder, drop a folder onto
@@ -495,8 +533,8 @@ IDLE  4 ›
 - **To act on a row**, hover it and click **…**, or right-click it (or ⌃-click). Projects offer
   Pin, New session, New job for this project…, Rename…, the session order, Reveal in Finder, Copy
   path and Hide. Sessions offer Pin, Reveal in Finder, Copy path (of the session file), Copy
-  session info, Send to Atlas, Mark as unread (open sessions; Mark as read when it is), Hide and
-  Close session.
+  session info, Send to Atlas, [Peek](#peek) (open sessions that can be peeked), Mark as unread
+  (open sessions; Mark as read when it is), Hide and Close session.
 - **To come back to a session later**, use its **…** → **Mark as unread**, or press ⇧⌘U in it
   (Window menu or the palette: the tab you are in, if it is a terminal, else the session's; a
   session on this Mac, not another machine's): it
@@ -2139,6 +2177,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | the pane with the keyboard's tabs; in the palette: run its rows |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
 | Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | waiting for you, then errors, then finished and not seen, on every online machine, the longest first: the [Attention view](#what-needs-you-everywhere)'s order ([To go to what needs you](#tabs)) |
+| Peek at next needing you | ⌃⌥⌘A | where ⌥⌘A would go, in a panel over the centre, without leaving the session on screen ([Peek](#peek)) |
 | Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | the last one you looked at; the oldest |
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | the Open section's rows |
 | Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | this tab; this Mac's sessions |
@@ -2264,6 +2303,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | |
 | Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | |
+| Peek at next needing you | ⌃⌥⌘A | [Peek](#peek) at where ⌥⌘A would go |
 | Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | |
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | |
 | Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | |

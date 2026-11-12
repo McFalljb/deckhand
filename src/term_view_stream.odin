@@ -195,7 +195,7 @@ term_views_tick :: proc() {
 	home := core.home_tab()
 	gone := make([dynamic]^Term_View, context.temp_allocator)
 	for id, v in term_views {
-		on := core.session_tab_shown(core.cur_view(), id) || (home != nil && id == home.id && state.home_open) || (id == core.harness_run.term_id && setup_open())
+		on := core.session_tab_shown(core.cur_view(), id) || (home != nil && id == home.id && state.home_open) || (id == core.harness_run.term_id && setup_open()) || (peek_is_open() && id == peek.tab)
 		if on do v.shown = now
 		// a snapshot that does not decode: attached again once a second, never every frame (the
 		// core encodes each one anew)

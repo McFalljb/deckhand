@@ -1130,10 +1130,10 @@ else.
   the View menu. It sets the terminals' and the editor's text size and is remembered.
 - **To paste a file's path**, drag its row from the Files tab onto the terminal.
 - **Links**: hold **⌘** over a link to underline it and see where it goes (at the bottom of the
-  terminal); **⌘-click** opens it. A web link opens in a new browser tab of the session, in
-  front (in your default browser when Deckhand has no browser, and from Atlas's terminal);
-  **⇧⌘-click** always uses your default browser; a mail link opens your mail app. Right-click
-  a link for **Open link**, **Open in default browser** and **Copy link**. Both hyperlinks
+  terminal); **⌘-click** opens it in your default browser, and a mail link in your mail app.
+  **⇧⌘-click** opens a web link in a new browser tab of the session, in front (in your default
+  browser when Deckhand has no browser, and from Atlas's terminal). Right-click a link for
+  **Open link**, **Open in browser tab** and **Copy link**. Both hyperlinks
   (OSC 8, a program's link whose text may differ from its address) and web addresses in the
   text work, also when they wrap onto the next row. Only http, https and mailto links open:
   file, javascript and other kinds from a program's output never do.
@@ -2261,7 +2261,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | ⌥⌦ | Delete a word forward |
 | ⌘←, ⌘→ | Terminal: line start, line end |
 | ⌥←, ⌥→ | Terminal: word back, word forward |
-| ⌘-click, ⇧⌘-click | Terminal: open a link (hold ⌘ to see it; ⇧: the default browser); right-click it for its menu |
+| ⌘-click, ⇧⌘-click | Terminal: open a link in the default browser (hold ⌘ to see it; ⇧: a browser tab); right-click it for its menu |
 | Esc | goes to the program: in pi, interrupt (also in Atlas's drawer, which stays open) |
 
 **Editor**

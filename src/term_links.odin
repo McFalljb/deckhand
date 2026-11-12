@@ -4,13 +4,15 @@ package main
 // (libghostty-vt keeps its URI per cell) or a URL in the text (http, https,
 // mailto; soft-wrapped rows are read as one line). Holding ⌘ underlines the
 // link under the pointer, shows a hand and a tip with where it goes (OSC 8
-// text may differ from its target); ⌘-click opens it, ⇧⌘-click opens it in
-// the default browser; right-click (⌃-click) on it: a menu with Open link,
-// Open in default browser and Copy link. ⌘ is needed because a plain click
-// selects, or goes to the program when it tracks the mouse (pi does).
+// text may differ from its target); ⌘-click opens it in the default browser
+// (mailto: the mail app), ⇧⌘-click in a browser tab of the terminal's
+// session; right-click (⌃-click) on it: a menu with Open link, Open in
+// browser tab and Copy link. ⌘ is needed because a plain click selects, or
+// goes to the program when it tracks the mouse (pi does).
 //
-// Opening is the terminal_link command (the user's only): http(s) opens in
-// a browser tab of the terminal's session, in front; mailto, ⇧⌘, a build
+// Opening is the terminal_link command (the user's only): with external
+// (⌘-click, Open link) the default app; without it (⇧⌘-click) http(s) opens
+// in a browser tab of the terminal's session, in front, and mailto, a build
 // without the browser, a browser that failed to start and Home's terminal
 // (Home has no browser tabs) use the default app. Only http, https and
 // mailto ever open: terminal output is untrusted, so file:, javascript:,
@@ -377,8 +379,8 @@ term_links_frame :: proc() {
 // The tab a terminal belongs to (0: none).
 term_tab_id :: proc(t: ^Term_View) -> u64 {return t.tab_id}
 
-// A press in a terminal pane on a link: ⌘-click opens it (⇧⌘: in the
-// default browser), right-click or ⌃-click (without ⌘) opens its menu. True if taken
+// A press in a terminal pane on a link: ⌘-click opens it in the default
+// browser (⇧⌘: in a browser tab of the session), right-click or ⌃-click (without ⌘) opens its menu. True if taken
 // (the program and the selection never see it).
 term_link_mouse_down :: proc(t: ^Term_View, e: ^sapp.Event) -> bool {
 	// taken only as ⌘-click (open) or right-click / ⌃-click (the menu, as a
@@ -397,7 +399,7 @@ term_link_mouse_down :: proc(t: ^Term_View, e: ^sapp.Event) -> bool {
 		menu_open(Menu_Term_Link{tab_id = tab_id, url = l.url}, {e.mouse_x, e.mouse_y})
 		return true
 	}
-	ui_do(core.Terminal_Link{tab_id = tab_id, url = l.url, external = e.modifiers & sapp.MODIFIER_SHIFT != 0})
+	ui_do(core.Terminal_Link{tab_id = tab_id, url = l.url, external = e.modifiers & sapp.MODIFIER_SHIFT == 0})
 	app.redraw = true
 	return true
 }
@@ -455,8 +457,8 @@ term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]core.Menu_Item)
 	append(items, core.Menu_Item{label = shown, note = true})
 	append(items, core.Menu_Item{sep = true})
 	mail := core.ascii_prefix(m.url, "mailto:")
-	append(items, core.Menu_Item{label = "Open link", keys = "⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url}})
-	if !mail do append(items, core.Menu_Item{label = "Open in default browser", keys = "⇧⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url, external = true}})
+	append(items, core.Menu_Item{label = "Open link", keys = "⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url, external = true}})
+	if !mail && term_link_tab_possible(m.tab_id) do append(items, core.Menu_Item{label = "Open in browser tab", keys = "⇧⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url}})
 	append(items, core.Menu_Item{label = "Copy link", copy = m.url})
 }
 
@@ -465,6 +467,16 @@ term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]core.Menu_Item)
 // Whether http(s) links can open in Deckhand's own browser.
 @(private = "file")
 browser_usable :: proc() -> bool {return CEF_BUILT_IN && cef_state != .Failed}
+
+// Whether a link from tab_id's terminal can open in a browser tab (the menu's Open in browser
+// tab): Deckhand's browser works, and the terminal is neither Home's (Atlas's: no browser tabs)
+// nor another machine's (its browser tabs run in that machine's own window). Where it cannot,
+// ⇧⌘-click is the command without external all the same: the core falls back as it decides.
+term_link_tab_possible :: proc(tab_id: u64) -> bool {
+	if !browser_usable() || core.id_machine(tab_id) != 0 do return false
+	s, _, _ := find_tab(tab_id) // the replica (state_view.odin)
+	return s != nil && !s.home
+}
 
 // The window's part of terminal_link (the core checked the tab and the URL: tabhost_route.odin): an
 // http(s) link opens in a browser tab of the terminal's session when Deckhand's browser works,

@@ -171,7 +171,7 @@ term_link_command :: proc(t: ^testing.T) {
 	testing.expect(t, !r.ok, "not for agents")
 	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "https://example.com/x"}, {kind = .Script})
 	testing.expect(t, !r.ok, "not for scripts")
-	// mailto and ⇧⌘ (external) go to the default app
+	// mailto and ⌘-click's (external) go to the default app
 	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "mailto:a@example.invalid"}, ui)
 	testing.expect(t, r.ok, r.error)
 	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "https://example.com/ext", external = true}, ui)
@@ -181,8 +181,8 @@ term_link_command :: proc(t: ^testing.T) {
 		testing.expect_value(t, opened[0], "mailto:a@example.invalid")
 		testing.expect_value(t, opened[1], "https://example.com/ext")
 	}
-	// http(s): Deckhand's browser in the terminal's session, in front, when the build has
-	// one; without CEF (this test build) the default browser
+	// ⇧⌘-click's http(s) (not external): Deckhand's browser in the terminal's session, in
+	// front, when the build has one; without CEF (this test build) the default browser
 	n := len(state.open_sessions[0].tabs)
 	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "https://example.com/b"}, ui)
 	testing.expect(t, r.ok, r.error)
@@ -206,26 +206,48 @@ term_link_command :: proc(t: ^testing.T) {
 @(test)
 term_link_menu :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	tab, _ := link_setup()
+	tab, home := link_setup()
 	menu_open(Menu_Term_Link{tab_id = tab, url = "https://example.com/m"}, {10, 10})
 	defer menu_close()
 	labels := make([dynamic]string, context.temp_allocator)
-	open_cmd: core.Command
+	open_cmd, tab_cmd: core.Command
+	open_keys, tab_keys := "", ""
 	copy := ""
 	for it in menu_items() {
 		append(&labels, it.label)
-		if it.label == "Open link" do open_cmd = it.cmd
+		if it.label == "Open link" do open_cmd, open_keys = it.cmd, it.keys
+		if it.label == "Open in browser tab" do tab_cmd, tab_keys = it.cmd, it.keys
 		if it.label == "Copy link" do copy = it.copy
 	}
 	testing.expectf(t, slice_has(labels[:], "https://example.com/m"), "the URL shows: %v", labels)
 	testing.expectf(t, slice_has(labels[:], "Open link"), "Open link: %v", labels)
-	testing.expectf(t, slice_has(labels[:], "Open in default browser"), "Open in default browser: %v", labels)
+	testing.expect(t, !slice_has(labels[:], "Open in default browser"), "Open link is the default browser now")
 	testing.expect_value(t, copy, "https://example.com/m")
+	// Open link: the default browser (external), as ⌘-click
 	c, is := open_cmd.(core.Terminal_Link)
-	testing.expect(t, is && c.url == "https://example.com/m" && c.tab_id == tab && !c.external)
-	// a mail link: no browser row
+	testing.expect(t, is && c.url == "https://example.com/m" && c.tab_id == tab && c.external, "Open link is external")
+	testing.expect_value(t, open_keys, "⌘-click")
+	// Open in browser tab: not external, as ⇧⌘-click; only where a browser tab can open (this
+	// test build has no CEF: never)
+	testing.expect_value(t, slice_has(labels[:], "Open in browser tab"), term_link_tab_possible(tab))
+	testing.expect_value(t, term_link_tab_possible(tab), CEF_BUILT_IN && cef_state != .Failed)
+	if CEF_BUILT_IN && cef_state != .Failed {
+		tc, tis := tab_cmd.(core.Terminal_Link)
+		testing.expect(t, tis && tc.url == "https://example.com/m" && tc.tab_id == tab && !tc.external, "Open in browser tab is not external")
+		testing.expect_value(t, tab_keys, "⇧⌘-click")
+	}
+	// never from Home's terminal (Atlas's) or another machine's
+	testing.expect(t, !term_link_tab_possible(home), "Home: no browser tab")
+	remote, _ := core.id_pack(3, tab)
+	testing.expect(t, !term_link_tab_possible(remote), "another machine's: no browser tab")
+	// a mail link: no browser tab row, Open link still the mail app's
 	menu_open(Menu_Term_Link{tab_id = tab, url = "mailto:a@example.invalid"}, {10, 10})
-	for it in menu_items() do testing.expect(t, it.label != "Open in default browser")
+	mail_open := false
+	for it in menu_items() {
+		testing.expect(t, it.label != "Open in browser tab")
+		if it.label == "Open link" do if mc, mis := it.cmd.(core.Terminal_Link); mis && mc.external do mail_open = true
+	}
+	testing.expect(t, mail_open, "a mail link's Open link")
 
 	slice_has :: proc(xs: []string, x: string) -> bool {
 		for y in xs do if y == x do return true

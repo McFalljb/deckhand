@@ -889,7 +889,7 @@ SHORTCUTS_EXTRA := [?]struct {
 	{"Terminal", "Terminal: delete to line start, word back", "⌘⌫, ⌥⌫"},
 	{"Terminal", "Terminal: line start, line end", "⌘←, ⌘→"},
 	{"Terminal", "Terminal: word back, word forward", "⌥←, ⌥→"},
-	{"Terminal", "Terminal: open a link (hold ⌘ to see it; ⇧: the default browser)", "⌘-click, ⇧⌘-click"},
+	{"Terminal", "Terminal: open a link in the default browser (hold ⌘ to see it; ⇧: a browser tab)", "⌘-click, ⇧⌘-click"},
 	{"Editor", "Editor: toggle comment (⌘/ opens the shortcuts elsewhere)", "⌘/"},
 	{"Editor", "Editor: go to line (as ⌘L)", "⌃G"},
 	{"Editor", "Editor: indent, outdent", "⌘], ⌘["},

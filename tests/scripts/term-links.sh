@@ -1,6 +1,6 @@
 #!/bin/sh
 # Links in a terminal tab in test mode (quiet: the window stays hidden): ⌘-hover,
-# ⌘-click, ⇧⌘-click and the right-click menu on an OSC 8 link, URLs in text
+# ⌘-click (default browser), ⇧⌘-click (a browser tab) and the right-click menu on an OSC 8 link, URLs in text
 # (in brackets, soft-wrapped), a mail link and a refused javascript: target.
 # Opening is never real: test mode logs the default browser's URL, and a
 # browser tab opens without starting Chromium (no CFFIXED_USER_HOME).

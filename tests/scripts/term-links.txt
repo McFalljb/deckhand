@@ -1,7 +1,7 @@
 # Links in a terminal tab (term_links.odin): ⌘ held underlines the link under
-# the pointer and shows its target; ⌘-click opens it (http(s): a browser tab of
-# the session, in front; mailto: the mail app), ⇧⌘-click in the default
-# browser; right-click: Open link, Open in default browser, Copy link. An OSC 8
+# the pointer and shows its target; ⌘-click opens it in the default browser
+# (mailto: the mail app), ⇧⌘-click in a browser tab of the session, in front;
+# right-click: Open link, Open in browser tab, Copy link. An OSC 8
 # link with a javascript: target is no link. Run with tests/scripts/term-links.sh
 # (it writes ~/links.txt: an OSC 8 link, a URL in brackets, a refused OSC 8
 # link, a mail link and a URL that soft-wraps onto the next row).
@@ -23,19 +23,19 @@ shot term-links/hover
 mousecell hover 4 0
 assert_link -
 assert_not_drawn https://example.com/osc8
-# ⇧⌘-click: the default browser
-mousecell click 4 0 cmd shift
+# ⌘-click: the default browser
+mousecell click 4 0 cmd
 assert_opened https://example.com/osc8
 # a URL in text: the bracket and the period are not part of it
 mousecell hover 10 1 cmd
 assert_link https://example.com/plain?q=1
-mousecell click 10 1 cmd shift
+mousecell click 10 1 cmd
 assert_opened https://example.com/plain?q=1
-# mailto: the mail app, ⌘ alone
+# mailto: the mail app
 mousecell click 8 3 cmd
 assert_opened mailto:a@example.invalid
 # a URL soft-wrapped onto the next row, clicked on its second row
-mousecell click 3 5 cmd shift
+mousecell click 3 5 cmd
 assert_opened https://example.com/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
 # javascript: from OSC 8 is never a link (nothing opens)
 mousecell hover 2 2 cmd
@@ -45,14 +45,16 @@ assert_opened https://example.com/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
 # a plain click on a link selects, nothing opens
 mousecell click 4 0
 assert_opened https://example.com/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
-# right-click on a link: its menu (the URL, Open link, Open in default browser, Copy link)
+# right-click on a link: its menu (the URL, Open link, Open in browser tab, Copy link);
+# Open link: the default browser
 mousecell rclick 4 0
 eventually
 assert_drawn Open link
-assert_drawn Open in default browser
+assert_drawn Open in browser tab
 assert_drawn Copy link
+assert_not_drawn Open in default browser
 shot term-links/menu
-clickid menurow 3
+clickid menurow 2
 assert_opened https://example.com/osc8
 # ⌘ let go while a field has the keyboard: the link is no longer underlined
 ui_command {"type":"set_focus","widget":"sidebar_filter"}
@@ -78,7 +80,7 @@ waitfor TRACK-ON 5000
 wait 300
 mousecell click 4 0 ctrl
 eventually
-assert_drawn Open in default browser
+assert_drawn Open in browser tab
 key escape
 wait 200
 mousecell click 20 2 ctrl
@@ -86,8 +88,8 @@ mousecell click 4 0 cmd ctrl
 waitfor ^[[<16;5;1M 3000
 assert_screen ^[[<16;21;3M
 assert_opened https://example.com/osc8
-# ⌘-click an http link: a browser tab of this session, in front
-mousecell click 10 1 cmd
+# ⇧⌘-click an http link: a browser tab of this session, in front
+mousecell click 10 1 cmd shift
 eventually
 assert_state open_sessions.0.tabs.2.kind browser
 assert_state open_sessions.0.tabs.2.url https://example.com/plain?q=1

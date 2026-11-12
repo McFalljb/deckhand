@@ -576,6 +576,44 @@ sidebar_open :: proc() -> []^Open_Session {
 }
 
 
+// Another machine's open sessions (machine no), in the Open group's order and through the same
+// filter and quick filters: waiting ones always show (temp allocator).
+machine_open_rows :: proc(no: u64) -> []^Open_Session {
+	rows := make([dynamic]^Open_Session, context.temp_allocator)
+	words := filter_words()
+	for &s in state.open_sessions {
+		if s.home || s.machine != no do continue
+		st := session_quick_status(&s)
+		if st != .Waiting {
+			if _, ok := filter_score(words, open_session_title(&s), session_project_name(&s)); !ok do continue
+			if !quick_ok(st, session_pinned(s.pi_session_id) >= 0) do continue
+		}
+		append(&rows, &s)
+	}
+	slice.stable_sort_by(rows[:], proc(a, b: ^Open_Session) -> bool {
+		ac, bc := a.id == state.current_session, b.id == state.current_session
+		if ac != bc do return ac
+		return a.shown_at > b.shown_at
+	})
+	return rows[:]
+}
+
+// Another machine's project rows (machine no), in its order, through the filter and quick filters
+// as this Mac's: a project with waiting work, or whose sessions match, always shows. Its projects
+// can't be pinned or hidden here (temp allocator).
+machine_project_rows :: proc(no: u64) -> []Sidebar_Row {
+	rows := make([dynamic]Sidebar_Row, context.temp_allocator)
+	words := filter_words()
+	for &p in state.projects {
+		if p.machine != no || p.group != .Projects do continue
+		st := project_quick_status(p.id, project_status(p.id))
+		score, ok := filter_score(words, project_name(p), p.cwd)
+		if st != .Waiting && (!ok || !quick_ok(st, false)) && !project_sessions_match(p) do continue
+		append(&rows, Sidebar_Row{project = &p, pin = -1, score = score})
+	}
+	return rows[:]
+}
+
 // Waiting sessions the filter took out of the session lists (the selected
 // project's and Chats): "N waiting (filtered)".
 sidebar_waiting_filtered :: proc() -> int {
@@ -733,6 +771,7 @@ project_display :: proc(p: Project) -> string {
 session_place :: proc(s: ^Open_Session) -> (ic: Icon, name: string) {
 	if open_session_is_chat(s) do return .Chat, "Chat"
 	if p := find_project(s.project_id); p != nil do return .Folder, project_display(p^)
+	if s.machine != 0 do return .Chat, "Chat" // another machine's Chats is not mirrored: its sessions have no project here
 	return .Folder, short_label(s.cwd)
 }
 
@@ -748,6 +787,8 @@ open_session_title :: proc(s: ^Open_Session) -> string {
 	}
 	untitled := open_session_is_chat(s) ? "Untitled chat" : "Untitled session"
 	for l in state.sessions do if l.id == s.pi_session_id do return session_label(l)
+	// another machine's: the title it sent (its session file is not on this Mac)
+	if s.machine != 0 && s.title != "" do return strings.clone(s.title, context.temp_allocator)
 	if s.session_file == "" do return untitled
 	open_session_refresh(s) // at most once a second (sidebar.odin)
 	// a copy for this frame: a later call may replace the cached one while

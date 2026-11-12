@@ -110,7 +110,7 @@ containers :: proc(overlay: bool) -> [dynamic]Box {
 }
 
 // Problems in the current layout, one line each.
-@(private = "file")
+// (Also machine_rows_test.odin's, for the narrowest sidebar.)
 // within: only the pieces that start inside this element (the drawer's
 // header) on its layer (z), checked against the element and its own
 // controls (what lies beneath on another layer does not hold them); "" = all.

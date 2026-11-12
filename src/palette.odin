@@ -117,7 +117,7 @@ palette_items :: proc() -> [dynamic]Palette_Item {
 		for tab in s.tabs {
 			detail := stitle
 			if cs != nil && s.id == cs.id do detail = fmt.tprintf("%s · current session", stitle)
-			append(&items, Palette_Item{kind = .Tab, key = fmt.tprintf("tab:%d", tab.id), title = tab.title, detail = detail, id = tab.id})
+			append(&items, Palette_Item{kind = .Tab, key = fmt.tprintf("tab:%d", tab.id), title = tab.title, detail = on_machine(detail, s.machine), id = tab.id})
 		}
 	}
 	sel := core.find_project(state.selected_project)
@@ -126,7 +126,7 @@ palette_items :: proc() -> [dynamic]Palette_Item {
 		pname := core.project_display(sel^)
 		for s in state.sessions {
 			listed[s.id] = true
-			append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.id), title = core.session_label(s), detail = pname, project = sel.id, session = s.id})
+			append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.id), title = core.session_label(s), detail = on_machine(pname, sel.machine), project = sel.id, session = s.id})
 		}
 	}
 	if c := core.chats_project(); c != nil {
@@ -139,14 +139,22 @@ palette_items :: proc() -> [dynamic]Palette_Item {
 		if s.home || listed[s.pi_session_id] do continue
 		ic, place := core.session_place(&s)
 		chat := ic == .Chat
-		append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.pi_session_id), title = core.open_session_title(&s), detail = chat ? "" : place, id = s.id, chat = chat})
+		append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.pi_session_id), title = core.open_session_title(&s), detail = on_machine(chat ? "" : place, s.machine), id = s.id, chat = chat})
 	}
 	for p in state.projects {
 		if p.group != .Projects do continue // Chats is no project to select
-		append(&items, Palette_Item{kind = .Project, key = fmt.tprintf("project:%s", p.cwd), title = core.project_name(p), detail = p.name != "" ? p.label : "", id = p.id})
+		append(&items, Palette_Item{kind = .Project, key = fmt.tprintf("project:%s", p.cwd), title = core.project_name(p), detail = on_machine(p.name != "" ? p.label : "", p.machine), id = p.id})
 	}
 	for &it, i in items do it.order = i
 	return items
+}
+
+// An item's detail, with the machine it is on when that is another one ("deckhand · on nuc"; the
+// name is this Mac's own, from machines.json).
+on_machine :: proc(detail: string, machine: u64) -> string {
+	if machine == 0 do return detail
+	if detail == "" do return fmt.tprintf("on %s", core.machine_name(machine))
+	return fmt.tprintf("%s · on %s", detail, core.machine_name(machine))
 }
 
 // Items matching query, best first; ties: recent first, then kind and order.

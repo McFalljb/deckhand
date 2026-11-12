@@ -57,6 +57,11 @@ assert_drawn this Mac
 rclickid machhead 1
 assert_menurows Open web page…|-|Rename…|Remove…
 key escape
+# its "…" opens the same menu; an online machine's header has no other button
+clickid machmore 1
+assert_menurows Open web page…|-|Rename…|Remove…
+key escape
+assert_not_drawn Open web page…
 ui_command {"type":"set_left_tab","tab":"settings"}
 wait 500
 assert_drawn Machines
@@ -83,7 +88,7 @@ waitfor $ 20000
 assert_drawn on m2
 eventually 20000
 assert_rows machines m2:offline:3
-assert_drawn offline
+assert_drawn Connect
 eventually 20000
 assert_rows machines m2:online:3
 assert_clipboard -

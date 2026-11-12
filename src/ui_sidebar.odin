@@ -550,12 +550,19 @@ sidebar :: proc(cs: ^core.Open_Session, h: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		}) {
-			// this Mac's header over its own sections, while Machines over SSH is on (other machines below)
-			if state.settings.remote_machines do machine_header(0, th.done, core.machine_here_name(), "this Mac", "", text_w_max)
-			open_group(cs, text_w_max)
-			projects_section(cs, text_w_max, row_w)
-			gap(GAP_SECTION)
-			chats_section(cs, text_w_max, row_w)
+			// this Mac's header over its own sections, while Machines over SSH is on (other machines
+			// below). Folded: only its waiting open sessions (as Open folded); its count while folded
+			// (the Open header counts them otherwise)
+			here_folded := state.settings.remote_machines && state.sidebar.folded[.This_Mac]
+			if state.settings.remote_machines do machine_header(0, th.done, core.machine_here_name(), "this Mac", "", here_folded ? len(core.sidebar_open()) : 0, text_w_max)
+			if here_folded {
+				for s in core.sidebar_open() do if core.session_waiting(s.pi_session_id) do open_row(s, cs, text_w_max)
+			} else {
+				open_group(cs, text_w_max)
+				projects_section(cs, text_w_max, row_w)
+				gap(GAP_SECTION)
+				chats_section(cs, text_w_max, row_w)
+			}
 			machines_sections(cs, text_w_max) // other machines, each under its name (Machines over SSH)
 		}
 	}
@@ -743,71 +750,86 @@ action_row :: proc(id: clay.ElementId, hit: Hit, ic: core.Icon, label: string, i
 open_group :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 	rows := core.sidebar_open()
 	if len(rows) == 0 do return
-	th := theme()
 	nav_header("OPEN", .Open, len(rows), nil, nil, {})
 	folded := state.sidebar.folded[.Open]
 	for s in rows {
 		// folded: only waiting work stays (it is never concealed)
 		if folded && !core.session_waiting(s.pi_session_id) do continue
-		append(&drawn.open, s.id)
-		k := u32(len(drawn.open) - 1) // ids follow the drawn rows (sidebar_hit)
-		id := clay.ID("open", k)
-		current := cs != nil && s.id == cs.id
-		close_hover := ui_hover == Hit(Hit_Close_Session(s.id))
-		more_hover := ui_hover == Hit(Hit_More_Open(s.id))
-		hovered := ui_hover == Hit(Hit_Open_Row(s.id)) || close_hover || more_hover
-		bg, em := overlay(id, current, hovered)
-		if clay.UI(id)(row_cfg(bg)) {
-			st, _ := core.session_row_status(s) // the strongest of its tabs (agent_status.odin)
-			ic, place := core.session_place(s)
-			chat := ic == .Chat
-			when_ := st == .Waiting ? "Waiting for you" : core.open_session_age(s)
-			// an agent acts in one of its browser tabs the user does not see (browser_act.odin)
-			acting := st != .Waiting && browser_act_session_background(s)
-			if acting do when_ = browser_act_session_text(s) // the acting tab's harness
-			// children: icon, [place ·], title, spacer, then time and dot, or the buttons
-			right: f32
-			n := 3 // icon, title, spacer
-			if hovered {
-				right = 2 * px(ROW_BUTTON)
-				n += 2
-			} else {
-				right = text_w(when_)
-				n += 1
-			}
-			if st != .None {
-				right += px(DOT)
-				n += 1
-			}
-			if !chat do n += 1
-			room := text_w_max - px(KIND_ICON) - right - f32(n - 1) * px(GAP_INLINE)
-			// the session the centre shows, from another project than the selected one: its place in the accent
-			elsewhere := current && !chat && s.project_id != state.selected_project
-			icon(ic, elsewhere ? th.accent : th.text_muted, KIND_ICON)
-			title := core.open_session_title(s)
-			if !chat {
-				lead := fmt.tprintf("%s ·", place)
-				pw := min(text_w(lead), max(room * 0.4, room - text_w(title)))
-				clay.TextDynamic(clip(lead, pw), txt(elsewhere ? th.accent : th.text_muted))
-				room -= pw
-			}
-			// which agent it runs (a Claude-only session, else pi), and the account of several
-			harness := s.agent == .Claude ? core.Harness.Claude : core.Harness.Pi
-			tag := ""
-			if s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account)
-			room -= px(HARNESS_ICON_SIZE + GAP_INLINE)
-			if tag != "" do room -= text_w(tag, FONT_UI_SMALL) + px(GAP_INLINE)
-			icon(core.harness_icon(harness), th.text_muted, HARNESS_ICON_SIZE)
-			clay.TextDynamic(clip(title, room), txt(mix(th.text_secondary, th.text, em)))
-			if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
-			spacer()
-			if !hovered do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
-			if st != .None do dot(status_color(st))
-			row_button(clay.ID("openmore", k), "", hovered, more_hover, .More)
-			row_button(clay.ID("openclose", k), "", hovered, close_hover, .Close)
-		}
+		open_row(s, cs, text_w_max)
 	}
 	gap(GAP_SECTION)
+}
+
+// An open session's row: its place's icon, [place ·], its agent's icon, title, then "Waiting for
+// you" or its age and its dot, or (hovered) its "…" and close buttons. Another machine's (remote)
+// has no buttons (its rows have no menu yet: sidebar_context) and no age (its session file is not
+// on this Mac); while that machine is not online (live false) it is greyed, without a status.
+@(private = "file")
+open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32, remote := false, live := true) {
+	th := theme()
+	append(&drawn.open, s.id)
+	k := u32(len(drawn.open) - 1) // ids follow the drawn rows (sidebar_hit)
+	id := clay.ID("open", k)
+	current := cs != nil && s.id == cs.id
+	close_hover := !remote && ui_hover == Hit(Hit_Close_Session(s.id))
+	more_hover := !remote && ui_hover == Hit(Hit_More_Open(s.id))
+	row_hover := ui_hover == Hit(Hit_Open_Row(s.id))
+	hovered := !remote && (row_hover || close_hover || more_hover) // its buttons show
+	bg, em := overlay(id, current, row_hover || hovered)
+	if clay.UI(id)(row_cfg(bg)) {
+		st, _ := core.session_row_status(s) // the strongest of its tabs (agent_status.odin)
+		if !live do st = .None // what it showed last: no status
+		ic, place := core.session_place(s)
+		chat := ic == .Chat
+		when_ := ""
+		if st == .Waiting do when_ = "Waiting for you"
+		else if !remote do when_ = core.open_session_age(s)
+		// an agent acts in one of its browser tabs the user does not see (browser_act.odin)
+		acting := !remote && st != .Waiting && browser_act_session_background(s)
+		if acting do when_ = browser_act_session_text(s) // the acting tab's harness
+		// children: icon, [place ·], harness icon, title, [tag], spacer, then time and dot, or the buttons
+		right: f32
+		n := 4 // icon, harness icon, title, spacer
+		if hovered {
+			right = 2 * px(ROW_BUTTON)
+			n += 2
+		} else if when_ != "" {
+			right = text_w(when_)
+			n += 1
+		}
+		if st != .None {
+			right += px(DOT)
+			n += 1
+		}
+		if !chat do n += 1
+		// which agent it runs (a Claude-only session, else pi), and the account of several
+		harness := s.agent == .Claude ? core.Harness.Claude : core.Harness.Pi
+		tag := ""
+		if s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account)
+		if tag != "" {
+			right += text_w(tag, FONT_UI_SMALL)
+			n += 1
+		}
+		room := text_w_max - px(KIND_ICON + HARNESS_ICON_SIZE) - right - f32(n - 1) * px(GAP_INLINE)
+		// the session the centre shows, from another project than the selected one: its place in the accent
+		elsewhere := current && !chat && s.project_id != state.selected_project
+		icon(ic, elsewhere ? th.accent : th.text_muted, KIND_ICON)
+		title := core.open_session_title(s)
+		if !chat {
+			lead := fmt.tprintf("%s ·", place)
+			pw := min(text_w(lead), max(room * 0.4, room - text_w(title)))
+			clay.TextDynamic(clip(lead, pw), txt(elsewhere ? th.accent : th.text_muted))
+			room -= pw
+		}
+		icon(core.harness_row_icon(harness, !live), th.text_muted, HARNESS_ICON_SIZE)
+		clay.TextDynamic(clip(title, room), txt(live ? mix(th.text_secondary, th.text, em) : th.text_muted))
+		if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
+		spacer()
+		if !hovered && when_ != "" do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
+		if st != .None do dot(status_color(st))
+		row_button(clay.ID("openmore", k), "", hovered, more_hover, .More)
+		row_button(clay.ID("openclose", k), "", hovered, close_hover, .Close)
+	}
 }
 
 // Projects as a tree: each project row (chevron, folder, name, open count);
@@ -834,7 +856,7 @@ projects_section :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 	}
 	if state.sidebar.folded[.Projects] do return
 	n := 0
-	for p in state.projects do if p.group == .Projects do n += 1
+	for p in state.projects do if p.group == .Projects && p.machine == 0 do n += 1 // this Mac's (other machines' are under their names)
 	if n == 0 do empty_state("No projects yet", "+ adds a folder, or drop one here", row_w)
 	else if len(rows) == 0 do empty_state("No matching projects", "Esc in the filter clears it", row_w)
 	for r, i in rows {
@@ -859,26 +881,30 @@ projects_section :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 }
 
 @(private = "file")
-project_row :: proc(r: core.Sidebar_Row, i: int, cs: ^core.Open_Session, text_w_max: f32, indent: f32 = 0) {
+// Another machine's (remote): no buttons (its rows have no menu yet: sidebar_context); while that
+// machine is not online (live false) greyed, without a status.
+project_row :: proc(r: core.Sidebar_Row, i: int, cs: ^core.Open_Session, text_w_max: f32, indent: f32 = 0, remote := false, live := true) {
 	th := theme()
 	p := r.project
 	id := clay.ID("proj", u32(i))
-	pin_hover := ui_hover == Hit(Hit_Pin_Project(p.id))
-	new_hover := ui_hover == Hit(Hit_New_In(p.id))
-	more_hover := ui_hover == Hit(Hit_More_Project(p.id))
+	pin_hover := !remote && ui_hover == Hit(Hit_Pin_Project(p.id))
+	new_hover := !remote && ui_hover == Hit(Hit_New_In(p.id))
+	more_hover := !remote && ui_hover == Hit(Hit_More_Project(p.id))
+	row_hover := ui_hover == Hit(Hit_Project(p.id))
 	// the "N folders" toggle is part of the row: the buttons stay while the pointer is on it (else
 	// they go, the toggle slides right from under the pointer, the row is hovered, they come back: a flicker)
-	hovered := ui_hover == Hit(Hit_Project(p.id)) || ui_hover == Hit(Hit_Kids(p.id)) || pin_hover || new_hover || more_hover
+	hovered := !remote && (row_hover || ui_hover == Hit(Hit_Kids(p.id)) || pin_hover || new_hover || more_hover) // its buttons show
 	selected := p.id == state.selected_project
 	expanded := selected && !tree.folded
 	// the expanded project is not "selected" in colour: its sessions carry the selection
 	current := cs != nil && !core.open_session_is_chat(cs) && cs.project_id == p.id && !expanded
-	bg, em := overlay(id, current, hovered)
+	bg, em := overlay(id, current, row_hover || hovered)
 	cfg := row_cfg(bg)
 	cfg.layout.padding.left = pu(PAD_ROW + indent)
 	kids_hover := ui_hover == Hit(Hit_Kids(p.id)) && !r.forced // kept open: not clickable
 	if clay.UI(id)(cfg) {
 		st := core.project_status(p.id)
+		if !live do st = .None
 		n_open := 0
 		for s in state.open_sessions do if !s.home && s.project_id == p.id do n_open += 1
 		right_text := r.hidden ? core.HIDE_REASON_TAGS[r.reason] : (n_open > 0 ? fmt.tprint(n_open) : "")
@@ -905,7 +931,7 @@ project_row :: proc(r: core.Sidebar_Row, i: int, cs: ^core.Open_Session, text_w_
 		}
 		room := text_w_max - px(indent) - px(TREE_CHEVRON + KIND_ICON) - right - kids_w - f32(n - 1) * px(GAP_INLINE)
 		col := mix(th.text_secondary, th.text, em)
-		if p.missing || r.hidden do col = th.text_muted
+		if p.missing || r.hidden || !live do col = th.text_muted
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(TREE_CHEVRON)), clay.SizingFit()}, childAlignment = {x = .Center, y = .Center}}}) {
 			icon(expanded ? .Chevron_Down : .Chevron_Right, th.text_muted, TREE_CHEVRON)
 		}
@@ -1043,26 +1069,32 @@ chats_section :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 
 // Session rows (a project's, indented under it, or Chats, each with a
 // bubble): title, then the time and status dot; on hover pin, "…" and, for
-// an open session, close buttons instead of the time.
+// an open session, close buttons instead of the time. Another machine's (remote): no buttons (its
+// rows have no menu yet: sidebar_context); while that machine is not online (live false) greyed,
+// without a status, and not clickable.
 @(private = "file")
-session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_Session, prefix: string, text_w_max, indent: f32) {
+session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_Session, prefix: string, text_w_max, indent: f32, remote := false, live := true) {
 	th := theme()
 	chat := prefix == "chat"
 	for r, i in rows {
 		if i > 0 && rows[i - 1].pin >= 0 && r.pin < 0 do pinned_divider(indent)
 		s := r.session
-		if chat do append(&drawn.chat, keep(s.id))
-		else do append(&drawn.sess, keep(s.id))
-		id := clay.ID(prefix, u32(i))
+		id := clay.ID("sessoff", u32(i)) // not clickable while its machine is not online
+		if live {
+			if chat do append(&drawn.chat, keep(s.id))
+			else do append(&drawn.sess, keep(s.id))
+			id = clay.ID(prefix, u32(i))
+		}
 		current := cs != nil && s.id == cs.pi_session_id
 		open_id := open_session_of(project_id, s.id)
-		close_hover := open_id != 0 && ui_hover == Hit(Hit_Close_Session(open_id))
-		pin_hover := ui_hover == Hit(Hit_Pin_Session(s.id))
-		more_hover := ui_hover == Hit(Hit_More_Session(s.id))
-		info_hover := ui_hover == Hit(Hit_Info_Session(s.id))
+		close_hover := !remote && open_id != 0 && ui_hover == Hit(Hit_Close_Session(open_id))
+		pin_hover := !remote && ui_hover == Hit(Hit_Pin_Session(s.id))
+		more_hover := !remote && ui_hover == Hit(Hit_More_Session(s.id))
+		info_hover := !remote && ui_hover == Hit(Hit_Info_Session(s.id))
 		row_hit: Hit = chat ? Hit(Hit_Chat(s.id)) : Hit(Hit_Session(s.id))
-		hovered := ui_hover == row_hit || close_hover || pin_hover || more_hover || info_hover
-		bg, em := overlay(id, current, hovered)
+		row_hover := live && ui_hover == row_hit
+		hovered := !remote && (row_hover || close_hover || pin_hover || more_hover || info_hover) // its buttons show
+		bg, em := overlay(id, current, row_hover || hovered)
 		cfg := row_cfg(bg)
 		cfg.layout.padding.left = pu(PAD_ROW + indent)
 		if state.focus_widget == "rename_session" && s.id == rename_session {
@@ -1071,6 +1103,7 @@ session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_S
 		}
 		if clay.UI(id)(cfg) {
 			st := core.session_status(s.id)
+			if !live do st = .None // what it showed last: no status
 			// "needs you" outranks the time
 			when_ := st == .Waiting ? "Waiting for you" : (r.hidden ? "hidden" : rel_time(s.when_))
 			if st != .Waiting && !r.hidden && state.sidebar.sort[chat ? .Chats : .Sessions] == .Recent do when_ = core.ago(s.modified)
@@ -1100,9 +1133,9 @@ session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_S
 			lead := px(HARNESS_ICON_SIZE)
 			room := text_w_max - px(indent) - lead - right - f32(n - 1) * px(GAP_INLINE)
 			col := mix(th.text_secondary, th.text, em)
-			if r.hidden || s.gone do col = th.text_muted
+			if r.hidden || s.gone || !live do col = th.text_muted
 			// which agent it runs (pi or Claude Code): every row, in Chats too (in the bubble's place)
-			icon(core.harness_row_icon(core.session_harness(s^), r.hidden || s.gone), th.text_muted, HARNESS_ICON_SIZE)
+			icon(core.harness_row_icon(core.session_harness(s^), r.hidden || s.gone || !live), th.text_muted, HARNESS_ICON_SIZE)
 			clay.TextDynamic(clip(core.session_label(s^, chat), room), txt(col))
 			if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 			spacer()
@@ -1277,6 +1310,7 @@ sidebar_hit :: proc() -> Hit {
 	if state.settings.remote_machines && clay.PointerOver(clay.ID("machhead", 0)) do return Hit_Machine_Head(0) // this Mac's
 	for m in state.machines {
 		if clay.PointerOver(clay.ID("machact", u32(m.no))) do return Hit_Machine(m.no)
+		if clay.PointerOver(clay.ID("machmore", u32(m.no))) do return Hit_Machine_More(m.no)
 		if clay.PointerOver(clay.ID("machhead", u32(m.no))) do return Hit_Machine_Head(m.no)
 	}
 	if clay.PointerOver(clay.ID("machadd")) do return Hit_Machine_Add{}
@@ -1326,6 +1360,12 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 		}
 	case Hit_Machine:
 		machine_run_action(u64(h))
+	case Hit_Machine_Head:
+		machine_fold_toggle(u64(h))
+	case Hit_Machine_More: // its menu, under the button (as a right click on its header opens it)
+		at := at
+		if d := clay.GetElementData(clay.ID("machmore", u32(u64(h)))); d.found do at = {d.boundingBox.x, d.boundingBox.y + d.boundingBox.height}
+		menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Machine_Add:
 		machine_add_open()
 	case Hit_Open_Row:
@@ -1401,6 +1441,7 @@ sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
 		if h == 0 do return false // this Mac's: no menu
 		menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Machine:      menu_open(Menu_Machine(u64(h)), at)
+	case Hit_Machine_More: menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Session:
 		menu_open(Menu_Session{project_id = state.selected_project, pi_session_id = string(h)}, at)
 	case Hit_Chat:
@@ -1542,15 +1583,10 @@ machine_run_action :: proc(no: u64) {
 		label := core.machine_action_label(m)
 		switch label {
 		case "Cancel":         ui_do_menu(core.Machine_Install{no = no, cancel = true}, "Cancel the install")
-		case "Install…", "Update", "Retry":
-			if m.update == .Command_Only do toast_show(core.machine_update_command(m.name))
-			else do ui_do_menu(core.Machine_Install{no = no}, label == "Update" ? "Update" : "Install")
+		case "Install…", "Update", "Retry": ui_do_menu(core.Machine_Install{no = no}, label == "Update" ? "Update" : "Install")
 		case "Keep running…":  ui_do_menu(core.Machine_Linger{no = no}, label) // the user said yes: linger --enable there
 		case "Log in…":        ui_do_menu(core.Machine_Login{no = no}, label)
 		case "Connect", "Take back": ui_do_menu(core.Machine_Connect{no = no}, label)
-		case "Open web page…":
-			palette_open_pages(no) // the palette asks for the port
-			ui_do(core.Set_Focus{"palette"})
 		}
 	}
 }
@@ -1561,14 +1597,11 @@ machine_action_tip :: proc(m: core.Machine_View) -> string {
 	case "Cancel":        return "Stop the install (what it copied is removed)"
 	case "Retry":         return "Try the install again"
 	case "Install…":      return "Install Deckhand there over your ssh (nothing runs there but Deckhand's own install)"
-	case "Update":
-		if m.update == .Command_Only do return "Show what to do on that machine"
-		return "Install this Mac's version there; its sessions keep running"
+	case "Update":        return "Install this Mac's version there; its sessions keep running"
 	case "Keep running…": return "Keep its jobs running after you log out of it (asks its login manager; no password)"
 	case "Log in…":       return "Open a tab here that runs ssh to it, so you can type its password or passphrase"
 	case "Take back":     return "Show its sessions here again (its own window lets go)"
 	case "Connect":       return "Try to connect now"
-	case "Open web page…": return "Open a page it serves on its own localhost (a dev server) in a tab here"
 	}
 	return ""
 }
@@ -1586,13 +1619,22 @@ machine_tip :: proc(m: core.Machine_View) -> string {
 
 MACHINE_ADD_TIP :: "Add a machine you reach with ssh: user@host or a name from ~/.ssh/config. Deckhand uses your own ssh and keys"
 
-// The sidebar's + Add a machine…, the palette's, Settings' row: the same add field.
-machine_add_open :: proc() {machine_edit_begin()}
+// The sidebar's + Add a machine… and the palette's: the add field in Settings; once the machine is
+// added, back to Sessions (machine_add_back). Settings' own row opens the field and stays there.
+machine_add_open :: proc() {
+	machine_edit_begin()
+	machine_add_back = true
+}
 
-// Each other machine under its name, after this Mac's sections: a status dot, what is wrong and
-// what to do, its open sessions, then its projects (the selected one with its sessions). While it
-// is not online its rows are greyed: what it showed last (kept in memory only). Then + Add a
-// machine…, while Machines over SSH is on.
+// The add field was opened from the sidebar or the palette: a machine added goes back to Sessions.
+machine_add_back: bool
+
+// Each other machine under its name, after this Mac's sections: a status dot, what is wrong (two
+// lines at most; its tooltip has ssh's own words), its open sessions, then its projects (the
+// selected one with its sessions), drawn as this Mac's rows are and through the same filter and
+// quick filters. While it is not online its rows are greyed: what it showed last (kept in memory
+// only). Folded (its header): only its waiting open sessions. Then + Add a machine…, while Machines
+// over SSH is on.
 @(private = "file")
 machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 	if !state.settings.remote_machines do return
@@ -1600,54 +1642,125 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 		live := m.status == .Online
 		gap(GAP_SECTION)
 		label, why, _ := core.machine_status_text(m)
-		machine_header(m.no, machine_dot(m), m.name, label, core.machine_action_label(m), text_w_max)
-		// what is wrong, in plain words, while it is not online (its tooltip has ssh's own)
-		if why != "" && !live do list_note(why, 0, text_w_max)
-		n := 0
-		for &s in state.open_sessions do if s.machine == m.no && !s.home {
-			machine_open_row(&s, cs, live, text_w_max)
-			n += 1
+		// an online machine's sentence is in its tooltip, but for an update to make there (no button says it)
+		note := why
+		if live && m.update != .Command_Only do note = ""
+		opens := core.machine_open_rows(m.no)
+		folded := machine_folded(m.no)
+		// a note under it says what is wrong: the header keeps its name and button, not the status too
+		machine_header(m.no, machine_dot(m), m.name, note != "" ? "" : label, core.machine_action_label(m), len(opens), text_w_max)
+		if note != "" do wrapped_note(note, text_w_max)
+		for o in opens {
+			if folded && !core.session_waiting(o.pi_session_id) do continue // folded: only waiting work stays
+			open_row(o, cs, text_w_max, remote = true, live = live)
 		}
-		for &p in state.projects do if p.machine == m.no && p.group == .Projects {
-			append(&drawn.proj, p.id)
-			machine_project_row(&p, len(drawn.proj) - 1, live, text_w_max)
-			if p.id == state.selected_project && !tree.folded do machine_sessions(live, text_w_max)
-			n += 1
+		if folded do continue
+		projects := core.machine_project_rows(m.no)
+		for r in projects {
+			append(&drawn.proj, r.project.id)
+			project_row(r, len(drawn.proj) - 1, cs, text_w_max, 0, remote = true, live = live)
+			if r.project.id == state.selected_project && !tree.folded do machine_sessions(cs, live, label, text_w_max)
 		}
-		if n == 0 && (why == "" || live) do list_note(live ? "Nothing there yet" : "Not connected", 0, text_w_max)
+		if len(opens) + len(projects) > 0 do continue
+		if core.sidebar_filtering() do list_note("No matches", 0, text_w_max)
+		// nothing there: what makes a project appear (this Mac can't add one there)
+		else if live do wrapped_note(MACHINE_EMPTY_HINT, text_w_max)
 	}
 	gap(GAP_SECTION)
 	action_row(clay.ID("machadd"), Hit_Machine_Add{}, .Plus, "Add a machine…", 0, text_w_max)
 }
 
-// A machine's header: its dot, its name, its status (or "this Mac"), its button. no 0 = this Mac
-// (no button, no menu: its tooltip says where other machines go).
+MACHINE_EMPTY_HINT :: "No projects there yet: start pi or Claude Code in a folder on it"
+
+// The machines whose header is folded (not saved; this Mac's is the saved .This_Mac fold).
+machines_folded: [dynamic]u64
+
+machine_folded :: proc(no: u64) -> bool {
+	if no == 0 do return state.sidebar.folded[.This_Mac]
+	for x in machines_folded do if x == no do return true
+	return false
+}
+
+// A click on a machine's header: fold or unfold it (this Mac's by command, so it is saved).
+machine_fold_toggle :: proc(no: u64) {
+	if no == 0 {
+		ui_do(core.Set_Sidebar_Folded{section = .This_Mac, folded = !state.sidebar.folded[.This_Mac]})
+		return
+	}
+	for x, i in machines_folded do if x == no {
+		unordered_remove(&machines_folded, i)
+		app.redraw = true
+		return
+	}
+	append(&machines_folded, no)
+	app.redraw = true
+}
+
+// A muted note of at most two lines under a machine's header (what is wrong, what to do).
 @(private = "file")
-machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, text_w_max: f32) {
+wrapped_note :: proc(text: string, text_w_max: f32) {
+	cfg := txt(theme().text_muted)
+	cfg.wrapMode = .Newlines
+	lines, _ := wrap_clip(text, text_w_max, 2)
+	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit({min = px(ROW_H)})}, padding = {pu(PAD_ROW), pu(PAD_ROW), pu(SP_1), pu(SP_1)}, childAlignment = {y = .Center}}}) {
+		clay.TextDynamic(lines, cfg)
+	}
+}
+
+// A machine's header: its dot, its name, its status (or "this Mac"), a count (its open sessions)
+// and a fold chevron (shown while folded or hovered: a click folds it, as Open, Projects and Chats
+// fold), then its button and, for another machine, its "…" (the right-click menu). no 0 = this Mac.
+@(private = "file")
+machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, count: int, text_w_max: f32) {
 	th := theme()
-	if clay.UI(clay.ID("machhead", u32(no)))({
+	id := clay.ID("machhead", u32(no))
+	hit := Hit(Hit_Machine_Head(no))
+	folded := machine_folded(no)
+	_, em := overlay(id, false, ui_hover == hit)
+	if clay.UI(id)({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
 	}) {
 		dot(dot_col)
-		// its name (never cut to nothing: the status gives way first), its status, its button
-		room := text_w_max - px(DOT) - 3 * px(GAP_INLINE)
-		if act != "" do room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2 + GAP_INLINE)
+		cnt := count > 0 ? fmt.tprint(count) : ""
+		// children: dot, name, status, [count], chevron, spacer, [button], [more]
+		n := 6
+		room := text_w_max - px(DOT + ICON_SIZE_SM - 2)
+		if cnt != "" {
+			room -= text_w(cnt, FONT_UI_SMALL)
+			n += 1
+		}
+		if act != "" {
+			room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2)
+			n += 1
+		}
+		if no != 0 {
+			room -= px(ROW_BUTTON)
+			n += 1
+		}
+		room -= f32(n - 1) * px(GAP_INLINE)
+		// its name (never cut to nothing: the status gives way first), its status
 		nw := text_w(name, FONT_UI_SMALL | WEIGHT_HEADER)
-		name_w := max(min(nw, max(room * 0.6, room - text_w(label, FONT_UI_SMALL))), min(nw, px(48))) // never cut to nothing
-		clay.TextDynamic(clip(name, name_w, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_secondary, FONT_UI_SMALL | WEIGHT_HEADER))
-		if lw := room - name_w; lw > px(SP_6) do clay.TextDynamic(clip(label, lw, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+		name_w := max(min(nw, max(room * 0.6, room - text_w(label, FONT_UI_SMALL))), min(nw, px(48)))
+		col := mix(th.text_secondary, th.text, em)
+		clay.TextDynamic(clip(name, name_w, FONT_UI_SMALL | WEIGHT_HEADER), txt(col, FONT_UI_SMALL | WEIGHT_HEADER))
+		if lw := room - name_w; label != "" && lw > px(SP_6) do clay.TextDynamic(clip(label, lw, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+		if cnt != "" do clay.TextDynamic(cnt, txt(th.text_muted, FONT_UI_SMALL))
+		a := fade(id, 7, folded || ui_hover == hit ? 1 : 0, DUR_HOVER)
+		icon(folded ? .Chevron_Right : .Chevron_Down, with_alpha(col, a), ICON_SIZE_SM - 2)
 		spacer()
 		if act != "" {
-			id := clay.ID("machact", u32(no))
-			bg, em := overlay(id, false, ui_hover == Hit(Hit_Machine(no)))
-			if clay.UI(id)({
+			bid := clay.ID("machact", u32(no))
+			bg, bem := overlay(bid, false, ui_hover == Hit(Hit_Machine(no)))
+			if clay.UI(bid)({
 				layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(ROW_BUTTON))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 				backgroundColor = bg,
 				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 			}) {
-				clay.TextDynamic(act, txt(mix(th.text_secondary, th.text, em), FONT_UI_SMALL))
+				clay.TextDynamic(act, txt(mix(th.text_secondary, th.text, bem), FONT_UI_SMALL))
 			}
 		}
+		// every action has a button: its menu (Rename…, Remove…, Open web page…, Try again) here too
+		if no != 0 do row_button(clay.ID("machmore", u32(no)), "", true, ui_hover == Hit(Hit_Machine_More(no)), .More)
 	}
 }
 
@@ -1681,74 +1794,17 @@ machine_menu_items :: proc(no: u64, items: ^[dynamic]core.Menu_Item) {
 	}
 }
 
-// One of its open sessions: its place and title, its dot while online. A click shows it (its
-// tabs here are read-only until its terminals come over, M6-C).
+// The selected project's sessions, as that machine lists them, drawn as this Mac's are. While it
+// is online a click opens one there (Open_Session_Cmd, as a local row's: machine_route.odin sends
+// it), and + New session starts one there (the local row's harness picker).
 @(private = "file")
-machine_open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, live: bool, text_w_max: f32) {
-	th := theme()
-	append(&drawn.open, s.id)
-	id := clay.ID("open", u32(len(drawn.open) - 1)) // ids follow the drawn rows (sidebar_hit)
-	bg, em := overlay(id, cs != nil && s.id == cs.id, ui_hover == Hit(Hit_Open_Row(s.id)))
-	if clay.UI(id)(row_cfg(bg)) {
-		st, _ := core.session_row_status(s)
-		_, place := core.session_place(s)
-		title := core.open_session_title(s)
-		col := live ? mix(th.text_secondary, th.text, em) : th.text_muted
-		room := text_w_max - px(KIND_ICON) - 3 * px(GAP_INLINE) - (live && st != .None ? px(DOT) : 0)
-		icon(.Folder, th.text_muted, KIND_ICON)
-		lead := fmt.tprintf("%s ·", place)
-		pw := min(text_w(lead), max(room * 0.4, room - text_w(title)))
-		clay.TextDynamic(clip(lead, pw), txt(th.text_muted))
-		clay.TextDynamic(clip(title, room - pw), txt(col))
-		spacer()
-		if live && st != .None do dot(status_color(st))
-	}
-}
-
-// One of its projects: a click selects it, and its sessions come from that machine.
-@(private = "file")
-machine_project_row :: proc(p: ^core.Project, i: int, live: bool, text_w_max: f32) {
-	th := theme()
-	id := clay.ID("proj", u32(i))
-	selected := p.id == state.selected_project
-	bg, em := overlay(id, false, ui_hover == Hit(Hit_Project(p.id)))
-	if clay.UI(id)(row_cfg(bg)) {
-		col := live ? mix(th.text_secondary, th.text, em) : th.text_muted
-		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(TREE_CHEVRON)), clay.SizingFit()}, childAlignment = {x = .Center, y = .Center}}}) {
-			icon(selected && !tree.folded ? .Chevron_Down : .Chevron_Right, th.text_muted, TREE_CHEVRON)
-		}
-		icon(.Folder, th.text_muted, KIND_ICON)
-		clay.TextDynamic(clip(core.project_display(p^), text_w_max - px(TREE_CHEVRON + KIND_ICON) - 2 * px(GAP_INLINE)), txt(col, selected ? WEIGHT_BOLD : WEIGHT_REGULAR))
-	}
-}
-
-// The selected project's sessions, as that machine lists them. While it is online a click opens
-// one there (Open_Session_Cmd, as a local row's: machine_route.odin sends it), and + New session
-// starts one there (the local row's harness picker).
-@(private = "file")
-machine_sessions :: proc(live: bool, text_w_max: f32) {
-	th := theme()
+machine_sessions :: proc(cs: ^core.Open_Session, live: bool, label: string, text_w_max: f32) {
 	rows := core.sidebar_sessions(.Sessions)
-	if len(rows) == 0 do list_note(live ? "No sessions yet" : "Not connected", TREE_INDENT, text_w_max)
+	if len(rows) == 0 && !live do list_note(label, TREE_INDENT, text_w_max)
+	else if len(rows) == 0 && !core.sidebar_filtering() do list_note("No sessions yet", TREE_INDENT, text_w_max)
+	else if len(rows) == 0 do list_note("No matching sessions", TREE_INDENT, text_w_max)
 	shown, more := capped_rows(rows, tree.all_sessions)
-	for r, k in shown {
-		id := clay.ID("sessoff", u32(k)) // not clickable while it is not online
-		cfg := row_cfg({})
-		if live {
-			append(&drawn.sess, keep(r.session.id))
-			id = clay.ID("sess", u32(len(drawn.sess) - 1)) // ids follow the drawn rows (sidebar_hit)
-			bg, _ := overlay(id, false, ui_hover == Hit(Hit_Session(r.session.id)))
-			cfg = row_cfg(bg)
-		}
-		cfg.layout.padding.left = pu(PAD_ROW + TREE_INDENT)
-		if clay.UI(id)(cfg) {
-			st := core.session_status(r.session.id)
-			icon(core.harness_row_icon(core.session_harness(r.session^), !live), th.text_muted, HARNESS_ICON_SIZE)
-			clay.TextDynamic(clip(core.session_label(r.session^), text_w_max - px(TREE_INDENT + HARNESS_ICON_SIZE + DOT) - 3 * px(GAP_INLINE)), txt(live ? th.text_secondary : th.text_muted))
-			spacer()
-			if live && st != .None do dot(status_color(st))
-		}
-	}
+	session_rows(shown, state.selected_project, cs, "sess", text_w_max, TREE_INDENT, remote = true, live = live)
 	if more > 0 do action_row(clay.ID("showmore", 0), Hit_Show_More(0), .None, fmt.tprintf("Show %d more", more), TREE_INDENT, text_w_max)
 	if live do action_row(clay.ID("new"), Hit_New{}, .Plus, "New session", TREE_INDENT, text_w_max) // the harness picker (harness.odin)
 }

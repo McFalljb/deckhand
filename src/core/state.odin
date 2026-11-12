@@ -364,6 +364,7 @@ Sidebar_Fold :: enum {
 	Open, // the open sessions of every project, on top
 	Projects,
 	Chats,
+	This_Mac, // this Mac's header over the three, while Machines over SSH is on (waiting open sessions still show)
 }
 
 SIDEBAR_LIST_MAX :: 500 // pinned or hidden items per list

@@ -252,29 +252,40 @@ The Sessions tab has three sections:
 the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
 Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter
 (for another port, add a `Host` entry with its `Port` to `~/.ssh/config` and type that name).
-Deckhand calls it by its host's name (`nuc` for `jb@nuc.home.arpa`); **Rename…** changes that.
+Deckhand calls it by its host's name (`nuc` for `jb@nuc.home.arpa`); once it is added, the
+column goes back to Sessions, where it shows (an add started in Settings stays there).
+**Rename…** changes the name.
 While Machines over SSH is on, this Mac's own sections (Open, Projects, Chats) sit under a header
 of their own: a green dot, this Mac's name and *this Mac*. After them, each machine has its own, under its name, with a dot (green online,
-amber when it needs you, red when its install failed, grey offline), what is wrong in plain words,
-and a button when there is something to do: **Log in…** (ssh wants a password, a host key or a
+amber when it needs you, red when its install failed, grey offline), its status in a word or two
+(*Online*, *Offline*, *Connecting…*, *Needs you to log in*: the Jobs tab and Settings use the same
+words) or, when something is wrong, a note of up to two lines under it that says what, and a button
+when there is something to do: **Log in…** (ssh wants a password, a host key or a
 code: a shell tab here runs `ssh` to it so you can answer, in a new chat if no session is open,
 and the link connects once you are in), **Connect**, **Take back**, **Install…**, **Retry** (an
 install that failed), **Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
-and **Cancel** while an install runs. Point at its name for why, and ssh's own words. Right-click
-it for **Connect**, **Log in…** or **Take back**, **Open web page…**, **Rename…** and **Remove…**.
+and **Cancel** while an install runs. Point at its name for why, and ssh's own words. Its **…**
+button (or a right click on it) has **Connect**, **Log in…** or **Take back**, **Open web page…**,
+**Rename…** and **Remove…**. Click a header (this Mac's too) to fold it, as Open, Projects and Chats
+fold: a folded machine shows only its sessions that wait for you, and its header counts its open
+sessions. This Mac's fold is saved; other machines' last until Deckhand quits.
 A machine that refuses this Mac says to turn on **Allow other machines to connect** on it, and
 one that is not a Mac or Linux says so; neither offers Connect (right-click › **Try again** after
 you fixed it). Deckhand does not keep retrying a machine that needs you (to log in, or to allow
 this Mac): it tries again when you click. An offline machine is retried on its own, less and less
-often. Under it are its open sessions, then its projects; click a project to list its sessions,
-as that machine has them. Click an open session to show it, or one of a project's sessions to open
+often. Under it are its open sessions, then its projects, drawn as this Mac's are (*Waiting for
+you*, the time, the dot; an open session's age is not known here) and thinned by the filter and
+the Running, Waiting and Pinned chips like this Mac's (its header stays). Click a project to list its sessions,
+as that machine has them. A machine with no projects yet says so: Deckhand can't add a folder on
+another machine, so start pi or Claude Code in a folder there and the project shows here. The
+palette names the machine of its items that are on another one (*… · on nuc*). Click an open session to show it, or one of a project's sessions to open
 it there (**+ New session** under it starts one there, with what that machine has installed and its
 own Claude Code account), and work in its terminals as in a local tab.
 While one of its sessions is on screen, the top bar shows a quiet **on <machine>** before its tabs,
 and the window's title and the tabs' tooltips start with the machine's name: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
 **⌘1**–**⌘9** and clicking its tabs act on that machine; a confirmation it asks for shows here as
-*On <machine>: …*. **Open web page…** on an online machine's row (or **Open a machine's web page…** in the
+*On <machine>: …*. **Open web page…** in an online machine's **…** (or **Open a machine's web page…** in the
 palette) asks for a port on that machine, like `3000` or `3000/admin`, and opens the page its own
 `localhost` serves there (a dev server) in an ordinary browser tab here: in the session on screen,
 or the last one of this Mac's you looked at when another machine's is on screen (with none open,
@@ -1103,7 +1114,7 @@ pi is installed; Claude Code's once it has been used:
   keeps no link to any machine, and the group says *Machines over SSH is off* with **Turn on**:
   your machines are kept). Until you add a machine nothing happens: no `ssh`, no process.
   Each machine you added, with what is wrong and what to do in plain words, or its status
-  (`online` and its Deckhand version); point at it for its ssh address and ssh's own words. Its
+  (*Online* and its Deckhand version); point at it for its ssh address and ssh's own words. Its
   button is the sidebar's: **Connect** tries now, **Log in…**, **Take back** takes it from whoever
   showed it last, and so on. The **×** removes it after you confirm: nothing on it is deleted, and
   its sessions keep running there. **Add a machine…**: type `user@host` or a name from
@@ -1141,10 +1152,10 @@ pi is installed; Claude Code's once it has been used:
   stays as it is: turn it on there. **Cancel** stops it and removes what it copied. If it
   fails, its row says why (*Install failed: its disk is full*) and offers **Retry**.
 - **Update.** When this Mac's Deckhand is newer than a machine's core, or that core is too old to
-  work with (**needs an update**), its row shows **Update**. A click installs this Mac's version as
+  work with (*Needs an update*), its row shows **Update**. A click installs this Mac's version as
   above and hands that machine's sessions over to the new core: they keep running, with a short
   pause. Never to an older version. A core that does not run from Deckhand's own folder (or is
-  too old to say where it runs) is left alone: the button says what to do on that machine.
+  too old to say where it runs) is left alone: there is no button, and its row says to update it on that machine.
 - **Linger (Linux).** If lingering is off there, the machine's jobs stop when you log out of it,
   and its row offers **Keep running…**: a click asks that machine's login manager to turn it on
   for you (no password, no `sudo`). If it refuses, run `loginctl enable-linger` there yourself.
@@ -1353,11 +1364,13 @@ Deckhand…**. The header has **New job** (+, the [job sheet](#the-job-sheet)), 
 **Resume all** and **Limits**, and the count of unread runs.
 
 **Other machines' jobs** run on their own machine, on its schedule, even while this Mac sleeps.
-They are listed after this Mac's, under each machine's name (greyed while it is not connected):
+They are listed after this Mac's, under each machine's name (greyed while it is not online, with its
+status, such as *Offline*, where the count goes):
 what each is up to and, when a run needs you, what for. They are read-only here: run, edit or
 pause them from a session on that machine. A run there that needs you rings the bell here.
 While Machines over SSH is on, this Mac's own jobs sit under a header of the same kind: *On* this
-Mac's name, *this Mac*, and their count.
+Mac's name, *this Mac*, and their count. Click a machine's header (this Mac's too) to fold its jobs, as a
+group folds.
 
 Jobs are grouped by **who they belong to**: each of your projects that has jobs (by name), then
 **Atlas**, **Chats** and **Other**. A group's row shows its name and how many jobs it has (a dot

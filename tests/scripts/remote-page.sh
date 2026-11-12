@@ -63,8 +63,10 @@ assert_state open_sessions.0.tabs.1.url http://127.0.0.1:$P/hello?x=1
 ui_command {"type":"close_tab","tab_id":\$last}
 eventually 10000
 assert_state open_sessions.0.tabs.# 1
-# the sidebar's button: the palette asks for the port
-clickid machact 1
+# the sidebar header's "…" › Open web page…: the palette asks for the port
+clickid machmore 1
+wait 300
+clickmenu Open web page…
 wait 300
 type $P/docs
 key enter

@@ -1108,6 +1108,7 @@ files_new_target :: proc() -> string {
 }
 
 files_begin_edit :: proc(mode: Files_Edit_Mode, target, text: string, focus := true) {
+	machine_add_back = false // machine_add_open sets it after
 	fu.edit = mode
 	delete(fu.target)
 	fu.target = strings.clone(target)
@@ -1157,6 +1158,9 @@ files_commit_edit :: proc() {
 		delete(fu.edit_err)
 		fu.edit_err = ""
 		ui_do(core.Set_Focus{"files"})
+		// added from the sidebar's row or the palette: back to Sessions, where it now shows
+		if machine_add_back && fu.target == core.MACHINE_ADD_ROW do ui_do(core.Set_Left_Tab{tab = .Sessions})
+		machine_add_back = false
 		return
 	}
 	if err := files_name_error(name); err != "" {
@@ -1209,6 +1213,7 @@ files_commit_edit :: proc() {
 }
 
 files_cancel_edit :: proc() {
+	machine_add_back = false
 	fu.edit = .None
 	delete(fu.edit_err)
 	fu.edit_err = ""

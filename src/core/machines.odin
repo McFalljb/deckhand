@@ -402,38 +402,47 @@ machine_status_of :: proc(o: Machine_Outcome) -> (s: Machine_Status, why: string
 
 // ---- what the user reads (the sidebar, Settings and their tooltips: one place) ----
 
-// A machine's status in plain words: label (a few words: the sidebar's header, Settings' row), why
-// (a sentence that says what is wrong and what to do; "" = nothing to say) and raw (the text it
-// came from, ssh's or the install's, cleaned: a tooltip's second line; "" = none). Temp.
+// A machine's status in plain words: label (a few words, in sentence case like a session's "Waiting
+// for you": the sidebar's header, Settings' row, the Jobs tab), why (a sentence that says what is
+// wrong; "" = nothing to say; it never points at the button next to it, which says that) and raw
+// (the text it came from, ssh's or the install's, cleaned: a tooltip's second line; "" = none). Temp.
 machine_status_text :: proc(m: Machine_View) -> (label, why, raw: string) {
 	// its install or update: while it runs, then a failure that still applies
-	if m.job != .None && m.job != .Done && m.job != .Failed do return fmt.tprintf("%s…", MACHINE_JOB_NAMES[m.job]), "", ""
+	if m.job != .None && m.job != .Done && m.job != .Failed do return fmt.tprintf("%s…", sentence_case(MACHINE_JOB_NAMES[m.job])), "", ""
 	if machine_install_failed(m) {
 		w, r := machine_install_why(m.job_note)
 		what := m.update != .None ? "Update" : "Install"
-		return fmt.tprintf("%s failed", strings.to_lower(what, context.temp_allocator)), fmt.tprintf("%s failed: %s", what, w), r
+		return fmt.tprintf("%s failed", what), fmt.tprintf("%s failed: %s", what, w), r
 	}
+	// an update that has to be made on that machine: no button here, the sentence says what to do
+	if m.update == .Command_Only do return m.status == .Online ? "Online" : "Needs an update", "Its Deckhand wasn't installed by Deckhand: update it on that machine", ""
 	switch m.status {
-	case .Connecting:    return "connecting…", "", ""
+	case .Connecting:    return "Connecting…", "", ""
 	case .Online:
-		if m.linger == .Off do return "online", "Its jobs stop when you log out of it: Keep running… keeps them going", ""
-		return "online", "", ""
+		if m.linger == .Off do return "Online", "Its jobs stop when you log out of it: Keep running… keeps them going", ""
+		return "Online", "", ""
 	case .Offline:
 		why, raw = machine_offline_why(m.error, m.target != "" ? m.target : m.name)
-		return "offline", why, raw
-	case .Needs_Login:   return "needs you to log in", "ssh wants a password or a key: Log in…", m.error
+		return "Offline", why, raw
+	case .Needs_Login:   return "Needs you to log in", "ssh wants a password or a key", m.error
 	case .Needs_Update:
-		if m.update == .Command_Only do return "needs an update", "Its Deckhand runs from outside its own folder: update it on that machine", ""
-		if strings.contains(m.error, "newer") do return "needs an update", "Its Deckhand is newer than this Mac's: update Deckhand on this Mac", ""
-		return "needs an update", "Its Deckhand is too old for this Mac: Update", ""
-	case .Not_Installed: return "no Deckhand there", "Deckhand isn't installed there: Install…", ""
+		if strings.contains(m.error, "newer") do return "Needs an update", "Its Deckhand is newer than this Mac's: update Deckhand on this Mac", ""
+		return "Needs an update", "Its Deckhand is too old for this Mac", ""
+	case .Not_Installed: return "No Deckhand there", "Deckhand isn't installed there", ""
 	case .Taken:
-		if strings.has_prefix(m.error, "viewed from ") do return "in use there", fmt.tprintf("Shown from %s now: Take back shows it here", m.error[len("viewed from "):]), ""
-		return "in use there", "Its own window is showing it: Take back shows it here", ""
-	case .Refused:       return "not allowed", "Turn on Allow other machines to connect on that Mac", ""
-	case .Unsupported:   return "not supported", "Not a Mac or Linux machine", m.error
+		if strings.has_prefix(m.error, "viewed from ") do return "In use there", fmt.tprintf("Shown from %s now: Take back shows it here", m.error[len("viewed from "):]), ""
+		return "In use there", "Its own window is showing it: Take back shows it here", ""
+	case .Refused:       return "Not allowed", "Turn on Allow other machines to connect on that Mac", ""
+	case .Unsupported:   return "Not supported", "Not a Mac or Linux machine", m.error
 	}
 	return "", "", ""
+}
+
+// s with its first letter upper-case (ASCII; temp).
+@(private = "file")
+sentence_case :: proc(s: string) -> string {
+	if s == "" || s[0] < 'a' || s[0] > 'z' do return s
+	return fmt.tprintf("%c%s", rune(s[0] - 32), s[1:])
 }
 
 // A failed install or update that still applies (its machine has no Deckhand, or one to update);
@@ -473,7 +482,7 @@ machine_offline_why :: proc(err, host: string) -> (why, raw: string) {
 	h := host
 	if i := strings.last_index_byte(h, '@'); i >= 0 do h = h[i + 1:]
 	switch {
-	case err == "":                                                              return "Not connected", ""
+	case err == "":                                                              return "", "" // its label says Offline
 	case has(err, "Could not resolve hostname", "nodename nor servname", "Name or service not known"): return fmt.tprintf("Can't find a computer called %s", text_clean(h, 64)), err
 	case has(err, "Connection refused"):                                          return "It refused the connection", err
 	case has(err, "timed out"):                                                   return "The connection timed out", err

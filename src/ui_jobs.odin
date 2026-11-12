@@ -31,6 +31,7 @@ Jobs_Hit_Kind :: enum u8 {
 	Group, // index: the drawn group: go to its project (Atlas, Chats), or fold Other
 	Group_Fold, // its chevron
 	Group_New, // its "+": New job for it
+	Machine, // index: a machine's number (0 = this Mac): its "On <name>" header folds it
 }
 Hit_Jobs :: struct {
 	what:  Jobs_Hit_Kind,
@@ -308,7 +309,7 @@ jobs_panel :: proc(row_w: f32) {
 		// no header while it has none)
 		if state.settings.remote_machines && len(state.jobs) > 0 do jobs_machine_header(0, core.machine_here_name(), "this Mac", fmt.tprintf("%d", len(state.jobs)), row_w)
 		// grouped by owner (jobs_owner.odin): projects by name, then Atlas, Chats, Other
-		for g in core.jobs_groups() {
+		if !(state.settings.remote_machines && jobs_machine_folded(0)) do for g in core.jobs_groups() {
 			folded := core.list_index(ju.folded[:], core.job_owner_key(g.owner)) >= 0
 			job_group_row(g, folded, row_w, a)
 			if folded do continue
@@ -332,7 +333,9 @@ machine_jobs_sections :: proc(row_w: f32) {
 		if n == 0 do continue
 		live := m.status == .Online
 		gap(SP_2)
-		jobs_machine_header(m.no, m.name, "", live ? fmt.tprintf("%d", n) : "not connected", row_w)
+		label, _, _ := core.machine_status_text(m) // as the sidebar says it
+		jobs_machine_header(m.no, m.name, "", live ? fmt.tprintf("%d", n) : label, row_w)
+		if jobs_machine_folded(m.no) do continue
 		k := 0
 		for r in state.machine_jobs do if r.machine == m.no {
 			k += 1
@@ -354,17 +357,25 @@ machine_jobs_sections :: proc(row_w: f32) {
 	}
 }
 
-// A machine's header in the Jobs tab: On <name>, a muted note after it ("this Mac", for no 0), and
-// on the right its count (or why it shows what it showed last).
+// A machine's header in the Jobs tab: its fold chevron (a click folds it, as an owner's row folds),
+// On <name>, a muted note after it ("this Mac", for no 0), and on the right its count (or its
+// status while it shows what it showed last).
 @(private = "file")
 jobs_machine_header :: proc(no: u64, name, note, right: string, row_w: f32) {
 	th := theme()
 	inner := row_w - px(2 * PAD_ROW)
-	if clay.UI(clay.ID("jobmach", u32(no)))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
+	id := clay.ID("jobmach", u32(no))
+	bg, _ := overlay(id, false, ui_hover == Hit(Hit_Jobs{what = .Machine, index = int(no)}))
+	if clay.UI(id)({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(PAD_ROW - SP_1), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
+		backgroundColor = bg,
+		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
 	}) {
+		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(TREE_CHEVRON + SP_1)), clay.SizingFixed(px(ROW_BUTTON))}, childAlignment = {x = .Center, y = .Center}}}) {
+			icon(jobs_machine_folded(no) ? .Chevron_Right : .Chevron_Down, th.text_muted, TREE_CHEVRON)
+		}
 		label := fmt.tprintf("On %s", name)
-		room := inner - text_w(right) - px(GAP_INLINE)
+		room := inner + px(SP_1) - px(TREE_CHEVRON + SP_1) - text_w(right) - 2 * px(GAP_INLINE)
 		lw := clip(label, room, WEIGHT_BOLD)
 		clay.TextDynamic(lw, txt(th.text_secondary, WEIGHT_BOLD))
 		if nr := room - text_w(lw, WEIGHT_BOLD) - px(GAP_INLINE); note != "" && nr > px(SP_6) do clay.TextDynamic(clip(note, nr), txt(th.text_muted))
@@ -477,6 +488,20 @@ owner_value :: proc(o: core.Job_Owner) -> string {
 	case .Other:   return "none"
 	}
 	return ""
+}
+
+// Whether machine no's jobs are folded (0 = this Mac's), and folding them: as the owners' rows, in
+// ju.folded (not saved).
+@(private = "file")
+jobs_machine_folded :: proc(no: u64) -> bool {return core.list_index(ju.folded[:], fmt.tprintf("machine:%d", no)) >= 0}
+
+@(private = "file")
+jobs_machine_fold :: proc(no: u64) {
+	key := fmt.tprintf("machine:%d", no)
+	if at := core.list_index(ju.folded[:], key); at >= 0 {
+		delete(ju.folded[at])
+		ordered_remove(&ju.folded, at)
+	} else do append(&ju.folded, strings.clone(key))
 }
 
 @(private = "file")
@@ -604,6 +629,8 @@ jobs_hit :: proc() -> Hit {
 	if ju.limits_open do for row in Job_Limit_Row do if clay.PointerOver(clay.ID("joblimit", u32(row))) do return Hit_Jobs{what = .Limit, index = int(row)}
 	if !clay.PointerOver(clay.ID("jobs_list")) do return nil
 	for _, i in ju.buttons do if clay.PointerOver(clay.ID("jobbtn", u32(i))) do return Hit_Jobs{what = .Button, index = i}
+	if clay.PointerOver(clay.ID("jobmach", 0)) do return Hit_Jobs{what = .Machine, index = 0}
+	for m in state.machines do if clay.PointerOver(clay.ID("jobmach", u32(m.no))) do return Hit_Jobs{what = .Machine, index = int(m.no)}
 	for _, i in ju.groups {
 		if clay.PointerOver(clay.ID("jobgroupnew", u32(i))) do return Hit_Jobs{what = .Group_New, index = i}
 		if clay.PointerOver(clay.ID("jobgroupfold", u32(i))) do return Hit_Jobs{what = .Group_Fold, index = i}
@@ -637,7 +664,7 @@ jobs_tip :: proc(h: Hit_Jobs) -> (label, keys: string) {
 			case .Other:   return "Jobs of no project: click to fold or unfold", ""
 			}
 		}
-	case .Group_Fold: return "Fold or unfold", ""
+	case .Group_Fold, .Machine: return "Fold or unfold", ""
 	case .Group_New:
 		if h.index < len(ju.groups) do return fmt.tprintf("New job for %s", core.job_owner_label(ju.groups[h.index])), ""
 	case .Button:
@@ -694,14 +721,17 @@ jobs_click :: proc(h: Hit_Jobs) {
 		switch o.kind {
 		case .Project:
 			ui_do(core.Set_Left_Tab{tab = .Sessions})
+			if state.sidebar.folded[.This_Mac] do ui_do(core.Set_Sidebar_Folded{section = .This_Mac, folded = false})
 			ui_do(core.Select_Project{o.project})
 		case .Atlas: ui_do(core.Set_Home{open = true})
 		case .Chats:
 			ui_do(core.Set_Left_Tab{tab = .Sessions})
 			if state.sidebar.folded[.Chats] do ui_do(core.Set_Sidebar_Folded{section = .Chats, folded = false})
+			if state.sidebar.folded[.This_Mac] do ui_do(core.Set_Sidebar_Folded{section = .This_Mac, folded = false})
 		case .Other: group_fold(h.index)
 		}
 	case .Group_Fold: group_fold(h.index)
+	case .Machine:    jobs_machine_fold(u64(h.index))
 	case .Group_New:
 		if h.index < len(ju.groups) do ui_do(core.Job_Sheet{open = true, for_project = owner_value(ju.groups[h.index])})
 	case .Resume_All: ui_do(core.Jobs_Resume{})

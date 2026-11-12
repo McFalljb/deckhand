@@ -445,6 +445,41 @@ jobs_deliver_to_bell :: proc(t: ^testing.T) {
 	testing.expectf(t, len(os_notes) == 1, "one OS notification, not two: %v", os_notes)
 }
 
+// The Jobs row decides a job's banners: Bell off still notifies as its macOS says, and macOS
+// never means no banner at all (no fallback of Deckhand's own).
+@(test)
+jobs_follow_the_jobs_row :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	fx := fx_setup()
+	saved_platform := core.platform
+	defer {
+		core.platform = saved_platform
+		core.run_command(core.Set_Bell{jobs = true, macos = #partial [core.Bell_Group]Maybe(core.Os_When){.Jobs = .Default}}, UI)
+		core.run_command(core.Notifications_Clear{})
+		clear(&os_notes)
+		fx_done(fx)
+	}
+	core.platform.notify = proc(title, body: string) {append(&os_notes, strings.clone(title))}
+	app.window_active = false
+	defer app.window_active = true
+	core.run_command(core.Notifications_Clear{})
+	clear(&os_notes)
+	core.run_command(core.Set_Bell{jobs = false}, UI)
+	note(fx, "gone", "gone2", "manual", "OK", fmt.tprintf("folder: %s/nope", fx.dir))
+	sync_rows()
+	testing.expect(t, core.run_command(core.Job_Run_Now{job = "gone2"}, UI).ok)
+	core.inbox_drain()
+	for x in state.notices.items do testing.expectf(t, x.job_id != "gone2", "Bell off: not in the bell")
+	testing.expectf(t, len(os_notes) == 1, "Bell off, macOS background: one banner: %v", os_notes)
+	clear(&os_notes)
+	core.run_command(core.Set_Bell{macos = #partial [core.Bell_Group]Maybe(core.Os_When){.Jobs = .Never}}, UI)
+	note(fx, "gone", "gone3", "manual", "OK", fmt.tprintf("folder: %s/nope", fx.dir))
+	sync_rows()
+	testing.expect(t, core.run_command(core.Job_Run_Now{job = "gone3"}, UI).ok)
+	core.inbox_drain()
+	testing.expectf(t, len(os_notes) == 0, "Bell off, macOS never: no banner: %v", os_notes)
+}
+
 // ---- review round 2 ----
 
 // The open row's text wraps in the Jobs tab, never clipped.

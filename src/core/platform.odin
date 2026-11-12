@@ -17,6 +17,7 @@ Platform :: struct {
 	wake:           proc(), // any thread: get the main thread to drain the inbox soon
 	run_later:      proc(p: proc()), // main thread: runs p soon from the main run loop, outside any event or frame callback
 	notify:         proc(title, body: string), // an OS notification (the agent, while the window is in the background)
+	notify_front:   proc(title, body: string), // one that macOS shows also while Deckhand is in front (a bell kind whose macOS says always; nil: notify)
 	trash:          proc(path: string) -> bool, // moves path to the Trash; nil or false: not moved
 	activity:       proc(on: bool), // holds off App Nap while on (activity_hold: jobs, recent output); nil: nothing
 	// main thread: calls fire every `every` from the main run loop, outside sokol's callbacks, also

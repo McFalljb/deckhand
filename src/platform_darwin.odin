@@ -182,7 +182,7 @@ foreign pdplatform {
 	dh_mac_set_appearance :: proc(mode: c.int) ---
 	dh_mac_test_window_light :: proc() -> c.int ---
 	dh_mac_test_ime :: proc(kind: c.int, text: cstring, key_code: c.int, alt: c.int, ops: cstring) ---
-	dh_mac_notify :: proc(title, body: cstring) ---
+	dh_mac_notify :: proc(title, body: cstring, front: c.int) ---
 	dh_mac_quiet :: proc() ---
 	dh_mac_alert :: proc(title, text, button: cstring) ---
 	dh_mac_ask :: proc(title, text, yes, no: cstring) -> c.int ---
@@ -250,7 +250,12 @@ platform_ask :: proc(title, text, yes, no: string) -> bool {
 platform_test_scale :: proc(scale: f64) {dh_mac_test_scale(scale)}
 
 platform_notify :: proc(title, body: string) {
-	dh_mac_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator))
+	dh_mac_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator), 0)
+}
+
+// One macOS shows also while Deckhand is in front (a bell kind whose macOS says always).
+platform_notify_front :: proc(title, body: string) {
+	dh_mac_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator), 1)
 }
 
 // Blended title bar and input methods; call once the window exists.

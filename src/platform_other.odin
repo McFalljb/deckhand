@@ -68,6 +68,7 @@ test_menu_key :: proc(chars: string, mods: u64, key_code: int, key_window := tru
 test_menu_dump :: proc() -> string {return ""}
 platform_reveal :: proc(path: string) {}
 platform_notify :: proc(title, body: string) {}
+platform_notify_front :: proc(title, body: string) {}
 platform_quiet :: proc() {}
 
 platform_activity :: proc(on: bool) {}

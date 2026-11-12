@@ -450,16 +450,18 @@ bell_failed_action_ignores_errors_off :: proc(t: ^testing.T) {
 	// a session's error is still not collected
 	run_command(Tab_Exited{tab_id = n_tab(a)})
 	testing.expect_value(t, len(state.notices.items), 1)
-	// in the background: the bell entry, but no macOS banner while Errors is off
+	// in the background: the bell entry, and its banner as the Errors row's macOS says
+	// (the columns are independent: Bell off does not silence it)
 	n_set_active(false)
 	n_later(11 * time.Second)
 	notify_failed("Send to Atlas", "pi started over: copied to the clipboard")
 	testing.expect_value(t, len(state.notices.items), 2)
-	testing.expect_value(t, len(n_os), 0)
-	// Errors on: the banner as for any error
-	run_command(Set_Bell{errors = true}, N_UI)
+	testing.expect_value(t, len(n_os), 1)
+	// Errors' macOS never: the bell entry only
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Errors = .Never}}, N_UI)
 	n_later(11 * time.Second)
 	notify_failed("Send to Atlas", "pi took too long: copied to the clipboard")
+	testing.expect_value(t, len(state.notices.items), 3)
 	testing.expect_value(t, len(n_os), 1)
 }
 
@@ -543,7 +545,7 @@ bell_settings_migrate :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.settings.bell_off, bit_set[Bell_Group]{.Jobs})
 	// saved again in the new form
 	saved := strings.clone(workspace_json(), context.temp_allocator)
-	testing.expectf(t, strings.contains(saved, `"macos":{`) && !strings.contains(saved, `"os":`), "%s", saved)
+	testing.expectf(t, strings.contains(saved, `"macos":{`) && strings.contains(saved, `"os":false`), "%s", saved) // os: for an older build
 	// an old file with the switch on (or none): the defaults, per group as before
 	state = State{}
 	old2, _ := strings.replace(base, `"settings":{`, `"settings":{"bell":{"os":true},`, 1, context.temp_allocator)
@@ -655,4 +657,91 @@ bell_sound_settings_user_only :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.settings.bell_os, [Bell_Group]Os_When{})
 	testing.expect(t, run_command(Set_Bell{sound = #partial [Bell_Group]Maybe(Bell_Sound){.Finished = .Hero}}, N_UI).ok, "the user's")
 	testing.expect_value(t, bell_sound_of(state.settings, .Finished), Bell_Sound.Hero)
+}
+
+// ---- review: compatibility, independent columns, the summary, banners in front ----
+
+// (1) An older build reads "os": false (rolled back to), and an older window reads bell_os_off
+// (attached through an update): both say off while every kind's macOS is never.
+@(test)
+bell_review_old_builds_see_off :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	n_reset()
+	defer n_done()
+	run_command(Set_Bell{os = false}, N_UI)
+	testing.expect(t, strings.contains(workspace_json(), `"os":false`), "saved for an older build")
+	testing.expect(t, state.settings.bell_os_off, "streamed for an older window")
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Errors = .Background}}, N_UI)
+	testing.expect(t, !strings.contains(workspace_json(), `"os":false`), "one kind on: not off")
+	testing.expect(t, !state.settings.bell_os_off, "one kind on: not off on the wire")
+	testing.expect_value(t, bell_os_when(state.settings, .Waiting), Os_When.Never)
+}
+
+// (2) The columns are independent: Bell off still notifies and plays as the row says. An old
+// file's kinds that were off stay quiet (they never notified before).
+@(test)
+bell_review_columns_independent :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, b := n_reset()
+	defer n_done()
+	n_set_active(false)
+	run_command(Set_Bell{errors = false, sound = #partial [Bell_Group]Maybe(Bell_Sound){.Errors = .Basso}}, N_UI)
+	n_status(b, .Working)
+	n_status(b, .Error)
+	testing.expect_value(t, len(state.notices.items), 0) // not in the bell
+	testing.expect_value(t, len(n_os), 1) // the banner
+	testing.expect_value(t, n_sounds(), 1) // and the sound
+	// an old file (no "macos"): a kind that was off keeps no banner and no sound
+	base := strings.clone(workspace_json(), context.temp_allocator)
+	state.settings = {}
+	plain, _ := strings.replace(base, `"bell":{`, `"bell_was":{`, 1, context.temp_allocator)
+	old, _ := strings.replace(plain, `"settings":{`, `"settings":{"bell":{"waiting":false},`, 1, context.temp_allocator)
+	if e := workspace_restore(old); e != "" do testing.expect(t, false, e)
+	testing.expect_value(t, bell_os_when(state.settings, .Waiting), Os_When.Never)
+	testing.expect_value(t, bell_sound_of(state.settings, .Waiting), Bell_Sound.None)
+	testing.expect_value(t, bell_os_when(state.settings, .Errors), Os_When.Background)
+}
+
+// (3) A burst's summary says what it holds: finished runs are not "sessions that need you".
+@(test)
+bell_review_summary_words :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	n_reset()
+	defer n_done()
+	n_set_active(false)
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Finished = .Background}}, N_UI)
+	for i in 0 ..< 3 do notify_remote(Notice{kind = .Finished, machine = 7, title = fmt.aprintf("s%d", i), place = strings.clone("nuc")})
+	testing.expect_value(t, len(n_os), 3)
+	if len(n_os) == 3 do testing.expect_value(t, n_os[2], "Deckhand|3 sessions finished")
+	// a mixed burst says both
+	n_later(6 * time.Second)
+	clear(&n_os)
+	notify_remote(Notice{kind = .Finished, machine = 7, title = strings.clone("a"), place = strings.clone("nuc")})
+	notify_remote(Notice{kind = .Waiting, machine = 7, title = strings.clone("b"), place = strings.clone("nuc")})
+	notify_remote(Notice{kind = .Waiting, machine = 7, title = strings.clone("c"), place = strings.clone("nuc")})
+	if len(n_os) == 3 do testing.expect_value(t, n_os[2], "Deckhand|2 sessions need you, 1 finished")
+}
+
+@(private = "file")
+n_front: [dynamic]string
+
+// (4) Only a kind whose macOS says always asks to be shown while Deckhand is in front.
+@(test)
+bell_review_front_only_always :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, b := n_reset()
+	defer n_done()
+	clear(&n_front)
+	platform.notify_front = proc(title, body: string) {append(&n_front, fmt.aprintf("%s|%s", title, body))}
+	n_set_active(false)
+	n_status(b, .Working)
+	n_status(b, .Error) // background policy: a plain notification
+	testing.expect_value(t, len(n_os), 1)
+	testing.expect_value(t, len(n_front), 0)
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Waiting = .Always}}, N_UI)
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle, waiting = true)
+	testing.expect_value(t, len(n_front), 1)
+	testing.expect_value(t, len(n_os), 1)
 }

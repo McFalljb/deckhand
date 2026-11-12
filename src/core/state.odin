@@ -306,9 +306,9 @@ Settings :: struct {
 	agent_model:   string, // the agent's model, "provider/id[:thinking]" ("" = pi's default); user-only
 	notify_off:    bool, // no OS notifications from the agent while the window is in the background
 	bell_off:      bit_set[Bell_Group], // kinds the bell does not collect (notify.odin); default: all on
-	// retired (one switch for every group): only an older core's state stream sets it (the window
-	// of a newer build, attached to it through an update) and then every group's macOS is never;
-	// this build keeps it false (Set_Bell clears it, nothing saves it)
+	// the one switch older builds know: true while every group's macOS is never (Set_Bell keeps
+	// it so), streamed for an older window attached through an update; from an older core's
+	// stream it means every group never
 	bell_os_off:   bool,
 	bell_os:       [Bell_Group]Os_When, // per group: a macOS notification never, in the background or always (Default: BELL_OS_DEFAULT; notify.odin)
 	bell_sound:    [Bell_Group]Bell_Sound, // per group: its sound (Default: BELL_SOUND_DEFAULT; notify.odin)

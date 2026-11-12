@@ -116,6 +116,12 @@ bell_os_when :: proc(st: Settings, g: Bell_Group) -> Os_When {
 	return v == .Default ? BELL_OS_DEFAULT[g] : v
 }
 
+// Every group's macOS is never: what older builds call "os": false (saved, and on the wire).
+bell_os_all_never :: proc(st: Settings) -> bool {
+	for g in Bell_Group do if bell_os_when(st, g) != .Never do return false
+	return true
+}
+
 bell_sound_of :: proc(st: Settings, g: Bell_Group) -> Bell_Sound {
 	v := st.bell_sound[g]
 	return v == .Default ? BELL_SOUND_DEFAULT[g] : v
@@ -135,6 +141,7 @@ bell_sound_next :: proc(v: Bell_Sound) -> Bell_Sound {return v == max(Bell_Sound
 Notice_Channels :: struct {
 	bell:  bool,
 	os:    bool,
+	front: bool, // the macOS notification is an "always" one: shown also while Deckhand is in front
 	sound: Bell_Sound,
 }
 
@@ -145,6 +152,7 @@ notice_channels :: proc(st: Settings, kind: Notice_Kind, active: bool) -> (c: No
 	if kind == .Job_Finished do return
 	w := bell_os_when(st, g)
 	c.os = w == .Always || (w == .Background && !active)
+	c.front = w == .Always
 	if s := bell_sound_of(st, g); s != .None && (w == .Always || !active) do c.sound = s
 	return
 }
@@ -175,6 +183,7 @@ Notices :: struct {
 	os_recent:   [dynamic]Os_Recent,
 	burst_start: time.Time,
 	burst_n:     int, // notifications wanted in the burst so far
+	burst_need:  int, // of them, kinds that need the user (NOTICE_OS_KINDS): the summary's words
 	sounds:      int, // sounds asked of the window (tests)
 	sound_at:    time.Time, // the last one (SOUND_FLOOR)
 }
@@ -311,6 +320,7 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		for v, g in c.macos do if w, set := v.?; set do st.bell_os[g] = w == BELL_OS_DEFAULT[g] ? .Default : w
 		for v, g in c.sound do if s, set := v.?; set do st.bell_sound[g] = s == BELL_SOUND_DEFAULT[g] ? .Default : s
 		if on, set := c.dock.?; set do st.bell_dock_off = !on
+		st.bell_os_off = bell_os_all_never(st^)
 		return {ok = true}, st.bell_off != was_off || st.bell_os != was_os || st.bell_sound != was_sound || st.bell_dock_off != was_dock || was_os_off
 	}
 	return fail("unknown command"), false
@@ -386,7 +396,7 @@ notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind, tab_shown
 // An entry for something Deckhand could not do for the user (no session,
 // no job): what, and why. In the bell whatever the groups: it answers the
 // user's own action (Send to Atlas: the only word of where the text went);
-// a macOS notification only while Errors is on.
+// its banner and sound as the Errors row says.
 notify_failed :: proc(what, why: string) {
 	notice_post(Notice{kind = .Error, place = notice_text(what), title = notice_text(why)}, any_group = true)
 }
@@ -472,8 +482,14 @@ notice_post :: proc(n: Notice, any_group := false) -> bool {
 	n := n
 	// quitting: pi processes ending are not news
 	ch := notice_channels(state.settings, n.kind, notify_window_active())
-	group_off := !ch.bell
-	if app_quitting || (!any_group && group_off) {
+	if app_quitting {
+		notice_free(&n)
+		return false
+	}
+	// not collected: its banner and sound still go as its row says (the columns are independent)
+	if !any_group && !ch.bell {
+		n.at = notice_now()
+		notify_os(n, ch)
 		notice_free(&n)
 		return false
 	}
@@ -496,7 +512,7 @@ notice_post :: proc(n: Notice, any_group := false) -> bool {
 		notice_free(&items[0])
 		ordered_remove(items, 0)
 	}
-	if !repeat && !group_off do notify_os(n, ch) // (any_group: the bell entry only)
+	if !repeat do notify_os(n, ch)
 	return true
 }
 
@@ -519,18 +535,25 @@ notify_os :: proc(n: Notice, ch: Notice_Channels) {
 	for r in ns.os_recent do if (n.session != 0 && r.session == n.session) || (n.job_id != "" && r.job_id == n.job_id) do return
 	append(&ns.os_recent, Os_Recent{session = n.session, job_id = strings.clone(n.job_id), at = n.at})
 	if ns.burst_n == 0 || time.diff(ns.burst_start, n.at) >= NOTICE_BURST {
-		ns.burst_start, ns.burst_n = n.at, 0
+		ns.burst_start, ns.burst_n, ns.burst_need = n.at, 0, 0
 	}
 	ns.burst_n += 1
+	if n.kind in NOTICE_OS_KINDS do ns.burst_need += 1
+	notify := ch.front && platform.notify_front != nil ? platform.notify_front : platform.notify
 	switch {
 	case ns.burst_n <= NOTICE_BURST_SINGLE:
 		title := n.place != "" ? fmt.tprintf("%s · %s", n.place, n.title) : n.title
-		if os do platform.notify(title, notice_label(n))
+		if os do notify(title, notice_label(n))
 	case ns.burst_n == NOTICE_BURST_SINGLE + 1:
-		// the rest of the burst in one; the bell lists them
-		need := 0
-		for x in ns.items do if !x.read && x.kind in NOTICE_OS_KINDS do need += 1
-		if os do platform.notify("Deckhand", fmt.tprintf("%d sessions need you", need))
+		// the rest of the burst in one, in words for what it holds; the bell lists them
+		fin := ns.burst_n - ns.burst_need
+		text: string
+		switch {
+		case fin == 0: text = fmt.tprintf("%d sessions need you", ns.burst_need)
+		case ns.burst_need == 0: text = fmt.tprintf("%d sessions finished", fin)
+		case: text = fmt.tprintf("%d sessions need you, %d finished", ns.burst_need, fin)
+		}
+		if os do notify("Deckhand", text)
 	case:
 		return
 	}

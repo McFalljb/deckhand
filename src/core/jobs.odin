@@ -1347,7 +1347,7 @@ jobs_deliver :: proc(j: ^Job, e: Job_Event, nudge: bool) {
 	if sched.quitting do return
 	attention := e.status != "ok" && e.status != "quiet" && e.status != "unchanged"
 	push := j.def.notify == .Always || (j.def.notify == .Attention && attention)
-	bell := j.def.notify != .Never && .Jobs not_in state.settings.bell_off
+	bell := j.def.notify != .Never // the bell's Jobs row decides collecting, banner and sound (notify.odin)
 	if bell {
 		st := Job_Status.Finished
 		if e.status == "needs_you" do st = .Needs_You
@@ -1411,6 +1411,7 @@ job_mark_read :: proc(j: ^Job, run: string) -> int {
 @(private = "file")
 jobs_notify :: proc(title, body: string, urgent: bool) {
 	if platform.notify == nil do return
+	if bell_os_when(state.settings, .Jobs) == .Never do return // the gear's Jobs row: no banners
 	if window_attached() && window_is_active() do return
 	if !urgent && sched.last_notify != {} && time.tick_since(sched.last_notify) < NOTIFY_GAP do return
 	sched.last_notify = time.tick_now()

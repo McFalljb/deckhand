@@ -87,7 +87,7 @@ Window_Op :: enum u8 {
 	Job_Sheet, // the job_sheet command (job_sheet, caller); reply: result, changed
 	Job_Sheet_Saved, // Job_Save's answer (path, message: its error); reply: ok (the sheet closed)
 	Job_Sheet_Holds_Quit, // a quit: reply ok when the sheet has changes (it asks to discard them; the quit stops)
-	Notify, // a separate core's OS notification (text: title, message: body), shown by the window's own
+	Notify, // a separate core's OS notification (text: title, message: body; count 1: shown also in front), shown by the window's own
 	Quit, // the core ends on purpose (a quit, Stop All) or let this window go for a newer one (text: why): the window quits too, never reconnects
 	Viewed_From, // another machine's Deckhand took this core (text: its name): the window shows Viewed from <machine> with Take back, and does not reconnect until then
 	App_Boxes, // a separate core: tab_id's app sent new tab.boxes (text: {"boxes":[…]}), drawn while inspected
@@ -195,7 +195,8 @@ window_open_url :: proc(url: string) -> bool {
 }
 window_reveal :: proc(path: string) {ask({op = .Reveal, path = path})}
 // A separate core's OS notification goes through the window (none attached: serve shows its own).
-window_notify :: proc(title, body: string) {ask({op = .Notify, text = title, message = body})}
+// front: one macOS shows also while Deckhand is in front (count 1; a bell kind whose macOS says always).
+window_notify :: proc(title, body: string, front := false) {ask({op = .Notify, text = title, message = body, count = front ? 1 : 0})}
 // A bell entry's sound (notify.odin's notify_os: once per entry, paced): the window plays it.
 window_sound :: proc(name: string) {ask({op = .Sound, text = name})}
 // A separate core: the window goes too (it must not reconnect). why: for its log.

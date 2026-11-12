@@ -1567,7 +1567,8 @@ The bell in the top bar collects what happened in sessions you were **not lookin
   | Errors | on | background | none |
   | Jobs | on | background | none |
 
-  (the defaults). **Bell**: whether the bell collects it. Something you asked for that Deckhand
+  (the defaults). The three columns are independent. **Bell**: whether the bell collects it (off,
+  its macOS notification and sound still come as their columns say). Something you asked for that Deckhand
   could not do (Send to Atlas's text left on the clipboard, and why) always shows in the bell, even
   with Errors off.
 - **macOS**: **never**, **background** (only while Deckhand is not the app in front) or
@@ -1575,7 +1576,10 @@ The bell in the top bar collects what happened in sessions you were **not lookin
   one "N sessions need you" summary. A build run from the repo (no app bundle) bounces the Dock
   icon instead. A job's finished run raises one only with its own `notify: always` ([Jobs](#jobs)).
   Upgrading keeps what you had: the old **Also notify in macOS** switch off becomes never for
-  every kind.
+  every kind, and a kind you had turned off in the bell gets macOS never and no sound. **Jobs**
+  set to never stops every job banner, also a job's own `notify: always` and the auto-pause
+  nudge. A burst's summary says what it holds ("3 sessions finished", "2 sessions need you, 1
+  finished").
 - **Sound**: none, or one of macOS's sounds: Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso
   (choosing one plays it). The rule: a sound plays while Deckhand is in the background, or also
   while it is in front when that kind's macOS says always. It is paced with the macOS

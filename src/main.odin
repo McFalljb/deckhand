@@ -110,6 +110,7 @@ init :: proc "c" () {
 		autotest_init()
 	}
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
+	if core.autotest_active do core.platform.notify_front = proc(title, body: string) {fmt.println("[autotest] notify (front):", title, "-", body)}
 	// test mode keeps its log out of the user's data dir
 	if core.autotest_active && core.hook_env(.Data_Dir) == "" {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
@@ -214,6 +215,7 @@ init_separate :: proc(note := "") -> bool {
 	autotest_init()
 	script_drain = client_drain // the script's commands go over core.sock
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
+	if core.autotest_active do core.platform.notify_front = proc(title, body: string) {fmt.println("[autotest] notify (front):", title, "-", body)}
 	if core.autotest_active && core.hook_env(.Data_Dir) == "" {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		core.home_root = strings.concatenate({cwd, "/build/test-data"})
@@ -289,6 +291,7 @@ platform_app :: proc() -> core.Platform {
 		wake = platform_wake,
 		run_later = platform_run_later,
 		notify = platform_notify,
+		notify_front = platform_notify_front,
 		trash = fs_trash, // editor_platform_*.odin
 		activity = platform_activity,
 		core_timer = platform_core_timer,

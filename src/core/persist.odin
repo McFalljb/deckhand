@@ -575,6 +575,7 @@ workspace_json :: proc() -> string {
 		k(&w, "bell")
 		open_obj(&w)
 		for g in Bell_Group do if g in st.bell_off do kb(&w, BELL_GROUP_NAMES[g], false)
+		if bell_os_all_never(st) do kb(&w, "os", false) // what an older build reads (a rollback keeps banners off)
 		// per group, only what differs from its default (notify.odin)
 		if st.bell_os != {} {
 			k(&w, "macos")
@@ -745,9 +746,16 @@ workspace_restore :: proc(text: string) -> string {
 			sb := Set_Bell{finished = on(bo, "finished"), waiting = on(bo, "waiting"), errors = on(bo, "errors"), jobs = on(bo, "jobs"), os = on(bo, "os"), dock = on(bo, "dock")}
 			mo, _ := bo["macos"].(json.Object)
 			so, _ := bo["sound"].(json.Object)
+			_, per_group := bo["macos"]
 			for g in Bell_Group {
 				if v, ok := enum_of(mo, BELL_GROUP_NAMES[g], OS_WHEN_NAMES); ok do sb.macos[g] = v
 				if v, ok := enum_of(so, BELL_GROUP_NAMES[g], BELL_SOUND_NAMES); ok do sb.sound[g] = v
+				// saved before the columns were independent: a group off in the bell had no
+				// banner either, and no sound
+				if on, ok := sb_group(sb, g).?; ok && !on && !per_group {
+					sb.macos[g] = Os_When.Never
+					if _, has := sb.sound[g].?; !has do sb.sound[g] = Bell_Sound.None
+				}
 			}
 			run(sb)
 		}
@@ -1123,4 +1131,16 @@ persist_after_layout :: proc(skip: bool) {
 term_note :: proc(t: ^Term, text: string) {
 	msg := fmt.tprintf("\x1b[2m%s\x1b[0m\r\n", text)
 	term_vt_write(t, transmute([]u8)msg)
+}
+
+// A Set_Bell's bell on/off for group g.
+@(private = "file")
+sb_group :: proc(c: Set_Bell, g: Bell_Group) -> Maybe(bool) {
+	switch g {
+	case .Finished: return c.finished
+	case .Waiting:  return c.waiting
+	case .Errors:   return c.errors
+	case .Jobs:     return c.jobs
+	}
+	return nil
 }

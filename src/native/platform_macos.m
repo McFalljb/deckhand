@@ -560,22 +560,24 @@ int dh_mac_test_panels(void) {
 int dh_mac_test_has_input_context(void) { return view.inputContext != nil; }
 
 // macOS shows a notification of the app in front only when its delegate says
-// so: the bell's "always" (core/notify.odin) raises them while Deckhand is in
-// front; everything else notifies only while it is in the background.
+// so: only those sent as "always" ones (the bell's kinds whose macOS says
+// always: userInfo front) show while Deckhand is in front; any other that
+// arrives just as Deckhand comes to the front goes to Notification Center only.
 @interface DHNoteDelegate : NSObject <UNUserNotificationCenterDelegate>
 @end
 @implementation DHNoteDelegate
 - (void)userNotificationCenter:(UNUserNotificationCenter*)center
        willPresentNotification:(UNNotification*)notification
          withCompletionHandler:(void (^)(UNNotificationPresentationOptions))handler {
-    handler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList);
+    BOOL front = [notification.request.content.userInfo[@"front"] boolValue];
+    handler(front ? (UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList) : UNNotificationPresentationOptionNone);
 }
 @end
 
 // An OS notification from the agent. A bundled app (an identifier) uses the
 // user notification center, asking for permission once; a bare binary (the
 // dev build) cannot, so the Dock icon bounces once instead.
-void dh_mac_notify(const char* title, const char* body) {
+void dh_mac_notify(const char* title, const char* body, int front) {
     NSString* t = [NSString stringWithUTF8String:title] ?: @"";
     NSString* b = [NSString stringWithUTF8String:body] ?: @"";
     if (NSBundle.mainBundle.bundleIdentifier == nil) {
@@ -595,6 +597,7 @@ void dh_mac_notify(const char* title, const char* body) {
     UNMutableNotificationContent* content = [UNMutableNotificationContent new];
     content.title = t;
     content.body = b;
+    if (front) content.userInfo = @{@"front" : @YES};
     UNNotificationRequest* req = [UNNotificationRequest requestWithIdentifier:[[NSUUID UUID] UUIDString] content:content trigger:nil];
     [center addNotificationRequest:req withCompletionHandler:nil];
 }

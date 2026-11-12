@@ -625,6 +625,24 @@ files_name_box :: proc(w: f32, placeholder := "") {
 	}
 }
 
+// A press on a row, or a drag from it, ends where it is: nothing opens or drops (an overlay
+// opened over it: ui_bell.odin).
+files_drag_cancel :: proc() {
+	if fu.press || fu.dragging do app.redraw = true
+	fu.press, fu.dragging = false, false
+}
+
+when core.TEST_HOOKS {
+	// Tests: a drag of path from the Files tab in progress; whether one is.
+	files_drag_for_test :: proc(path: string) {
+		delete(fu.press_path)
+		delete(fu.drag_path)
+		fu.press_path, fu.drag_path = strings.clone(path), strings.clone(path)
+		fu.press, fu.dragging = true, true
+	}
+	files_dragging :: proc() -> bool {return fu.press || fu.dragging}
+}
+
 // The file being dragged, under the pointer.
 files_drag_layout :: proc() {
 	if !fu.dragging do return
@@ -905,9 +923,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return true
 	case .MOUSE_LEAVE:
-		// a press that leaves the window is dropped (its release may never come)
-		if fu.press || fu.dragging do app.redraw = true
-		fu.press, fu.dragging = false, false
+		files_drag_cancel() // a press that leaves the window is dropped (its release may never come)
 		return false
 	case .MOUSE_SCROLL:
 		if !(files_shown() || settings_shown()) || !inside(clay.ID("files_list"), e.mouse_x, e.mouse_y) do return false

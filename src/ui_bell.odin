@@ -406,3 +406,73 @@ popover_event :: proc(e: ^sapp.Event, close: proc(), keys: proc(e: ^sapp.Event),
 	}
 	return false
 }
+
+// ---- what goes on under an overlay that opens or closes (#113) ----
+//
+// What takes the keys over the panes (a popover, a peek, a menu, the palette, a sheet) or shows in
+// their place (the Deck view). When one opens or closes, a key held down keeps repeating (macOS
+// repeats the key pressed last until its release): those repeats go nowhere, there or under it,
+// until a key is pressed afresh, so a key held in a terminal does not go on typing into it after a
+// popover came and went, nor the Esc that closed one, nor the Enter that opened a session from the
+// Deck view. A key pressed while one shows repeats in it as usual (↓ held in a list). And a drag
+// in progress when one opens ends (its release would go to the overlay, and the next click would
+// drop it: a Files drag pastes its path into a terminal). popover_repeat_event, first thing in
+// peek_event (before anything else in event()), keeps this.
+
+Overlay :: enum u8 {
+	Peek,
+	Bell,
+	Settings,
+	Shortcuts,
+	Setup,
+	Palette,
+	Menu,
+	Checkouts, // the Files tab's checkout switcher (ui_worktrees.odin)
+	Deck,
+}
+
+overlays_shown :: proc() -> bit_set[Overlay] {
+	o: bit_set[Overlay]
+	if peek_is_open() do o += {.Peek}
+	if bell_open() do o += {.Bell}
+	if settings_open() do o += {.Settings}
+	if shortcuts_open() do o += {.Shortcuts}
+	if setup_open() do o += {.Setup}
+	if palette_is_open() do o += {.Palette}
+	if menu.open do o += {.Menu}
+	if wt_menu.open do o += {.Checkouts}
+	if deck_shown() do o += {.Deck}
+	return o
+}
+
+@(private = "file")
+overlays: struct {
+	last:     bit_set[Overlay], // at the last event
+	at_press: bit_set[Overlay], // at the last fresh key press
+	no_repeat: bool, // they changed since: repeats go nowhere until the next fresh press
+}
+
+// Each event, before anything takes it: a repeat after an overlay opened or closed goes nowhere
+// (its CHAR and release too); an overlay opening ends a drag. True: taken.
+popover_repeat_event :: proc(e: ^sapp.Event) -> bool {
+	now := overlays_shown()
+	if now - overlays.last != {} do overlay_drags_cancel()
+	overlays.last = now
+	if now != overlays.at_press do overlays.no_repeat = true
+	if e.type != .KEY_DOWN do return false
+	if !e.key_repeat {
+		overlays.at_press, overlays.no_repeat = now, false
+		return false
+	}
+	if !overlays.no_repeat do return false
+	app.key_in_widget, app.key_taken = false, true
+	return true
+}
+
+// An overlay opened: a press or drag under it ends where it is, as when the window loses focus.
+@(private = "file")
+overlay_drags_cancel :: proc() {
+	files_drag_cancel()
+	tab_drag_cancel()
+	for _, x in term_views do term_cancel_drag(x)
+}

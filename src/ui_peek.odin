@@ -67,9 +67,6 @@ Peek_State :: struct {
 }
 peek: Peek_State
 peek_moving: bool // its fade runs: draw the next frame (ui_wants_frame)
-// the peek's own key that closed or opened it (⌘W, Esc, ⌘↩): its repeats go nowhere until its release
-@(private = "file")
-peek_held: sapp.Keycode
 // mouse buttons down (1 << button; peek_event): a peek does not open over a press (its release would be lost)
 @(private = "file")
 peek_buttons: u8
@@ -457,11 +454,9 @@ peek_key :: proc(e: ^sapp.Event) -> bool {
 	#partial switch e.key_code {
 	case .ENTER, .KP_ENTER:
 		if m != sapp.MODIFIER_SUPER do return false
-		peek_held = e.key_code
 		peek_go()
 	case .W:
 		if m != sapp.MODIFIER_SUPER do return false
-		peek_held = e.key_code
 		peek_close() // the peek, never the tab under it
 	case .A:
 		switch m {
@@ -478,7 +473,10 @@ peek_key :: proc(e: ^sapp.Event) -> bool {
 // Input while peeking (main.odin event, before anything else takes it): its own ⌘ chords, then
 // the bell popover's (popover_event). Nothing reaches the peeked terminal. True: taken.
 peek_event :: proc(e: ^sapp.Event) -> bool {
-	// the buttons down (the system's word on a move), and the repeats of its own key that closed it
+	// a key's repeats after an overlay (this one too) opened or closed go nowhere: the key that
+	// opened or closed it (⌘W, Esc, ⌘↩), one held in the terminal under it (ui_bell.odin)
+	if popover_repeat_event(e) do return true
+	// the buttons down (the system's word on a move)
 	peek_buttons |= peek_pressed
 	peek_pressed = 0
 	b := e.mouse_button < .INVALID ? u8(1) << u8(e.mouse_button) : 0
@@ -491,14 +489,7 @@ peek_event :: proc(e: ^sapp.Event) -> bool {
 		if e.modifiers & sapp.MODIFIER_RMB != 0 do peek_buttons |= 2
 		if e.modifiers & sapp.MODIFIER_MMB != 0 do peek_buttons |= 4
 	case .UNFOCUSED:
-		peek_buttons, peek_held = 0, .INVALID
-	case .KEY_UP:
-		if e.key_code == peek_held do peek_held = .INVALID
-	case .KEY_DOWN:
-		if e.key_repeat && e.key_code == peek_held {
-			app.key_taken = true
-			return true
-		}
+		peek_buttons = 0
 	}
 	if !peek_is_open() do return false
 	peek_tick() // its tab, session or machine went (a state update before this event): closed
@@ -511,7 +502,6 @@ peek_event :: proc(e: ^sapp.Event) -> bool {
 		return true
 	}
 	if e.type == .KEY_DOWN {
-		if e.key_code == .ESCAPE && e.modifiers & sapp.MODIFIER_SUPER == 0 do peek_held = .ESCAPE // it closes (popover_event)
 		app.key_in_widget, app.key_taken = false, false
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 && peek_key(e) {
 			app.key_taken = true // its release goes nowhere

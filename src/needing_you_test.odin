@@ -179,73 +179,75 @@ needing_you_focuses_the_tab_and_its_pane :: proc(t: ^testing.T) {
 // click on its row (focus_session here and there) and on its tab (focus_tab, run there).
 @(test)
 needing_you_other_machines :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	nn_reset()
-	state.settings.remote_machines = true
-	state.machines = make([]core.Machine_View, 2)
-	state.machines[0] = {no = 3, name = "nuc", status = .Online}
-	state.machines[1] = {no = 4, name = "box", status = .Offline}
-	nn_session(100, nn_tab(101, "unseen"))
-	nn_session(150, nn_tab(151))
-	mirror :: proc(no: u64, r: ^core.State, m: ^core.Machine_Mirror) {
-		s := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me"), title = strings.clone("there")}
-		append(&s.tabs, core.Tab{id = 10, kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle})
-		append(&s.tabs, core.Tab{id = 11, kind = core.Pi_Tab{}, title = strings.clone("pi 2"), status = .Running, waiting = true})
-		s.active_tab = 10
-		append(&r.open_sessions, s)
-		core.mirror_merge(no, r, m)
-	}
-	r3, r4: core.State
-	m3, m4: core.Machine_Mirror
-	mirror(3, &r3, &m3)
-	mirror(4, &r4, &m4)
-	core.machine_test_links.on = true
-	core.machine_test_links.up = make(map[u64]bool)
-	core.machine_test_links.up[3] = true
-	defer {
-		core.machine_route_down(3, gone = true)
-		core.machine_test_links.on = false
-		for x in core.machine_test_links.texts do delete(x)
-		clear(&core.machine_test_links.texts)
-		delete(core.machine_test_links.up)
-		core.mirror_unmerge(3)
-		core.mirror_unmerge(4)
-		core.mirror_free(&m3)
-		core.mirror_free(&m4)
-		core.replica_free(&r3, runtime.heap_allocator())
-		core.replica_free(&r4, runtime.heap_allocator())
+	when core.TEST_HOOKS { // machine_test_links is a test hook: not in a release build
+		context.allocator = runtime.heap_allocator()
 		nn_reset()
+		state.settings.remote_machines = true
+		state.machines = make([]core.Machine_View, 2)
+		state.machines[0] = {no = 3, name = "nuc", status = .Online}
+		state.machines[1] = {no = 4, name = "box", status = .Offline}
+		nn_session(100, nn_tab(101, "unseen"))
+		nn_session(150, nn_tab(151))
+		mirror :: proc(no: u64, r: ^core.State, m: ^core.Machine_Mirror) {
+			s := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me"), title = strings.clone("there")}
+			append(&s.tabs, core.Tab{id = 10, kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle})
+			append(&s.tabs, core.Tab{id = 11, kind = core.Pi_Tab{}, title = strings.clone("pi 2"), status = .Running, waiting = true})
+			s.active_tab = 10
+			append(&r.open_sessions, s)
+			core.mirror_merge(no, r, m)
+		}
+		r3, r4: core.State
+		m3, m4: core.Machine_Mirror
+		mirror(3, &r3, &m3)
+		mirror(4, &r4, &m4)
+		core.machine_test_links.on = true
+		core.machine_test_links.up = make(map[u64]bool)
+		core.machine_test_links.up[3] = true
+		defer {
+			core.machine_route_down(3, gone = true)
+			core.machine_test_links.on = false
+			for x in core.machine_test_links.texts do delete(x)
+			clear(&core.machine_test_links.texts)
+			delete(core.machine_test_links.up)
+			core.mirror_unmerge(3)
+			core.mirror_unmerge(4)
+			core.mirror_free(&m3)
+			core.mirror_free(&m4)
+			core.replica_free(&r3, runtime.heap_allocator())
+			core.replica_free(&r4, runtime.heap_allocator())
+			nn_reset()
+		}
+		s3, _ := core.id_pack(3, 9)
+		t3, _ := core.id_pack(3, 11)
+		// the online machine's waiting session before this Mac's unseen one; the offline one's never
+		order := nn_order()
+		testing.expectf(t, nn_same(order, {s3, 100}), "order %v", order)
+		state.current_session = 150
+		r := core.run_command(core.Next_Needing_You{}, NN_UI)
+		testing.expect(t, r.ok, r.error)
+		testing.expect_value(t, state.current_session, s3)
+		testing.expect_value(t, r.data, fmt.tprintf(`{{"session":%d,"tab_id":%d}}`, s3, t3))
+		// sent there as a click's: focus_session (no reply wanted), then focus_tab with that machine's ids
+		texts := core.machine_test_links.texts[:]
+		testing.expect_value(t, len(texts), 2)
+		if len(texts) == 2 {
+			testing.expect(t, strings.contains(texts[0], `"type":"focus_session","session":9`), texts[0])
+			testing.expect(t, strings.contains(texts[1], `"type":"focus_tab","tab_id":11`), texts[1])
+			testing.expect(t, strings.contains(texts[1], `"on_behalf":{"kind":"ui"}`), texts[1])
+		}
+		// next: this Mac's unseen one, then round to the machine's
+		core.run_command(core.Next_Needing_You{}, NN_UI)
+		testing.expect_value(t, state.current_session, u64(100))
+		core.find_session(100).tabs[0].unseen = true // seen by arriving: put back
+		// a hub (another machine viewing this one) is never sent to a third machine's sessions
+		order_hub := make([dynamic]u64, context.temp_allocator)
+		for x in core.needing_you(hub = true) do append(&order_hub, x.session.id)
+		testing.expectf(t, nn_same(order_hub[:], {100}), "hub order %v", order_hub)
+		// the machine goes offline: its sessions no longer count
+		state.machines[0].status = .Offline
+		order = nn_order()
+		testing.expectf(t, nn_same(order, {100}), "offline order %v", order)
 	}
-	s3, _ := core.id_pack(3, 9)
-	t3, _ := core.id_pack(3, 11)
-	// the online machine's waiting session before this Mac's unseen one; the offline one's never
-	order := nn_order()
-	testing.expectf(t, nn_same(order, {s3, 100}), "order %v", order)
-	state.current_session = 150
-	r := core.run_command(core.Next_Needing_You{}, NN_UI)
-	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, state.current_session, s3)
-	testing.expect_value(t, r.data, fmt.tprintf(`{{"session":%d,"tab_id":%d}}`, s3, t3))
-	// sent there as a click's: focus_session (no reply wanted), then focus_tab with that machine's ids
-	texts := core.machine_test_links.texts[:]
-	testing.expect_value(t, len(texts), 2)
-	if len(texts) == 2 {
-		testing.expect(t, strings.contains(texts[0], `"type":"focus_session","session":9`), texts[0])
-		testing.expect(t, strings.contains(texts[1], `"type":"focus_tab","tab_id":11`), texts[1])
-		testing.expect(t, strings.contains(texts[1], `"on_behalf":{"kind":"ui"}`), texts[1])
-	}
-	// next: this Mac's unseen one, then round to the machine's
-	core.run_command(core.Next_Needing_You{}, NN_UI)
-	testing.expect_value(t, state.current_session, u64(100))
-	core.find_session(100).tabs[0].unseen = true // seen by arriving: put back
-	// a hub (another machine viewing this one) is never sent to a third machine's sessions
-	order_hub := make([dynamic]u64, context.temp_allocator)
-	for x in core.needing_you(hub = true) do append(&order_hub, x.session.id)
-	testing.expectf(t, nn_same(order_hub[:], {100}), "hub order %v", order_hub)
-	// the machine goes offline: its sessions no longer count
-	state.machines[0].status = .Offline
-	order = nn_order()
-	testing.expectf(t, nn_same(order, {100}), "offline order %v", order)
 }
 
 // Who may send it: as focus_session (the user, scripts, Atlas; never a pi tab); the action in the
@@ -331,40 +333,42 @@ needing_you_remote_osc_and_claude_status :: proc(t: ^testing.T) {
 // finished with this request's id).
 @(test)
 needing_you_remote_focus_result :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	nn_reset()
-	state.settings.remote_machines = true
-	state.machines = make([]core.Machine_View, 1)
-	state.machines[0] = {no = 3, name = "nuc", status = .Online}
-	r: core.State
-	m: core.Machine_Mirror
-	s := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me"), title = strings.clone("there")}
-	append(&s.tabs, core.Tab{id = 10, kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle})
-	append(&s.tabs, core.Tab{id = 11, kind = core.Pi_Tab{}, title = strings.clone("pi 2"), status = .Running, waiting = true})
-	s.active_tab = 10
-	append(&r.open_sessions, s)
-	core.mirror_merge(3, &r, &m)
-	core.machine_test_links.on = true
-	core.machine_test_links.up = make(map[u64]bool)
-	core.machine_test_links.up[3] = true
-	defer {
-		core.machine_route_down(3, gone = true)
-		core.machine_test_links.on = false
-		for x in core.machine_test_links.texts do delete(x)
-		clear(&core.machine_test_links.texts)
-		delete(core.machine_test_links.up)
-		core.mirror_unmerge(3)
-		core.mirror_free(&m)
-		core.replica_free(&r, runtime.heap_allocator())
+	when core.TEST_HOOKS { // machine_test_links is a test hook: not in a release build
+		context.allocator = runtime.heap_allocator()
 		nn_reset()
+		state.settings.remote_machines = true
+		state.machines = make([]core.Machine_View, 1)
+		state.machines[0] = {no = 3, name = "nuc", status = .Online}
+		r: core.State
+		m: core.Machine_Mirror
+		s := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me"), title = strings.clone("there")}
+		append(&s.tabs, core.Tab{id = 10, kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle})
+		append(&s.tabs, core.Tab{id = 11, kind = core.Pi_Tab{}, title = strings.clone("pi 2"), status = .Running, waiting = true})
+		s.active_tab = 10
+		append(&r.open_sessions, s)
+		core.mirror_merge(3, &r, &m)
+		core.machine_test_links.on = true
+		core.machine_test_links.up = make(map[u64]bool)
+		core.machine_test_links.up[3] = true
+		defer {
+			core.machine_route_down(3, gone = true)
+			core.machine_test_links.on = false
+			for x in core.machine_test_links.texts do delete(x)
+			clear(&core.machine_test_links.texts)
+			delete(core.machine_test_links.up)
+			core.mirror_unmerge(3)
+			core.mirror_free(&m)
+			core.replica_free(&r, runtime.heap_allocator())
+			nn_reset()
+		}
+		res := core.run_command(core.Next_Needing_You{}, {kind = .Script})
+		testing.expect(t, !res.ok, "a script's focus_tab there is refused: so is this")
+		testing.expect(t, strings.contains(res.error, "another machine"), res.error)
+		state.current_session = 0
+		res = core.run_command(core.Next_Needing_You{}, NN_UI, 77)
+		testing.expect(t, res.ok, res.error)
+		testing.expect(t, res.pending, "forwarded: its finished comes later")
 	}
-	res := core.run_command(core.Next_Needing_You{}, {kind = .Script})
-	testing.expect(t, !res.ok, "a script's focus_tab there is refused: so is this")
-	testing.expect(t, strings.contains(res.error, "another machine"), res.error)
-	state.current_session = 0
-	res = core.run_command(core.Next_Needing_You{}, NN_UI, 77)
-	testing.expect(t, res.ok, res.error)
-	testing.expect(t, res.pending, "forwarded: its finished comes later")
 }
 
 // A text field with the keyboard (the sidebar filter, a browser's address): ⌘A alone selects all;

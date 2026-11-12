@@ -100,11 +100,11 @@ serve_main :: proc(args: []string) -> int {
 	core.home_root = strings.clone(data)
 	core.window_floor_load() // the window floor of earlier runs (window_sock.odin)
 	if why := core.instance_guard(core.home_root, !core.autotest_active || core.hook_env(.Runtime_Dir) != ""); why != "" {
-		fmt.eprintln("deckhand-core serve:", why)
+		core.log_ln("deckhand-core serve:", why)
 		core.core_refused_write(run, why) // its window says why (client_core_dial)
 		return 3
 	}
-	fmt.eprintfln("deckhand-core serve: pid %d, data %s, run %s", posix.getpid(), data, run)
+	core.log_fln("deckhand-core serve: pid %d, data %s, run %s", posix.getpid(), data, run)
 	core.event_log_open(core.home_root)
 	{
 		y, m, d := time.date(time.now())
@@ -117,11 +117,11 @@ serve_main :: proc(args: []string) -> int {
 	core.rescan_now(claude = false)
 	// the window's token first: a window that sees core.sock answer finds the token too
 	if !core.window_token_publish(run) {
-		fmt.eprintln("deckhand-core serve: cannot write", run, "/", core.WINDOW_TOKEN_FILE)
+		core.log_ln("deckhand-core serve: cannot write", run, "/", core.WINDOW_TOKEN_FILE)
 		return 1
 	}
 	if !core.socket_start() {
-		fmt.eprintln("deckhand-core serve: cannot listen on core.sock")
+		core.log_ln("deckhand-core serve: cannot listen on core.sock")
 		return 1
 	}
 	// test mode: a control token in the core's log, for the scenes' --ctl (never in a release build)
@@ -240,7 +240,7 @@ serve_loop :: proc() {
 		core.window_link_io()
 		loop_again = core.output_backlog() && terms_bytes_in() != before
 		if core.core_idle_due(&loop.idle_since, core.core_idle_facts(), time.tick_now()) {
-			fmt.eprintfln("deckhand-core serve: no window, no tab's process and no job run for %v: exiting", core.CORE_IDLE_EXIT)
+			core.log_fln("deckhand-core serve: no window, no tab's process and no job run for %v: exiting", core.CORE_IDLE_EXIT)
 			loop.quit = true
 		}
 		free_all(context.temp_allocator)
@@ -296,7 +296,7 @@ serve_stop :: proc(run: string) {
 detach_serve :: proc(args: []string) -> int {
 	self := os.args[0]
 	if !strings.has_prefix(self, "/") {
-		fmt.eprintln("deckhand-core __detach serve: not started by its absolute path:", self)
+		core.log_ln("deckhand-core __detach serve: not started by its absolute path:", self)
 		return 2
 	}
 	cwd, _ := os.get_working_directory(context.temp_allocator)

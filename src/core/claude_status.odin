@@ -97,7 +97,7 @@ hints_save :: proc() {
 	strings.write_string(&b, `{"version_dismissed":`)
 	json_quote(&b, version_dismissed)
 	strings.write_string(&b, "}\n")
-	if e := write_atomic(p, strings.to_string(b)); e != "" do fmt.eprintln("Deckhand: could not save", p, ":", e)
+	if e := write_atomic(p, strings.to_string(b)); e != "" do log_ln("Deckhand: could not save", p, ":", e)
 }
 
 // This run's record of a tab (a restart starts a new one).

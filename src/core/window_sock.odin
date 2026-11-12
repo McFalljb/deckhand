@@ -349,7 +349,7 @@ window_floor_save :: proc(v: cw.Version) {
 	tmp := fmt.tprintf("%s.new", path)
 	text := fmt.tprintf("%d.%d.%d\n", v.major, v.minor, v.patch)
 	if os.write_entire_file(tmp, transmute([]u8)text) != nil || os.rename(tmp, path) != nil {
-		fmt.eprintln("Deckhand: the window floor could not be saved in", path)
+		log_ln("Deckhand: the window floor could not be saved in", path)
 		os.remove(tmp)
 	}
 }

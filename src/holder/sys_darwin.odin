@@ -15,6 +15,20 @@ import "../trust"
 
 foreign import libc "system:System"
 
+CLOCK_UPTIME_RAW :: 8 // <time.h>: like CLOCK_MONOTONIC_RAW, but it stops while the Mac sleeps
+
+@(private = "file")
+foreign libc {
+	clock_gettime_nsec_np :: proc(clock: c.int) -> u64 ---
+}
+
+// The clock a core's silence is measured on (pong_timeout): it does not advance while the Mac
+// sleeps, so a core that slept with the holder is not dropped on wake before its next PING (#108).
+// time.tick_now (CLOCK_MONOTONIC_RAW on macOS) counts the sleep.
+awake_now :: proc() -> time.Tick {
+	return time.Tick{_nsec = i64(clock_gettime_nsec_np(CLOCK_UPTIME_RAW))}
+}
+
 TIOCSWINSZ :: 0x80087467
 TIOCGWINSZ :: 0x40087468
 EAGAIN :: 35

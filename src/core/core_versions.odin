@@ -191,7 +191,7 @@ core_collect :: proc(vdir, in_use: string) {
 		if posix.lstat(strings.clone_to_cstring(e.fullpath, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do continue
 		if strings.contains(in_use, fmt.tprintf("%s/%s/", vdir, e.name)) do continue
 		if real != "" && strings.contains(in_use, fmt.tprintf("%s/%s/", real, e.name)) do continue
-		fmt.eprintln("Deckhand: background core: removing an unused version,", e.fullpath)
+		log_ln("Deckhand: background core: removing an unused version,", e.fullpath)
 		remove_tree(e.fullpath)
 	}
 }

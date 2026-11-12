@@ -122,13 +122,13 @@ holder_upgrade_run :: proc(auto: bool) -> bool {
 		} else {
 			r := holder_upgrade(path)
 			if auto && r.ok {
-				fmt.eprintfln("Deckhand: session holder: upgraded in place to holder_rev %d, every session kept", r.holder_rev)
+				log_fln("Deckhand: session holder: upgraded in place to holder_rev %d, every session kept", r.holder_rev)
 				err = false
 			} else do msg, err = holder_restart_text(r, auto)
 			delete(r.error)
 			delete(path)
 		}
-		if auto && msg != "" do fmt.eprintln("Deckhand:", msg)
+		if auto && msg != "" do log_ln("Deckhand:", msg)
 		sync.lock(&restart.mu)
 		delete(restart.msg)
 		restart.msg, restart.err, restart.running = msg, err, false

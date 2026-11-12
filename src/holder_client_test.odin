@@ -607,6 +607,90 @@ holder_lost_alive_no_restart :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(saved, fmt.tprintf(`"holder":"%s"`, f.instance)), saved)
 }
 
+// #108: the holder dropped this core (its pong timeout: the core was stopped, or the Mac slept)
+// while both still run. The core attaches to the same holder again, as after an upgrade, and the
+// pi tab stays the same running terminal: the holder's TAIL and what follows reach it, input
+// reaches the holder on the new connection, nothing is spawned or restarted, nothing is lost.
+@(test)
+holder_dropped_core_rejoins :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}, rejoin_output = transmute([]u8)string("after the drop")}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"eeee-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj)
+	adopt_run(t, &f, text, binds)
+	s := &state.open_sessions[len(state.open_sessions) - 1]
+	s.missing = false
+	tab := &s.tabs[0]
+	if !testing.expect_value(t, tab.status, core.Tab_Status.Running) do return
+	fp := &f
+	sync.atomic_store(&fp.drop, true)
+	rejoined := false
+	for _ in 0 ..< 300 { // the drop, then the second HELLO and its OUTPUT
+		core.pump_all()
+		sync.lock(&core.hc.mu)
+		h := core.hc.held[3]
+		got := h != nil && strings.contains(string(h.buf[:]), "after the drop")
+		sync.unlock(&core.hc.mu)
+		if sync.atomic_load(&fp.hellos) >= 2 && (got || term_shows(tab.id, "after the drop")) {
+			rejoined = true
+			break
+		}
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expectf(t, rejoined, "not attached again: hellos %d, lost %v", sync.atomic_load(&fp.hellos), sync.atomic_load(&core.hc.lost))
+	testing.expect(t, !sync.atomic_load(&core.hc.lost), "the holder was taken for lost")
+	testing.expect(t, core.hc.on, "not attached")
+	for _ in 0 ..< 20 {
+		core.pump_all()
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect_value(t, tab.status, core.Tab_Status.Running)
+	testing.expect_value(t, core.tab_held_away(tab), u32(0))
+	testing.expect(t, !core.holder_term_lost(3), "its terminal was marked lost")
+	testing.expect(t, term_shows(tab.id, "after the drop"), "the output after the rejoin never reached the tab")
+	core.holder_input(3, transmute([]u8)string("typed after"))
+	typed := false
+	for _ in 0 ..< 200 {
+		for g in core.fake_holder_got(fp) do if g.kind == .Input && g.terminal == 3 && g.conn == 2 && strings.contains(g.payload, "typed after") do typed = true
+		if typed do break
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(t, typed, "input after the rejoin did not reach the holder on the new connection")
+	testing.expect_value(t, core.fake_holder_count(fp, .Spawn), 0)
+	testing.expect_value(t, core.fake_holder_count(fp, .Release), 0)
+}
+
+// The rejoin takes only the same holder run: a WELCOME with another instance (another holder on
+// that socket) is not adopted. The core loses the holder as before, and its tab is never
+// restarted while the holder still runs (holder_lost_alive_no_restart).
+@(test)
+holder_rejoin_other_instance_refused :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, rejoin_instance = "another-holder-run", terms = {fake_term(3, "")}, rejoin_output = transmute([]u8)string("not ours")}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	sync.atomic_store(&f.drop, true)
+	testing.expect(t, core.wait_until(3000, proc() -> bool {return sync.atomic_load(&core.hc.lost)}), "not lost")
+	testing.expect_value(t, sync.atomic_load(&f.hellos), 2) // it tried the rejoin
+	sync.lock(&core.hc.mu)
+	h := core.hc.held[3]
+	testing.expect(t, h != nil && h.lost && !strings.contains(string(h.buf[:]), "not ours"), "took another holder run's terminal")
+	sync.unlock(&core.hc.mu)
+	testing.expect_value(t, core.fake_holder_count(&f, .Spawn), 0)
+}
+
+@(private = "file")
+term_shows :: proc(tab_id: u64, text: string) -> bool {
+	tm := core.term_of(tab_id)
+	return tm != nil && strings.contains(gt_screen_text(tm.gt), text)
+}
+
 // macOS refuses a connect with ECONNREFUSED when the listen backlog is full, too: a live
 // holder's socket refused is tried again, with backoff (HOLDER_RECHECKS), before it is taken
 // for a dead one's and removed.

@@ -427,7 +427,7 @@ relay_attach :: proc(r: ^Term_Relay) {
 // Ends r's stream there (it misbehaved): attached again RELAY_RETRY later.
 @(private = "file")
 relay_restart :: proc(r: ^Term_Relay, why: string) {
-	fmt.eprintfln("Deckhand: machine %s's terminal %d: %s (attached again in %v)", machine_name(r.machine), id_local(r.tab_id), why, RELAY_RETRY)
+	log_fln("Deckhand: machine %s's terminal %d: %s (attached again in %v)", machine_name(r.machine), id_local(r.tab_id), why, RELAY_RETRY)
 	if r.remote != 0 do machine_link_send_text(r.machine, fmt.tprintf(`{{"v":%d,"type":"term.detach","channel":%d}}`, PROTOCOL_VERSION, r.remote))
 	r.remote, r.asking = 0, false
 	r.retry_at = time.tick_add(time.tick_now(), RELAY_RETRY)

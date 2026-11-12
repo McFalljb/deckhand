@@ -37,7 +37,7 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 	if systemd_start_wanted(real_path(bin), real_path(current), core_separate, autotest_active, systemd_unit_ours(data), core_use_previous_serve(data) != "") {
 		out, st := run_group(systemd_argv(.Start), 5 * time.Second, merge_stderr = true)
 		if st == .Ok do return 0, true, ""
-		fmt.eprintfln("Deckhand: background core: systemctl --user start %s failed (%v: %s): starting it directly", SYSTEMD_UNIT, st, strings.trim_space(out))
+		log_fln("Deckhand: background core: systemctl --user start %s failed (%v: %s): starting it directly", SYSTEMD_UNIT, st, strings.trim_space(out))
 	}
 	ours, _ := os.environ(context.temp_allocator)
 	return scope_launch(bin, run, data, core_launch_env(ours, from_tab), "serve", secret)
@@ -64,7 +64,7 @@ scope_launch :: proc(bin, run, data: string, env: []string, mode, secret: string
 		return holder_launch_direct(bin, run, data, env, mode, secret)
 	}
 	if !systemd_scope_args_ok({bin, run, data}) {
-		fmt.eprintfln("Deckhand: %s: a '$' in %s, %s or %s (systemd-run would expand it): started directly, outside a systemd scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", bin, run, data)
+		log_fln("Deckhand: %s: a '$' in %s, %s or %s (systemd-run would expand it): started directly, outside a systemd scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", bin, run, data)
 		return holder_launch_direct(bin, run, data, env, mode, secret)
 	}
 	r: [4]u8
@@ -94,7 +94,7 @@ scope_launch :: proc(bin, run, data: string, env: []string, mode, secret: string
 			time.sleep(10 * time.Millisecond)
 		}
 	}
-	fmt.eprintfln("Deckhand: %s: the systemd scope %s failed (%s): starting it directly, outside a scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", unit, swhy)
+	log_fln("Deckhand: %s: the systemd scope %s failed (%s): starting it directly, outside a scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", unit, swhy)
 	return holder_launch_direct(bin, run, data, env, mode, secret)
 }
 

@@ -98,7 +98,7 @@ data_dir_pick :: proc(new, old: string) -> string {
 	if note != data_dir_note {
 		delete(data_dir_note, runtime.heap_allocator())
 		data_dir_note = strings.clone(note, runtime.heap_allocator())
-		fmt.eprintln(note)
+		log_ln(note)
 	}
 	return pick
 }

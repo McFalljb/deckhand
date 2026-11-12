@@ -1212,7 +1212,7 @@ machines_reachable_grant_take :: proc() {
 		if machines_grant_take_at(upath(home_root, MACHINES_GRANT_FILE)) && !state.settings.machines_reachable {
 			state.settings.machines_reachable = true
 			persist.gen += 1 // saved with the next save
-			fmt.eprintln("Deckhand: Allow other machines to connect is on (the install from another machine asked for it)")
+			log_ln("Deckhand: Allow other machines to connect is on (the install from another machine asked for it)")
 		}
 	}
 }

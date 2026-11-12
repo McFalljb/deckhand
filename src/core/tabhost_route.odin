@@ -220,7 +220,7 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 	heap := runtime.heap_allocator()
 	r, rerr := tab_host_result_read(obj, text)
 	if rerr != "" {
-		fmt.eprintln("Deckhand: a finished from the window refused:", rerr)
+		log_ln("Deckhand: a finished from the window refused:", rerr)
 		return
 	}
 	private := bool(obj["private"].(json.Boolean) or_else false)
@@ -251,7 +251,7 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 		running := false
 		for c in host.calling do if c.id == id do running = true
 		if !running {
-			when TEST_HOOKS do fmt.eprintln("[tab_host] an answer to a call nobody waits for:", id)
+			when TEST_HOOKS do log_ln("[tab_host] an answer to a call nobody waits for:", id)
 			return
 		}
 		if old, had := host.answers[id]; had {
@@ -263,7 +263,7 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 	}
 	n, nok := obj["request_id"].(json.Integer)
 	if !nok || n <= 0 {
-		fmt.eprintln("Deckhand: a finished from the window with neither id nor request_id")
+		log_ln("Deckhand: a finished from the window with neither id nor request_id")
 		return
 	}
 	rid := u64(n)
@@ -288,7 +288,7 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 		emit_event(Finished_Event{request_id = rid, result = r, private = private || tab_host_data_private(w.cmd)})
 		return
 	}
-	when TEST_HOOKS do fmt.eprintln("[tab_host] a finished for a request nobody waits for:", rid)
+	when TEST_HOOKS do log_ln("[tab_host] a finished for a request nobody waits for:", rid)
 }
 
 // Ends the calls and requests past their deadline (core_tick).

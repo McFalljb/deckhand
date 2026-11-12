@@ -34,6 +34,8 @@ Fake_Got :: struct {
 	kind:     hw.Kind,
 	terminal: u32,
 	mode:     string, // GOODBYE's
+	conn:     int, // which HELLO's connection it came on (1 = the first)
+	payload:  string, // INPUT's bytes (temp)
 }
 
 Fake_Holder :: struct {
@@ -51,6 +53,14 @@ Fake_Holder :: struct {
 	// first terminal and its EXITED (code 7). After that it sends nothing more, PONG included.
 	upgrade_output: []u8,
 	upgraded:  bool,
+	// The holder's pong-timeout drop (#108): once the test sets drop (atomic), the fake closes the
+	// connection, as conn_drop does, and keeps listening. A later HELLO is WELCOMEd again (with
+	// rejoin_instance in place of instance when set: a different holder run), the TAILs, then
+	// rejoin_output as OUTPUT of the first terminal.
+	drop:            bool,
+	rejoin_instance: string,
+	rejoin_output:   []u8,
+	hellos:    int, // HELLOs so far (atomic)
 	helloed:   bool, // a HELLO came (atomic)
 	key:       [32]u8,
 	dir:       string, // the runtime dir (also home_root/..)
@@ -109,6 +119,7 @@ fake_holder_stop :: proc(f: ^Fake_Holder) {
 	home_root = f.saved_root
 	os.unset_env("DECKHAND_HOLDER_DIRECT")
 	state.settings.keep_sessions = false
+	for g in f.got do delete(g.payload, runtime.heap_allocator())
 	delete(f.got)
 }
 
@@ -179,6 +190,7 @@ fake_serve :: proc(f: ^Fake_Holder) {
 	defer delete(buf)
 	hello := false
 	for !sync.atomic_load(&f.stop) {
+		if hello && sync.atomic_load(&f.hellos) == 1 && sync.atomic_load(&f.drop) do return // the holder's conn_drop: closed, nothing more
 		if hello && f.no_read {
 			time.sleep(10 * time.Millisecond)
 			continue
@@ -195,6 +207,7 @@ fake_serve :: proc(f: ^Fake_Holder) {
 				if kind != .Hello do return
 				hello = true
 				sync.atomic_store(&f.helloed, true)
+				sync.atomic_add(&f.hellos, 1)
 				switch f.mode {
 				case .Refuse:
 					fake_send(f, .Refused, 0, hw.Refused{code = f.refuse_code != "" ? f.refuse_code : "wire", error = "fake: refused"})
@@ -207,7 +220,8 @@ fake_serve :: proc(f: ^Fake_Holder) {
 					return
 				case .Silent, .Hangup:
 				case .Welcome:
-					w := hw.Welcome{wire = hw.WIRE, instance = f.instance, pid = i64(posix.getpid()), holder_rev = 1, previous = f.upgraded ? "upgrade" : f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
+					rejoin := sync.atomic_load(&f.hellos) > 1
+					w := hw.Welcome{wire = hw.WIRE, instance = rejoin && f.rejoin_instance != "" ? f.rejoin_instance : f.instance, pid = i64(posix.getpid()), holder_rev = 1, previous = f.upgraded ? "upgrade" : rejoin ? "crash" : f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
 					out := make([dynamic]u8, context.temp_allocator)
 					hw.encode(&out, .Welcome, 0, w)
 					for wt, i in f.terms {
@@ -216,6 +230,9 @@ fake_serve :: proc(f: ^Fake_Holder) {
 					}
 					if len(f.output) > 0 && len(f.terms) > 0 && !f.upgraded {
 						hw.encode_output(&out, .Output, u32(f.terms[0].id), f.terms[0].offset, f.output)
+					}
+					if rejoin && len(f.rejoin_output) > 0 && len(f.terms) > 0 {
+						hw.encode_output(&out, .Output, u32(f.terms[0].id), f.terms[0].offset, f.rejoin_output)
 					}
 					if f.upgraded && len(f.upgrade_output) > 0 && len(f.terms) > 0 {
 						t0 := f.terms[0]
@@ -226,7 +243,8 @@ fake_serve :: proc(f: ^Fake_Holder) {
 				}
 				continue
 			}
-			g := Fake_Got{kind = kind, terminal = fr.terminal}
+			g := Fake_Got{kind = kind, terminal = fr.terminal, conn = sync.atomic_load(&f.hellos)}
+			if kind == .Input do g.payload = strings.clone(string(fr.payload), runtime.heap_allocator()) // freed by fake_holder_stop
 			#partial switch kind {
 			case .Spawn:
 				fake_send(f, .Spawned, fr.terminal, hw.Spawned{pid = i64(posix.getpid()), pgid = i64(posix.getpid())})

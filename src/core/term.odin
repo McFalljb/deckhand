@@ -259,7 +259,7 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	if tab_id != 0 && tab_id != harness_run.term_id && holder_wanted() {
 		p, ok = holder_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows, px_w, px_h)
 		if ok do socket_tokens_bind(tab_id, p.held, start) // its tokens (minted for its env) and what it is are kept with it
-		else do fmt.eprintln("Deckhand: session holder: SPAWN failed; this tab runs on its own PTY (it stops at quit)")
+		else do log_ln("Deckhand: session holder: SPAWN failed; this tab runs on its own PTY (it stops at quit)")
 	}
 	if !ok {
 		p, ok = pty_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows)

@@ -38,7 +38,7 @@ import "../trust"
 HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh; trust.CORE_IDS)
 HOLDER_BIN :: "deckhand-core"
 CORE_APP :: "Deckhand Core.app" // in Deckhand.app/Contents/Helpers (scripts/bundle-app.sh)
-HOLDER_REV :: 6 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
+HOLDER_REV :: 7 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 CORE_LOG :: "core.log" // in the runtime dir: a separate core's stderr (deckhand-core serve)
 
@@ -362,7 +362,7 @@ core_install :: proc(bin, data: string) -> (path: string, ok: bool, why: string)
 	if autotest_active do return strings.clone(bin), true, ""
 	app := holder_bundle_of(fmt.tprintf("%s/%s", filepath.dir(bin), HOLDER_BIN))
 	if app == "" {
-		fmt.eprintln("Deckhand: background core: no Deckhand Core.app (a bare development build): running", bin, "in place")
+		log_ln("Deckhand: background core: no Deckhand Core.app (a bare development build): running", bin, "in place")
 		return strings.clone(bin), true, ""
 	}
 	return core_install_app(app, data)

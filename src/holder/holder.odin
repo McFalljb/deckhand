@@ -36,7 +36,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 6
+HOLDER_REV :: 7
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -125,7 +125,7 @@ Conn :: struct {
 	rx:            holderwire.Stream,
 	out:           [dynamic]u8,
 	out_head:      int,
-	last_rx:       time.Tick,
+	last_rx:       time.Tick, // on awake_now's clock (not time.tick_now's): the Mac's sleep is no silence
 	accepted_at:   time.Tick,
 	welcomed:      bool,
 	wire:          i64, // the wire WELCOME agreed on
@@ -184,8 +184,17 @@ Start_Error :: enum {
 	Lock_Busy, // an older Deckhand holds instance.lock exclusively
 }
 
+// One line on stderr (<run>/holder.log): the time in UTC first (#108), as the core's (src/core
+// log_line.odin), then who wrote it.
 log_line :: proc(msg: string) {
-	fmt.eprintf("deckhand-core[%d]: %s\n", getpid(), msg)
+	fmt.eprintf("%s deckhand-core[%d]: %s\n", log_stamp(time.now()), getpid(), msg)
+}
+
+// "YYYY-MM-DDTHH:MM:SSZ" for t (temp).
+log_stamp :: proc(t: time.Time) -> string {
+	y, mo, d := time.date(t)
+	h, mi, s := time.clock(t)
+	return fmt.tprintf("%04d-%02d-%02dT%02d:%02d:%02dZ", y, int(mo), d, h, mi, s)
 }
 
 hlog :: proc(h: ^Holder, format: string, args: ..any) {
@@ -380,7 +389,7 @@ holder_attach :: proc(h: ^Holder, fd: c.int) -> bool {
 	set_nonblock(fd)
 	set_nosigpipe(fd)
 	cn := new(Conn)
-	cn.fd, cn.peer, cn.last_rx, cn.accepted_at = fd, peer, time.tick_now(), time.tick_now()
+	cn.fd, cn.peer, cn.last_rx, cn.accepted_at = fd, peer, awake_now(), time.tick_now()
 	h.serials += 1
 	cn.serial = h.serials
 	append(&h.conns, cn)
@@ -499,8 +508,8 @@ reading_allowed :: proc(h: ^Holder) -> bool {return h.core == nil || queued(h.co
 queued :: proc(cn: ^Conn) -> int {return len(cn.out) - cn.out_head}
 
 @(private)
-ms_until :: proc(since: time.Tick, d: time.Duration) -> int {
-	left := d - time.tick_since(since)
+ms_until :: proc(since: time.Tick, d: time.Duration, now := time.Tick{}) -> int {
+	left := d - time.tick_diff(since, now == {} ? time.tick_now() : now) // now: another clock's (awake_now)
 	return max(int(time.duration_milliseconds(left)) + 1, 0)
 }
 
@@ -510,7 +519,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 	if h.shutting_down do return 10
 	for cn in h.conns {
 		if cn.closing do t = min(t, ms_until(cn.closing_since, cn.linger ? LINGER : h.cfg.pong_timeout))
-		else do t = min(t, ms_until(cn.last_rx, h.cfg.pong_timeout))
+		else do t = min(t, ms_until(cn.last_rx, h.cfg.pong_timeout, awake_now()))
 		if !cn.welcomed && !cn.closing do t = min(t, ms_until(cn.accepted_at, h.cfg.hello_timeout))
 	}
 	for term in h.terms {
@@ -567,7 +576,7 @@ conn_read :: proc(h: ^Holder, cn: ^Conn) {
 		conn_drop(h, cn, fmt.tprintf("peer changed since accept: %v", d))
 		return
 	}
-	cn.last_rx = time.tick_now()
+	cn.last_rx = awake_now()
 	holderwire.stream_feed(&cn.rx, h.buf[:n])
 	if !cn.welcomed do trust.wipe(h.buf[:n]) // a HELLO may carry the successor secret (its frame is wiped once decoded)
 	// before HELLO only a HELLO, judged by its header (nothing of a big payload is buffered)
@@ -1002,7 +1011,7 @@ timers :: proc(h: ^Holder) {
 		if cn.dead do continue
 		if cn.closing {
 			if time.tick_since(cn.closing_since) >= (cn.linger ? LINGER : h.cfg.pong_timeout) do cn.dead = true
-		} else if time.tick_since(cn.last_rx) >= h.cfg.pong_timeout {
+		} else if time.tick_diff(cn.last_rx, awake_now()) >= h.cfg.pong_timeout {
 			conn_drop(h, cn, "no frame within the pong timeout")
 		} else if !cn.welcomed && time.tick_since(cn.accepted_at) >= h.cfg.hello_timeout {
 			conn_drop(h, cn, "no HELLO in time")

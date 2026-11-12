@@ -122,6 +122,7 @@ Typical times and tags are in `tests/scenes.txt`; each script's header says what
 |---|---|
 | `two-process` | a separate core: the window launches it, attaches, closes; the core and a shell run on; a second window shows the same terminal |
 | `window-attach` | the window killed during a pi turn (the turn runs on); the core killed (the window relaunches one, which adopts from the holder) |
+| `holder-stall` | the core stopped (SIGSTOP) past the holder's 30 s pong timeout, as a sleep or a long stall would (#108): once continued it attaches to the same holder again; its pi tab still runs, same process, input and output through it, nothing started twice |
 | `handover` | a core handed over to another: same holder and session pids, terminals exact from the snapshot, a job run finished, no secret in any log; the supervisor relaunches a killed core |
 | `keep-sessions` | the holder through a quit, a kill -9 of the app and of the holder; Stop All; *Restart session holder* in place |
 | `hidden-window` (`inproc`) | the core loop while the window is hidden: output, the bell and exits still land; a quit while hidden |

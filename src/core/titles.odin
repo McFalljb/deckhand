@@ -442,7 +442,7 @@ titles_save :: proc() {
 	titles.saved_at = time.tick_now()
 	path := titles.path
 	sync.unlock(&titles.mu)
-	if err := write_atomic(path, strings.to_string(b)); err != "" do fmt.eprintln("Deckhand: could not save session titles:", err)
+	if err := write_atomic(path, strings.to_string(b)); err != "" do log_ln("Deckhand: could not save session titles:", err)
 }
 
 // Forgets everything (tests).

@@ -155,11 +155,11 @@ successor_secret_take :: proc(run: string) -> string {
 	if !peer.ok || peer.euid != u32(posix.geteuid()) do return ""
 	// it is a relaunch helper: Deckhand's holder binary, signed as we are
 	if exe := holder_pid_exe(peer.pid); !strings.has_suffix(exe, "/" + HOLDER_BIN) {
-		fmt.eprintln("Deckhand: successor.sock is not a relaunch helper's: not used")
+		log_ln("Deckhand: successor.sock is not a relaunch helper's: not used")
 		return ""
 	}
 	if why := holder_peer_code_ok(tok); why != "" {
-		fmt.eprintln("Deckhand: successor.sock's relaunch helper is refused:", why)
+		log_ln("Deckhand: successor.sock's relaunch helper is refused:", why)
 		return ""
 	}
 	if !sock_write_all(fd, transmute([]u8)fmt.tprintf("%d\n", posix.getpid())) do return ""

@@ -106,7 +106,7 @@ restore_panes :: proc(s: ^Open_Session, layout: Restore_Layout, places: []Restor
 	pane_focus(s, focus)
 
 	if err := session_check(s); err != "" {
-		fmt.eprintln("Deckhand: a saved pane layout was not restored:", err)
+		log_ln("Deckhand: a saved pane layout was not restored:", err)
 		session_panes_free(s)
 		s.active_tab = one_pane_active
 		session_panes_init(s)

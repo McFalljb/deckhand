@@ -142,7 +142,7 @@ hook_lookup :: proc(h: Hook, allocator := context.temp_allocator) -> (string, bo
 		if ok && !hook_warned[h] {
 			hook_warned[h] = true
 			hook_last_warning = fmt.aprintf("Deckhand: %s is the old name of %s; set %s instead (the old name stops working in 0.2.0)", old, name, name, allocator = runtime.heap_allocator())
-			fmt.eprintln(hook_last_warning)
+			log_ln(hook_last_warning)
 		}
 		return v, ok
 	} else {

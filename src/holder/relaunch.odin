@@ -113,7 +113,7 @@ relaunch_main :: proc(args: []string) -> int {
 
 @(private = "file")
 relaunch_say :: proc(format: string, args: ..any) {
-	fmt.eprintf("deckhand-core relaunch[%d]: %s\n", getpid(), fmt.tprintf(format, ..args))
+	fmt.eprintf("%s deckhand-core relaunch[%d]: %s\n", log_stamp(time.now()), getpid(), fmt.tprintf(format, ..args))
 }
 
 @(private = "file")

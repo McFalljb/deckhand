@@ -20,7 +20,7 @@ dh_core_notify :: proc(title, body: cstring) -> c.int {return 0}
 
 // --ready is the launchd launcher's handshake (launchd_darwin.odin): never on Linux.
 serve_ready_handshake :: proc(ready: string) -> bool {
-	fmt.eprintln("deckhand-core serve: --ready is macOS's launchd handshake")
+	core.log_ln("deckhand-core serve: --ready is macOS's launchd handshake")
 	return false
 }
 
@@ -48,7 +48,7 @@ serve_platform_prepare :: proc(run: string) -> bool {
 	parent := filepath.dir(run)
 	os.make_directory_all(parent, {.Read_User, .Write_User, .Execute_User})
 	if why := core.runtime_dir_prepare(run, core.RUNTIME_CORE_NEED); why != "" {
-		fmt.eprintln("deckhand-core serve:", why)
+		core.log_ln("deckhand-core serve:", why)
 		return false
 	}
 	if !core.autotest_active do core.linger_state = core.linger_check()

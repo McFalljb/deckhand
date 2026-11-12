@@ -17,7 +17,7 @@ Command_Who :: enum {
 	Own_Session, // anyone but apps; a pi or Claude tab only for its own session (the command checks: browser_*, app_*)
 	User_Control, // the user, control callers (the Home agent) and Deckhand itself: opens a Finder window
 	Claude, // a Claude tab's plugin for its own tab (caller panel + claude), scripts (tests), Deckhand; never a pi tab's bridge
-	User_Here, // as User, and never from a hub (another machine's core viewing this one), queued or not (caller_may): every machine_* command
+	User_Here, // as User, and never from a hub (another machine's core viewing this one), queued or not (caller_may): every machine_* command, and the settings that bound what other machines and agents may do here (set_machines_reachable, set_remote_machines, set_pi_extension, set_claude_default_flags, set_chats_readonly)
 }
 
 Command_Spec :: struct {
@@ -68,8 +68,8 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_notify", args = "on", does = "OS notifications from the agent while Deckhand is in the background", who = .User},
 	{type = "copy_control_token", does = "Settings › Copy a control token: a new control token for `deckhand --ctl`, as shell exports, onto the clipboard (never in the result or a log); the user's", who = .User},
 	{type = "set_separate_core", args = "on", does = "run sessions in a background core (deckhand-core serve) from the next launch (on by default)", who = .User},
-	{type = "set_machines_reachable", args = "on, confirm?", does = "Settings › Machines › Allow other machines to connect to this one (off by default): another machine's core that logs in here over ssh as this user may view and drive this machine's sessions", who = .User},
-	{type = "set_remote_machines", args = "on", does = "Settings › Machines over SSH (on by default): links to the machines in Settings › Machines; off: none", who = .User},
+	{type = "set_machines_reachable", args = "on, confirm?", does = "Settings › Machines › Allow other machines to connect to this one (off by default): another machine's core that logs in here over ssh as this user may view and drive this machine's sessions", who = .User_Here},
+	{type = "set_remote_machines", args = "on", does = "Settings › Machines over SSH (on by default): links to the machines in Settings › Machines; off: none", who = .User_Here},
 	{type = "machine_add", args = "target, name?, via?", does = "add a machine reached over ssh (target: an ~/.ssh/config alias or user@host; a leading `ssh ` or `ssh://` is dropped; name: what Deckhand calls it, by default the target's host part); via: a development or test build's command in place of `ssh … connect`; created_id = its number", who = .User_Here},
 	{type = "machine_remove", args = "no, confirm?", does = "remove a machine (its link ends; nothing on it is touched): the user confirms first", who = .User_Here},
 	{type = "machine_rename", args = "no, name", does = "rename a machine: what Deckhand calls it (its ssh target stays)", who = .User_Here},
@@ -116,9 +116,9 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_home_dir", args = "path, create?", does = `the main folder (sessions/, jobs/, memory/, atlas/, chats/; missing ones made, empty; "" = unset); create: make it first. set_notes_dir is the old name`, who = .User},
 	{type = "set_folder", args = "kind, path", does = `a subfolder's override (kind: sessions|jobs|memory|atlas|chats; "" = <main>/<kind>); chats: where new chats run, the old folder becomes an ordinary project. set_chats_dir is the old name for chats`, who = .User},
 	{type = "setup_sheet", args = "open", does = "the first-run sheet: open, or close (done or skipped: it does not open by itself again)", who = .User},
-	{type = "set_chats_readonly", args = "on", does = "start chats read-only (pi: its read tools only, plus PI_KIT_READONLY=1; Claude: Deckhand's read-only profile) or full", who = .User},
-	{type = "set_pi_extension", args = "name, on", does = "turn one of the pi integration's optional extensions (guardrails, shell, notes; get_state settings.pi_extensions) on or off for the pi tabs started from now on; running tabs keep theirs until restarted (the restart bar offers it); the user's", who = .User},
-	{type = "set_claude_default_flags", args = "skip_permissions, confirm?", does = "default Claude Code flags for each start of a Claude tab the user makes (new tab, session, chat, the user's resume, restore and restart; never an agent's, a panel's or an app's; a read-only chat leaves it out): skip_permissions adds --dangerously-skip-permissions (off by default; turning it on is confirmed), never saved into a tab's flags", who = .User},
+	{type = "set_chats_readonly", args = "on", does = "start chats read-only (pi: its read tools only, plus PI_KIT_READONLY=1; Claude: Deckhand's read-only profile) or full", who = .User_Here},
+	{type = "set_pi_extension", args = "name, on", does = "turn one of the pi integration's optional extensions (guardrails, shell, notes; get_state settings.pi_extensions) on or off for the pi tabs started from now on; running tabs keep theirs until restarted (the restart bar offers it); the user's", who = .User_Here},
+	{type = "set_claude_default_flags", args = "skip_permissions, confirm?", does = "default Claude Code flags for each start of a Claude tab the user makes (new tab, session, chat, the user's resume, restore and restart; never an agent's, a panel's or an app's; a read-only chat leaves it out): skip_permissions adds --dangerously-skip-permissions (off by default; turning it on is confirmed), never saved into a tab's flags", who = .User_Here},
 	{type = "set_confirm_policy", args = "caller, class, mode", does = "how a caller's destructive commands of a class are confirmed (ask, trusted, auto)", who = .User},
 	{type = "set_close_confirm", args = "tab_kind, rule", does = "when closing a running tab asks (auto, always, never)", who = .User},
 	{type = "pi.session", args = "tab_id?, pi_session_id, session_file?, cwd?", does = "a pi tab reports its session", who = .Report},

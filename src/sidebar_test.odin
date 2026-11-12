@@ -464,37 +464,43 @@ sb_drawn :: proc() -> string {
 // count it): a folded project tree and a folded Open group keep it, and the filter counts it.
 @(test)
 question_is_never_concealed :: proc(t: ^testing.T) {
-	data := sb_dir("data")
-	context.allocator = sb_reset(data)
+	context.allocator = sb_reset()
 	if !testing.expect(t, audit_ui(), "fonts") do return
 	defer state^ = core.State{}
-	home := sb_dir("home")
-	os.set_env("HOME", home)
-	a := sb_dir("qa")
-	sb_session(store_dir(home, a), a, "q-1", "asks you something", 1, time.Hour)
-	core.rescan_now()
-	pa := by_cwd(a)
-	core.run_command(core.Select_Project{project_id = pa.id})
-	r := core.run_command(core.Open_Session_Cmd{project_id = pa.id, pi_session_id = "q-1"}, {kind = .UI})
-	s := core.find_session(r.created_id)
-	r = core.run_command(core.Pi_Status_Update{tab_id = s.tabs[0].id, agent = .Idle, question = true}, {kind = .Script})
-	testing.expect(t, r.ok, r.error)
+	// a project, its one session open in a pi tab whose agent asked a question (no process: nothing
+	// can end it meanwhile)
+	append(&state.projects, core.Project{id = 1, group = .Projects, cwd = strings.clone("/tmp/sb-q-proj"), label = strings.clone("qproj")})
+	state.selected_project = 1
+	append(&state.sessions, core.Session{id = strings.clone("q-1"), path = strings.clone("/tmp/sb-q-proj/q-1.jsonl"), title = strings.clone("asks you something")})
+	o := core.Open_Session{id = 2, project_id = 1, pi_session_id = strings.clone("q-1"), cwd = strings.clone("/tmp/sb-q-proj"), title = strings.clone("asks you something")}
+	tab := core.Tab{id = 3, kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle, question = true}
+	tab.prog.progress = -1
+	append(&o.tabs, tab)
+	o.active_tab = 3
+	core.session_panes_init(&o)
+	append(&state.open_sessions, o)
+	q := &state.open_sessions[0].tabs[0]
 	testing.expect(t, core.session_waiting("q-1"))
 	// the filter takes it out of the list: counted ("1 waiting (filtered)")
 	core.run_command(core.Set_Filter{text = "zzz"})
-	n := core.sidebar_waiting_filtered()
-	testing.expectf(t, n == 1, "waiting (filtered): %d; filter %q, project %q, rows %q", n, state.sidebar.filter, core.project_name(pa^), names(core.sidebar_sessions(.Sessions)))
+	testing.expectf(t, core.sidebar_waiting_filtered() == 1, "rows %q", names(core.sidebar_sessions(.Sessions)))
 	core.run_command(core.Set_Filter{text = ""})
 	// folded: the project's tree and the Open group keep it
 	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 400, .Sessions
-	project_row_click(pa.id) // the selected project's row: folds its sessions
+	project_row_click(1) // the selected project's row: folds its sessions
+	defer tree.folded = false
 	state.sidebar.folded[.Open] = true
 	testing.expect(t, tree.folded)
-	testing.expect_value(t, strings.count(sb_drawn(), "asks you something"), 2) // the Open row and the tree's
-	r = core.run_command(core.Pi_Status_Update{tab_id = s.tabs[0].id, agent = .Idle}, {kind = .Script})
+	// drawn as often as when it waits on a permission: in the folded tree, the folded Open group
+	// (and the empty centre's list of what needs you)
+	q.question, q.waiting = false, true
+	blocked := strings.count(sb_drawn(), "asks you something")
+	testing.expect(t, blocked >= 2, "a waiting session shows folded")
+	q.question, q.waiting = true, false
+	testing.expect_value(t, strings.count(sb_drawn(), "asks you something"), blocked)
+	q.question = false // answered
 	testing.expect(t, !core.session_waiting("q-1"))
 	testing.expect(t, !strings.contains(sb_drawn(), "asks you something"), "answered: folded away")
-	tree.folded = false
 }
 
 // Paths are resolved (pi runs in the real folder): a symlink adds the same

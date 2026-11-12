@@ -16,7 +16,7 @@ package core
 // state arrives through the mirror before its result (that core flushes its delta first, Q9), and
 // the result finishes the request here (route_result): its created_id packed, its error this
 // core's words for a known code (ROUTE_CODES) or "on <machine>: " and its text cleaned and cut
-// short, its data only {code?, id? (a claude_prompt's held text)}, and Result.remote set (the
+// short, its data only {code?, id? (a claude_prompt's held text), count? (a mark_all_read's)}, and Result.remote set (the
 // reply's top-level "machine", which only this sets). A link
 // that is down answers machine_offline. Its view stays this Mac's: focusing one of its sessions and
 // selecting one of its projects run here (Focus_Session also goes there, so its restored tabs
@@ -66,6 +66,7 @@ ROUTE_TEXT_MAX :: 300 // its errors and confirmation summaries (text_clean)
 ROUTE_REMOTE_ERROR_MAX :: 160 // another machine's error text here, cut to this (bytes; after "on <machine>: ")
 ROUTE_WAIT_SLACK :: 10 * time.Second // a forwarded wait: its own timeout, plus this
 ROUTE_WAIT_MAX :: 130 * time.Second
+ROUTE_COUNT_MAX :: 1 << 20 // a forwarded mark_all_read's count, at most (a larger one is clamped)
 // The data codes a forwarded command's result keeps (data.code; everything else in its data is
 // dropped): what the agents' tools read. Each comes with this core's own words, never that
 // machine's (review round 1).
@@ -91,6 +92,20 @@ Forward :: struct {
 	kind:       Caller_Kind, // .UI or .Control
 	sent:       time.Tick,
 	wait:       time.Duration, // its answer, at most this late
+	fan:        u64, // one machine's part of a Mark_All_Read fan (its id; 0: none)
+}
+
+// The user's Mark all sessions as read (⌥⇧⌘U) at this Mac: this Mac's sessions marked here, then
+// the same command sent to every online machine (each marks its own); its one toast and its
+// finished come once every machine answered (or failed, went offline, timed out).
+@(private = "file")
+Fan :: struct {
+	id:         u64,
+	request_id: u64,
+	count:      int, // sessions marked: here, and by each machine that answered
+	waiting:    int, // machines not answered yet
+	notes:      [dynamic]string, // what did not work, or was skipped, per machine (heap)
+	failed:     bool, // a machine refused or could not get it (the toast is an error's)
 }
 
 @(private = "file")
@@ -118,6 +133,7 @@ route: struct {
 	forwards: [dynamic]^Forward,
 	proxies:  [dynamic]Confirm_Proxy,
 	relays:   [dynamic]^Term_Relay,
+	fans:     [dynamic]^Fan,
 	next:     u64,
 }
 
@@ -210,10 +226,16 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	}
 	no, mixed := command_machine(cmd)
 	if mixed do return fail("this names ids on two machines"), true
+	if su, is := cmd.(Set_Unread); is && su.tab_id == 0 do no = unread_session_machine(su.pi_session_id)
 	if no == 0 do return {}, false
 	#partial switch c in cmd {
 	case Select_Project, Copy_Selection:
 		return {}, false // this Mac's view; the window's own copy's selection
+	case Terminal_Link:
+		// the user's click at this window opens here (tabhost_route.odin: the default browser, never
+		// a browser tab): never sent there, and nobody else's (a hub's, Atlas's) opens anything here
+		if caller.kind == .UI && !caller_from_hub(caller) do return {}, false
+		return fail("a link in another machine's terminal opens only from your click in this window"), true
 	case New_Claude_Session:
 		if c.codex do return fail(CODEX_REMOTE), true // codex.odin: this Mac only (an older core there would start claude)
 	case New_Claude_Tab:
@@ -225,19 +247,117 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	}
 	// the user's and Atlas's, from this machine only: never a hub's (no reaching a third machine)
 	if (caller.kind != .UI && caller.kind != .Control) || caller.hub do return fail("this is on another machine: only you and Atlas on this machine can work in it from here"), true
-	if !machine_link_up(no) do return machine_offline(no), true
-	if len(route.forwards) >= ROUTE_FORWARDS_MAX do return fail("too many commands are waiting for other machines"), true
+	r = forward_send(cmd, no, caller.kind, request_id)
+	if !r.ok && caller.kind == .UI do route_toast(cmd, r)
+	return r, true
+}
+
+// cmd (ids packed) sent to machine no's core as kind's: pending, or why it could not go.
+@(private = "file")
+forward_send :: proc(cmd: Command, no: u64, kind: Caller_Kind, request_id: u64, fan: u64 = 0) -> Result {
+	if !machine_link_up(no) do return machine_offline(no)
+	if len(route.forwards) >= ROUTE_FORWARDS_MAX do return fail("too many commands are waiting for other machines")
 	heap := runtime.heap_allocator()
 	route.next += 1
 	f := new(Forward, heap)
-	f^ = {id = route.next, machine = no, request_id = request_id, cmd = command_clone(cmd, heap), kind = caller.kind, sent = time.tick_now(), wait = route_wait(cmd)}
-	if !machine_link_send_text(no, hub_command_json(command_for_machine(cmd, no), fmt.tprintf("h%d", f.id), caller.kind)) {
+	f^ = {id = route.next, machine = no, request_id = request_id, cmd = command_clone(cmd, heap), kind = kind, sent = time.tick_now(), wait = route_wait(cmd), fan = fan}
+	if !machine_link_send_text(no, hub_command_json(command_for_machine(cmd, no), fmt.tprintf("h%d", f.id), kind)) {
 		forward_free(f)
-		return machine_offline(no), true
+		return machine_offline(no)
 	}
 	append(&route.forwards, f)
 	if autotest_active do fmt.printfln("[autotest] machine %s: forwarded %s", machine_name(no), command_type(cmd))
-	return {ok = true, pending = true}, true
+	return {ok = true, pending = true}
+}
+
+// The machine of the open session a Set_Unread names by its pi session id (0: this Mac's, or none
+// open): another machine's row reads "m<no>:<its id>", and the mirror's session says whose it is.
+@(private = "file")
+unread_session_machine :: proc(pi_session_id: string) -> u64 {
+	if pi_session_id == "" do return 0
+	for s in state.open_sessions do if !s.home && s.machine != 0 && s.pi_session_id == pi_session_id do return s.machine
+	return 0
+}
+
+// The user's command another machine refused (or could not get): said in a toast where nothing
+// else would say it (a key's, or one that finished later; a menu row's failure says it too, in
+// the same words: inbox.odin's menu_result).
+@(private = "file")
+route_toast :: proc(cmd: Command, r: Result) {
+	if r.ok || r.pending || r.error == "needs_confirmation" do return
+	#partial switch c in cmd {
+	case Set_Unread:
+		window_toast(fmt.tprintf("%s: %s", c.unread ? "Mark as unread" : "Mark as read", r.error != "" ? r.error : "it did not work"), err = true)
+	}
+}
+
+// Mark all sessions as read, the user's at this Mac (mark_read.odin; here already: `here`
+// sessions marked): sent to every online machine as the user's, each marking its own; an offline
+// one is skipped (the toast says so). fanned: the toast and the finished come when they answer.
+machine_mark_all_read :: proc(caller: Caller, request_id: u64, here: int) -> (r: Result, fanned: bool) {
+	if caller.kind != .UI || caller_from_hub(caller) do return {}, false // a hub's: that machine's own only (no third machine)
+	heap := runtime.heap_allocator()
+	fan := new(Fan, heap)
+	route.next += 1
+	fan^ = {id = route.next, request_id = request_id, count = here, notes = make([dynamic]string, heap)}
+	for m in state.machines {
+		if m.no == 0 do continue
+		if !machine_link_up(m.no) {
+			if m.status != .Online && m.status != .Connecting do append(&fan.notes, fmt.aprintf("%s is not connected", machine_name(m.no), allocator = heap))
+			continue
+		}
+		fr := forward_send(Mark_All_Read{}, m.no, .UI, 0, fan.id)
+		if fr.pending do fan.waiting += 1
+		else {
+			append(&fan.notes, strings.clone(fr.error, heap))
+			fan.failed = true
+		}
+	}
+	if fan.waiting > 0 {
+		append(&route.fans, fan)
+		return {ok = true, pending = true}, true
+	}
+	r = fan_result(fan)
+	fan_free(fan)
+	return r, true
+}
+
+// A fan's toast ("Marked N as read", "Nothing unread", then what did not work) and its result.
+@(private = "file")
+fan_result :: proc(fan: ^Fan) -> Result {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, fan.count == 0 ? "Nothing unread" : fmt.tprintf("Marked %d as read", fan.count))
+	for n in fan.notes do fmt.sbprintf(&b, " · %s", n)
+	window_toast(strings.to_string(b), err = fan.failed)
+	return {ok = true, data = fmt.tprintf(`{{"count":%d}}`, fan.count)}
+}
+
+@(private = "file")
+fan_free :: proc(fan: ^Fan) {
+	heap := runtime.heap_allocator()
+	for n in fan.notes do delete(n, heap)
+	delete(fan.notes)
+	free(fan, heap)
+}
+
+// Machine f's answer to its part of a fan (r: as route_result made it); the last one ends the fan.
+@(private = "file")
+fan_answer :: proc(f: ^Forward, r: Result) {
+	at := -1
+	for x, i in route.fans do if x.id == f.fan do at = i
+	if at < 0 do return
+	fan := route.fans[at]
+	if r.ok {
+		if n, ok := strconv.parse_int(json_path(r.data, "count")); ok && n > 0 do fan.count += n
+	} else {
+		append(&fan.notes, strings.clone(r.error != "" ? r.error : fmt.tprintf("on %s: it did not work", machine_name(f.machine)), runtime.heap_allocator()))
+		fan.failed = true
+	}
+	fan.waiting -= 1
+	if fan.waiting > 0 do return
+	ordered_remove(&route.fans, at)
+	defer fan_free(fan)
+	emit_event(Finished_Event{request_id = fan.request_id, result = fan_result(fan)})
 }
 
 // How long a forwarded command's answer may take: a wait's own timeout there, plus slack.
@@ -271,6 +391,11 @@ forward_finish :: proc(i: int, r: Result) {
 	f := route.forwards[i]
 	ordered_remove(&route.forwards, i)
 	defer forward_free(f)
+	if f.fan != 0 {
+		fan_answer(f, r)
+		return
+	}
+	if f.kind == .UI do route_toast(f.cmd, r)
 	r := r
 	if r.ok && r.created_id != 0 && f.kind == .UI {
 		// it opened or made one of its sessions: shown here, as a local one would be
@@ -317,7 +442,8 @@ machine_route_reply :: proc(no: u64, text: string) {
 // (packed); the error in this core's words for a known code, else "on <machine>: " and that
 // machine's text, one line, cleaned and cut short (the agents' tools mark it as that machine's
 // data); data {"code"?: a known code, "id"?: a claude_prompt's held text's id (an integer, 1 to
-// 2^53-1)}, nothing else of what it sent; remote = no (round 2: the reply's top-level "machine",
+// 2^53-1), "count"?: a mark_all_read's sessions marked there (0 up, clamped to ROUTE_COUNT_MAX)}, nothing
+// else of what it sent; remote = no (round 2: the reply's top-level "machine",
 // beside data, which only this sets: a local app's error data may hold any field).
 @(private = "file")
 route_result :: proc(no: u64, f: ^Forward, rr: Result) -> Result {
@@ -328,10 +454,15 @@ route_result :: proc(no: u64, f: ^Forward, rr: Result) -> Result {
 	known := -1
 	if code := json_path(rr.data, "code"); code != "" do for c, i in ROUTE_CODES do if c == code do known = i
 	if known >= 0 do fmt.sbprintf(&b, `"code":"%s"`, ROUTE_CODES[known])
-	if _, is := f.cmd.(Claude_Prompt); is && rr.data != "" {
+	// a claude_prompt's held text's id; a mark_all_read's count of sessions marked there (bounded)
+	_, prompt := f.cmd.(Claude_Prompt)
+	_, all_read := f.cmd.(Mark_All_Read)
+	if (prompt || all_read) && rr.data != "" {
 		if v, err := jg.parse_string(rr.data, .JSON, true, context.temp_allocator); err == nil {
 			if o, ok := v.(json.Object); ok {
-				if id, iok := o["id"].(json.Integer); iok && id > 0 && id < 1 << 53 do fmt.sbprintf(&b, `%s"id":%d`, known >= 0 ? "," : "", id)
+				if id, iok := o["id"].(json.Integer); prompt && iok && id > 0 && id < 1 << 53 do fmt.sbprintf(&b, `%s"id":%d`, known >= 0 ? "," : "", id)
+				// a machine may have marked more sessions than this Mac mirrors of it: clamped, never dropped
+				if n, nok := o["count"].(json.Integer); all_read && rr.ok && nok && n >= 0 do fmt.sbprintf(&b, `%s"count":%d`, known >= 0 ? "," : "", min(n, ROUTE_COUNT_MAX))
 			}
 		}
 	}

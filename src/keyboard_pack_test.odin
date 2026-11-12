@@ -500,10 +500,13 @@ mark_all_read_race_and_authority :: proc(t: ^testing.T) {
 	_, tab, _ = core.find_tab(21)
 	testing.expect(t, tab != nil && tab.unseen && core.tab_status_view(tab^).dot == .Error, "the error is kept, not seen")
 	testing.expect_value(t, toast.text, "Nothing unread")
-	// authority: the user at this Mac only
+	// authority: the user's (#114: a hub's, on behalf of its user, marks this machine's own: that
+	// is how another Mac's ⌥⇧⌘U reaches it; it goes no further, machine_route_test's
+	// route_mark_all_read); never an agent's or a script's
 	spec := core.command_spec("mark_all_read")
-	testing.expect(t, spec != nil && spec.who == .User_Here)
-	testing.expect(t, !core.caller_may({kind = .UI, hub = true}, core.Mark_All_Read{}))
+	testing.expect(t, spec != nil && spec.who == .User)
+	testing.expect(t, core.caller_may({kind = .UI, hub = true}, core.Mark_All_Read{}))
+	testing.expect(t, !core.caller_may({kind = .Control, hub = true}, core.Mark_All_Read{}))
 	testing.expect(t, !core.caller_may({kind = .Control}, core.Mark_All_Read{}))
 	testing.expect(t, !core.caller_may({kind = .Script}, core.Mark_All_Read{}))
 	testing.expect_value(t, core.command_wire_json(core.Mark_All_Read{}), `{"type":"mark_all_read"}`)

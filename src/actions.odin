@@ -831,11 +831,12 @@ session_nth_title :: proc(i: int) -> string {
 	return i < len(rows) ? core.open_session_title(rows[i]) : ""
 }
 
-// ⇧⌘U: the focused tab (a terminal), else the session's (its active tab, or its main tab).
+// ⇧⌘U: the focused tab (a terminal), else the session's (its active tab, or its main tab). Another
+// machine's session: the same, marked there (its packed tab id or "m<no>:" id: machine_route.odin).
 mark_unread :: proc() -> (core.Command, bool) {
 	cs := core.cur()
 	if cs == nil || cs.home do return nil, false
-	if t := core.active_tab(); t != nil && core.tab_is_terminal(t^) do return core.Set_Unread{tab_id = t.id, unread = true}, true
+	if t := core.active_tab(); t != nil && core.tab_is_terminal(t^) && (t.machine == 0 || t.has_term) do return core.Set_Unread{tab_id = t.id, unread = true}, true
 	if cs.pi_session_id == "" do return nil, false
 	return core.Set_Unread{pi_session_id = cs.pi_session_id, unread = true}, true
 }

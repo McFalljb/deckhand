@@ -626,7 +626,11 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 	case Terminal_Link:
 		// a click on a terminal's link (the user's only): ⇧⌘-click's (not external) http and https in
 		// a browser tab of the terminal's session, in front; mailto, ⌘-click's (external), Home's or
-		// no browser: the default one
+		// no browser: the default one. Another machine's terminal (the user's click here: machine_route.
+		// odin keeps it here, nobody else's): the default browser always, never a browser tab (its
+		// pages could reach this Mac's network); its URL is that machine's output, checked as any.
+		// A hub's (another machine viewing this one) never opens anything here.
+		if caller_from_hub(caller) do return no_window(), false
 		s, tab, _ := find_tab(c.tab_id)
 		if tab == nil do return fail("no such tab"), false
 		#partial switch _ in tab.kind {
@@ -634,8 +638,9 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		case:
 			return fail("not a terminal tab"), false
 		}
+		if tab.machine != 0 && !tab.has_term do return fail("not a terminal tab"), false
 		if !term_url_allowed(c.url) do return fail("only http, https and mailto links open from a terminal"), false
-		if !ascii_prefix(c.url, "mailto:") && !c.external && !s.home && tab_host_up() {
+		if tab.machine == 0 && !ascii_prefix(c.url, "mailto:") && !c.external && !s.home && tab_host_up() {
 			if r, ch := routed(cmd, caller, request_id, new_id()); r.ok do return r, ch
 		}
 		// the user's ⌘-click: there is a window (a hub's opens nothing for this core: §8.2)

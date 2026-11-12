@@ -31,6 +31,8 @@ rt_win: [dynamic]Rt_Frame // what the window received
 rt_end: cw.Mem_End
 @(private = "file")
 rt_finished: [dynamic]Result // the Finished_Events (heap)
+@(private = "file")
+rt_opened: [dynamic]string // the links the window was asked to open (window.request open_url; heap)
 
 @(private = "file")
 rt_on_frames :: proc() {
@@ -38,7 +40,23 @@ rt_on_frames :: proc() {
 		f, err := cw.mem_recv(rt_end, context.temp_allocator)
 		if err != .None do return
 		append(&rt_win, Rt_Frame{channel = f.channel, kind = cw.Kind(f.kind), payload = strings.clone(string(f.payload), runtime.heap_allocator())})
+		// the opened-URL hook: the window opens nothing, it says it did
+		if text := string(f.payload); json_path(text, "type") == "window.request" {
+			id, q, _ := window_request_parse(text)
+			if q.op != .Open_Url do continue
+			append(&rt_opened, strings.clone(q.text, runtime.heap_allocator()))
+			rep := Window_Reply{ok = true}
+			if id != "" do assert(cw.mem_send(rt_end, cw.JSON_CHANNEL, .Data, transmute([]u8)window_msg_reply(id, &rep)) == .None)
+		}
 	}
+}
+
+// The toasts the window was sent, in order (temp).
+@(private = "file")
+rt_toasts :: proc() -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	for f in rt_win do if json_path(f.payload, "type") == "toast" do append(&out, f.payload)
+	return out[:]
 }
 
 // State with machine 3's session (packed id S, its shell tab T with a terminal), machine 3's link up
@@ -60,6 +78,7 @@ rt_begin :: proc(up := true) -> (sid, tid: u64) {
 	machine_test_links.up[3] = up
 	rt_win = make([dynamic]Rt_Frame)
 	rt_finished = make([dynamic]Result)
+	rt_opened = make([dynamic]string)
 	window.test_event = proc(ev: Event) {
 		if f, ok := ev.(Finished_Event); ok do append(&rt_finished, result_clone(f.result, runtime.heap_allocator()))
 	}
@@ -84,6 +103,8 @@ rt_end_test :: proc() {
 	delete(rt_win)
 	for r in rt_finished do result_free(r)
 	delete(rt_finished)
+	for u in rt_opened do delete(u)
+	delete(rt_opened)
 	inbox_drain()
 	state = State{}
 }
@@ -479,4 +500,209 @@ hub_drops_tab_host :: proc(t: ^testing.T) {
 	for k in ([]string{"window.request", "confirmation.parked", "tab_host.call", "tab_host.event"}) do testing.expectf(t, hub_msg_dropped(k), "%s: dropped", k)
 	for k in ([]string{"result", "finished", "term.attached", STATE_FULL, "hub.taken"}) do testing.expectf(t, !hub_msg_dropped(k), "%s: read", k)
 }
+
+// #114: Mark as unread / read on another machine's session goes there, by its "m3:" id (the row
+// menu, ⇧⌘U on a tab that is not a terminal) or its packed tab id (⇧⌘U), as the user's; this
+// Mac's mirror copy is never changed here (that machine's state brings it back). An older core
+// that refuses it, or a link that is down: the row keeps its state, an error toast says why.
+@(test)
+route_set_unread :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sid, tid := rt_begin()
+	defer rt_end_test()
+	_, tab, _ := find_tab(tid)
+	r := run_command(Set_Unread{pi_session_id = "m3:abc", unread = true}, {kind = .UI}, 80)
+	testing.expect(t, r.ok && r.pending, "forwarded: pending")
+	sent := rt_last_text()
+	testing.expect_value(t, json_path(sent, "command.type"), "set_unread")
+	testing.expect_value(t, json_path(sent, "command.pi_session_id"), "abc")
+	testing.expect_value(t, json_path(sent, "command.unread"), "true")
+	testing.expect(t, strings.contains(sent, `"on_behalf":{"kind":"ui"}`), "as the user's")
+	testing.expect(t, !tab.unseen, "this Mac's copy is not changed here")
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true}}}}`, json_path(sent, "id")))
+	if testing.expect_value(t, len(rt_finished), 1) do testing.expect(t, rt_finished[0].ok)
+	testing.expect_value(t, len(rt_toasts()), 0)
+	// ⇧⌘U on its terminal tab: by the packed tab id, unpacked there
+	r = run_command(Set_Unread{tab_id = tid, unread = true}, {kind = .UI}, 81)
+	testing.expect(t, r.pending && json_path(rt_last_text(), "command.tab_id") == "10", "its tab id there")
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true}}}}`, json_path(rt_last_text(), "id")))
+	// an older core that does not know it: refused there; nothing changes here, an error toast
+	tab.unseen = true
+	r = run_command(Set_Unread{pi_session_id = "m3:abc", unread = false}, {kind = .UI}, 82)
+	testing.expect(t, r.pending)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"unknown command \"set_unread\""}}}}`, json_path(rt_last_text(), "id")))
+	if testing.expect_value(t, len(rt_finished), 3) do testing.expect(t, !rt_finished[2].ok && strings.has_prefix(rt_finished[2].error, "on nuc: "), "its error, said whose")
+	testing.expect(t, tab.unseen, "the row keeps its state")
+	toasts := rt_toasts()
+	if testing.expect_value(t, len(toasts), 1) {
+		testing.expect(t, strings.has_prefix(json_path(toasts[0], "text"), "Mark as read: on nuc: ") && json_path(toasts[0], "err") == "true", toasts[0])
+	}
+	// the link down: machine_offline at once, nothing sent, the same toast
+	machine_test_links.up[3] = false
+	n := len(machine_test_links.texts)
+	r = run_command(Set_Unread{pi_session_id = "m3:abc", unread = false}, {kind = .UI}, 83)
+	testing.expect(t, !r.ok && strings.contains(r.data, "machine_offline"), "offline")
+	testing.expect_value(t, len(machine_test_links.texts), n)
+	testing.expect(t, tab.unseen, "still as it was")
+	toasts = rt_toasts()
+	if testing.expect_value(t, len(toasts), 2) do testing.expect_value(t, json_path(toasts[1], "text"), "Mark as read: nuc is not connected")
+	machine_test_links.up[3] = true
+	// a hub's (a machine viewing this one) never reaches a third machine through this one
+	r = run_command(Set_Unread{pi_session_id = "m3:abc", unread = true}, {kind = .UI, hub = true}, 84)
+	testing.expect(t, !r.ok && !r.pending, "a hub's: refused")
+	testing.expect_value(t, len(machine_test_links.texts), n)
+	testing.expect(t, tab.unseen, "and not applied to the mirror either")
+	// an id no open session has (and this Mac's own ids) stays here
+	_, routed := machine_route(Set_Unread{pi_session_id = "m3:nope", unread = true}, {kind = .UI}, 85)
+	testing.expect(t, !routed, "no such open session: here (\"the session is not open\")")
+	_ = sid
+}
+
+// #114: ⌥⇧⌘U at this Mac marks this Mac's sessions here and goes to every online machine as the
+// user's (each marks its own, answering its count); offline ones are skipped and named. One
+// toast, one finished, when every machine answered. An older core's refusal is said, not hidden.
+// A hub's (another machine viewing this one) marks this machine's own and goes no further.
+@(test)
+route_mark_all_read :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	rt_begin()
+	defer rt_end_test()
+	// this Mac's session, finished and not seen; machine 4 known but offline
+	local := Open_Session{id = 500, pi_session_id = strings.clone("here-1"), cwd = strings.clone("/tmp")}
+	append(&local.tabs, Tab{id = 501, kind = Shell_Tab{}, title = strings.clone("sh"), status = .Running, unseen = true, pane = 500})
+	local.active_tab = 501
+	append(&state.open_sessions, local)
+	delete(state.machines)
+	state.machines = make([]Machine_View, 2)
+	state.machines[0] = {no = 3, name = "nuc", status = .Online}
+	state.machines[1] = {no = 4, name = "attic", status = .Offline}
+	machine_test_links.up[4] = false
+	r := run_command(Mark_All_Read{}, {kind = .UI}, 90)
+	testing.expect(t, r.ok && r.pending, "pending until the machines answer")
+	_, lt, _ := find_tab(501)
+	testing.expect(t, lt != nil && !lt.unseen, "this Mac's marked at once")
+	if testing.expect_value(t, len(machine_test_links.texts), 1) {
+		sent := rt_last_text()
+		testing.expect_value(t, json_path(sent, "command.type"), "mark_all_read")
+		testing.expect(t, strings.contains(sent, `"on_behalf":{"kind":"ui"}`), "as the user's")
+	}
+	testing.expect_value(t, len(rt_toasts()), 0)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":2}}}}}}`, json_path(rt_last_text(), "id")))
+	if testing.expect_value(t, len(rt_finished), 1) {
+		testing.expect(t, rt_finished[0].ok)
+		testing.expect_value(t, json_path(rt_finished[0].data, "count"), "3")
+	}
+	toasts := rt_toasts()
+	if testing.expect_value(t, len(toasts), 1) {
+		testing.expect_value(t, json_path(toasts[0], "text"), "Marked 3 as read · attic is not connected")
+		testing.expect_value(t, json_path(toasts[0], "err"), "false")
+	}
+	// an older core that does not know it (or refuses a hub's): said, as an error; this Mac's count stays
+	run_command(Mark_All_Read{}, {kind = .UI}, 91)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"unknown command \"mark_all_read\""}}}}`, json_path(rt_last_text(), "id")))
+	toasts = rt_toasts()
+	if testing.expect_value(t, len(toasts), 2) {
+		testing.expectf(t, strings.has_prefix(json_path(toasts[1], "text"), "Nothing unread · attic is not connected · on nuc: unknown command"), "%s", toasts[1])
+		testing.expect_value(t, json_path(toasts[1], "err"), "true")
+	}
+	// review P2: a machine may mark more than the 64 sessions this Mac mirrors of it: taken (a huge
+	// one clamped, never zeroed); only a malformed count is not
+	run_command(Mark_All_Read{}, {kind = .UI}, 92)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":100}}}}}}`, json_path(rt_last_text(), "id")))
+	if testing.expect_value(t, len(rt_finished), 3) do testing.expect_value(t, json_path(rt_finished[2].data, "count"), "100")
+	testing.expect_value(t, json_path(rt_toasts()[len(rt_toasts()) - 1], "text"), "Marked 100 as read · attic is not connected")
+	run_command(Mark_All_Read{}, {kind = .UI}, 92)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":99999999999}}}}}}`, json_path(rt_last_text(), "id")))
+	testing.expect_value(t, json_path(rt_finished[len(rt_finished) - 1].data, "count"), fmt.tprint(ROUTE_COUNT_MAX))
+	for bad in ([]string{`-1`, `"7"`, `1.5`, `null`}) {
+		run_command(Mark_All_Read{}, {kind = .UI}, 92)
+		machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":%s}}}}}}`, json_path(rt_last_text(), "id"), bad))
+		testing.expectf(t, json_path(rt_finished[len(rt_finished) - 1].data, "count") == "0", "count %s: not taken", bad)
+	}
+	// the link drops while it waits: that machine is named, the request ends
+	nf, ntoasts := len(rt_finished), len(rt_toasts())
+	run_command(Mark_All_Read{}, {kind = .UI}, 93)
+	machine_route_down(3)
+	if testing.expect_value(t, len(rt_finished), nf + 1) do testing.expect(t, rt_finished[nf].ok)
+	toasts = rt_toasts()
+	testing.expect(t, len(toasts) == ntoasts + 1 && strings.contains(json_path(toasts[ntoasts], "text"), "nuc is not connected"), "named offline")
+	// a hub's (on behalf of its user): this machine's own only, nothing sent on, no toast here
+	machine_test_links.up[3] = true
+	n, nt := len(machine_test_links.texts), len(rt_toasts())
+	r = run_command(Mark_All_Read{}, {kind = .UI, hub = true}, 94)
+	testing.expect(t, r.ok && !r.pending, "a hub's: done here")
+	testing.expect_value(t, len(machine_test_links.texts), n)
+	testing.expect_value(t, len(rt_toasts()), nt)
+	// nor while this core's window link is a hub's
+	window_link_for_test().hub = true
+	r = run_command(Mark_All_Read{}, {kind = .UI}, 95)
+	window_link_for_test().hub = false
+	testing.expect(t, r.ok && !r.pending && len(machine_test_links.texts) == n, "viewed from another machine: no fan")
+	// an agent or a script: not at all
+	testing.expect(t, !run_command(Mark_All_Read{}, {kind = .Control}, 96).ok)
+	testing.expect(t, !run_command(Mark_All_Read{}, {kind = .Script}, 97).pending)
+	testing.expect_value(t, len(machine_test_links.texts), n)
+}
+
+// #120: a link the user clicks in another machine's terminal opens on this Mac, in the default
+// browser (⇧⌘-click too: never a browser tab), after the same checks as a local terminal's link;
+// nothing goes to that machine. A hub's, Atlas's or Deckhand's own terminal_link never opens
+// anything here.
+@(test)
+route_terminal_link_remote :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sid, tid := rt_begin()
+	defer rt_end_test()
+	// an editor tab of that machine's (no terminal)
+	ed, _ := id_pack(3, 11)
+	if s := find_session(sid); s != nil do append(&s.tabs, Tab{id = ed, machine = 3, kind = Editor_Tab{}, title = strings.clone("x"), status = .Running, pane = sid})
+	n := len(machine_test_links.texts)
+	r := run_command(Terminal_Link{tab_id = tid, url = "https://example.com/x", external = true}, {kind = .UI}, 100)
+	testing.expect(t, r.ok && !r.pending, r.error)
+	r = run_command(Terminal_Link{tab_id = tid, url = "https://example.com/tab"}, {kind = .UI}, 101) // ⇧⌘-click
+	testing.expect(t, r.ok && r.created_id == 0, "the default browser, no browser tab")
+	r = run_command(Terminal_Link{tab_id = tid, url = "mailto:a@example.invalid", external = true}, {kind = .UI}, 102)
+	testing.expect(t, r.ok, r.error)
+	if testing.expect_value(t, len(rt_opened), 3) {
+		testing.expect_value(t, rt_opened[0], "https://example.com/x")
+		testing.expect_value(t, rt_opened[1], "https://example.com/tab")
+		testing.expect_value(t, rt_opened[2], "mailto:a@example.invalid")
+	}
+	testing.expect_value(t, len(machine_test_links.texts), n)
+	// that machine's output, checked as a local terminal's link is
+	for u in ([]string{"file:///etc/passwd", "javascript:alert(1)", "myapp://x", "https://user@evil.example/", "https://a.example\\@b.example/", "https://example.com/‮evil", "https://exa​mple.com/"}) {
+		r = run_command(Terminal_Link{tab_id = tid, url = u, external = true}, {kind = .UI}, 103)
+		testing.expectf(t, !r.ok, "%q refused", u)
+	}
+	r = run_command(Terminal_Link{tab_id = ed, url = "https://example.com/x", external = true}, {kind = .UI}, 104)
+	testing.expect(t, !r.ok, "not a terminal tab")
+	// a hub's (another machine viewing this one), Atlas's, a script's, Deckhand's own: nothing opens
+	r = run_command(Terminal_Link{tab_id = tid, url = "https://example.com/hub", external = true}, {kind = .UI, hub = true}, 105)
+	testing.expect(t, !r.ok, "a hub's: refused")
+	r = run_command(Terminal_Link{tab_id = tid, url = "https://example.com/c", external = true}, {kind = .Control}, 106)
+	testing.expect(t, !r.ok, "Atlas's: refused")
+	r = run_command(Terminal_Link{tab_id = tid, url = "https://example.com/i", external = true}, {kind = .Internal}, 107)
+	testing.expect(t, !r.ok, "not the user's click: refused")
+	window_link_for_test().hub = true
+	r = run_command(Terminal_Link{tab_id = tid, url = "https://example.com/v", external = true}, {kind = .UI}, 108)
+	window_link_for_test().hub = false
+	testing.expect(t, !r.ok, "viewed from another machine: refused")
+	// and over the wire: a hub's command (on behalf of its user) on this Mac's own terminal
+	local := Open_Session{id = 600, pi_session_id = strings.clone("here-2"), cwd = strings.clone("/tmp")}
+	append(&local.tabs, Tab{id = 601, kind = Shell_Tab{}, title = strings.clone("sh"), status = .Running, pane = 600})
+	local.active_tab = 601
+	append(&state.open_sessions, local)
+	window_link_for_test().hub = true
+	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"command","id":"q","now":true,"on_behalf":{"kind":"ui"},"command":{"type":"terminal_link","tab_id":601,"url":"https://example.com/w","external":true}}`)
+	window_link_for_test().hub = false
+	got := ""
+	for i := len(rt_win) - 1; i >= 0; i -= 1 do if json_path(rt_win[i].payload, "type") == "result" {
+		got = rt_win[i].payload
+		break
+	}
+	testing.expectf(t, json_path(got, "result.ok") == "false", "a hub's terminal_link: %s", got)
+	testing.expect_value(t, len(rt_opened), 3)
+	testing.expect_value(t, len(machine_test_links.texts), n)
+}
+
 } // when TEST_HOOKS

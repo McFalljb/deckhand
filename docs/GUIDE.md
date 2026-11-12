@@ -320,7 +320,8 @@ browser, and while you view that machine from here (or if it has no window, like
 their browser tools answer that no browser is available there. Its other kinds of tab (editors, pages, apps) show only on that machine for
 now. This Mac's [Atlas](#what-atlas-can-do) sees its sessions and jobs and can work in its
 sessions; this Mac's other agents can't act on it. Its programs can't use this Mac's clipboard (OSC 52
-is ignored), open windows or notify here, but its jobs that need you and its bell's new entries
+is ignored), open windows or links (a link you ⌘-click in its terminal opens in this Mac's default
+browser: your click, not that machine's) or notify here, but its jobs that need you and its bell's new entries
 ring the bell ([Notifications](#notifications)) here. If the link drops, its terminals reconnect with their
 screen when it comes back. While the machine is offline its rows are greyed and show what it had
 when last seen; they come back up to date when it does. Nothing of another machine is saved on this
@@ -530,8 +531,7 @@ is waiting for you).
 - **To peek**, press Space on the row you picked with ↑ and ↓ in the Attention view (filter field
   focused, ⇧⌘F); or hover a row of the Attention view, of the centre's list (with no session open)
   or of the notifications and click its eye; or choose **Peek** in an open session's **…** menu
-  (this Mac's rows: another machine's open rows in the sidebar have no menu yet, so peek at those
-  from the Attention view or ⌃⌥⌘A).
+  (this Mac's open sessions and an online machine's).
   **Peek at next needing you** (⌃⌥⌘A, Window menu or the palette) peeks at where ⌥⌘A would go.
 - **Peek is for looking**: nothing you type, paste or click reaches the peeked tab. **Open (⌘↩) to
   answer**. Its keys work like the notifications popover's:
@@ -583,14 +583,18 @@ is waiting for you).
   Pin, New session, New job for this project…, Rename…, the session order, Reveal in Finder, Copy
   path and Hide. Sessions offer Pin, Reveal in Finder, Copy path (of the session file), Copy
   session info, Send to Atlas, [Peek](#peek) (open sessions that can be peeked), Mark as unread
-  (open sessions on this Mac; Mark as read when it is), Hide and Close session.
+  (open sessions; Mark as read when it is), Hide and Close session. Another machine's open
+  session, while that machine is online, offers only Peek and Mark as unread (or read); its
+  other rows have no menu yet.
 - **To come back to a session later**, use its **…** → **Mark as unread**, or press ⇧⌘U in it
-  (Window menu or the palette: the tab you are in, if it is a terminal, else the session's; a
-  session on this Mac, not another machine's): it
-  keeps the finished check mark (the accent) until you look at it again. ⌥⇧⌘U (**Mark all sessions as read**) clears
-  finished and not seen on every open session on this Mac and says how many ("Marked 2 as read",
-  or "Nothing unread"); a tab waiting for you, with an error or a question stays exactly as it
-  is until you look at it. Other machines' sessions keep theirs.
+  (Window menu or the palette: the tab you are in, if it is a terminal, else the session's): it
+  keeps the finished check mark (the accent) until you look at it again. On another machine's
+  session the mark is made on that machine, so it stays there too; if that machine is offline, or
+  its Deckhand is too old to do it, the row stays as it was and a message says why. ⌥⇧⌘U
+  (**Mark all sessions as read**) clears finished and not seen on every open session on this Mac
+  and on every online machine, and says how many ("Marked 2 as read", or "Nothing unread"),
+  naming a machine it skipped because it is offline, or that could not do it; a tab waiting for
+  you, with an error or a question stays exactly as it is until you look at it.
 - **To start a job for a project**, click **New job…** under the selected project (below
   **+ New session**), or use its menu's **New job for this project…**: the [job
   sheet](#the-job-sheet) opens with that project chosen.
@@ -1159,7 +1163,9 @@ else.
   terminal); **⌘-click** opens it in your default browser, and a mail link in your mail app.
   **⇧⌘-click** opens a web link in a new browser tab of the session, in front (in your default
   browser when Deckhand has no browser, and from Atlas's terminal). Right-click a link for
-  **Open link**, **Open in browser tab** and **Copy link**. Both hyperlinks
+  **Open link**, **Open in browser tab** and **Copy link**. A link in another machine's terminal
+  opens here, on this Mac, in your default browser (⇧⌘-click too; there is no **Open in browser
+  tab** for it): it is that machine's output, so it gets the same checks as any link here. Both hyperlinks
   (OSC 8, a program's link whose text may differ from its address) and web addresses in the
   text work, also when they wrap onto the next row. Only http, https and mailto links open:
   file, javascript and other kinds from a program's output never do.
@@ -2267,7 +2273,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Peek at next needing you | ⌃⌥⌘A | where ⌥⌘A would go, in a panel over the centre, without leaving the session on screen; look only, nothing you type reaches it ([Peek](#peek)) |
 | Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | the last one you looked at; the oldest |
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | the Open section's rows |
-| Mark as unread, Mark all sessions as read | ⇧⌘U, ⌥⇧⌘U | this Mac only: the tab (or session) on screen; every open session on this Mac |
+| Mark as unread, Mark all sessions as read | ⇧⌘U, ⌥⇧⌘U | the tab (or session) on screen, on its machine; every open session on this Mac and every online machine |
 | Bring all to front |  | |
 
 **Help**

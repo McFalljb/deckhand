@@ -202,6 +202,7 @@ Edit_Target :: enum {
 }
 
 edit_target :: proc() -> Edit_Target {
+	if cover_is_open() do return cover_target_view() != nil ? .Terminal : .None // its keys go to it (ui_cover.odin)
 	if f, _, _ := focused_field(); f != nil do return .Field
 	if state.focus_widget == "" && tab_editor() != nil do return .Editor
 	if kt := core.key_tab(); kt != nil && kt.has_term && (state.focus_widget == "" || state.focus_widget == "agent_input") do return .Terminal

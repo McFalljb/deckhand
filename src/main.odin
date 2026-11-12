@@ -659,6 +659,8 @@ event :: proc(e: ^sapp.Event) {
 	defer client.busy -= 1
 	client_before_event() // the replica holds what timers did since the last frame (client.odin)
 	defer client_drain()
+	defer cover_event_end()
+	if cover_track(e) do return // a key held through a cover's open or close: its repeats and release go nowhere (ui_cover.odin)
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
 	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
@@ -681,9 +683,9 @@ event :: proc(e: ^sapp.Event) {
 			if e.type == .FILES_DROPPED || job_sheet_event(e) do return // dropped files: sidebar_drop refuses them too
 		}
 	}
-	// a peek (ui_peek.odin) takes every key and click: its terminal and its panel get them, nothing
-	// under it does; a ⌘ chord that is not its own closes it and goes on below
-	if peek_event(e) do return
+	// a cover (a peek, ui_cover.odin) takes every key, click and paste: nothing under it gets one;
+	// a ⌘ chord that is not its own closes it and goes on below
+	if cover_event(e) do return
 	// ⌘K opens the palette from anywhere, and closes it
 	if e.type == .KEY_DOWN && e.key_code == .K && only_cmd {
 		ime_cancel()
@@ -891,8 +893,7 @@ event :: proc(e: ^sapp.Event) {
 	case .CHAR:
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_char(kt, e)
 	case .CLIPBOARD_PASTED:
-		core.claude_note_typed(ktab)
-		if ktab != nil do ui_do(core.Send_Text{ktab.id, clipboard_text()})
+		if ktab != nil do tab_paste(ktab.id)
 	case .FILES_DROPPED:
 		paths := make([]string, sapp.get_num_dropped_files(), context.temp_allocator)
 		for &p, i in paths do p = string(sapp.get_dropped_file_path(i32(i)))
@@ -967,7 +968,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Button:    button_click(Button(hit))
 		case Hit_Fleet_Row: fleet_go(u64(hit)) // as ⌥⌘A would go there (ui_fleet.odin)
 		case Hit_Peek_Row:  peek_open_session(u64(hit)) // a row's eye: Peek (ui_peek.odin)
-		case Hit_Peek: // peek_event takes the panel's clicks
+		case Hit_Peek: // the peek takes its panel's clicks (its cover: ui_cover.odin)
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
 		}
 		clay.SetPointerState(app.pointer, false)
@@ -1007,15 +1008,16 @@ event :: proc(e: ^sapp.Event) {
 		// the session on screen is seen now: its bell entries are read
 		if core.notify_wants_seen(state.current_session) do client_internal(core.Notifications_Mark_Read{session = state.current_session})
 		for id in core.status_wants_seen() do client_internal(core.Set_Unread{tab_id = id, unread = false}) // agent_status.odin
-		if pv := peek_view(); pv != nil do term_focus(pv, true) // a peek has the keyboard (peek_close gives the one under it back)
-		else if kt != nil do term_focus(kt, true)
+		if cover_is_open() { 	// a cover has the keyboard (cover_close gives the one under it back)
+			if cv := cover_target_view(); cv != nil do term_focus(cv, true)
+		} else if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false
 		for _, x in term_views {
 			term_cancel_drag(x) // its release may go to another app
 			term_link_clear(x) // and ⌘'s
 		}
-		if pv := peek_view(); pv != nil && pv != kt do term_focus(pv, false)
+		if cv := cover_target_view(); cv != nil && cv != kt do term_focus(cv, false)
 		if kt != nil do term_focus(kt, false)
 	case .QUIT_REQUESTED:
 		// a separate core: the window closes, the core and its sessions run on (quit_route)
@@ -1371,13 +1373,12 @@ utf16_unit :: proc(pending: ^u32, cp: u32) -> (rune, bool) {
 ime_commit :: proc(text: string) {
 	if !autotest_allows_input() do return
 	ime_set_marked("", 0)
-	if pv := peek_view(); pv != nil { 	// a peek has the keyboard, over any field (ui_peek.odin)
-		_, ptab, _ := find_tab(pv.tab_id)
-		core.claude_note_typed(ptab)
-		term_text_input(pv, text)
+	if cover_is_open() { 	// a cover has the keyboard, over any field: its target, or nowhere (ui_cover.odin)
+		cover_ime_commit(text)
 	} else if f, _, _ := focused_field(); f != nil {
 		tf_insert(f, text)
 		if state.focus_widget == "palette" do palette_edited()
+		if state.focus_widget == "sidebar_filter" do attention_keyed = false // typed in: Space is a space again (ui_peek.odin)
 	} else if t := key_view(); t != nil {
 		core.claude_note_typed(core.key_tab())
 		term_text_input(t, text)
@@ -1389,27 +1390,30 @@ ime_commit :: proc(text: string) {
 
 ime_set_marked :: proc(text: string, caret: int) {
 	if !autotest_allows_input() do return
+	if cover_set_marked(text, caret) do return // a cover's: drawn at its target, never in a field under it (ui_cover.odin)
 	if text == ime.marked do return
 	delete(ime.marked)
 	ime.marked = strings.clone(text)
 	ime.caret = caret
 	app.redraw = true
 	if t := key_view(); t != nil do t.changed = true
-	if pv := peek_view(); pv != nil do pv.changed = true
 }
 
 ime_cancel :: proc() {
-	if ime.marked == "" do return
+	if m, _ := cover_marked(); ime.marked == "" && m == "" do return
 	platform_ime_cancel()
 	ime_set_marked("", 0)
 }
 
 // Option starts dead keys (é, ü) in text fields; in a terminal it is Alt.
-ime_option_composes :: proc() -> bool {return !peek_is_open() && (state.focus_widget != "" || active_editor() != nil)}
+ime_option_composes :: proc() -> bool {return !cover_is_open() && (state.focus_widget != "" || active_editor() != nil)}
 
 // The candidate window's anchor: the field caret, else the terminal cursor.
 ime_anchor :: proc() -> [4]f32 {
-	if pv := peek_view(); pv != nil do return {pv.cursor_px.x, pv.cursor_px.y, font.cell_w, font.cell_h}
+	if cover_is_open() {
+		if v := cover_target_view(); v != nil do return {v.cursor_px.x, v.cursor_px.y, font.cell_w, font.cell_h}
+		return {}
+	}
 	if state.focus_widget == "" {
 		if t := key_view(); t != nil do return {t.cursor_px.x, t.cursor_px.y, font.cell_w, font.cell_h}
 	}

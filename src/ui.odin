@@ -1514,13 +1514,13 @@ Hit_Pop :: distinct Pop_Item
 Hit_Sheet_Close :: struct {}
 
 ui_hit :: proc() -> Hit {
+	if h, covered := cover_hit(); covered do return h // a cover (a peek): nothing under it is hit (ui_cover.odin)
 	if palette_is_open() {
 		// the palette covers everything: nothing under it is hit
 		for i in palette.first ..< palette.first + PALETTE_ROWS do if clay.PointerOver(clay.ID("palrow", u32(i))) do return Hit_Palette_Row(i)
 		return nil
 	}
 	if shortcuts_open() do return sheet_hit() // so does the shortcuts sheet
-	if peek_is_open() do return peek_hit() // and a peek's scrim (ui_peek.odin)
 	if setup_open() do return setup_hit() // and the first-run sheet (ui_setup.odin)
 	if job_sheet_open() do return job_sheet_hit() // and the job sheet (ui_job_sheet.odin)
 	if settings_open() do return settings_hit() // and the settings popover

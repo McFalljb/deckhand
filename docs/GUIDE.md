@@ -497,14 +497,18 @@ and title, the machine it runs on when you have more than one, how long it has b
   | ⌘⌫, ⌘←, ⌘→ | line editing in it, as in any terminal |
 
   Any other ⌘ shortcut closes the peek and then does what it does. A click outside the panel
-  closes it. When it closes, the keyboard is back exactly where it was (a terminal, an editor, a
-  field).
+  closes it. Nothing under the panel gets a key, click, paste, dictation or input-method text
+  while it shows, and a key you are still holding when it closes (⌘W, Enter) does nothing more
+  until you let go of it. When it closes, the keyboard is back where it was (a terminal, an
+  editor, a field); **Open** gives it to the tab it opens. Hiding or minimizing the window (⌘H,
+  ⌘M) or going full screen (⌃⌘F) leaves the peek open, and typing goes on into it.
 - **What can be peeked**: a pi, Claude Code or shell tab of an open session other than the one on
   screen, on this Mac or on another machine that is online. Browser, app and editor tabs are not
   peeked: their rows have no eye, and a click opens them as before. The peek closes by itself
   when its tab or session closes, or its machine goes offline.
 - Looking counts: a session that finished while you were away is seen once you peek at it (and
-  its notification is read); one waiting for you stays waiting until you answer it.
+  its notifications are read, another machine's too, and any that come while you look); one
+  waiting for you stays waiting until you answer it.
 - The peeked terminal keeps the size it has in its session, drawn at full sharpness; the panel
   grows to show it whole when it can, and a terminal larger than the room left shows its bottom
   left (where an agent's prompt is). A tab this window has never shown takes the panel's size the

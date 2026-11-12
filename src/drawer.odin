@@ -336,5 +336,5 @@ drawer_event :: proc(e: ^sapp.Event) -> bool {
 
 // An overlay (palette, menu, popover, sheet) covers the pointer.
 over_overlay :: proc() -> bool {
-	return palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || peek_is_open()
+	return palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || cover_is_open()
 }

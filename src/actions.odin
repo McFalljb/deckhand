@@ -845,7 +845,7 @@ action_run :: proc(id: string, menu := "") {
 	a := action_by_id(id)
 	if a == nil do return
 	if id != "quit" && job_sheet_open() do return // modal: nothing behind it takes over (menubar.odin greys these)
-	if peek_action(id) do return // a peek's own (⌥⌘A, Close tab: the peek's); any other closes it first (ui_peek.odin)
+	if cover_action(id) do return // a cover's own (a peek's ⌥⌘A, Close tab); any other closes it first (ui_cover.odin)
 	if a.pick_folder {
 		for &b, i in ACTIONS do if &b == a do palette.pick_for = i + 1
 		delete(palette.pick_menu)

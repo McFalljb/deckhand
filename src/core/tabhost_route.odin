@@ -624,8 +624,9 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if !tab_host_up() do return {ok = true}, false // nobody waits: the window's requests went with it
 		return routed(cmd, caller, request_id)
 	case Terminal_Link:
-		// a ⌘-click on a terminal's link (the user's only): http and https in a browser tab of the
-		// terminal's session, in front; mailto, an external one, Home's or no browser: the default one
+		// a click on a terminal's link (the user's only): ⇧⌘-click's (not external) http and https in
+		// a browser tab of the terminal's session, in front; mailto, ⌘-click's (external), Home's or
+		// no browser: the default one
 		s, tab, _ := find_tab(c.tab_id)
 		if tab == nil do return fail("no such tab"), false
 		#partial switch _ in tab.kind {

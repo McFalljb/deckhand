@@ -72,6 +72,7 @@ platform_quiet :: proc() {}
 
 platform_activity :: proc(on: bool) {}
 platform_set_badge :: proc(n: int) {} // no Dock
+platform_play_sound :: proc(name: string) {} // macOS's system sounds only
 // no timer: frames tick the core
 platform_core_timer :: proc(every: time.Duration, fire: proc()) {}
 pid_cpu_seconds :: proc(pid: i32) -> f64 {return 0}

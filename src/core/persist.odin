@@ -571,11 +571,23 @@ workspace_json :: proc() -> string {
 	if st.remote_machines != remote_machines_default_on do kb(&w, "remote_machines", st.remote_machines) // Machines over SSH (machines.odin): saved when it differs from the default
 	if st.machines_reachable != machines_reachable_default_on do kb(&w, "machines_reachable", st.machines_reachable) // the hub door (window_sock.odin)
 	if st.last_harness != .Pi do ks(&w, "last_harness", HARNESS_KEYS[st.last_harness]) // the picker's first row (harness.odin)
-	if st.bell_off != {} || st.bell_os_off || st.bell_dock_off {
+	if st.bell_off != {} || st.bell_os != {} || st.bell_sound != {} || st.bell_dock_off {
 		k(&w, "bell")
 		open_obj(&w)
 		for g in Bell_Group do if g in st.bell_off do kb(&w, BELL_GROUP_NAMES[g], false)
-		if st.bell_os_off do kb(&w, "os", false)
+		// per group, only what differs from its default (notify.odin)
+		if st.bell_os != {} {
+			k(&w, "macos")
+			open_obj(&w)
+			for v, g in st.bell_os do if v != .Default do ks(&w, BELL_GROUP_NAMES[g], OS_WHEN_NAMES[v])
+			close_obj(&w)
+		}
+		if st.bell_sound != {} {
+			k(&w, "sound")
+			open_obj(&w)
+			for v, g in st.bell_sound do if v != .Default do ks(&w, BELL_GROUP_NAMES[g], BELL_SOUND_NAMES[v])
+			close_obj(&w)
+		}
 		if st.bell_dock_off do kb(&w, "dock", false)
 		close_obj(&w)
 	}
@@ -729,7 +741,15 @@ workspace_restore :: proc(text: string) -> string {
 				if v, ok := o[k].(json.Boolean); ok do return bool(v)
 				return nil
 			}
-			run(Set_Bell{finished = on(bo, "finished"), waiting = on(bo, "waiting"), errors = on(bo, "errors"), jobs = on(bo, "jobs"), os = on(bo, "os"), dock = on(bo, "dock")})
+			// "os": false (saved before per-group settings) = every group's macOS never
+			sb := Set_Bell{finished = on(bo, "finished"), waiting = on(bo, "waiting"), errors = on(bo, "errors"), jobs = on(bo, "jobs"), os = on(bo, "os"), dock = on(bo, "dock")}
+			mo, _ := bo["macos"].(json.Object)
+			so, _ := bo["sound"].(json.Object)
+			for g in Bell_Group {
+				if v, ok := enum_of(mo, BELL_GROUP_NAMES[g], OS_WHEN_NAMES); ok do sb.macos[g] = v
+				if v, ok := enum_of(so, BELL_GROUP_NAMES[g], BELL_SOUND_NAMES); ok do sb.sound[g] = v
+			}
+			run(sb)
 		}
 		// the folders (folders.odin): overrides, then the main folder. Older
 		// files: notes_dir becomes the main folder, and chats keep running

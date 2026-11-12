@@ -310,6 +310,7 @@ win_os_app :: proc() -> Win_OS {
 		set_clipboard_secret = platform_clipboard_set_secret,
 		clear_clipboard_if = platform_clipboard_clear_if,
 		set_badge = platform_set_badge,
+		play_sound = platform_play_sound,
 	}
 }
 

@@ -159,6 +159,9 @@ assert_state focus.kind terminal
 # ---- the shortcuts sheet: from the popover, its close button, outside, ⌘/
 clickid settings
 wait 200
+# the list is taller than the window: ↑ picks the last row, which scrolls the Deckhand group into view
+key up
+wait 200
 clickid pop 18
 eventually
 assert_state focus.id shortcuts

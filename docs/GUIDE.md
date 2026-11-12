@@ -1556,21 +1556,39 @@ The bell in the top bar collects what happened in sessions you were **not lookin
 - Looking at a session marks its entries read. Entries from the same session within 10 seconds
   replace each other, so a flapping session does not flood the list. At most 200 entries are
   kept, and they are not saved: the bell empties when Deckhand Core stops.
-- **To choose what the bell collects**, use the gear's **Notify me about** chips: Finished,
-  Waiting, Errors (errors and exits) and Jobs. Something you asked for that Deckhand could not do
-  (Send to Atlas's text left on the clipboard, and why) always shows in the bell, even with Errors off.
-- **macOS notifications** (gear: **Also notify in macOS**, on by default): while Deckhand is in the
-  background, waiting, errors, exits and jobs that need you or failed also raise a notification
-  (finished runs only go to the bell). Pacing: at most one per session every 10 seconds, and in a
-  burst the first two, then one "N sessions need you" summary. A build run from the repo
-  (no app bundle) bounces the Dock icon instead.
+- **To choose what you hear about**, use the gear's **Notify me about** grid, one row per kind
+  (Needs you, Finished, Errors: errors and exits, Jobs: runs that need you or failed). Click a
+  cell (or move to it with the arrow keys and press Enter or Space) to step to its next choice:
+
+  | Notify me about | Bell | macOS | Sound |
+  |---|---|---|---|
+  | Needs you | on | background | Tink |
+  | Finished | on | never | none |
+  | Errors | on | background | none |
+  | Jobs | on | background | none |
+
+  (the defaults). **Bell**: whether the bell collects it. Something you asked for that Deckhand
+  could not do (Send to Atlas's text left on the clipboard, and why) always shows in the bell, even
+  with Errors off.
+- **macOS**: **never**, **background** (only while Deckhand is not the app in front) or
+  **always**. Pacing: at most one per session every 10 seconds, and in a burst the first two, then
+  one "N sessions need you" summary. A build run from the repo (no app bundle) bounces the Dock
+  icon instead. A job's finished run raises one only with its own `notify: always` ([Jobs](#jobs)).
+  Upgrading keeps what you had: the old **Also notify in macOS** switch off becomes never for
+  every kind.
+- **Sound**: none, or one of macOS's sounds: Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso
+  (choosing one plays it). The rule: a sound plays while Deckhand is in the background, or also
+  while it is in front when that kind's macOS says always. It is paced with the macOS
+  notifications, and never more than one a second.
 - **The Dock icon's badge** (gear: **Badge Dock icon**, on by default): the number of open
   sessions waiting for you, this Mac's and those of machines that are online; no badge at zero.
 - **Other machines** can't notify you themselves, so this Mac rings for them: each new entry of
   their bell once, and each job run there that needs you once (also one from while you were
-  away, when it connects). What a machine already had the first time it connects, or after its
-  core restarted, does not ring again. At most 4 a minute ring for one machine. Removing the
-  machine, or turning Machines over SSH off, takes its entries away.
+  away, when it connects), with this Mac's bell, macOS and sound choices for its kind. What a
+  machine already had the first time it connects, or after its core restarted, does not ring
+  again. At most 4 a minute ring for one machine. Removing the machine, or turning Machines over
+  SSH off, takes its entries away. Only you, at this Mac, change these settings: not an agent, and
+  not another machine viewing this one.
 
 ## The palette and the gear
 
@@ -1601,7 +1619,8 @@ window the list scrolls.
 **Notifications**
 
 - **Agent notifications**: Atlas's macOS notifications.
-- **Notify me about**, **Also notify in macOS** and **Badge Dock icon**: see [Notifications](#notifications).
+- **Notify me about** (a grid: Bell, macOS and Sound for each kind) and **Badge Dock icon**: see
+  [Notifications](#notifications).
 
 **Sessions**
 
@@ -2091,10 +2110,17 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Notifications: mark all read |  | |
 | Notifications: clear |  | |
 | Notify me about: Finished |  | bell group on/off |
-| Notify me about: Waiting |  | bell group on/off |
+| Notify me about: Needs you |  | bell group on/off |
 | Notify me about: Errors |  | bell group on/off |
 | Notify me about: Jobs |  | bell group on/off |
-| Also notify in macOS |  | macOS notifications for the bell |
+| Needs you: macOS notification |  | the gear's grid: the next choice (never, background, always) |
+| Finished: macOS notification |  | the gear's grid: the next choice (never, background, always) |
+| Errors: macOS notification |  | the gear's grid: the next choice (never, background, always) |
+| Jobs: macOS notification |  | the gear's grid: the next choice (never, background, always) |
+| Needs you: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
+| Finished: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
+| Errors: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
+| Jobs: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
 | Badge Dock icon |  | the number of sessions waiting for you on the Dock icon |
 | Toggle left column | ⌘B | |
 | Toggle right column | ⌥⌘B | |

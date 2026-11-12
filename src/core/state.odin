@@ -306,7 +306,12 @@ Settings :: struct {
 	agent_model:   string, // the agent's model, "provider/id[:thinking]" ("" = pi's default); user-only
 	notify_off:    bool, // no OS notifications from the agent while the window is in the background
 	bell_off:      bit_set[Bell_Group], // kinds the bell does not collect (notify.odin); default: all on
-	bell_os_off:   bool, // no OS notifications for bell entries (waiting, errors, jobs that need you) while in the background
+	// retired (one switch for every group): only an older core's state stream sets it (the window
+	// of a newer build, attached to it through an update) and then every group's macOS is never;
+	// this build keeps it false (Set_Bell clears it, nothing saves it)
+	bell_os_off:   bool,
+	bell_os:       [Bell_Group]Os_When, // per group: a macOS notification never, in the background or always (Default: BELL_OS_DEFAULT; notify.odin)
+	bell_sound:    [Bell_Group]Bell_Sound, // per group: its sound (Default: BELL_SOUND_DEFAULT; notify.odin)
 	bell_dock_off: bool, // no badge on the Dock icon (the sessions waiting for you: win_os.odin)
 	// jobs (jobs.odin; user-only)
 	// the main folder and its subfolders (folders.odin; user-only)

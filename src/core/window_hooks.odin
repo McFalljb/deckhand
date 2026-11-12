@@ -91,6 +91,7 @@ Window_Op :: enum u8 {
 	Quit, // the core ends on purpose (a quit, Stop All) or let this window go for a newer one (text: why): the window quits too, never reconnects
 	Viewed_From, // another machine's Deckhand took this core (text: its name): the window shows Viewed from <machine> with Take back, and does not reconnect until then
 	App_Boxes, // a separate core: tab_id's app sent new tab.boxes (text: {"boxes":[…]}), drawn while inspected
+	Sound, // a bell entry's sound (text: its name, BELL_SOUND_LABELS), played by the window (notify.odin)
 }
 
 Window_Request :: struct {
@@ -195,6 +196,8 @@ window_open_url :: proc(url: string) -> bool {
 window_reveal :: proc(path: string) {ask({op = .Reveal, path = path})}
 // A separate core's OS notification goes through the window (none attached: serve shows its own).
 window_notify :: proc(title, body: string) {ask({op = .Notify, text = title, message = body})}
+// A bell entry's sound (notify.odin's notify_os: once per entry, paced): the window plays it.
+window_sound :: proc(name: string) {ask({op = .Sound, text = name})}
 // A separate core: the window goes too (it must not reconnect). why: for its log.
 window_quit :: proc(why: string) {ask({op = .Quit, text = why})}
 window_viewed_from :: proc(machine: string) {ask({op = .Viewed_From, text = machine})}

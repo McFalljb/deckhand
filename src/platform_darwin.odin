@@ -194,6 +194,7 @@ foreign pdplatform {
 	dh_mac_pasteboard_clear_if :: proc(count: c.long) ---
 	dh_mac_activity :: proc(on: c.int) ---
 	dh_mac_set_badge :: proc(n: c.int) ---
+	dh_mac_play_sound :: proc(name: cstring) ---
 	dh_mac_display_hook :: proc() ---
 	dh_mac_display_fps :: proc() -> c.int ---
 	dh_mac_display_scale :: proc() -> f32 ---
@@ -228,6 +229,9 @@ platform_activity :: proc(on: bool) {dh_mac_activity(on ? 1 : 0)}
 
 // The Dock icon's badge: n, none at 0 (win_os.set_badge).
 platform_set_badge :: proc(n: int) {dh_mac_set_badge(c.int(n))}
+
+// A macOS system sound by name (win_os.play_sound: the bell's sounds, core/notify.odin).
+platform_play_sound :: proc(name: string) {dh_mac_play_sound(strings.clone_to_cstring(name, context.temp_allocator))}
 
 // Quiet test mode, before sokol starts: never activates, window off-screen
 // (src/native/platform_macos.m).

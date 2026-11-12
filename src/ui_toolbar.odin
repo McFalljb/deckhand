@@ -239,6 +239,16 @@ Pop_Item :: enum {
 	Separate_Core, // run sessions in a background core (on by default; read at launch); last so earlier rows keep their ids
 	Remote_Machines, // Machines over SSH (machines.odin; on by default); last so earlier rows keep their ids
 	Bell_Dock, // the Dock icon's badge (win_os.odin); drawn after Also notify in macOS; last so earlier rows keep their ids
+	// the Notifications grid's macOS and Sound columns (one per Bell_Group, in its order); last so
+	// earlier rows keep their ids. Bell_OS (one switch for all) is no longer drawn
+	Os_Finished,
+	Os_Waiting,
+	Os_Errors,
+	Os_Jobs,
+	Sound_Finished,
+	Sound_Waiting,
+	Sound_Errors,
+	Sound_Jobs,
 }
 
 // The rows top to bottom, in their groups (POP_GROUPS): the keyboard walks them in this order.
@@ -248,8 +258,13 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Look_Graphite, .Look_Warm, .Look_Ghostty,
 	.Text_Small, .Text_Medium, .Text_Default, .Text_Large,
 	.Reduce_Motion,
-	// Notifications
-	.Notifications, .Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS, .Bell_Dock,
+	// Notifications: the switch, then the grid row by row (Bell, macOS, Sound), the Dock
+	.Notifications,
+	.Bell_Waiting, .Os_Waiting, .Sound_Waiting,
+	.Bell_Finished, .Os_Finished, .Sound_Finished,
+	.Bell_Errors, .Os_Errors, .Sound_Errors,
+	.Bell_Jobs, .Os_Jobs, .Sound_Jobs,
+	.Bell_Dock, .Bell_OS,
 	// Sessions: switches, then one-shot actions
 	.Agent_Model, .Chats_Readonly, .Chats_Folder, .Chats_Folder_Default, .Tidy_Projects,
 	.Keep_Sessions, .Separate_Core, .Remote_Machines,
@@ -274,8 +289,16 @@ POP_ACTIONS := [Pop_Item]string {
 	.Bell_Waiting      = "bell_waiting",
 	.Bell_Errors       = "bell_errors",
 	.Bell_Jobs         = "bell_jobs",
-	.Bell_OS           = "bell_os",
+	.Bell_OS           = "", // not drawn (the grid's macOS column)
 	.Bell_Dock         = "bell_dock",
+	.Os_Finished       = "bell_os_finished",
+	.Os_Waiting        = "bell_os_waiting",
+	.Os_Errors         = "bell_os_errors",
+	.Os_Jobs           = "bell_os_jobs",
+	.Sound_Finished    = "bell_sound_finished",
+	.Sound_Waiting     = "bell_sound_waiting",
+	.Sound_Errors      = "bell_sound_errors",
+	.Sound_Jobs        = "bell_sound_jobs",
 	.Agent_Model       = "agent_model_pop",
 	.Chats_Readonly    = "chats_readonly",
 	.Chats_Folder      = "chats_dir",
@@ -307,6 +330,7 @@ pop_item_shown :: proc(it: Pop_Item) -> bool {
 	#partial switch it {
 	case .Reload_Pi, .Restart_Claude: return action_ok(POP_ACTIONS[it])
 	case .Agent_Model: return core.atlas_offered()
+	case .Bell_OS: return false
 	}
 	return true
 }
@@ -324,7 +348,126 @@ pop_run :: proc(it: Pop_Item) {
 		ui_do(core.Set_Focus{""})
 	}
 	if !action_ok(POP_ACTIONS[it]) do return // not now (no other folder to go back from)
+	// a sound: the next one plays as it is chosen (a preview; none for "none")
+	preview := it >= .Sound_Finished && it <= .Sound_Jobs ? core.bell_sound_next(core.bell_sound_of(state.settings, core.Bell_Group(int(it) - int(Pop_Item.Sound_Finished)))) : core.Bell_Sound.None
 	action_run(POP_ACTIONS[it])
+	if preview != .None do play_bell_sound(core.BELL_SOUND_LABELS[preview])
+}
+
+// ---- the Notifications grid: per group, Bell (on/off), macOS (never, background, always), Sound ----
+
+// Its rows top to bottom, and what each is called.
+BELL_GRID_ORDER :: [4]core.Bell_Group{.Waiting, .Finished, .Errors, .Jobs}
+BELL_GRID_LABELS := [core.Bell_Group]string{.Waiting = "Needs you", .Finished = "Finished", .Errors = "Errors", .Jobs = "Jobs"}
+// What the rule is, in the tooltips.
+BELL_SOUND_RULE :: "A sound plays while Deckhand is in the background, or also in front when macOS says always"
+
+// The grid's actions (actions.odin): the next choice for a group.
+bell_os_step :: proc(g: core.Bell_Group) -> core.Set_Bell {
+	c: core.Set_Bell
+	c.macos[g] = core.os_when_next(core.bell_os_when(state.settings, g))
+	return c
+}
+bell_os_detail :: proc(g: core.Bell_Group) -> string {return core.OS_WHEN_NAMES[core.bell_os_when(state.settings, g)]}
+bell_sound_step :: proc(g: core.Bell_Group) -> core.Set_Bell {
+	c: core.Set_Bell
+	c.sound[g] = core.bell_sound_next(core.bell_sound_of(state.settings, g))
+	return c
+}
+bell_sound_detail :: proc(g: core.Bell_Group) -> string {return core.BELL_SOUND_LABELS[core.bell_sound_of(state.settings, g)]}
+
+// The columns' widths: each fits its widest choice, so the columns line up.
+@(private = "file")
+bell_grid_cols :: proc() -> (bell, mac, sound: f32) {
+	pad := px(2 * (SP_1 + 2))
+	bell = max(px(SWITCH_W + 2 * SP_1), text_w("Bell", FONT_UI_SMALL))
+	mac = text_w("macOS", FONT_UI_SMALL)
+	for n in core.OS_WHEN_NAMES do mac = max(mac, text_w(n, FONT_UI_SMALL) + pad)
+	sound = text_w("Sound", FONT_UI_SMALL)
+	for n in core.BELL_SOUND_LABELS do sound = max(sound, text_w(n, FONT_UI_SMALL) + pad)
+	return
+}
+
+@(private = "file")
+bell_grid :: proc() {
+	th := theme()
+	bw, mw, sw := bell_grid_cols()
+	row :: proc() -> clay.ElementDeclaration {
+		return {layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}
+	}
+	head :: proc(text: string, w: f32) {
+		if clay.UI()({layout = {sizing = {clay.SizingFixed(w), clay.SizingFit()}, childAlignment = {x = .Center}}}) {
+			clay.TextDynamic(text, txt(theme().text_muted, FONT_UI_SMALL))
+		}
+	}
+	// the header: what the columns are
+	if clay.UI(clay.ID("bell_grid_head"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POP_HEAD_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
+		pop_label("Notify me about")
+		spacer()
+		head("Bell", bw)
+		head("macOS", mw)
+		head("Sound", sw)
+	}
+	for g in BELL_GRID_ORDER {
+		if clay.UI(clay.ID("bell_grid_row", u32(g)))(row()) {
+			clay.TextDynamic(BELL_GRID_LABELS[g], txt(th.text_secondary))
+			spacer()
+			// Bell: a switch in a cell the size of the column
+			it := Pop_Item(int(Pop_Item.Bell_Finished) + int(g))
+			id := pop_id(it)
+			bg, _ := overlay(id, false, pop_hovered(it))
+			if clay.UI(id)({
+				layout = {sizing = {clay.SizingFixed(bw), clay.SizingFixed(px(CHIP_SMALL_H))}, childAlignment = {x = .Center, y = .Center}},
+				backgroundColor = bg,
+				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+			}) {
+				switch_control(g not_in state.settings.bell_off)
+			}
+			w := core.bell_os_when(state.settings, g)
+			grid_chip(Pop_Item(int(Pop_Item.Os_Finished) + int(g)), core.OS_WHEN_NAMES[w], w != .Never, mw)
+			s := core.bell_sound_of(state.settings, g)
+			grid_chip(Pop_Item(int(Pop_Item.Sound_Finished) + int(g)), core.BELL_SOUND_LABELS[s], s != .None, sw)
+		}
+	}
+}
+
+// One of the grid's choices: a chip that steps to the next choice (accent-tinted unless off).
+@(private = "file")
+grid_chip :: proc(it: Pop_Item, text: string, on: bool, w: f32) {
+	th := theme()
+	id := pop_id(it)
+	bg, em := overlay(id, false, pop_hovered(it))
+	if on do bg = cc(mix(th.bg_elevated, th.accent, 0.22 + 0.14 * em))
+	if clay.UI(id)({
+		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(px(CHIP_SMALL_H))}, childAlignment = {x = .Center, y = .Center}},
+		backgroundColor = bg,
+		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+		border = {color = cc(on ? with_alpha(th.accent, 0.6) : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
+	}) {
+		clay.TextDynamic(text, txt(on ? th.text : mix(th.text_muted, th.text_secondary, em), FONT_UI_SMALL))
+	}
+}
+
+// The grid's tooltips: what the cell is now, what a click does, and the rule.
+@(private = "file")
+bell_grid_tip :: proc(it: Pop_Item) -> string {
+	switch {
+	case it >= .Bell_Finished && it <= .Bell_Jobs:
+		g := core.Bell_Group(int(it) - int(Pop_Item.Bell_Finished))
+		what := [core.Bell_Group]string{.Finished = "Finished runs", .Waiting = "Questions and dialogs", .Errors = "Errors and exits", .Jobs = "Jobs"}
+		off := g in state.settings.bell_off
+		return fmt.tprintf("%s in the bell: %s (click to turn %s)", what[g], off ? "off" : "on", off ? "on" : "off")
+	case it >= .Os_Finished && it <= .Os_Jobs:
+		g := core.Bell_Group(int(it) - int(Pop_Item.Os_Finished))
+		w := core.bell_os_when(state.settings, g)
+		now := [core.Os_When]string{.Default = "", .Never = "never", .Background = "while Deckhand is in the background", .Always = "always, also while Deckhand is in front"}
+		return fmt.tprintf("%s: a macOS notification %s (click: %s)", BELL_GRID_LABELS[g], now[w], core.OS_WHEN_NAMES[core.os_when_next(w)])
+	case it >= .Sound_Finished && it <= .Sound_Jobs:
+		g := core.Bell_Group(int(it) - int(Pop_Item.Sound_Finished))
+		s := core.bell_sound_of(state.settings, g)
+		return fmt.tprintf("%s: sound %s (click: %s, played). %s.", BELL_GRID_LABELS[g], core.BELL_SOUND_LABELS[s], core.BELL_SOUND_LABELS[core.bell_sound_next(s)], BELL_SOUND_RULE)
+	}
+	return ""
 }
 
 // The part of a table label after "Appearance: " or "Look: ".
@@ -518,28 +661,7 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Reduce_Motion, state.settings.reduce_motion)
 		pop_head(1)
 		pop_row(.Notifications, !state.settings.notify_off)
-		// the bell: what it collects (one chip per group), and macOS notifications
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POP_HEAD_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}}}) {
-			pop_label("Notify me about")
-		}
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
-			for g in core.Bell_Group {
-				it := Pop_Item(int(Pop_Item.Bell_Finished) + int(g))
-				on := g not_in state.settings.bell_off
-				id := pop_id(it)
-				bg, em := overlay(id, false, pop_hovered(it))
-				if on do bg = cc(mix(th.bg_elevated, th.accent, 0.22))
-				if clay.UI(id)({
-					layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(CHIP_SMALL_H))}, padding = {pu(SP_1 + 2), pu(SP_1 + 2), 0, 0}, childAlignment = {y = .Center}},
-					backgroundColor = bg,
-					cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-					border = {color = cc(on ? with_alpha(th.accent, 0.6) : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
-				}) {
-					clay.TextDynamic(label_tail(POP_ACTIONS[it]), txt(on ? th.text : mix(th.text_muted, th.text_secondary, em), FONT_UI_SMALL))
-				}
-			}
-		}
-		pop_row(.Bell_OS, !state.settings.bell_os_off)
+		bell_grid() // per kind: Bell, macOS, Sound
 		pop_row(.Bell_Dock, !state.settings.bell_dock_off)
 		pop_head(2)
 		if pop_item_shown(.Agent_Model) do pop_row(.Agent_Model, nil)
@@ -863,11 +985,7 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		if Pop_Item(x) == .Restart_Claude do return "Restart every idle Claude tab now (each resumes its conversation; background work stops); busy ones once idle", ""
 		if Pop_Item(x) >= .Look_Graphite && Pop_Item(x) <= .Look_Ghostty do return act(POP_ACTIONS[Pop_Item(x)])
 		if Pop_Item(x) >= .Text_Small && Pop_Item(x) <= .Text_Large do return act(POP_ACTIONS[Pop_Item(x)])
-		if Pop_Item(x) >= .Bell_Finished && Pop_Item(x) <= .Bell_Jobs {
-			g := core.Bell_Group(int(x) - int(Pop_Item.Bell_Finished))
-			what := [core.Bell_Group]string{.Finished = "Finished runs", .Waiting = "Questions and dialogs", .Errors = "Errors and exits", .Jobs = "Jobs"}
-			return fmt.tprintf("%s: %s (click to turn %s)", what[g], g in state.settings.bell_off ? "off" : "on", g in state.settings.bell_off ? "on" : "off"), ""
-		}
+		if tip := bell_grid_tip(Pop_Item(x)); tip != "" do return tip, ""
 	case Hit_Bell:
 		return bell_tip(x)
 	case Hit_Sheet_Close:

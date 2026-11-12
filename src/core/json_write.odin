@@ -1794,7 +1794,18 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		key(&st, "bell")
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)
-		kv_bool(&bo, "os", !s.settings.bell_os_off)
+		// per group, what applies (the defaults filled in: notify.odin); os: any group's macOS is not never
+		any_os := false
+		for g in Bell_Group do if bell_os_when(s.settings, g) != .Never do any_os = true
+		kv_bool(&bo, "os", any_os)
+		key(&bo, "macos")
+		mo := obj_begin(b)
+		for g in Bell_Group do kv_str(&mo, BELL_GROUP_NAMES[g], OS_WHEN_NAMES[bell_os_when(s.settings, g)])
+		obj_end(&mo)
+		key(&bo, "sound")
+		so := obj_begin(b)
+		for g in Bell_Group do kv_str(&so, BELL_GROUP_NAMES[g], BELL_SOUND_NAMES[bell_sound_of(s.settings, g)])
+		obj_end(&so)
 		kv_bool(&bo, "dock", !s.settings.bell_dock_off)
 		obj_end(&bo)
 		// the main folder and the effective subfolders (folders.odin)

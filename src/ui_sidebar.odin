@@ -172,11 +172,20 @@ unread_item :: proc(items: ^[dynamic]core.Menu_Item, id: u64, pi_session_id: str
 }
 
 // Another machine's open session's menu (#114): what acts there as the user's and nothing of this
-// Mac's (no pins, paths, accounts or new tabs): Peek, Mark as unread or read.
+// Mac's (no pins, paths, accounts or new tabs): Peek, Mark as unread or read. id is its row's own;
+// a session that has no id there yet (a Claude session before it reported one: a bare "m<no>:")
+// has nothing to mark.
 @(private = "file")
 remote_session_items :: proc(items: ^[dynamic]core.Menu_Item, id: u64, pi_session_id: string) {
 	if peek_tab_of(find_session(id)) != nil do append(items, core.Menu_Item{label = "Peek", peek = id})
-	unread_item(items, id, pi_session_id)
+	if !remote_id_bare(pi_session_id) do unread_item(items, id, pi_session_id)
+}
+
+// Another machine's pi_session_id without its own id: "m<no>:" and nothing after (or none at all).
+@(private = "file")
+remote_id_bare :: proc(pi_session_id: string) -> bool {
+	k := strings.index_byte(pi_session_id, ':')
+	return k < 0 || k == len(pi_session_id) - 1
 }
 
 Menu_Project :: distinct u64 // project id
@@ -184,6 +193,7 @@ Menu_Session :: struct {
 	project_id:    u64,
 	pi_session_id: string, // owned
 	info:          string, // owned: the ⓘ menu, the session's info block shown on top ("" = the row menu)
+	session:       u64, // the open session whose row it is (another machine's: its menu acts on this, never on a lookup by pi_session_id)
 }
 Menu_Sort :: distinct core.Sort_Section
 Menu_New :: struct {
@@ -220,7 +230,7 @@ menu_open :: proc(target: Menu_Target, at: [2]f32) {
 	menu_close()
 	handoff_drawn_clear() // what the last menu drew (ui_handoff.odin)
 	menu.target = target
-	if s, ok := target.(Menu_Session); ok do menu.target = Menu_Session{s.project_id, strings.clone(s.pi_session_id), strings.clone(s.info)}
+	if s, ok := target.(Menu_Session); ok do menu.target = Menu_Session{s.project_id, strings.clone(s.pi_session_id), strings.clone(s.info), s.session}
 	if f, ok := target.(Menu_Files); ok do menu.target = Menu_Files{strings.clone(f.path)}
 	if w, ok := target.(Menu_Worktree); ok do menu.target = Menu_Worktree{strings.clone(w.path), strings.clone(w.branch)}
 	if j, ok := target.(Menu_Job); ok do menu.target = Menu_Job{strings.clone(j.id)}
@@ -304,7 +314,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			info_items(&items, t)
 			break
 		}
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.id_machine(id) != 0 {
+		if id := t.session != 0 ? t.session : core.open_session_any(t.pi_session_id); id != 0 && core.id_machine(id) != 0 {
 			remote_session_items(&items, id, t.pi_session_id)
 			break
 		}
@@ -1565,8 +1575,9 @@ sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
 	case Hit_Open_Row:
 		if core.id_machine(u64(h)) != 0 {
 			s := core.find_session(u64(h))
-			if s == nil || !machine_online(s.machine) || s.pi_session_id == "" do return false
-			menu_open(Menu_Session{project_id = s.project_id, pi_session_id = s.pi_session_id}, at)
+			if s == nil || !machine_online(s.machine) do return false
+			if remote_id_bare(s.pi_session_id) && peek_tab_of(s) == nil do return false // nothing to offer
+			menu_open(Menu_Session{project_id = s.project_id, pi_session_id = s.pi_session_id, session = s.id}, at)
 			return true
 		}
 	case Hit_Session: if core.id_machine(state.selected_project) != 0 do return false

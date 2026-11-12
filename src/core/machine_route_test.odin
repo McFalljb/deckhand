@@ -605,16 +605,27 @@ route_mark_all_read :: proc(t: ^testing.T) {
 		testing.expectf(t, strings.has_prefix(json_path(toasts[1], "text"), "Nothing unread · attic is not connected · on nuc: unknown command"), "%s", toasts[1])
 		testing.expect_value(t, json_path(toasts[1], "err"), "true")
 	}
-	// a count out of bounds is not taken
+	// review P2: a machine may mark more than the 64 sessions this Mac mirrors of it: taken (a huge
+	// one clamped, never zeroed); only a malformed count is not
 	run_command(Mark_All_Read{}, {kind = .UI}, 92)
-	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":99999999}}}}}}`, json_path(rt_last_text(), "id")))
-	if testing.expect_value(t, len(rt_finished), 3) do testing.expect_value(t, json_path(rt_finished[2].data, "count"), "0")
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":100}}}}}}`, json_path(rt_last_text(), "id")))
+	if testing.expect_value(t, len(rt_finished), 3) do testing.expect_value(t, json_path(rt_finished[2].data, "count"), "100")
+	testing.expect_value(t, json_path(rt_toasts()[len(rt_toasts()) - 1], "text"), "Marked 100 as read · attic is not connected")
+	run_command(Mark_All_Read{}, {kind = .UI}, 92)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":99999999999}}}}}}`, json_path(rt_last_text(), "id")))
+	testing.expect_value(t, json_path(rt_finished[len(rt_finished) - 1].data, "count"), fmt.tprint(ROUTE_COUNT_MAX))
+	for bad in ([]string{`-1`, `"7"`, `1.5`, `null`}) {
+		run_command(Mark_All_Read{}, {kind = .UI}, 92)
+		machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":{{"count":%s}}}}}}`, json_path(rt_last_text(), "id"), bad))
+		testing.expectf(t, json_path(rt_finished[len(rt_finished) - 1].data, "count") == "0", "count %s: not taken", bad)
+	}
 	// the link drops while it waits: that machine is named, the request ends
+	nf, ntoasts := len(rt_finished), len(rt_toasts())
 	run_command(Mark_All_Read{}, {kind = .UI}, 93)
 	machine_route_down(3)
-	if testing.expect_value(t, len(rt_finished), 4) do testing.expect(t, rt_finished[3].ok)
+	if testing.expect_value(t, len(rt_finished), nf + 1) do testing.expect(t, rt_finished[nf].ok)
 	toasts = rt_toasts()
-	testing.expect(t, len(toasts) == 4 && strings.contains(json_path(toasts[3], "text"), "nuc is not connected"), "named offline")
+	testing.expect(t, len(toasts) == ntoasts + 1 && strings.contains(json_path(toasts[ntoasts], "text"), "nuc is not connected"), "named offline")
 	// a hub's (on behalf of its user): this machine's own only, nothing sent on, no toast here
 	machine_test_links.up[3] = true
 	n, nt := len(machine_test_links.texts), len(rt_toasts())

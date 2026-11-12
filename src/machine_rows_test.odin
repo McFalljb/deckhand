@@ -88,7 +88,7 @@ machine_rows_remote :: proc(t: ^testing.T) {
 		// marked unread (its state came back): Mark as read
 		_, rt, _ := core.find_tab(tab_id)
 		rt.unseen = true
-		menu_open(Menu_Session{project_id = pid, pi_session_id = rs.pi_session_id}, {})
+		testing.expect(t, sidebar_context(Hit_Open_Row(sid), {}))
 		testing.expectf(t, strings.has_suffix(menu_labels(), "Mark as read"), "%q", menu_labels())
 		rt.unseen = false
 		// its project's and sessions' rows: none yet
@@ -278,4 +278,44 @@ machine_rows_review :: proc(t: ^testing.T) {
 		testing.expectf(t, clay.GetElementData(clay.ID("rename_field")).found, "%s: the field shows", w)
 	}
 	state.focus_widget = ""
+}
+
+// Review P2 (#114): another machine's session still waiting for its Claude id reads a bare "m3:".
+// Its row's menu acts on that row (its packed id), never on another session found by that string:
+// Peek peeks it, and with no id there is nothing to mark.
+@(test)
+machine_rows_bare_id :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	state^ = core.State{}
+	state.settings.remote_machines = true
+	state.machines = make([]core.Machine_View, 1)
+	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online}
+	r: core.State
+	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/jb/garden"), label = strings.clone("garden")})
+	for i in u64(0) ..< 2 {
+		s := core.Open_Session{id = 20 + i, project_id = 5, pi_session_id = strings.clone(""), cwd = strings.clone("/home/jb/garden"), title = strings.clone("new")}
+		append(&s.tabs, core.Tab{id = 30 + i, kind = core.Claude_Tab{}, title = strings.clone("claude"), status = .Running, has_term = true})
+		s.active_tab = 30 + i
+		append(&r.open_sessions, s)
+	}
+	m: core.Machine_Mirror
+	core.mirror_merge(3, &r, &m)
+	defer {
+		menu_close()
+		core.mirror_unmerge(3)
+		core.mirror_free(&m)
+		core.replica_free(&r, runtime.heap_allocator())
+		state^ = core.State{}
+	}
+	first, _ := core.id_pack(3, 20)
+	second, _ := core.id_pack(3, 21)
+	if s := core.find_session(second); !testing.expect(t, s != nil && s.pi_session_id == "m3:", "its id is the bare prefix") do return
+	testing.expect(t, sidebar_context(Hit_Open_Row(second), {}), "its row has a menu (Peek)")
+	peeked: u64
+	for it in menu_items() {
+		testing.expectf(t, !strings.has_prefix(it.label, "Mark as"), "no id: nothing to mark (%q)", it.label)
+		if it.label == "Peek" do peeked = it.peek
+	}
+	testing.expect_value(t, peeked, second)
+	testing.expect(t, peeked != first, "never the first session with that string")
 }

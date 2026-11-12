@@ -66,6 +66,7 @@ ROUTE_TEXT_MAX :: 300 // its errors and confirmation summaries (text_clean)
 ROUTE_REMOTE_ERROR_MAX :: 160 // another machine's error text here, cut to this (bytes; after "on <machine>: ")
 ROUTE_WAIT_SLACK :: 10 * time.Second // a forwarded wait: its own timeout, plus this
 ROUTE_WAIT_MAX :: 130 * time.Second
+ROUTE_COUNT_MAX :: 1 << 20 // a forwarded mark_all_read's count, at most (a larger one is clamped)
 // The data codes a forwarded command's result keeps (data.code; everything else in its data is
 // dropped): what the agents' tools read. Each comes with this core's own words, never that
 // machine's (review round 1).
@@ -441,7 +442,7 @@ machine_route_reply :: proc(no: u64, text: string) {
 // (packed); the error in this core's words for a known code, else "on <machine>: " and that
 // machine's text, one line, cleaned and cut short (the agents' tools mark it as that machine's
 // data); data {"code"?: a known code, "id"?: a claude_prompt's held text's id (an integer, 1 to
-// 2^53-1), "count"?: a mark_all_read's sessions marked there (0 to MIRROR_SESSIONS_MAX)}, nothing
+// 2^53-1), "count"?: a mark_all_read's sessions marked there (0 up, clamped to ROUTE_COUNT_MAX)}, nothing
 // else of what it sent; remote = no (round 2: the reply's top-level "machine",
 // beside data, which only this sets: a local app's error data may hold any field).
 @(private = "file")
@@ -460,7 +461,8 @@ route_result :: proc(no: u64, f: ^Forward, rr: Result) -> Result {
 		if v, err := jg.parse_string(rr.data, .JSON, true, context.temp_allocator); err == nil {
 			if o, ok := v.(json.Object); ok {
 				if id, iok := o["id"].(json.Integer); prompt && iok && id > 0 && id < 1 << 53 do fmt.sbprintf(&b, `%s"id":%d`, known >= 0 ? "," : "", id)
-				if n, nok := o["count"].(json.Integer); all_read && rr.ok && nok && n >= 0 && n <= MIRROR_SESSIONS_MAX do fmt.sbprintf(&b, `%s"count":%d`, known >= 0 ? "," : "", n)
+				// a machine may have marked more sessions than this Mac mirrors of it: clamped, never dropped
+				if n, nok := o["count"].(json.Integer); all_read && rr.ok && nok && n >= 0 do fmt.sbprintf(&b, `%s"count":%d`, known >= 0 ? "," : "", min(n, ROUTE_COUNT_MAX))
 			}
 		}
 	}

@@ -20,7 +20,7 @@ package main
 // row's menu; Peek at next needing you (⌃⌥⌘A, Window menu, palette).
 //
 // It is a cover (ui_cover.odin): opening it lets go of what had the input, nothing under it gets
-// a key, click, composition or paste while it shows, keys held when it closes go nowhere, and
+// a key, click, composition or paste while it shows, keys held as it closes go nowhere (its quiet gate), and
 // what had the keyboard has it again after.
 //
 // Keys while peeking (peek_input, the cover's event: before anything else takes a key): everything goes to the
@@ -161,7 +161,7 @@ peek_close :: proc(restore := true) {
 peek_let_go :: proc() {
 	v := term_view_peek(peek.tab)
 	if v == nil do return
-	cover_release_mouse(v)
+	term_release_input(v)
 	if v.focused && v != key_view() do term_focus(v, false)
 }
 

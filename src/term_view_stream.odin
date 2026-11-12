@@ -23,6 +23,7 @@ import "core"
 import cw "corewire"
 import gh "ghostty"
 import jg "jsonguard"
+import sapp "../vendor/sokol-odin/sokol/app"
 
 HIDDEN_DETACH :: 2 * time.Second // a tab off screen this long gives up its copy
 SNAP_FAIL_GAP :: time.Second // a tab whose snapshot did not decode attaches again at most this often
@@ -57,6 +58,8 @@ Term_View :: struct {
 	pending_mods: gh.Mods,
 	pending_cp:   rune,
 	char_handled: bool, // KEY_DOWN already sent the key: drop its CHAR events
+	held:         [8]sapp.Keycode, // keys pressed in it and not yet released (term_release_input), as a browser's and an app's
+	held_n:       int,
 	surrogate:    u32,
 	selecting:    bool,
 	// a drag's anchor and what its press selected (word or line: lo, hi),

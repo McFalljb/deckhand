@@ -125,7 +125,9 @@ pk_session :: proc(id: u64, title: string, tabs: ..core.Tab) {
 	append(&state.open_sessions, s)
 }
 
+// A key typed at a person's pace (after a cover's quiet gate: cover_wait).
 pk_key :: proc(k: sapp.Keycode, mods: u32 = 0, ch: rune = 0) {
+	cover_wait(COVER_QUIET)
 	e := sapp.Event{type = .KEY_DOWN, key_code = k, modifiers = mods}
 	event(&e)
 	if ch != 0 {
@@ -137,6 +139,7 @@ pk_key :: proc(k: sapp.Keycode, mods: u32 = 0, ch: rune = 0) {
 }
 
 pk_mouse :: proc(type: sapp.Event_Type, x, y: f32, button := sapp.Mousebutton.LEFT) {
+	if type == .MOUSE_DOWN do cover_wait(COVER_QUIET)
 	e := sapp.Event{type = type, mouse_button = button, mouse_x = x, mouse_y = y}
 	event(&e)
 }
@@ -213,6 +216,7 @@ peek_input_goes_to_the_peeked_tab_only :: proc(t: ^testing.T) {
 	// a click on the panel's header (not a button) does nothing
 	head, _ := pk_box("peek_title")
 	pk_mouse(.MOUSE_DOWN, head.x + 2, head.y + head.height / 2)
+	pk_mouse(.MOUSE_UP, head.x + 2, head.y + head.height / 2)
 	testing.expect(t, peek_is_open(), "a click in the panel keeps it")
 
 	// ⌘W: the peek closes, not the tab under it; the field has the keyboard as before
@@ -371,6 +375,7 @@ peek_entry_points_and_what_can_be_peeked :: proc(t: ^testing.T) {
 	_ = ui_layout(1600, 900)
 	ui_hover = Hit_Open_Row(on3.id)
 	_ = ui_layout(1600, 900)
+	cover_wait(COVER_QUIET)
 	event(&e)
 	testing.expect(t, peek_is_open() && peek.session == on3.id, "the eye's click peeks at another machine's tab")
 	e.type = .MOUSE_UP
@@ -415,6 +420,9 @@ peek_entry_points_and_what_can_be_peeked :: proc(t: ^testing.T) {
 	testing.expect(t, found && eye.width > 0, "an eye on the hovered entry")
 	if found {
 		be := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = pk_centre(eye).x, mouse_y = pk_centre(eye).y}
+		cover_wait(COVER_QUIET)
+		event(&be)
+		be.type = .MOUSE_UP
 		event(&be)
 		core.inbox_drain()
 		testing.expect(t, peek_is_open() && peek.tab == 201, "its click peeks")
@@ -609,7 +617,8 @@ peek_closes_when_its_tab_goes :: proc(t: ^testing.T) {
 		break
 	}
 	key := sapp.Event{type = .KEY_DOWN, key_code = .X}
-	event(&key) // before the frame: closed first, and the key goes where it would
+	cover_wait(COVER_QUIET)
+	event(&key) // before the frame: closed first (the key meant for it goes nowhere)
 	testing.expect(t, !peek_is_open(), "its session closed")
 	pk_session(200, "There", pk_tab(201, "waiting", time.Minute), pk_tab(202, "waiting", 2 * time.Minute))
 	// its session comes on screen
@@ -718,7 +727,7 @@ peek_panel_layout_and_hits :: proc(t: ^testing.T) {
 
 // The peek is a cover (ui_cover.odin): opened from the palette, the palette closes; a key held
 // when it closes (its tab went) does not go on under it; holding ⌘W closes the peek, never the tab
-// under it; a paste asked for in it is its tab's even when the peek closed first; a composition
+// under it; a paste in it is its tab's, and one that comes after it closed goes nowhere; a composition
 // shows in it, never in the field under it; Space after an input method typed into the Attention
 // filter is a space; the pointer outside its terminal is not the program's unless a press is
 // held; the window to the background and back (⌘H, ⌘M) keeps typing in it.
@@ -751,11 +760,15 @@ peek_is_a_cover :: proc(t: ^testing.T) {
 	testing.expect(t, peek_open_session(200), "peeks")
 
 	// holding ⌘W: the peek closes, the repeats close nothing
+	cover_wait(COVER_QUIET)
 	ev := sapp.Event{type = .KEY_DOWN, key_code = .W, modifiers = sapp.MODIFIER_SUPER}
 	event(&ev)
 	testing.expect(t, !peek_is_open(), "⌘W closed it")
 	ev.key_repeat = true
-	for _ in 0 ..< 3 do event(&ev)
+	for _ in 0 ..< 3 {
+		cover_wait(40 * time.Millisecond)
+		event(&ev)
+	}
 	ev.type = .KEY_UP
 	event(&ev)
 	core.inbox_drain()
@@ -765,6 +778,7 @@ peek_is_a_cover :: proc(t: ^testing.T) {
 
 	// Enter held when its tab goes: nothing types under it
 	testing.expect(t, peek_open_session(200), "peeks")
+	cover_wait(COVER_QUIET)
 	en := sapp.Event{type = .KEY_DOWN, key_code = .ENTER}
 	event(&en)
 	testing.expect_value(t, pk_take(201), "\r")
@@ -780,14 +794,19 @@ peek_is_a_cover :: proc(t: ^testing.T) {
 	testing.expect_value(t, pk_take(101), "")
 	find_session(200).tabs[0].has_term = true
 
-	// ⌘V in it, the peek closed before the paste came: its tab's, not the one under it
+	// ⌘V in it: its tab's; the peek closed before a paste came: nowhere, not the tab under it
 	testing.expect(t, peek_open_session(200), "peeks")
+	cover_wait(COVER_QUIET)
 	pv := sapp.Event{type = .KEY_DOWN, key_code = .V, modifiers = sapp.MODIFIER_SUPER}
 	event(&pv)
-	peek_close()
 	pv.type = .CLIPBOARD_PASTED
 	event(&pv)
 	testing.expect(t, len(pasted) == 1 && pasted[0] == 201, "pasted into the peeked tab")
+	peek_close()
+	event(&pv)
+	testing.expect_value(t, len(pasted), 1)
+	pv.type = .KEY_UP
+	event(&pv)
 
 	// a composition over the Attention filter: drawn in the peek only; Space after a commit into the filter is a space
 	state.sidebar.view = .Attention
@@ -795,6 +814,7 @@ peek_is_a_cover :: proc(t: ^testing.T) {
 	filter_focus()
 	core.inbox_drain()
 	testing.expect(t, peek_open_session(200), "peeks")
+	cover_wait(COVER_QUIET)
 	ime_set_marked("に", 1)
 	testing.expect_value(t, ime.marked, "")
 	m, _ := cover_marked()

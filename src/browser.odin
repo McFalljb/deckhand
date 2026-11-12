@@ -526,6 +526,11 @@ on_cef_closed :: proc "c" (id: c.int) {
 	app.redraw = true
 }
 
+// Every page lets go of what it holds (a cover opened over them: ui_cover.odin).
+browsers_release_input :: proc() {
+	for _, b in browsers do if b.cef != 0 do release_input(b)
+}
+
 // Lets go of what the page holds: the keys and buttons pressed in it get
 // their releases (the page lost the keyboard, or the tab went away).
 @(private = "file")

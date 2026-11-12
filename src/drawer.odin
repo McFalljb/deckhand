@@ -37,6 +37,13 @@ drawer_ui: struct {
 	mouse: bool, // a press in Atlas's terminal: moves and the release go there
 }
 
+// A press in Atlas's terminal owns the pointer (moves and the release go there).
+drawer_mouse_held :: proc() -> bool {return drawer_ui.mouse}
+
+// The drawer lets go of the pointer (a cover opened: ui_cover.odin; its terminal's press is
+// released with every terminal's). set: tests.
+drawer_release_input :: proc(set := false) {drawer_ui.mouse = set}
+
 @(private = "file")
 hovered :: proc(h: Hit_Agent) -> bool {return ui_hover == Hit(h)}
 

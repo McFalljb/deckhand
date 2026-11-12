@@ -660,11 +660,12 @@ event :: proc(e: ^sapp.Event) {
 	client_before_event() // the replica holds what timers did since the last frame (client.odin)
 	defer client_drain()
 	defer cover_event_end()
-	if cover_track(e) do return // a key held through a cover's open or close: its repeats and release go nowhere (ui_cover.odin)
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
 	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
 	term_links_event(e) // ⌘ down or up, before anything takes the key (term_links.odin)
+	// right after a cover opened or closed, keys, buttons and pastes go nowhere until all are up (ui_cover.odin)
+	if cover_track(e) do return
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
 	if e.type == .MOUSE_DOWN || e.type == .KEY_DOWN || e.type == .MOUSE_SCROLL do tip_dismiss()
@@ -1373,8 +1374,7 @@ utf16_unit :: proc(pending: ^u32, cp: u32) -> (rune, bool) {
 ime_commit :: proc(text: string) {
 	if !autotest_allows_input() do return
 	ime_set_marked("", 0)
-	if cover_is_open() { 	// a cover has the keyboard, over any field: its target, or nowhere (ui_cover.odin)
-		cover_ime_commit(text)
+	if cover_ime_commit(text) { 	// a cover has the keyboard, over any field: its target, or nowhere (ui_cover.odin)
 	} else if f, _, _ := focused_field(); f != nil {
 		tf_insert(f, text)
 		if state.focus_widget == "palette" do palette_edited()

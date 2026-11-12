@@ -467,11 +467,14 @@ Delivery:
    A run is read once its report is opened (Last report) or `job_mark_read` is called.
 3. **The bell** (notify.odin): every run with `notify` other than `never` goes to
    `notify_job_finished` (job id, title, status finished/needs_you/failed, the one-line summary,
-   the run folder). The bell sends the macOS notification for runs that need the user or
-   failed, paced by its own rules, while Deckhand is in the background.
+   the run folder). The bell sends the macOS notification and sound for runs that need the user
+   or failed, as the gear's *Notify me about* Jobs row says (default: a notification while
+   Deckhand is in the background, no sound; PROTOCOL.md `set_notifications`), paced by its own
+   rules, also when the bell does not collect jobs.
 4. **Deckhand's own macOS notification** only for what the bell does not notify: a finished run
-   with `notify: always` (at most one per 5 s), the auto-pause nudge, and every pushed run while
-   the bell's Jobs group is off. One run, one OS notification.
+   with `notify: always` (at most one per 5 s) and the auto-pause nudge, while Deckhand is in the
+   background; none while the Jobs row's macOS notification is never. One run, one OS
+   notification.
 5. **On demand for Atlas:** `job_list {unread?}` and `job_runs {job, limit?}`: anyone may call
    them, a pi tab's bridge too, so a desk tool can fetch them when the user asks. No notice is
    sent to Atlas's terminal.

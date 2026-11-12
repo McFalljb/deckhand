@@ -86,7 +86,8 @@ id and the old signature format, so the rename takes two releases:
     take the flip.
   - `scripts/rename-pi-desk.py` did the mechanical part (re-runnable with
     `scripts/rename-pi-desk-rebase.sh`).
-- **The flip (0.2.1).** The bundle id becomes `dev.deckhand.app`, releases are signed v3,
+- **The flip (a later release, not yet made: 0.3.0 still ships `dev.pi-desk.app`).** The bundle
+  id becomes `dev.deckhand.app`, releases are signed v3,
   and the data dir moves to `…/Deckhand` (with a link from the old place). The window's identifier
   list in `src/trust` gains `dev.deckhand.app`. The move must handle a running core and holder:
   the runtime dir, `core.sock` and `core/<v>/` live in the data dir, and kept tabs have
@@ -482,9 +483,10 @@ fail a unit test on any change that is not an addition.
 ## Architecture
 
 Deckhand is written in **Odin** with **Clay** for layout, **sokol** for the window and the GPU,
-**libghostty-vt** for terminal emulation and **CEF** for browser tabs. It targets macOS for now;
-the platform pieces (the PTY, fonts, launchd, signatures) sit behind small files so Linux and
-Windows can follow. The design of the process split is
+**libghostty-vt** for terminal emulation and **CEF** for browser tabs. The app targets macOS; the
+core and the session holder also build for Linux, as another machine's headless core
+([Building the Linux core](#building-the-linux-core)). The platform pieces (the PTY, fonts,
+launchd and systemd, signatures and peer checks) sit behind small files so Windows can follow. The design of the process split is
 [docs/plans/background-core.md](plans/background-core.md); this section is how it is built.
 
 ### Processes
@@ -568,7 +570,7 @@ client.odin, client_core.odin   the window as a client: dial, hello, replica, re
 coremain/           deckhand-core-serve: serve (the poll loop), __detach, check, install, launch
 holder/             the session holder (above); holderwire/ its wire
 corewire/           the window/core framed wire, the socket and in-memory transports (golden vectors in tests/framed-wire/v1/)
-trust/              who may talk to whom: own signature, peer DR checks by audit token
+trust/              who may talk to whom: own signature, peer DR checks by audit token (Linux: same user, SO_PEERCRED)
 updatesig/          the update manifest and its Ed25519 signature
 jsonguard/          the check in front of every parse of input Deckhand does not control
 core/state.odin     State: the one plain, serialisable app state (ids, no pointers)
@@ -604,7 +606,19 @@ core/jobs*.odin, ui_jobs.odin, ui_job_sheet.odin  jobs
 core/update*.odin, ui_update.odin  Deckhand's own updates
 core/agent_status.odin  each terminal tab's status (OSC 7501, the bridge), unread, roll-ups
 core/notify.odin, ui_bell.odin  the bell
-core/sidebar.odin, ui_sidebar.odin  the left column
+core/sidebar.odin, ui_sidebar.odin  the left column (the Projects tree and the Attention view)
+core/needing_you.odin  what needs you, in order, on every machine: next needing you, the Attention view, the fleet pill, the Dock badge
+core/mark_read.odin  mark all read
+ui_fleet.odin, ui_deck.odin, ui_peek.odin  the fleet pill and the empty centre, the Deck view, Peek
+closed_tabs.odin    Reopen closed tab (the window's memory only)
+core/machines.odin  other machines over SSH: the registry, the link, statuses (PROTOCOL.md §5a)
+core/machine_mirror.odin, machine_route.odin  their sessions, jobs and bells here; commands run there
+core/machine_install.odin, machine_page.odin  install and update a machine's core; a machine's web page in a local tab
+core/window_sock.odin  the window's and the hub's door on core.sock (sshd check, Allow other machines)
+core/handoff.odin, ui_handoff.odin  new session on another machine
+coremain/connect.odin  `deckhand-core-serve connect`: the far end of a machine's ssh link
+core/systemd_unit.odin, launch_linux.odin, proc_linux.odin  the Linux core: its systemd unit, launching, /proc
+core/lock_holder.odin  who holds a lock file when a second core is refused
 core/files.odin, fs_model.odin, ui_files.odin  the Files and Settings tabs
 core/changes.odin, ui_changes.odin  the Changes tab
 core/settings_files.odin  the Settings tab: pi's settings files by an allowlist

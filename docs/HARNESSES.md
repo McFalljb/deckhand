@@ -228,6 +228,15 @@ shell environment, and when a run ends (then the cached `pi_installed` and `clau
 answers are dropped too, and pi's version probed again). Test mode never looks at PATH
 (`detect_path`), only the fake HOME's install folders.
 
+**Other machines** (Machines over SSH, [GUIDE.md](GUIDE.md)). Each machine's core checks its own
+harnesses with this manifest. This Mac shows that machine's checklist read-only under Settings ›
+Machines (`<machine>: <item>`, its state and the command to run there, with **Copy**; at most 16
+rows, the text cleaned: `machines[].checklist` in the state snapshot, PROTOCOL.md §5a). No harness is
+installed on another machine from here (`machine_install` installs only Deckhand's core). A new session on another machine offers only the
+harnesses its checklist lists as found (`ok`, `too_old` or `unchecked`; pi alone before its
+checklist arrives) and runs with that machine's own accounts and folders, never this Mac's
+(`machine_harnesses` in `src/core/harness.odin`).
+
 ## 7. Install and update
 
 `src/core/harness_install.odin`. Deckhand works out a harness's

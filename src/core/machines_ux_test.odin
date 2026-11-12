@@ -168,7 +168,7 @@ machines_ux_add_rename_remove :: proc(t: ^testing.T) {
 	testing.expect(t, r.ok, r.error)
 	fa, _ = machine_facts(a)
 	testing.expect(t, fa.name == "Lab box" && fa.target == "me@nuc.home.arpa", fa.name)
-	r = machine_rename_apply({no = a, name = "JB2@NUC.LAN"})
+	r = machine_rename_apply({no = a, name = "ME2@NUC.LAN"})
 	testing.expect(t, !r.ok && strings.contains(r.error, "already called"), r.error)
 	saved, _, _ := machines_read(machines_path(), context.temp_allocator)
 	testing.expect(t, len(saved) == 2 && saved[0].name == "Lab box" && saved[0].target == "me@nuc.home.arpa", "saved")

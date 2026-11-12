@@ -80,8 +80,10 @@ assert_state claude_accounts.1.label Job
 assert_state claude_accounts.1.chosen true
 assert_state claude_accounts.2.label Team Claude
 assert_state claude_accounts.3.label Plain-folder
-# Settings → Claude accounts: the same list, Scan again, Add account…
-clickid lefttab 2
+# Settings → Coding agents → Claude accounts: the same list, Scan again, Add account…
+key comma cmd
+wait 300
+clickid spi @Agents
 wait 500
 shot setup/settings-accounts-dark
 quit

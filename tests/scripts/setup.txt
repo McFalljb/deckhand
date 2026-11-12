@@ -59,10 +59,14 @@ wait 300
 ui_command {"type":"job_create","name":"Setup check"}
 waitstate 6000 jobs.# 1
 shot setup/jobs-dark
-# the Settings tab's Folders and Chats groups
-clickid lefttab 2
+# the Settings page's Folders
+key comma cmd
+wait 300
+clickid spi @Folders
 wait 500
 shot setup/settings-folders-dark
+key escape
+wait 300
 # a new chat: in ~/Chats, with PI_KIT_NOTES_DIR=<main folder>
 ui_command {"type":"new_chat","project_id":$chats}
 wait 1500

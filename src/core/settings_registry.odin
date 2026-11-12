@@ -307,8 +307,9 @@ is_word_char :: proc(c: u8) -> bool {return (c >= 'a' && c <= 'z') || (c >= '0' 
 
 // Settings and files matching every word of query, best first (ties: the page's order). Labels,
 // hints, keywords, cards and sections; for files their names, what they are and their paths.
-// Empty query: nothing. rows: settings_file_rows() (nil: read now).
-settings_search :: proc(query: string, rows: []Settings_File_Row = nil) -> []Settings_Hit {
+// Empty query: nothing. rows: settings_file_rows() (nil: read now). deep: also every file inside
+// the listed folders and the project's .pi/ (settings_scan_files), as the old tab's filter found them.
+settings_search :: proc(query: string, rows: []Settings_File_Row = nil, deep := false) -> []Settings_Hit {
 	out := make([dynamic]Settings_Hit, context.temp_allocator)
 	words := strings.fields(query, context.temp_allocator)
 	if len(words) == 0 do return out[:]
@@ -339,6 +340,25 @@ settings_search :: proc(query: string, rows: []Settings_File_Row = nil) -> []Set
 		base := filepath.base(r.path)
 		if sc, ok := settings_match(words, {r.label, base, r.detail, group, fs_display(r.path), card, SETTING_SECTION_NAMES[sec], "file"}, base); ok {
 			append(&out, Settings_Hit{kind = .File, row = r, section = sec, card = card, score = sc, order = len(SETTINGS) + i})
+		}
+	}
+	if deep {
+		listed := make(map[string]bool, context.temp_allocator)
+		for r in list do listed[r.path] = true
+		for f, i in settings_scan_files(list, cwd) {
+			if listed[f] do continue
+			// in which listed folder (its group), else the project's .pi/
+			r := Settings_File_Row{group = "project", path = f, exists = true}
+			for x in list do if x.kind == .Folder && strings.has_prefix(f, strings.concatenate({x.path, "/"}, context.temp_allocator)) {
+				r.group = x.group
+				r.label = strings.concatenate({x.label, f[len(x.path):]}, context.temp_allocator)
+			}
+			if r.label == "" do r.label = cwd != "" && strings.has_prefix(f, cwd) ? f[len(cwd) + 1:] : filepath.base(f)
+			sec, card, _ := settings_group_section(r.group)
+			base := filepath.base(f)
+			if sc, ok := settings_match(words, {r.label, base, fs_display(f), card, SETTING_SECTION_NAMES[sec], "file"}, base); ok {
+				append(&out, Settings_Hit{kind = .File, row = r, section = sec, card = card, score = sc, order = len(SETTINGS) + len(list) + i})
+			}
 		}
 	}
 	slice.sort_by(out[:], proc(a, b: Settings_Hit) -> bool {

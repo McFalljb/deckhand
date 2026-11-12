@@ -88,11 +88,16 @@ assert_state layout.drawer_pinned true
 shot agent/pinned
 clickid drawer_pin
 wait 400
-# the Settings tab's Atlas group: the prompt file, the model with Change…
-ui_command {"type":"set_left_tab","tab":"settings"}
+# the Settings page's Atlas & jobs: the prompt file, the model
+key comma cmd
+wait 300
+clickid spi @Atlas
 eventually
-assert_files [Atlas]\nATLAS.md\nModel: opencode-go/deepseek-v4.1-flash [Change…]\n
+assert_drawn ATLAS.md
+assert_drawn Atlas's model
 shot agent/settings-group
+key escape
+wait 300
 # the palette's "edit prompt": the prompt file in an editor tab
 key k cmd
 type edit prompt

@@ -158,7 +158,8 @@ on_settings :: proc() -> bool {return state.layout.left_tab == .Settings}
 
 // ---- layout ----
 
-// The segmented switch under the title bar: Sessions | Files | Settings | Jobs.
+// The segmented switch under the title bar: Sessions | Files | Jobs (Settings is a page in the
+// centre: ui_settings_page.odin; the enum keeps its value for older callers and saved workspaces).
 left_tabs_switch :: proc() {
 	th := theme()
 	if clay.UI(clay.ID("lefttabs"))({
@@ -168,13 +169,16 @@ left_tabs_switch :: proc() {
 	}) {
 		// labels while each fits its segment, else icons (tooltips name them)
 		left, _ := column_widths()
-		seg := (left - 2 * SP_2 - 4 - 2 * f32(len(core.Left_Tab) - 1)) / f32(len(core.Left_Tab))
+		shown := len(core.Left_Tab) - 1
+		seg := (left - 2 * SP_2 - 4 - 2 * f32(shown - 1)) / f32(shown)
 		icons_only := false
 		for tab in core.Left_Tab {
+			if tab == .Settings do continue
 			extra := tab == .Jobs && state.jobs_unread > 0 ? f32(DOT + SP_1) : 0
 			if text_w(LEFT_TAB_LABELS[tab], FONT_UI_SMALL) / app.dpi + extra + 2 * SP_1 > seg do icons_only = true
 		}
 		for tab in core.Left_Tab {
+			if tab == .Settings do continue
 			what := LEFT_TAB_HITS[tab]
 			id := clay.ID("lefttab", u32(tab))
 			on := state.layout.left_tab == tab
@@ -579,12 +583,12 @@ machine_editing :: proc() -> bool {
 
 // Opens the add field (no = 0) or machine no's rename field, in the Settings tab.
 machine_edit_begin :: proc(no: u64 = 0) {
-	if state.layout.left_tab != .Settings || !state.layout.left_open do ui_do(core.Set_Left_Tab{tab = .Settings})
+	settings_page_open(.Machines) // Settings › Machines, its field (ui_settings_page.odin)
 	if no == 0 {
-		files_begin_edit(.Rename, core.MACHINE_ADD_ROW, "")
+		sp_edit_begin(.Add_Machine, core.MACHINE_ADD_ROW, "")
 		return
 	}
-	for m in state.machines do if m.no == no do files_begin_edit(.Rename, fmt.tprintf("%s%d", core.MACHINE_ROW, no), m.name)
+	for m in state.machines do if m.no == no do sp_edit_begin(.Rename_Machine, fmt.tprintf("%s%d", core.MACHINE_ROW, no), m.name)
 }
 
 @(private = "file")
@@ -690,7 +694,7 @@ files_scroll_to :: proc(i, n: int, center := false) {
 // ---- hits ----
 
 files_hit :: proc() -> Hit {
-	for tab in core.Left_Tab do if clay.PointerOver(clay.ID("lefttab", u32(tab))) do return Hit_Files{what = LEFT_TAB_HITS[tab]}
+	for tab in core.Left_Tab do if tab != .Settings && clay.PointerOver(clay.ID("lefttab", u32(tab))) do return Hit_Files{what = LEFT_TAB_HITS[tab]}
 	if state.layout.left_tab == .Sessions || state.layout.left_tab == .Jobs do return nil
 	if on_settings() {
 		for tool in Settings_Tool do if clay.PointerOver(clay.ID("settool", u32(tool))) && action_ok(SETTINGS_TOOLS[tool].action) do return Hit_Files{what = .Tool, index = int(tool)}
@@ -837,27 +841,11 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		case .Tab_Settings: ui_do(core.Set_Left_Tab{tab = .Settings})
 		case .Tab_Jobs:     ui_do(core.Set_Left_Tab{tab = .Jobs})
 		case .Tool:         action_run(on_settings() ? SETTINGS_TOOLS[Settings_Tool(h.index)].action : FILES_TOOLS[Files_Tool(h.index)].action)
-		case .Create:
-			if fu.drawn[h.index] == core.ATLAS_MODEL_ROW do action_run("agent_model") // the Atlas group's model: pi's selector
-			else if fu.drawn[h.index] == core.CLAUDE_FLAGS_ROW do action_run("claude_skip_permissions") // the Claude Code group's default flags
-			else if p := fu.drawn[h.index]; strings.has_prefix(p, core.PI_EXT_ROW) { 	// the pi extensions group
-				name := p[len(core.PI_EXT_ROW):]
-				ui_do(core.Set_Pi_Extension{name = name, on = !core.pi_extension_on(name)})
-			}
-			else if settings_folder_button(fu.drawn[h.index]) {} // the Folders group (folders.odin)
-			else if harness_settings_button(fu.drawn[h.index]) {} // the Coding agents group (ui_harness.odin)
-			else if fu.drawn[h.index] != "" do core.settings_create(fu.drawn[h.index]) // the explicit click: then it opens
-		case .Folder_Reset:
-			if k, ok := core.folder_row_kind(fu.drawn[h.index]); ok do ui_do(core.Set_Folder{kind = k, path = ""})
-		case .Account_Remove:
-			if p := fu.drawn[h.index]; strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = p[len(core.CLAUDE_ACCOUNT_ROW):]})
-			else if no, ok := core.machine_row_no(fu.drawn[h.index]); ok do ui_do_menu(core.Machine_Remove{no = no}, "Remove") // asks first
-		case .Account_Default:
-			if p := fu.drawn[h.index]; strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = p[len(core.CLAUDE_ACCOUNT_ROW):]})
-		case .Folder_Reveal:
-			p := fu.drawn[h.index]
-			if p == core.FOLDER_MAIN_ROW do ui_do(core.Reveal_In_Finder{path = state.settings.home_dir})
-			else if k, ok := core.folder_row_kind(p); ok do ui_do(core.Reveal_In_Finder{path = core.folder_of(k)})
+		case .Create:          settings_row_op(fu.drawn[h.index], .Button)
+		case .Folder_Reset:    settings_row_op(fu.drawn[h.index], .Reset)
+		case .Account_Remove:  settings_row_op(fu.drawn[h.index], .Remove)
+		case .Account_Default: settings_row_op(fu.drawn[h.index], .Default)
+		case .Folder_Reveal:   settings_row_op(fu.drawn[h.index], .Reveal)
 		case .Filter:
 			if state.focus_widget != "files_filter" {
 				tf_set(&files_filter_field, state.files.filter)
@@ -1281,6 +1269,41 @@ files_filter_key :: proc(key: sapp.Keycode) -> bool {
 	return false
 }
 
+Settings_Row_Op :: enum u8 {
+	Button, // the row's own button (Turn on, Change…, Log in…, Install…, Create…)
+	Remove, // an account's or a machine's Remove
+	Default, // an account's Make default
+	Reset, // a subfolder's Reset (back to the default)
+	Reveal, // a folder's Reveal in Finder
+}
+
+// What a Settings row's buttons do (settings_file_rows' rows): the Settings page's and, before it,
+// the left column's Settings tab's. path: the row's.
+settings_row_op :: proc(path: string, op: Settings_Row_Op) {
+	switch op {
+	case .Button:
+		if path == core.ATLAS_MODEL_ROW do action_run("agent_model") // the Atlas group's model: pi's selector
+		else if path == core.CLAUDE_FLAGS_ROW do action_run("claude_skip_permissions") // the Claude Code group's default flags
+		else if strings.has_prefix(path, core.PI_EXT_ROW) { 	// the pi extensions group
+			name := path[len(core.PI_EXT_ROW):]
+			ui_do(core.Set_Pi_Extension{name = name, on = !core.pi_extension_on(name)})
+		}
+		else if settings_folder_button(path) {} // the Folders group (folders.odin)
+		else if harness_settings_button(path) {} // the Coding agents group (ui_harness.odin)
+		else if path != "" do core.settings_create(path) // the explicit click: then it opens
+	case .Reset:
+		if k, ok := core.folder_row_kind(path); ok do ui_do(core.Set_Folder{kind = k, path = ""})
+	case .Remove:
+		if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = path[len(core.CLAUDE_ACCOUNT_ROW):]})
+		else if no, ok := core.machine_row_no(path); ok do ui_do_menu(core.Machine_Remove{no = no}, "Remove") // asks first
+	case .Default:
+		if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = path[len(core.CLAUDE_ACCOUNT_ROW):]})
+	case .Reveal:
+		if path == core.FOLDER_MAIN_ROW do ui_do(core.Reveal_In_Finder{path = state.settings.home_dir})
+		else if k, ok := core.folder_row_kind(path); ok do ui_do(core.Reveal_In_Finder{path = core.folder_of(k)})
+	}
+}
+
 // A Folders row's main button (folders.odin): Change… (the folder picker),
 // Set up… (the sheet), Reveal (the old main folder). False: not such a row.
 settings_folder_button :: proc(path: string) -> bool {
@@ -1294,8 +1317,8 @@ settings_folder_button :: proc(path: string) -> bool {
 		return true
 	}
 	if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) {
-		label := core.claude_account_label_now(path[len(core.CLAUDE_ACCOUNT_ROW):])
-		files_begin_edit(.Rename, path, label)
+		settings_page_open(.Agents)
+		sp_edit_begin(.Rename_Account, path, core.claude_account_label_now(path[len(core.CLAUDE_ACCOUNT_ROW):]))
 		return true
 	}
 	// Machines (machines.odin): Add a machine… opens the add field; a machine's button does what

@@ -401,11 +401,15 @@ jobs_ui blk1
 wait 300
 shot jobs/list-light
 jobs_ui -
-# ---- the Settings tab lists the notes folder and the job notes
-clickid lefttab 2
+# ---- the Settings page's Atlas & jobs: the notes folder and the job notes
+key comma cmd
+wait 300
+clickid spi @Atlas
 wait 500
 assert_not_drawn sk-ant-api03
 shot jobs/settings-light
+key escape
+wait 300
 ui_command {"type":"set_appearance","mode":"dark"}
 clickid lefttab 3
 wait 500

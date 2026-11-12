@@ -1,5 +1,5 @@
 #!/bin/sh
-# The coding agents checklist (the setup sheet's first step and the Settings tab's Coding agents
+# The coding agents checklist (the setup sheet's first step and the Settings page's Coding agents
 # group; harness_manifest.odin, harness_install.odin, ui_harness.odin) in quiet test mode, against
 # fake HOMEs with fake install layouts (stat and package.json only: nothing is ever run but the
 # stand-in tests/scripts/fake-install.sh, checked by its argv). Never the user's ~/.pi or ~/.claude.

@@ -177,11 +177,9 @@ eventually
 assert_state focus.kind terminal
 key comma cmd
 eventually
-assert_state layout.left_tab settings
-assert_state focus.id files
+assert_state focus.id settings_page
 key comma cmd
 eventually
-assert_state layout.left_tab sessions
 assert_state focus.kind terminal
 key b cmd
 eventually

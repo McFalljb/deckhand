@@ -525,12 +525,13 @@ num :: proc(s: string) -> f32 {
 }
 
 // Runs script lines until one has to wait. Called once per frame.
-// clickid's and rclickid's INDEX: a number (default 0), or @PATH for a drawn Files or Settings
-// row by its path's end (files_drawn_slot). A path no row has fails the script.
+// clickid's and rclickid's INDEX: a number (default 0), or @PATH for a drawn Files row by its
+// path's end (files_drawn_slot), or for the Settings page's items (spi) @KEY (settings_page_slot).
+// A path no row has fails the script.
 script_index :: proc(args: []string) -> (u32, bool) {
 	if len(args) < 2 do return 0, true
 	if strings.has_prefix(args[1], "@") {
-		slot := files_drawn_slot(args[1][1:])
+		slot := args[0] == "spi" ? settings_page_slot(args[1][1:]) : files_drawn_slot(args[1][1:]) // spi: the Settings page's items
 		if slot < 0 do return 0, false // the caller tries again (script_retry), then fails
 		return u32(slot), true
 	}

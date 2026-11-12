@@ -5,7 +5,7 @@
 # (~/.local/bin/claude -> versions/2.1.300, DECKHAND_CLAUDE_BIN; never run), the fake claude
 # (tests/scripts/fake-claude.py) in a Claude tab. Claude's CLAUDE.md edited outside → the Claude
 # bar → Restart (confirmed) resumes the conversation; claude relinked to 2.1.301 → the update bar →
-# Restart; the Settings tab's Claude Code groups; Claude exits with an error → Restart with
+# Restart; the Settings page's Claude Code card; Claude exits with an error → Restart with
 # model… → Deckhand pastes /model. Needs ./build.sh (build/claude-code, build/deckhand-cli).
 # Writes build/claude-runtime/ (run.log, claude.log) and build/shots/claude-runtime/.
 # Usage: tests/scripts/claude-runtime.sh

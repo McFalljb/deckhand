@@ -190,6 +190,34 @@ overlay_deck_enter_does_not_repeat :: proc(t: ^testing.T) {
 	testing.expect_value(t, pk_take(state.current_session + 1), "x")
 }
 
+// The Settings page's Esc goes back to the session: Esc's repeats do not go on into its terminal.
+@(test)
+overlay_settings_page_esc_does_not_repeat :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	pk_reset()
+	defer pk_reset()
+	defer settings_page_off()
+	pk_session(100, "Here", pk_tab(101, "waiting", 4 * time.Minute))
+	state.current_session = 100
+	_ = pk_view(101, 80, 24)
+	settings_page_open()
+	core.inbox_drain()
+	testing.expect(t, settings_page_shown(), "the page shows")
+	_ = ui_layout(1300, 800)
+	press(.ESCAPE, 0)
+	core.inbox_drain()
+	testing.expect(t, !settings_page_shown() && state.current_session == 100, "Esc went back")
+	_ = ui_layout(1300, 800)
+	press(.ESCAPE, 0, repeat = true)
+	press(.ESCAPE, 0, repeat = true)
+	testing.expect_value(t, pk_take(101), "")
+	release(.ESCAPE)
+	press(.X, 'x')
+	release(.X)
+	testing.expect_value(t, pk_take(101), "x")
+}
+
 // Review of #122: a modifier pressed while a suppressed key is still held (Esc held after it
 // closed a peek, then Shift) does not let that key's repeats through.
 @(test)

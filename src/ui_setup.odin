@@ -652,7 +652,7 @@ setup_hit :: proc() -> Hit {
 
 setup_tip :: proc(h: Hit_Setup) -> (string, string) {
 	switch h.what {
-	case .Skip:         return "Jobs stay off until a main folder is set (Set up Deckhand…, in the palette or the Settings tab)", "Esc"
+	case .Skip:         return "Jobs stay off until a main folder is set (Set up Deckhand…, in the palette or Settings)", "Esc"
 	case .Back:         return "The previous step", "Esc"
 	case .Next:         return setup_ui.step == setup_steps() - 1 ? "Make the folders and close" : "The next step", "Enter"
 	case .Choose_Chats: return "Pick the folder chats run in", ""

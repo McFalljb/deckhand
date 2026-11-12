@@ -719,10 +719,8 @@ event :: proc(e: ^sapp.Event) {
 		ime_cancel()
 		if menu.open do menu_close()
 		if e.key_code == .COMMA {
-			if state.layout.left_open && state.layout.left_tab == .Settings && state.focus_widget == "files" {
-				ui_do(core.Set_Left_Tab{tab = .Sessions})
-				ui_do(core.Set_Focus{""})
-			} else do action_run("settings")
+			if settings_page_shown() do settings_page_close() // ⌘, again: back where it was opened from
+			else do action_run("settings")
 		} else do ui_do(core.Set_Focus{state.focus_widget == "shortcuts" ? "" : "shortcuts"})
 		app.key_taken = true
 		return
@@ -832,6 +830,7 @@ event :: proc(e: ^sapp.Event) {
 	if browser_polish_event(fp, e) do return // a browser tab's bars, ⋯, ⌘F, zoom keys, pointer shape (browser_polish.odin)
 	if state.focus_widget != "" && widget_event(e) do return
 	if state.focus_widget == "" && deck_event(e) do return // the Deck view: its keys, wheel, a card's menu (ui_deck.odin)
+	if (state.focus_widget == "" || state.focus_widget == "settings_page") && settings_page_event(e) do return // the Settings page: its keys without its field, wheel (ui_settings_page.odin)
 	if drawer_event(e) do return // the drawer: resizing, the mouse in Atlas's terminal
 	if files_event(e) do return // the Files tab: rows, drag, its keys (ui_files.odin)
 	if changes_event(fp, e) do return // the Changes tab's list, bars and keys, the "±" button (ui_changes.odin)
@@ -973,6 +972,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Peek_Row:  peek_open_session(u64(hit)) // a row's eye: Peek (ui_peek.odin)
 		case Hit_Peek: // peek_event takes the panel's clicks first
 		case Hit_Deck_Card, Hit_Deck_More: deck_click(hit, app.pointer) // the Deck view's cards (ui_deck.odin)
+		case Hit_Spage:     settings_page_click(int(hit)) // the Settings page (ui_settings_page.odin)
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
 		}
 		clay.SetPointerState(app.pointer, false)
@@ -1183,6 +1183,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 	in_filter := state.focus_widget == "sidebar_filter"
 	in_files_filter := state.focus_widget == "files_filter"
 	in_files_name := state.focus_widget == "files_name"
+	in_spage := state.focus_widget == "settings_page"
 	shift := e.modifiers & sapp.MODIFIER_SHIFT != 0
 	cmd := e.modifiers & sapp.MODIFIER_SUPER != 0
 	alt := e.modifiers & sapp.MODIFIER_ALT != 0
@@ -1223,6 +1224,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			return true
 		}
 		if in_files_filter && files_filter_key(e.key_code) do return true
+		if in_spage && settings_page_key(e) do return true // Esc, Enter, Tab, the arrows across its controls
 		if in_files_name {
 			#partial switch e.key_code {
 			case .ENTER, .KP_ENTER:
@@ -1295,6 +1297,11 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 				return true
 			}
 			if !field_inside(box_id, e.mouse_x, e.mouse_y) do return true
+		} else if in_spage && !field_inside(box_id, e.mouse_x, e.mouse_y) {
+			// the Settings page keeps the keyboard for its field while its controls are clicked
+			ime_cancel()
+			if !settings_page_shown() || !inside(clay.ID("spage"), e.mouse_x, e.mouse_y) do ui_do(core.Set_Focus{""})
+			return false
 		} else if !field_inside(box_id, e.mouse_x, e.mouse_y) {
 			// a click outside the field ends editing (and is handled normally)
 			ime_cancel()

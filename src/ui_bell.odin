@@ -429,6 +429,7 @@ Overlay :: enum u8 {
 	Menu,
 	Checkouts, // the Files tab's checkout switcher (ui_worktrees.odin)
 	Deck,
+	Settings_Page, // the Settings page in the centre (ui_settings_page.odin)
 	Job_Sheet,
 }
 
@@ -443,6 +444,7 @@ overlays_shown :: proc() -> bit_set[Overlay] {
 	if menu.open do o += {.Menu}
 	if wt_menu.open do o += {.Checkouts}
 	if deck_shown() do o += {.Deck}
+	if settings_page_shown() do o += {.Settings_Page}
 	if job_sheet_open() do o += {.Job_Sheet}
 	return o
 }

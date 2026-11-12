@@ -3,13 +3,13 @@
 # ~/.pi/agent (settings.json with packages, models.json, an extension's
 # config, and an auth.json holding a dummy secret), a fake pi that prints
 # its arguments, a temp data dir (never the user's files).
-# ⌘, and the gear show the left column's Settings tab: pi's files by an
-# allowlist (never sessions/, npm/, logs…), the project's group with Create,
-# the extensions; prompts/ opens like a Files folder; settings.json opens in
-# an editor tab; invalid JSON is not saved; a valid save offers to reload
-# pi; the row menu has no Rename/Trash for pi's config files; credential
-# files are never shown (also inside an opened folder) or opened; the dummy
-# secret never shows (not drawn, not in the log or Deckhand's data).
+# ⌘, shows the Settings page in the centre: pi's files by an allowlist
+# (never sessions/, npm/, logs…), a pi extension's switch, a folder's files
+# in the search (credentials hidden inside it), settings.json opens in an
+# editor tab of the session; invalid JSON is not saved; a valid save offers
+# to reload pi; the project's missing .pi/settings.json made on Create;
+# credential files are never shown or opened; only the user opens the page;
+# the dummy secret never shows (not drawn, not in the log or Deckhand's data).
 # Screenshots: build/shots/settings/.
 # Usage: tests/scripts/settings.sh
 set -eu

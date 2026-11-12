@@ -795,7 +795,7 @@ Command :: union {
 
 // Widgets that can take keyboard focus (editor_*: the editor's find,
 // replace and go-to-line fields).
-FOCUS_WIDGETS :: [?]string{"rename_project", "rename_session", "palette", "sidebar_filter", "agent_input", "settings", "shortcuts", "editor_find", "editor_replace", "editor_goto", "files", "files_filter", "files_name", "notifications", "changes_message", "setup", "job_sheet", "comment_edit", "comment_new", "browser_url", "browser_find", "browser_prompt"}
+FOCUS_WIDGETS :: [?]string{"rename_project", "rename_session", "palette", "sidebar_filter", "agent_input", "settings", "settings_page", "shortcuts", "editor_find", "editor_replace", "editor_goto", "files", "files_filter", "files_name", "notifications", "changes_message", "setup", "job_sheet", "comment_edit", "comment_new", "browser_url", "browser_find", "browser_prompt"}
 
 Result :: struct {
 	ok:              bool,
@@ -1222,7 +1222,9 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if c.widget == "agent_input" && caller.kind != .UI && caller.kind != .Internal do return fail("only the user moves the keyboard into the agent's terminal"), false
 		if c.widget == "agent_input" && !state.home_open do return fail("the agent's drawer is shut"), false
 		// the overlays that take the user's keys (Space/Enter run settings) open for the user only
-		if (c.widget == "palette" || c.widget == "settings" || c.widget == "shortcuts" || c.widget == "notifications" || c.widget == "setup" || c.widget == "job_sheet") && caller.kind != .UI && caller.kind != .Internal do return fail("only the user opens the palette, settings, shortcuts, notifications and setup"), false
+		if (c.widget == "palette" || c.widget == "settings" || c.widget == "settings_page" || c.widget == "shortcuts" || c.widget == "notifications" || c.widget == "setup" || c.widget == "job_sheet") && caller.kind != .UI && caller.kind != .Internal do return fail("only the user opens the palette, settings, shortcuts, notifications and setup"), false
+		// the Settings page (ui_settings_page.odin) is this window's: never another machine's core viewing this one
+		if c.widget == "settings_page" && caller_from_hub(caller) do return fail("only the user at this Mac opens Settings"), false
 		// the job sheet is modal: it closes by its own Save / Cancel (job_sheet)
 		if window_job_sheet_open() && c.widget != "job_sheet" do return fail("the job sheet is open (save or cancel it first)"), false
 		if c.widget == "job_sheet" && !window_job_sheet_open() do return fail("the job sheet opens with job_sheet"), false

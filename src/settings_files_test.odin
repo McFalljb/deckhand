@@ -8,6 +8,7 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -347,7 +348,8 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	write_mode(fmt.tprintf("%s/.pi/prompts/p.md", proj), "p", 0o644)
 	write_mode(fmt.tprintf("%s/.pi/.env", proj), "K=v", 0o644)
 	core.harness_checklist_forget() // the Coding agents rows look at this HOME (another test's are cached)
-	core.run_command(core.Set_Left_Tab{tab = .Settings}, ui)
+	core.settings_watch = true // as while the Settings page shows: its folders are polled
+	defer core.settings_watch = false
 	tree :: proc() -> string {return core.files_rows_text(core.settings_tree_rows())}
 	got := tree()
 	want := "[pi (global)]\nsettings.json\nmodels.json\nprompts\nskills\nextensions\n[This project · proj]\n.pi/settings.json (create)\n.pi/prompts\nAGENTS.md (create)\n[Extensions]\npi-subagents config\nsubagent\n[Atlas]\nATLAS.md (create)\nModel: pi's default [Change…]\n[Chats]\nChat instructions (AGENTS.md) (create)\n[Folders]\nMain folder: not set [Set up…]\nsessions/: no main folder [Change…]\njobs/: no main folder [Change…]\nmemory/: no main folder [Change…]\natlas/: no main folder [Change…]\nchats/: default · ~/Chats [Change…]\n[Coding agents]\npi\n  Deckhand integration\n  pi-subagents\n  rpiv-todo: Not installed [Install…]\n  pi-ask-user: Not installed [Install…]\n  pi-web-access: Not installed [Install…]\n  rpiv-btw: Not installed [Install…]\nClaude Code\n  Deckhand integration\nCodex: Not installed [Install…]\n[Machines]\nMachines over SSH is off: turn it on to add a machine [Turn on]\nAllow other machines to connect: off [Turn on…]\n" // the harness checklist (ui_harness.odin), then the Machines group (always shown)
@@ -390,9 +392,13 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	core.run_command(core.Set_Files_Filter{text = "json"}, ui)
 	got = tree()
 	testing.expectf(t, !strings.contains(got, "notes.json") && !strings.contains(got, "token.json") && !strings.contains(got, "auth"), "filter hides credentials:\n%s", got)
-	// switching trees clears the filter
-	core.run_command(core.Set_Left_Tab{tab = .Files}, ui)
-	testing.expect_value(t, state.files.filter, "")
+	// the Settings page's search: the same files, also inside closed folders; credentials never
+	core.run_command(core.Set_Files_Filter{text = ""}, ui)
+	found := map[string]bool{}
+	defer delete(found)
+	for q in ([]string{"skill", "json", "fix", "index", "notes", "token", "env", "secret"}) do for h in core.settings_search(q, deep = true) do if h.kind == .File do found[filepath.base(h.row.path)] = true
+	testing.expectf(t, found["SKILL.md"] && found["fix.md"] && found["index.ts"], "the page's search finds files inside folders: %v", found)
+	for never in ([]string{"notes.json", "token.json", ".env", "secret.json", "auth.json"}) do testing.expectf(t, !found[never], "the page's search shows %s", never)
 	_ = home
 }
 
@@ -407,28 +413,6 @@ settings_tree_menu_restrictions :: proc(t: ^testing.T) {
 	write_mode(fmt.tprintf("%s/prompts/fix.md", ad), "fix", 0o644)
 	os.make_directory_all(fmt.tprintf("%s/.pi", proj))
 	write_mode(fmt.tprintf("%s/.pi/settings.json", proj), "{}", 0o644)
-	core.run_command(core.Set_Left_Tab{tab = .Settings}, ui)
-	labels :: proc(path: string) -> string {
-		items := make([dynamic]core.Menu_Item, context.temp_allocator)
-		files_menu_items(path, &items)
-		b := strings.builder_make(context.temp_allocator)
-		for it in items do if !it.sep do fmt.sbprintf(&b, "%s|", it.label)
-		return strings.to_string(b)
-	}
-	for p in ([]string{"settings.json", "models.json", "prompts", "extensions"}) {
-		m := labels(fmt.tprintf("%s/%s", ad, p))
-		testing.expectf(t, !strings.contains(m, "Rename") && !strings.contains(m, "Trash"), "%s: %s", p, m)
-	}
-	m := labels(fmt.tprintf("%s/prompts/fix.md", ad))
-	testing.expectf(t, strings.contains(m, "Open|") && strings.contains(m, "New file…|") && strings.contains(m, "Rename…|") && strings.contains(m, "Move to Trash…|") && strings.contains(m, "Reveal in Finder|"), "a prompt: %s", m)
-	m = labels(fmt.tprintf("%s/prompts", ad))
-	testing.expectf(t, strings.contains(m, "New file…|") && !strings.contains(m, "Rename"), "prompts/: %s", m)
-	m = labels(fmt.tprintf("%s/extensions/subagent", ad))
-	testing.expectf(t, strings.contains(m, "Rename…|") && !strings.contains(m, "New file"), "an extension's folder: %s", m)
-	m = labels(fmt.tprintf("%s/.pi/settings.json", proj))
-	testing.expectf(t, strings.contains(m, "Rename…|"), "inside the project's .pi/: %s", m)
-	m = labels(fmt.tprintf("%s/AGENTS.md", proj))
-	testing.expectf(t, !strings.contains(m, "Rename"), "the project's instructions file: %s", m)
 	// the commands: the user may make, rename and delete inside prompts/
 	r := core.run_command(core.Create_File{path = fmt.tprintf("%s/prompts/a.md", ad)}, ui)
 	testing.expect(t, r.ok, r.error)
@@ -465,23 +449,9 @@ review_filter_kept_for_sessions :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.files.filter, "main")
 	core.run_command(core.Set_Left_Tab{tab = .Files}, ui)
 	testing.expect_value(t, state.files.filter, "main")
+	// the old Settings tab (an older caller, a saved workspace): Sessions
 	core.run_command(core.Set_Left_Tab{tab = .Settings}, ui)
-	testing.expect_value(t, state.files.filter, "")
-}
-
-// 2. ↓ in the Settings filter selects in the Settings tree, not the Files tree.
-@(test)
-review_filter_down_selects_settings_row :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	home, _ := setup()
-	write_mode(fmt.tprintf("%s/.pi/agent/prompts/fix.md", home), "fix", 0o644)
-	core.run_command(core.Set_Left_Tab{tab = .Settings}, ui)
-	core.run_command(core.Set_Files_Filter{text = "fix"}, ui)
-	before := strings.clone(core.files_ui.cursor, context.temp_allocator)
-	files_filter_key(.DOWN)
-	core.inbox_drain()
-	testing.expect_value(t, core.settings_ui.cursor, fmt.tprintf("%s/.pi/agent/prompts/fix.md", home))
-	testing.expect_value(t, core.files_ui.cursor, before)
+	testing.expect_value(t, state.layout.left_tab, core.Left_Tab.Sessions)
 }
 
 // 3. New file/folder are not offered where the real folder is outside
@@ -520,7 +490,6 @@ review_collapse_all_only_dot_pi :: proc(t: ^testing.T) {
 	os.make_directory_all(fmt.tprintf("%s/.pip-cache/x", proj))
 	testing.expect(t, core.run_command(core.Files_Expand{path = fmt.tprintf("%s/.pi/prompts", proj), expanded = true}, ui).ok, "expand .pi/prompts")
 	testing.expect(t, core.run_command(core.Files_Expand{path = fmt.tprintf("%s/.pip-cache", proj), expanded = true}, ui).ok, "expand .pip-cache")
-	core.run_command(core.Set_Left_Tab{tab = .Settings}, ui)
 	action_run("settings_collapse_all")
 	core.inbox_drain()
 	testing.expect(t, !core.files_is_open(fmt.tprintf("%s/.pi/prompts", proj)), ".pi/prompts closed")

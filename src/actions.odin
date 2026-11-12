@@ -340,9 +340,10 @@ ACTIONS := [?]Action {
 	{id = "toggle_right", label = "Toggle right panels", keys = "⌥⌘B", make = proc() -> (core.Command, bool) {
 		return core.Set_Layout{right_open = !state.layout.right_open}, true
 	}},
-	{id = "settings", label = "Settings…", keys = "⌘,", prepare = proc() {ui_do(core.Set_Left_Tab{tab = .Settings})}, make = proc() -> (core.Command, bool) {
-		return core.Set_Focus{"files"}, true // the left column's Settings tab, with the keyboard (settings_files.odin)
-	}},
+	// the Settings page in the centre (ui_settings_page.odin): the user's only, as its focus widget
+	{id = "settings", label = "Settings…", keys = "⌘,", make = proc() -> (core.Command, bool) {
+		return core.Set_Focus{"settings_page"}, true
+	}, ui = proc() {settings_page_open()}},
 	{id = "quick_settings", label = "Quick settings", no_palette = true, make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"settings"}, true // the gear's popover (ui_toolbar.odin)
 	}},
@@ -389,14 +390,13 @@ ACTIONS := [?]Action {
 	// the machines themselves: the same add field, commands and Settings group as the sidebar's
 	// with Machines over SSH off: its Settings row (Turn on) and why, never turned on for the user
 	{id = "machine_add", make = proc() -> (core.Command, bool) {
-		return core.Set_Left_Tab{tab = .Settings}, true
+		return core.Set_Focus{"settings_page"}, true
 	}, ui = proc() {
 		if state.settings.remote_machines {
 			machine_add_open()
 			return
 		}
-		ui_do(core.Set_Left_Tab{tab = .Settings})
-		core.files_select_in(&core.settings_ui, core.MACHINE_SSH_ROW) // scrolled into view
+		settings_page_open(.Machines) // its switch is there
 		toast_show("Turn on Machines over SSH to add a machine")
 	}, detail = proc() -> string {return "over ssh"}},
 	{id = "machine_remove", label = "Remove a machine…", make = proc() -> (core.Command, bool) {
@@ -407,11 +407,8 @@ ACTIONS := [?]Action {
 		return nil, false
 	}, prepare = proc() {palette_open_machines(.Connect)}},
 	{id = "machines_settings", label = "Machines settings…", make = proc() -> (core.Command, bool) {
-		return core.Set_Left_Tab{tab = .Settings}, state.settings.remote_machines || state.settings.machines_reachable
-	}, ui = proc() {
-		ui_do(core.Set_Left_Tab{tab = .Settings})
-		core.files_select_in(&core.settings_ui, state.settings.remote_machines ? core.MACHINE_ADD_ROW : core.MACHINE_REACH_ROW) // scrolled into view
-	}},
+		return core.Set_Focus{"settings_page"}, state.settings.remote_machines || state.settings.machines_reachable
+	}, ui = proc() {settings_page_open(.Machines)}},
 	// a separate core only (core_handover.odin): the sessions go back to the core before the last update
 	{id = "use_previous_core", label = "Use previous core", make = proc() -> (core.Command, bool) {
 		return core.Core_Handover{to = core.CORE_PREVIOUS}, client_separate()
@@ -750,8 +747,8 @@ ACTIONS := [?]Action {
 		for p in core.settings_open_pi_dirs() do ui_do(core.Files_Expand{path = p, expanded = false})
 	}, done = proc() -> string {return "Folders collapsed"}},
 	{id = "settings_refresh", label = "Refresh settings files", make = proc() -> (core.Command, bool) {
-		return core.Set_Left_Tab{tab = .Settings}, true
-	}, prepare = proc() {
+		return core.Set_Focus{"settings_page"}, true
+	}, ui = settings_page_open_default, prepare = proc() {
 		// every listing of the tree is read again
 		ad := core.settings_agent_dir()
 		core.files_path_changed(ad)

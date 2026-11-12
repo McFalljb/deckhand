@@ -105,8 +105,8 @@ containers :: proc(overlay: bool) -> [dynamic]Box {
 		for name in ([]string{"menurow", "wtrow", "wtmore", "wthead", "bellrow", "bell_group", "setupopt", "setupbtn"}) do for i in u32(0) ..< 64 do if !one(&out, name, i) && i > 16 do break
 		return out
 	}
-	for name in ([]string{"sidebar", "sidebar_top", "lefttabs", "filter_box", "quick", "nav", "tabs", "ed_tools", "right", "centre", "files_head", "wt_switch", "files_filter_box", "rename_field", "new", "newchatrow", "waitingfiltered", "search", "homebutton", "confirm_bar", "bell", "bell_badge", "jobs_head", "jobs_list", "jobs_paused", "jobs_limits", "drawer_notes_line"}) do one(&out, name)
-	for name in ([]string{"open", "proj", "sess", "chat", "tab", "ed_tool", "chip", "lefttab", "filestool", "settool", "frow", "fcreate", "fmore", "freset", "freveal", "navhead", "showmore", "panelhead", "jobrow", "jobmore", "jobstool", "jobbtn", "joblimit"}) {
+	for name in ([]string{"sidebar", "sidebar_top", "lefttabs", "filter_box", "quick", "nav", "tabs", "ed_tools", "right", "centre", "files_head", "wt_switch", "files_filter_box", "rename_field", "new", "newchatrow", "waitingfiltered", "search", "homebutton", "confirm_bar", "bell", "bell_badge", "jobs_head", "jobs_list", "jobs_paused", "jobs_limits", "drawer_notes_line", "spage", "spnav", "spbody", "sp_search_box", "sp_edit_box"}) do one(&out, name)
+	for name in ([]string{"open", "proj", "sess", "chat", "tab", "ed_tool", "chip", "lefttab", "filestool", "settool", "frow", "fcreate", "fmore", "freset", "freveal", "navhead", "showmore", "panelhead", "jobrow", "jobmore", "jobstool", "jobbtn", "joblimit", "spi", "spfile"}) {
 		for i in u32(0) ..< 400 do if !one(&out, name, i) && i > 2 do break
 	}
 	return out

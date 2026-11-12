@@ -621,6 +621,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	ui_win_w = w
 	fleet_tally_frame() // once per frame: the pill's, the machine headers', the Dock's (ui_fleet.odin)
 	deck_sync() // a session shown again: the Deck view goes (ui_deck.odin)
+	settings_page_sync() // and the Settings page (ui_settings_page.odin)
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
 	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"
@@ -685,6 +686,7 @@ focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.ElementId) {
 	case "palette":        return &palette.field, clay.ID("palette_text"), clay.ID("palette_input")
 	case "sidebar_filter": return &filter_field, clay.ID("filter_text"), clay.ID("filter_box")
 	case "files_filter":   return &files_filter_field, clay.ID("files_filter_text"), clay.ID("files_filter_box")
+	case "settings_page":  return settings_page_field() // its search, or its add/rename field (ui_settings_page.odin)
 	case "files_name":     return &files_name_field, clay.ID("files_name_text"), clay.ID("files_name_box")
 	case "changes_message": return &changes_message_field, fid("ch_field_text"), fid("ch_field")
 	case "comment_edit":   return &comment_edit_field, clay.ID("cm_edit_text"), clay.ID("cm_edit_box")
@@ -800,7 +802,8 @@ centre :: proc(cs: ^core.Open_Session) {
 		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane; with no
 		// session current, the Deck view in the empty centre's place (ui_deck.odin)
 		if clay.UI(clay.ID("panes"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
-			if deck_shown() do deck_layout()
+			if settings_page_shown() do settings_page_layout() // Settings (ui_settings_page.odin): no pane under it
+			else if deck_shown() do deck_layout()
 			// zoomed (zoom_pane): that pane alone fills the area; the others are not laid out (not drawn, not hit)
 			else if zp := core.session_pane(cs, core.session_zoomed(cs)); zp != nil do pane_layout(cs, zp)
 			else if cs != nil && len(cs.nodes) > 0 && len(cs.panes) > 0 do pane_tree_layout(cs, cs.root)
@@ -1488,6 +1491,7 @@ Hit :: union {
 	Hit_Peek_Row, // a row's eye button: peek at its session (ui_peek.odin)
 	Hit_Deck_Card, // a card of the Deck view (ui_deck.odin)
 	Hit_Deck_More, // its "…"
+	Hit_Spage, // an item of the Settings page (ui_settings_page.odin)
 }
 Hit_Attention :: distinct int // a core.Sidebar_View (the switch), ATTN_HIT_IDLE, ATTN_HIT_FOOTER
 Hit_Editor_Tool :: distinct int // button index
@@ -1557,6 +1561,7 @@ ui_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("homebutton")) do return Hit_Home{}
 	if state.home_open && clay.PointerOver(clay.ID("drawer")) do return drawer_hit() // nothing under the drawer is hit
 	if h := deck_hit(); h != nil do return h // the Deck view's cards (ui_deck.odin)
+	if h := settings_page_hit(); h != nil do return h // the Settings page (ui_settings_page.odin)
 	if h := empty_hit(); h != nil do return h
 	if clay.PointerOver(clay.ID("new")) do return Hit_New{}
 	if len(state.pending_confirmations) > 0 {

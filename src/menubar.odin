@@ -104,7 +104,7 @@ MENUBAR := [?]Bar_Item {
 		{action = "attention_view", title = "Attention view", check = proc() -> bool {return left_tab_shown(.Sessions) && state.sidebar.view == .Attention}},
 		{action = "deck_view", title = "Deck view", check = proc() -> bool {return deck_shown()}},
 		{action = "show_files", title = "Files", check = proc() -> bool {return left_tab_shown(.Files)}},
-		{id = "settings_tab", action = "settings", title = "Settings", no_key = true, check = proc() -> bool {return left_tab_shown(.Settings)}},
+		{id = "settings_tab", action = "settings", title = "Settings", no_key = true, check = proc() -> bool {return settings_page_shown()}},
 		{action = "show_jobs", title = "Jobs", check = proc() -> bool {return left_tab_shown(.Jobs)}},
 		{action = "changes_open"}, // "Show changes"
 		{action = "toggle_right", check = proc() -> bool {return state.layout.right_open}},

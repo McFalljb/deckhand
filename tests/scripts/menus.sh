@@ -2,7 +2,7 @@
 # Every right-click menu, row by row, in test mode (tests/scripts/menus.txt):
 # each row's effect, or the toast that says why it could not. Session rows
 # (Open group, listing, ⓘ), sort menus, project rows, the "+" menu, the Files
-# tab, the editor, the worktree switcher, the Settings tab, a job row.
+# tab, the editor, the worktree switcher, a job row.
 # Fixtures: a fake HOME and pi store (a session file WITH pi-subagents'
 # same-named folder beside it, a session without a header), a git project
 # with a worktree and files, a notes folder with one job, a fake pi for
@@ -56,7 +56,7 @@ git -C "$A" -c user.name=t -c user.email=t@example.invalid commit -q -m init
 git -C "$A" worktree add -q -b feature "$FAKE_HOME/code/alpha-wt"
 printf 'hello\nworld\nchanged\n' > "$A/a.txt"
 
-# pi's own config (the Settings tab): settings.json and a prompt
+# pi's own config: settings.json and a prompt
 mkdir -p "$FAKE_HOME/.pi/agent/prompts"
 printf '{}\n' > "$FAKE_HOME/.pi/agent/settings.json"
 printf 'Fix it.\n' > "$FAKE_HOME/.pi/agent/prompts/fix.md"

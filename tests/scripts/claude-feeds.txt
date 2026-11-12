@@ -87,7 +87,7 @@ hover newmenu
 wait 200
 hover cl_status_go
 eventually
-assert_tip Show Claude Code's settings files (the Settings tab)
+assert_tip Show Claude Code's settings files (Settings → Coding agents)
 clickid cl_status_go
 eventually
 assert_drawn Claude Code (global)

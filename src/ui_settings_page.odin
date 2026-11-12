@@ -78,6 +78,10 @@ Sp_Edit_Kind :: enum u8 {
 	Add_Machine,
 	Rename_Machine,
 	Rename_Account,
+	// a file row's menu (right click; settings_page_context): as the old Settings tab's name field
+	New_File, // target: the folder
+	New_Folder,
+	Rename_File, // target: the path
 }
 
 Spage :: struct {
@@ -206,6 +210,25 @@ sp_edit_commit :: proc() {
 	case .Rename_Account:
 		if name == "" do break
 		r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name})
+	case .New_File, .New_Folder, .Rename_File:
+		if err := files_name_error(name); err != "" {
+			r = {error = err}
+			break
+		}
+		if spage.edit.kind == .Rename_File && name == filepath.base(spage.edit.target) do break
+		dir := spage.edit.kind == .Rename_File ? filepath.dir(spage.edit.target) : spage.edit.target
+		path := strings.concatenate({dir, "/", name}, context.temp_allocator)
+		#partial switch spage.edit.kind {
+		case .New_File:
+			r = ui_run(core.Create_File{path = path})
+			if r.ok {
+				sp_edit_end()
+				sp_open_file(path) // made: then opened, as the Files tab's New file…
+				return
+			}
+		case .New_Folder:  r = ui_run(core.Create_Dir{path = path})
+		case .Rename_File: r = ui_run(core.Rename_Path{from = spage.edit.target, to = path})
+		}
 	}
 	if !r.ok {
 		delete(spage.edit.err)
@@ -305,7 +328,7 @@ sp_run :: proc(k: int) {
 // The session files open in: the one the page was opened from, this Mac's (0: none, said in a toast).
 @(private = "file")
 sp_file_session :: proc() -> u64 {
-	if s := core.find_session(deck_under()); s != nil && s.machine == 0 && !s.home do return s.id
+	if s := settings_page_session(); s != 0 do return s
 	toast_show("Open a session on this Mac first: settings files open in its editor tabs")
 	return 0
 }
@@ -486,6 +509,7 @@ settings_page_layout :: proc() {
 				cfg.wrapMode = .Newlines
 				clay.TextDynamic(lines, cfg)
 			}
+			sp_file_edit()
 			if query != "" do sp_results(query, rows)
 			else do sp_section(spage.section, rows, project)
 		}
@@ -1003,6 +1027,63 @@ sp_edit_row :: proc(title, placeholder: string) {
 	}
 }
 
+// A file row menu's New file…, New folder… or Rename… (settings_page_file_step): its field, above
+// the section or search it was asked from.
+@(private = "file")
+sp_file_edit :: proc() {
+	title: string
+	#partial switch spage.edit.kind {
+	case .New_File:    title = fmt.tprintf("New file in %s", core.fs_display(spage.edit.target))
+	case .New_Folder:  title = fmt.tprintf("New folder in %s", core.fs_display(spage.edit.target))
+	case .Rename_File: title = fmt.tprintf("Rename %s", filepath.base(spage.edit.target))
+	case: return
+	}
+	if sp_card("") do sp_edit_row(title, "name")
+}
+
+// An item's tooltip: the notifications grid's cells say what they are and the rule ("": none).
+settings_page_tip :: proc(k: int) -> string {
+	if k < 0 || k >= len(spage.items) do return ""
+	if it := spage.items[k]; it.do_ == .Grid do return bell_grid_tip(it.pop)
+	return ""
+}
+
+// A right click on a file or folder row: the old Settings tab's row menu (ui_files.odin
+// settings_menu_items: the same commands and confirmations).
+settings_page_context :: proc(k: int, at: [2]f32) {
+	if k < 0 || k >= len(spage.items) do return
+	it := spage.items[k]
+	#partial switch it.do_ {
+	case .Open, .Folder, .Create: menu_open(Menu_Files{path = it.path, page = true}, at)
+	}
+}
+
+// The session a menu's Open goes to: the one the page was opened from, this Mac's (0: none).
+settings_page_session :: proc() -> u64 {
+	if s := core.find_session(deck_under()); s != nil && s.machine == 0 && !s.home do return s.id
+	return 0
+}
+
+// A file row menu's step that is not a command (ui_sidebar.odin's menu): New file…, New folder…
+// and Rename… open the page's field; Copy path. True: a path went on the clipboard.
+settings_page_file_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
+	#partial switch step {
+	case .New_File, .New_Folder:
+		dir := core.path_kind(path) == .Dir ? path : filepath.dir(path)
+		sp_edit_begin(step == .New_File ? .New_File : .New_Folder, dir, "")
+	case .Rename:
+		name := filepath.base(path)
+		sp_edit_begin(.Rename_File, path, name)
+		// the name without its extension is selected, as Finder does
+		if dot := strings.last_index_byte(name, '.'); dot > 0 do spage.edit.field.cursor, spage.edit.field.anchor = dot, 0
+	case .Copy_Path:
+		if path == "" || win_os.set_clipboard == nil do return false
+		win_os.set_clipboard(path)
+		return true
+	}
+	return false
+}
+
 // The look's swatches: its background and its accent, the current one ringed.
 @(private = "file")
 sp_swatches :: proc(s: ^core.Setting) {
@@ -1174,12 +1255,13 @@ sp_file_row :: proc(k: int, name, detail: string, missing: bool, button := "", l
 }
 
 // A scene's "spi @KEY" (autotest.odin script_index): a section by its name (Agents), an action's
-// id, a pi extension's name, a row's or a file's path by its end, a card's "All files…"
+// id (a notifications grid cell's too), a pi extension's name, a row's or a file's path by its end, a card's "All files…"
 // (Agents/pi); the last layout's item (-1: none).
 settings_page_slot :: proc(key: string) -> int {
 	for it, k in spage.items {
 		switch {
 		case it.do_ == .Nav: if fmt.tprint(it.section) == key do return k
+		case it.do_ == .Grid: if POP_ACTIONS[it.pop] == key do return k // a grid cell by its action (bell_os_waiting)
 		case it.action == key: return k
 		case it.path != "" && strings.has_suffix(it.path, key): return k
 		}

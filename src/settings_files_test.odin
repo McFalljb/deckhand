@@ -350,55 +350,34 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	core.harness_checklist_forget() // the Coding agents rows look at this HOME (another test's are cached)
 	core.settings_watch = true // as while the Settings page shows: its folders are polled
 	defer core.settings_watch = false
-	tree :: proc() -> string {return core.files_rows_text(core.settings_tree_rows())}
-	got := tree()
-	want := "[pi (global)]\nsettings.json\nmodels.json\nprompts\nskills\nextensions\n[This project · proj]\n.pi/settings.json (create)\n.pi/prompts\nAGENTS.md (create)\n[Extensions]\npi-subagents config\nsubagent\n[Atlas]\nATLAS.md (create)\nModel: pi's default [Change…]\n[Chats]\nChat instructions (AGENTS.md) (create)\n[Folders]\nMain folder: not set [Set up…]\nsessions/: no main folder [Change…]\njobs/: no main folder [Change…]\nmemory/: no main folder [Change…]\natlas/: no main folder [Change…]\nchats/: default · ~/Chats [Change…]\n[Coding agents]\npi\n  Deckhand integration\n  pi-subagents\n  rpiv-todo: Not installed [Install…]\n  pi-ask-user: Not installed [Install…]\n  pi-web-access: Not installed [Install…]\n  rpiv-btw: Not installed [Install…]\nClaude Code\n  Deckhand integration\nCodex: Not installed [Install…]\n[Machines]\nMachines over SSH is off: turn it on to add a machine [Turn on]\nAllow other machines to connect: off [Turn on…]\n" // the harness checklist (ui_harness.odin), then the Machines group (always shown)
+	got := sf_text()
+	want := "[pi (global)]\nsettings.json\nmodels.json\nprompts\nskills\nextensions\n[This project · proj]\n.pi/settings.json (create)\nAGENTS.md (create)\n[Extensions]\npi-subagents config\nsubagent\n[Atlas]\nATLAS.md (create)\nModel: pi's default [Change…]\n[Chats]\nChat instructions (AGENTS.md) (create)\n[Folders]\nMain folder: not set [Set up…]\nsessions/: no main folder [Change…]\njobs/: no main folder [Change…]\nmemory/: no main folder [Change…]\natlas/: no main folder [Change…]\nchats/: default · ~/Chats [Change…]\n[Coding agents]\npi\n  Deckhand integration\n  pi-subagents\n  rpiv-todo: Not installed [Install…]\n  pi-ask-user: Not installed [Install…]\n  pi-web-access: Not installed [Install…]\n  rpiv-btw: Not installed [Install…]\nClaude Code\n  Deckhand integration\nCodex: Not installed [Install…]\n[Machines]\nMachines over SSH is off: turn it on to add a machine [Turn on]\nAllow other machines to connect: off [Turn on…]\n" // the harness checklist (ui_harness.odin), then the Machines group (always shown)
 	testing.expect_value(t, got, want)
 	// pi's own folders (the Folders group's sessions/ is Deckhand's, below [Chats])
 	pis := got[:max(strings.index(got, "[Chats]"), 0)]
 	for never in ([]string{"auth", "sessions", "npm", "git", "bin", "logs", "intercom", "private-thing", "cursor-sdk", "models-store", ".env"}) {
 		testing.expectf(t, !strings.contains(pis, never), "%s shown:\n%s", never, got)
 	}
-	// folders open like the Files tab's; credentials stay hidden inside them
-	for d in ([]string{"prompts", "skills", "skills/review", "extensions", "extensions/subagent", "extensions/subagent/lib"}) {
-		r := core.run_command(core.Files_Expand{path = fmt.tprintf("%s/%s", ad, d), expanded = true}, ui)
-		testing.expectf(t, r.ok, "expand %s: %s", d, r.error)
-	}
-	r := core.run_command(core.Files_Expand{path = fmt.tprintf("%s/.pi/prompts", proj), expanded = true}, ui)
-	testing.expect(t, r.ok, r.error)
-	got = tree()
-	testing.expectf(t, strings.contains(got, "prompts/\n  fix.md\nskills/\n  review/\n    SKILL.md\nextensions/\n  subagent/\n    lib/\n    config.json\n    index.ts\n"), "opened:\n%s", got)
-	testing.expectf(t, strings.contains(got, ".pi/prompts/\n  p.md\n"), "project folder opened:\n%s", got)
-	for never in ([]string{"token.json", ".env", "notes.json", "secret.json"}) {
-		testing.expectf(t, !strings.contains(got, never), "%s shown in an opened folder:\n%s", never, got)
-	}
 	// not a settings folder: refused
 	testing.expect(t, !core.run_command(core.Files_Expand{path = fmt.tprintf("%s/sessions", ad), expanded = true}, ui).ok, "sessions/ does not open")
 	testing.expect(t, !core.run_command(core.Files_Expand{path = fmt.tprintf("%s/prompts", ad), expanded = true}, {kind = .Panel, tab_id = state.open_sessions[0].tabs[0].id}).ok, "a pi tab's bridge stays in its project")
-	// the open state is kept (saved with the workspace) under the agent folder
-	testing.expect(t, core.list_index(core.files_expanded_dirs(ad), "prompts") >= 0, "kept under the agent folder")
-	// a file made outside shows after the poll looks
-	write_mode(fmt.tprintf("%s/SYSTEM.md", ad), "sys", 0o644)
-	core.settings_poll_now()
-	testing.expectf(t, strings.contains(tree(), "SYSTEM.md\n"), "SYSTEM.md after the poll:\n%s", tree())
-	write_mode(fmt.tprintf("%s/prompts/new.md", ad), "n", 0o644)
-	core.settings_poll_now()
-	testing.expectf(t, strings.contains(tree(), "  new.md\n"), "a new prompt after the poll:\n%s", tree())
-	// the filter: every file of the tree, open or not; credentials never
-	core.run_command(core.Files_Expand{path = fmt.tprintf("%s/skills", ad), expanded = false}, ui)
-	core.run_command(core.Set_Files_Filter{text = "skill"}, ui)
-	got = tree()
-	testing.expectf(t, strings.contains(got, "skills/review/SKILL.md"), "filter finds a closed folder's file:\n%s", got)
-	core.run_command(core.Set_Files_Filter{text = "json"}, ui)
-	got = tree()
-	testing.expectf(t, !strings.contains(got, "notes.json") && !strings.contains(got, "token.json") && !strings.contains(got, "auth"), "filter hides credentials:\n%s", got)
-	// the Settings page's search: the same files, also inside closed folders; credentials never
-	core.run_command(core.Set_Files_Filter{text = ""}, ui)
+	// the Settings page's search: the files inside the folders and the project's .pi/; credentials never
 	found := map[string]bool{}
 	defer delete(found)
 	for q in ([]string{"skill", "json", "fix", "index", "notes", "token", "env", "secret"}) do for h in core.settings_search(q, deep = true) do if h.kind == .File do found[filepath.base(h.row.path)] = true
 	testing.expectf(t, found["SKILL.md"] && found["fix.md"] && found["index.ts"], "the page's search finds files inside folders: %v", found)
 	for never in ([]string{"notes.json", "token.json", ".env", "secret.json", "auth.json"}) do testing.expectf(t, !found[never], "the page's search shows %s", never)
+	searched :: proc(q, name: string) -> bool {
+		for h in core.settings_search(q, deep = true) do if h.kind == .File && filepath.base(h.row.path) == name do return true
+		return false
+	}
+	testing.expect(t, searched("p.md", "p.md"), "the project's .pi/prompts/p.md")
+	// a file made outside shows after the poll looks
+	testing.expect(t, !searched("new.md", "new.md"), "not there yet")
+	core.settings_poll_now() // the poll's baseline
+	write_mode(fmt.tprintf("%s/prompts/new.md", ad), "n", 0o644)
+	core.settings_poll_now()
+	testing.expect(t, searched("new.md", "new.md"), "a new prompt after the poll")
 	_ = home
 }
 
@@ -479,28 +458,6 @@ review_command_table_names_settings_tab :: proc(t: ^testing.T) {
 		testing.expectf(t, strings.contains(c.does, "settings"), "set_left_tab: %q", c.does)
 	}
 	testing.expect(t, found, "set_left_tab in the table")
-}
-
-// 5. Collapse all closes the project's .pi/ folders only, not .pip-cache.
-@(test)
-review_collapse_all_only_dot_pi :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	_, proj := setup()
-	os.make_directory_all(fmt.tprintf("%s/.pi/prompts", proj))
-	os.make_directory_all(fmt.tprintf("%s/.pip-cache/x", proj))
-	testing.expect(t, core.run_command(core.Files_Expand{path = fmt.tprintf("%s/.pi/prompts", proj), expanded = true}, ui).ok, "expand .pi/prompts")
-	testing.expect(t, core.run_command(core.Files_Expand{path = fmt.tprintf("%s/.pip-cache", proj), expanded = true}, ui).ok, "expand .pip-cache")
-	action_run("settings_collapse_all")
-	core.inbox_drain()
-	testing.expect(t, !core.files_is_open(fmt.tprintf("%s/.pi/prompts", proj)), ".pi/prompts closed")
-	testing.expect(t, core.files_is_open(fmt.tprintf("%s/.pip-cache", proj)), ".pip-cache stays open")
-}
-
-// 6. The Settings header's Reveal is not a second "Reveal in Finder" in the palette.
-@(test)
-review_settings_reveal_not_in_palette :: proc(t: ^testing.T) {
-	a := action_by_id("settings_reveal_finder")
-	testing.expect(t, a != nil && a.no_palette, "settings_reveal_finder is a button only")
 }
 
 // ---- Claude Code's files (settings_files.odin, claude_reload.odin) ----
@@ -623,8 +580,7 @@ settings_files_claude_default_flags :: proc(t: ^testing.T) {
 	home, proj := setup()
 	claude_setup(home, proj)
 	defer os.unset_env("CLAUDE_CONFIG_DIR")
-	core.run_command(core.Set_Left_Tab{tab = .Settings}, ui)
-	rows :: proc() -> string {return core.files_rows_text(core.settings_tree_rows())}
+	rows :: proc() -> string {return sf_text()}
 	got := rows()
 	warning :: proc() -> string {
 		b := strings.builder_make(context.temp_allocator)
@@ -795,16 +751,24 @@ settings_registry_reaches_every_row :: proc(t: ^testing.T) {
 		for h in core.settings_search(r.label, rows) do if (h.kind == .File || h.kind == .Row) && h.row.path == r.path do found = true
 		testing.expectf(t, found, "search %q does not find its row (%s)", r.label, r.path)
 	}
-	// the tab's filter: a setting row by its words (before, only file paths matched)
-	delete(state.files.filter)
-	state.files.filter = strings.clone("allow other machines")
-	core.files_state_gen += 1
-	defer {
-		delete(state.files.filter)
-		state.files.filter = ""
-		core.files_state_gen += 1
+}
+
+// Settings' rows as text, by group (as the old Settings tab drew them): "[group]", a file's label,
+// " (create)" while missing, a setting row's ": what [button]".
+@(private = "file")
+sf_text :: proc() -> string {
+	b := strings.builder_make(context.temp_allocator)
+	cwd := core.settings_project_cwd()
+	group := ""
+	for r in core.settings_file_rows() {
+		if r.group != group {
+			group = r.group
+			fmt.sbprintf(&b, "[%s]\n", core.settings_group_label(group, cwd))
+		}
+		strings.write_string(&b, r.label)
+		if !r.exists do strings.write_string(&b, " (create)")
+		if r.button != "" do fmt.sbprintf(&b, ": %s [%s]", r.detail, r.button)
+		strings.write_byte(&b, '\n')
 	}
-	found := false
-	for r in core.settings_tree_rows() do if r.path == core.MACHINE_REACH_ROW do found = r.button != ""
-	testing.expect(t, found, "the filter keeps Allow other machines, with its button")
+	return strings.to_string(b)
 }

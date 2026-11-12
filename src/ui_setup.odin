@@ -585,7 +585,7 @@ setup_layout :: proc(w, h: f32) {
 				case .Agents:
 					harness_step_body(box_w - px(2 * SP_3))
 				case .Main:
-					para("One main folder holds your session notes, jobs, memory, Atlas's prompt and chats. You can move any of them later (Settings tab, Folders).", th.text_secondary)
+					para("One main folder holds your session notes, jobs, memory, Atlas's prompt and chats. You can move any of them later (Settings › Folders).", th.text_secondary)
 					for o, i in setup_options() {
 						switch o {
 						case .Detected:

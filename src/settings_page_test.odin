@@ -230,3 +230,104 @@ settings_page_layout_audit :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, problems == 0, "%d layout problems", problems)
 }
+
+// The old Settings tab's row menu, on the page's file rows (right click): pi's own config files have
+// no Rename or Trash; a prompt has New file…, Rename… and Move to Trash…; New file… opens the page's
+// field, and Enter makes the file and opens it in the session the page was opened from.
+@(test)
+settings_page_file_menu :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sp_test_setup()
+	defer sp_test_setup()
+	defer menu_close()
+	labels :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for it in menu_items() do if !it.sep do fmt.sbprintf(&b, "%s|", it.label)
+		return strings.to_string(b)
+	}
+	settings_page_open(.Agents)
+	core.inbox_drain()
+	_ = ui_layout(1600, 900)
+	k := -1
+	for it, i in spage.items do if it.do_ == .Open && strings.has_suffix(it.path, "agent/settings.json") do k = i
+	if !testing.expect(t, k >= 0, "settings.json listed") do return
+	settings_page_context(k, {10, 10})
+	testing.expect_value(t, labels(), "Open|Open in preview|Reveal in Finder|Copy path|")
+	menu_close()
+	// a prompt (in its folder's search)
+	tf_set(&spage.search, "fix")
+	_ = ui_layout(1600, 900)
+	k = -1
+	for it, i in spage.items do if it.do_ == .Open && strings.has_suffix(it.path, "prompts/fix.md") do k = i
+	if !testing.expect(t, k >= 0, "fix.md found") do return
+	settings_page_context(k, {10, 10})
+	testing.expect_value(t, labels(), "Open|Open in preview|Open Markdown preview|New file…|New folder…|Rename…|Move to Trash…|Reveal in Finder|Copy path|")
+	n := -1
+	for it, i in menu_items() do if it.label == "New file…" do n = i
+	menu_run(n)
+	testing.expect(t, !menu.open, "the menu closed")
+	testing.expect_value(t, spage.edit.kind, Sp_Edit_Kind.New_File)
+	testing.expect(t, strings.has_suffix(spage.edit.target, ".pi/agent/prompts"), "in prompts/")
+	_ = ui_layout(1600, 900)
+	testing.expect(t, clay.GetElementData(clay.ID("sp_edit_box")).found, "its field shows")
+	f, _, _ := focused_field()
+	testing.expect(t, f == &spage.edit.field, "the field has the keyboard")
+	tf_set(&spage.edit.field, "new.md")
+	enter := sp_key(.ENTER)
+	settings_page_key(&enter)
+	core.inbox_drain()
+	testing.expect(t, os.exists(fmt.tprintf("%s/.pi/agent/prompts/new.md", os.get_env("HOME", context.temp_allocator))), "made")
+	_ = ui_layout(1600, 900)
+	testing.expect(t, !settings_page_shown(), "opened: the session shows")
+	s := core.find_session(10)
+	testing.expect(t, s != nil && len(s.tabs) == 2 && s.tabs[1].title == "new.md", "in the session it was opened from")
+}
+
+// The Notifications grid (on the page now, not the gear) at every text size: its columns line up
+// and every cell stays in the page's body; a changed choice is drawn; a cell's tooltip says the rule.
+@(test)
+settings_page_bell_grid :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sp_test_setup()
+	defer {
+		state.settings.text_size = .Default
+		fonts_apply(theme_font_config(theme()), 1)
+		sp_test_setup()
+	}
+	settings_page_open(.Notifications)
+	core.inbox_drain()
+	for size in core.Text_Size {
+		state.settings.text_size = size
+		fonts_apply(theme_font_config(theme()), 1)
+		_ = ui_layout(WINDOW_MIN_W, AUDIT_H)
+		_ = ui_layout(WINDOW_MIN_W, AUDIT_H)
+		body := clay.GetElementData(clay.ID("spbody")).boundingBox
+		x0: [3]f32
+		cells := 0
+		for it, k in spage.items do if it.do_ == .Grid {
+			d := clay.GetElementData(clay.ID("spi", u32(k)))
+			if !testing.expectf(t, d.found, "%v cell %v", size, it.pop) do continue
+			b := d.boundingBox
+			testing.expectf(t, b.x >= body.x && b.x + b.width <= body.x + body.width, "%v: %v %v leaves the page %v", size, it.pop, b, body)
+			c := it.pop >= .Sound_Finished ? 2 : it.pop >= .Os_Finished ? 1 : 0
+			if x0[c] == 0 do x0[c] = b.x + b.width / 2
+			else do testing.expectf(t, abs(b.x + b.width / 2 - x0[c]) < 0.5, "%v: column %d not aligned", size, c)
+			cells += 1
+		}
+		testing.expectf(t, cells == 12, "%v: %d cells", size, cells)
+	}
+	core.run_command(core.Set_Bell{sound = #partial [core.Bell_Group]Maybe(core.Bell_Sound){.Jobs = .Basso}}, {kind = .UI})
+	cmds := ui_layout(1600, 900)
+	found := false
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType == .Text && string(c.renderData.text.stringContents.chars[:c.renderData.text.stringContents.length]) == "Basso" do found = true
+	}
+	testing.expect(t, found, "the changed sound is drawn")
+	for it, k in spage.items do if it.do_ == .Grid && it.pop == .Sound_Waiting {
+		tip := settings_page_tip(k)
+		testing.expectf(t, strings.contains(tip, "background") && strings.contains(tip, "always"), "the rule in the tip: %q", tip)
+	}
+}

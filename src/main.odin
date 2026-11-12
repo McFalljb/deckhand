@@ -710,8 +710,8 @@ event :: proc(e: ^sapp.Event) {
 		else do ui_do(core.Set_Home{open = !state.home_open})
 		return
 	}
-	// ⌘, the Settings tab of the left column with the keyboard (again: back
-	// to Sessions) and ⌘/ keyboard shortcuts (again: closes), from anywhere;
+	// ⌘, the Settings page with the keyboard (again: back to the session it
+	// was opened from) and ⌘/ keyboard shortcuts (again: closes), from anywhere;
 	// in an editor tab with the keyboard ⌘/ toggles a comment instead (as in
 	// every code editor); the sheet is still on its button and in the
 	// palette. The gear's popover: a click on the gear.
@@ -924,6 +924,7 @@ event :: proc(e: ^sapp.Event) {
 			if b, ok := hit.(Hit_Button); ok && Button(b) == .New_Tab do button_click(.New_Menu) // "+": its menu
 			else if tb, ok1 := hit.(Hit_Tab); ok1 do tab_context(u64(tb), app.pointer) // ui_panes.odin
 			else if j, ok2 := hit.(Hit_Jobs); ok2 do jobs_context(j, app.pointer)
+			else if k, ok3 := hit.(Hit_Spage); ok3 do settings_page_context(int(k), app.pointer) // a file row's menu
 			else do sidebar_context(hit, app.pointer)
 			return
 		}

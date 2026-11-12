@@ -77,21 +77,25 @@ command {"type":"set_home_dir","path":"$homedir"}
 assert_result error not allowed for this caller
 command {"type":"set_folder","kind":"jobs","path":"$homedir"}
 assert_result error not allowed for this caller
-# the gear's "Set up Deckhand…" (its button once a main folder is set) reopens it
+# Settings › Deckhand's "Set up Deckhand…" (its button once a main folder is set) reopens it
 # at its first step, the coding agents (the main folder pre-filled); Esc closes, nothing changes
 clickid settings
 wait 200
 shot setup/gear-dark
-# its last group's row, picked with the keyboard (↑ from the top wraps to the end; the list
-# scrolls it into view in a short window): Copy a control token, then Set up Deckhand…
-key up
-key up
-key enter
+key escape
+wait 200
+key comma cmd
+wait 300
+clickid spi @Deckhand
+wait 200
+clickid spi @setup
 eventually
 assert_state focus.id setup
 shot setup/reopened-dark
 key escape
 wait 200
+key escape
+wait 300
 assert_state focus.kind terminal
 assert_state settings.home_dir $homedir/notes/agents-demo
 assert_state settings.folders.chats.path $homedir/Chats

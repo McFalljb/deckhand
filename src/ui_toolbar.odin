@@ -7,9 +7,9 @@ package main
 //     the inbox as the user (action_run), exactly like the palette; its
 //     tooltip is that action's label and shortcut
 //   - the search pill (opens the command palette)
-//   - the settings popover (focus widget "settings"; a click on the gear): its
-//     rows in groups (POP_GROUPS: Display, Notifications, Sessions, Deckhand),
-//     a list that scrolls in a short window; every row runs an action
+//   - Quick settings (focus widget "settings"; a click on the gear): the
+//     display pickers, the one-shot "Now" actions, and All settings… (⌘,: the
+//     Settings page, ui_settings_page.odin); every row runs an action
 //   - the keyboard shortcuts sheet (focus widget "shortcuts"; ⌘/), listed
 //     from the action table
 //   - the one tooltip system: after the pointer rests TIP_DELAY on a control,
@@ -233,7 +233,7 @@ Pop_Item :: enum {
 	Chats_Folder_Default, // only while another folder is set
 	Rescan,
 	Shortcuts,
-	Settings_Files, // the left column's Settings tab (settings_files.odin)
+	Settings_Files, // Quick settings' "All settings…": the Settings page (ui_settings_page.odin)
 	// Text size (shown under Look; last here so the rows above keep their ids)
 	Text_Small,
 	Text_Medium,
@@ -263,30 +263,22 @@ Pop_Item :: enum {
 	Dim_Panes, // split panes: the ones without the keyboard dim (ui_pane_motion.odin); drawn after Reduce motion; last so earlier rows keep their ids
 }
 
-// The rows top to bottom, in their groups (POP_GROUPS): the keyboard walks them in this order.
-POP_ORDER :: [len(Pop_Item)]Pop_Item {
+// The rows Quick settings draws, top to bottom, in their groups (POP_GROUPS): the keyboard walks
+// them in this order. The rest of Pop_Item are the Settings page's (its notifications grid) or kept
+// so the ids stay put; every setting is on the page.
+POP_ORDER :: [?]Pop_Item {
 	// Display
 	.Appearance_System, .Appearance_Light, .Appearance_Dark,
 	.Look_Graphite, .Look_Warm, .Look_Ghostty,
 	.Text_Small, .Text_Medium, .Text_Default, .Text_Large,
-	.Reduce_Motion, .Dim_Panes,
-	// Notifications: the switch, then the grid row by row (Bell, macOS, Sound), the Dock
-	.Notifications,
-	.Bell_Waiting, .Os_Waiting, .Sound_Waiting,
-	.Bell_Finished, .Os_Finished, .Sound_Finished,
-	.Bell_Errors, .Os_Errors, .Sound_Errors,
-	.Bell_Jobs, .Os_Jobs, .Sound_Jobs,
-	.Bell_Dock, .Bell_OS,
-	// Sessions: switches, then one-shot actions
-	.Agent_Model, .Chats_Readonly, .Chats_Folder, .Chats_Folder_Default, .Tidy_Projects,
-	.Keep_Sessions, .Separate_Core, .Remote_Machines,
+	// Now: one-shot actions
 	.Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env,
-	// Deckhand
-	.Update_Checks, .Settings_Files, .Shortcuts, .Setup, .Control_Token,
+	// the Settings page
+	.Settings_Files,
 }
 
 // The popover's group headers, top to bottom.
-POP_GROUPS :: [?]string{"Display", "Notifications", "Sessions", "Deckhand"}
+POP_GROUPS :: [?]string{"Display", "Now"}
 
 POP_ACTIONS := [Pop_Item]string {
 	.Appearance_System = "appearance_system",
@@ -367,7 +359,7 @@ pop_run :: proc(it: Pop_Item) {
 	if preview != .None do play_bell_sound(core.BELL_SOUND_LABELS[preview])
 }
 
-// ---- the Notifications grid: per group, Bell (on/off), macOS (never, background, always), Sound ----
+// ---- the Notifications grid (the Settings page's): per group, Bell (on/off), macOS (never, background, always), Sound ----
 
 // Its rows top to bottom, and what each is called.
 BELL_GRID_ORDER :: [4]core.Bell_Group{.Waiting, .Finished, .Errors, .Jobs}
@@ -389,80 +381,8 @@ bell_sound_step :: proc(g: core.Bell_Group) -> core.Set_Bell {
 }
 bell_sound_detail :: proc(g: core.Bell_Group) -> string {return core.BELL_SOUND_LABELS[core.bell_sound_of(state.settings, g)]}
 
-// The columns' widths: each fits its widest choice, so the columns line up.
-@(private = "file")
-bell_grid_cols :: proc() -> (bell, mac, sound: f32) {
-	pad := px(2 * (SP_1 + 2))
-	bell = max(px(SWITCH_W + 2 * SP_1), text_w("Bell", FONT_UI_SMALL))
-	mac = text_w("macOS", FONT_UI_SMALL)
-	for n in core.OS_WHEN_NAMES do mac = max(mac, text_w(n, FONT_UI_SMALL) + pad)
-	sound = text_w("Sound", FONT_UI_SMALL)
-	for n in core.BELL_SOUND_LABELS do sound = max(sound, text_w(n, FONT_UI_SMALL) + pad)
-	return
-}
-
-@(private = "file")
-bell_grid :: proc() {
-	th := theme()
-	bw, mw, sw := bell_grid_cols()
-	row :: proc() -> clay.ElementDeclaration {
-		return {layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}
-	}
-	head :: proc(text: string, w: f32) {
-		if clay.UI()({layout = {sizing = {clay.SizingFixed(w), clay.SizingFit()}, childAlignment = {x = .Center}}}) {
-			clay.TextDynamic(text, txt(theme().text_muted, FONT_UI_SMALL))
-		}
-	}
-	// the header: what the columns are
-	if clay.UI(clay.ID("bell_grid_head"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POP_HEAD_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
-		pop_label("Notify me about")
-		spacer()
-		head("Bell", bw)
-		head("macOS", mw)
-		head("Sound", sw)
-	}
-	for g in BELL_GRID_ORDER {
-		if clay.UI(clay.ID("bell_grid_row", u32(g)))(row()) {
-			clay.TextDynamic(BELL_GRID_LABELS[g], txt(th.text_secondary))
-			spacer()
-			// Bell: a switch in a cell the size of the column
-			it := Pop_Item(int(Pop_Item.Bell_Finished) + int(g))
-			id := pop_id(it)
-			bg, _ := overlay(id, false, pop_hovered(it))
-			if clay.UI(id)({
-				layout = {sizing = {clay.SizingFixed(bw), clay.SizingFixed(px(CHIP_SMALL_H))}, childAlignment = {x = .Center, y = .Center}},
-				backgroundColor = bg,
-				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-			}) {
-				switch_control(g not_in state.settings.bell_off)
-			}
-			w := core.bell_os_when(state.settings, g)
-			grid_chip(Pop_Item(int(Pop_Item.Os_Finished) + int(g)), core.OS_WHEN_NAMES[w], w != .Never, mw)
-			s := core.bell_sound_of(state.settings, g)
-			grid_chip(Pop_Item(int(Pop_Item.Sound_Finished) + int(g)), core.BELL_SOUND_LABELS[s], s != .None, sw)
-		}
-	}
-}
-
-// One of the grid's choices: a chip that steps to the next choice (accent-tinted unless off).
-@(private = "file")
-grid_chip :: proc(it: Pop_Item, text: string, on: bool, w: f32) {
-	th := theme()
-	id := pop_id(it)
-	bg, em := overlay(id, false, pop_hovered(it))
-	if on do bg = cc(mix(th.bg_elevated, th.accent, 0.22 + 0.14 * em))
-	if clay.UI(id)({
-		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(px(CHIP_SMALL_H))}, childAlignment = {x = .Center, y = .Center}},
-		backgroundColor = bg,
-		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-		border = {color = cc(on ? with_alpha(th.accent, 0.6) : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
-	}) {
-		clay.TextDynamic(text, txt(on ? th.text : mix(th.text_muted, th.text_secondary, em), FONT_UI_SMALL))
-	}
-}
-
-// The grid's tooltips: what the cell is now, what a click does, and the rule.
-@(private = "file")
+// The grid's tooltips (the Settings page's Notifications grid): what the cell is now, what a
+// click does, and the rule.
 bell_grid_tip :: proc(it: Pop_Item) -> string {
 	switch {
 	case it >= .Bell_Finished && it <= .Bell_Jobs:
@@ -522,7 +442,8 @@ pop_row :: proc(it: Pop_Item, toggle: Maybe(bool)) {
 	}) {
 		// the registry's name (settings_registry.odin), cut short when it is too wide for the gear
 		room := px(POPOVER_W - 4 * SP_2) - (toggle != nil ? px(SWITCH_W + SP_2) : 0)
-		clay.TextDynamic(clip(action_label(a), room), txt(mix(th.text_secondary, th.text, em)))
+		label := it == .Settings_Files ? "All settings…" : action_label(a)
+		clay.TextDynamic(clip(label, room), txt(mix(th.text_secondary, th.text, em)))
 		spacer()
 		if on, ok := toggle.?; ok {
 			switch_control(on)
@@ -669,31 +590,14 @@ settings_layout :: proc(w, h: f32) {
 				}
 			}
 		}
-		pop_row(.Reduce_Motion, state.settings.reduce_motion)
-		pop_row(.Dim_Panes, !state.settings.dim_panes_off)
 		pop_head(1)
-		pop_row(.Notifications, !state.settings.notify_off)
-		bell_grid() // per kind: Bell, macOS, Sound
-		pop_row(.Bell_Dock, !state.settings.bell_dock_off)
-		pop_head(2)
-		if pop_item_shown(.Agent_Model) do pop_row(.Agent_Model, nil)
-		pop_row(.Chats_Readonly, state.settings.chats_readonly)
-		pop_row(.Chats_Folder, nil)
-		if action_ok(POP_ACTIONS[.Chats_Folder_Default]) do pop_row(.Chats_Folder_Default, nil)
-		pop_row(.Tidy_Projects, !state.settings.tidy_off)
-		pop_row(.Keep_Sessions, state.settings.keep_sessions)
-		pop_row(.Separate_Core, state.settings.separate_core)
-		pop_row(.Remote_Machines, state.settings.remote_machines)
 		pop_row(.Rescan, nil)
 		if pop_item_shown(.Reload_Pi) do pop_row(.Reload_Pi, nil)
 		if pop_item_shown(.Restart_Claude) do pop_row(.Restart_Claude, nil)
 		pop_row(.Refresh_Env, nil)
-		pop_head(3)
-		pop_row(.Update_Checks, !core.update_view().checks_off)
+		// every setting: the Settings page
+		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(th.border)}) {}
 		pop_row(.Settings_Files, nil)
-		pop_row(.Shortcuts, nil)
-		pop_row(.Setup, nil)
-		pop_row(.Control_Token, nil)
 		}
 	}
 }
@@ -739,11 +643,11 @@ settings_event :: proc(e: ^sapp.Event) -> bool {
 			ui_do(core.Set_Focus{""}) // a shortcut (⌘N, ⌘Q, ...) closes it and runs as usual
 			return false
 		}
-		n := len(Pop_Item)
+		order := POP_ORDER
+		n := len(order)
 		#partial switch e.key_code {
 		case .ESCAPE:                   ui_do(core.Set_Focus{""})
 		case .UP, .LEFT, .DOWN, .RIGHT, .TAB:
-			order := POP_ORDER
 			at := -1
 			for o, k in order do if int(o) == popover.selected do at = k
 			d := (e.key_code == .UP || e.key_code == .LEFT) ? n - 1 : 1
@@ -995,6 +899,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return "Show all", ""
 	case Hit_Divider:
 		return "Drag to resize, double-click to reset", ""
+	case Hit_Spage:
+		return settings_page_tip(int(x)), ""
 	case Hit_Pop:
 		if Pop_Item(x) == .Reload_Pi do return "Reload every idle pi tab now (/reload); busy ones once idle", ""
 		if Pop_Item(x) == .Restart_Claude do return "Restart every idle Claude tab now (each resumes its conversation; background work stops); busy ones once idle", ""

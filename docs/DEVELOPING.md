@@ -621,9 +621,11 @@ core/handoff.odin, ui_handoff.odin  new session on another machine
 coremain/connect.odin  `deckhand-core-serve connect`: the far end of a machine's ssh link
 core/systemd_unit.odin, launch_linux.odin, proc_linux.odin  the Linux core: its systemd unit, launching, /proc
 core/lock_holder.odin  who holds a lock file when a second core is refused
-core/files.odin, fs_model.odin, ui_files.odin  the Files and Settings tabs
+core/files.odin, fs_model.odin, ui_files.odin  the Files tab (and the Settings page's file row menu)
 core/changes.odin, ui_changes.odin  the Changes tab
-core/settings_files.odin  the Settings tab: pi's settings files by an allowlist
+core/settings_files.odin  Settings' files and rows: agents' settings files by an allowlist
+core/settings_registry.odin  every setting: its section, card, label, action and command
+ui_settings_page.odin  the Settings page (⌘,): sections, search, cards; the gear is Quick settings (ui_toolbar.odin)
 editor*.odin, core/editor*_core.odin  editor tabs
 markdown*.odin      the Markdown parser and preview
 browser*.odin, core/browser*.odin  browser tabs (BROWSER.md); app_tab.odin, frames.odin app tabs (ENGINE-BRIDGE.md)

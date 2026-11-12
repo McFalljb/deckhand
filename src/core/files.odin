@@ -219,7 +219,7 @@ files_renamed :: proc(from, to: string) {
 	root := fs_root_longest(from)
 	if root != "" && root == fs_root_longest(to) && from != root && to != root do files_renamed_in(root, from, to)
 	else if r := settings_tree_root(from); r != "" && r == settings_tree_root(to) do files_renamed_in(r, from, to)
-	for v in ([]^Files_View{&files_ui, &settings_ui}) {
+	for v in ([]^Files_View{&files_ui}) {
 		if v.cursor == from || strings.has_prefix(v.cursor, strings.concatenate({from, "/"}, context.temp_allocator)) {
 			files_select_in(v, strings.concatenate({to, v.cursor[len(from):]}, context.temp_allocator))
 			v.reveal = false
@@ -388,15 +388,6 @@ Files_Row :: struct {
 	expanded: bool, // a folder shown open
 	more:     int, // > 0: an "N more…" row standing for that many entries
 	rel:      string, // filter results: the path relative to the root
-	// the Settings tab's rows (settings_tree_rows)
-	head:     bool, // a group's heading (name), not a file
-	missing:  bool, // not there yet: shown dimmed with a Create button
-	note:     string, // what the file is, beside its name
-	button:   string, // a row that is a setting, not a file (path ATLAS_MODEL_ROW): its button's label
-	reset:    bool, // a folder row (folders.odin): Reset and Reveal in Finder buttons too
-	reveal:   bool,
-	remove:   bool, // a Claude account's row (claude_accounts.odin): a Remove button
-	make_default: bool, // a Claude account's row: a Make default button
 	error:    string, // a folder that could not be listed (path): why, with a Retry button
 }
 
@@ -416,16 +407,12 @@ Files_View :: struct {
 	active_file:  string, // the editor file last revealed (owned)
 }
 files_ui: Files_View
-settings_ui: Files_View // the Settings tab's tree (rows: settings_tree_rows)
 
-// The view of the tree the left column shows (Files, else Settings).
-tree_view :: proc() -> ^Files_View {return state.layout.left_tab == .Settings ? &settings_ui : &files_ui}
+// The Files tab's tree.
+tree_view :: proc() -> ^Files_View {return &files_ui}
 
-// The rows of the tree the left column shows.
-tree_rows :: proc() -> []Files_Row {
-	if state.layout.left_tab == .Settings do return settings_tree_rows()
-	return files_rows(files_root())
-}
+// The rows of the Files tab's tree.
+tree_rows :: proc() -> []Files_Row {return files_rows(files_root())}
 
 // Moves the Files tab's selection to path (and scrolls it into view at the next layout).
 files_select :: proc(path: string) {files_select_in(&files_ui, path)}
@@ -481,11 +468,8 @@ files_rows :: proc(root: string) -> []Files_Row {
 	return files_ui.rows[:]
 }
 
-// Appends dir's entries (and open folders' below them) to v's rows. The
-// Settings tab's tree (settings): credential files are left out
-// (settings_hidden) and a folder's open state is looked up by its path
-// (files_is_open), as its folders live in more than one tree root.
-files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, open: map[string]bool, a: runtime.Allocator, settings := false) {
+// Appends dir's entries (and open folders' below them) to v's rows.
+files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, open: map[string]bool, a: runtime.Allocator) {
 	d := files_dir(dir, ignored)
 	walked[dir] = true
 	if d.err != "" {
@@ -500,20 +484,19 @@ files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, 
 			return
 		}
 		full := strings.concatenate({dir, "/", e.name}, a)
-		if settings && settings_hidden(full) do continue
 		shown += 1
 		r := rel == "" ? e.name : strings.concatenate({rel, "/", e.name}, context.temp_allocator)
-		is_open := e.kind == .Dir && (settings ? files_is_open(full) : r in open)
+		is_open := e.kind == .Dir && r in open
 		append(&v.rows, Files_Row{path = full, name = full[len(dir) + 1:], depth = depth, kind = e.kind, ignored = e.ignored, expanded = is_open})
 		if !is_open do continue
-		if !settings && list_index(walk_roots, full) >= 0 {
+		if list_index(walk_roots, full) >= 0 {
 			// a known folder (nested project, session worktree): the state of
 			// the folders below it is kept under it (files_expand_key)
 			sub := make(map[string]bool, context.temp_allocator)
 			for x in files_expanded_dirs(full) do sub[x] = true
-			files_walk(v, full, "", depth + 1, e.ignored, sub, a, settings)
+			files_walk(v, full, "", depth + 1, e.ignored, sub, a)
 		} else {
-			files_walk(v, full, r, depth + 1, e.ignored, open, a, settings)
+			files_walk(v, full, r, depth + 1, e.ignored, open, a)
 		}
 	}
 }
@@ -601,20 +584,16 @@ files_git_letter :: proc(code: string, is_dir: bool) -> string {
 }
 
 // A short description of a tree for logs and tests: one line per row,
-// indented two spaces per level, with "/" after open folders; the Settings
-// tab's headings in brackets, files not there yet with " (create)".
+// indented two spaces per level, with "/" after open folders.
 files_rows_text :: proc(rows: []Files_Row) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	for r in rows {
 		for _ in 0 ..< r.depth do strings.write_string(&b, "  ")
 		if r.error != "" do fmt.sbprintf(&b, "! %s", r.error)
 		else if r.more > 0 do fmt.sbprintf(&b, "%d more…", r.more)
-		else if r.head do fmt.sbprintf(&b, "[%s]", r.name)
 		else if r.rel != "" do strings.write_string(&b, r.rel)
 		else do strings.write_string(&b, r.name)
 		if r.expanded do strings.write_byte(&b, '/')
-		if r.missing do strings.write_string(&b, " (create)")
-		if r.button != "" do fmt.sbprintf(&b, ": %s [%s]", r.note, r.button)
 		strings.write_byte(&b, '\n')
 	}
 	return strings.to_string(b)
@@ -631,13 +610,15 @@ files_visible :: proc(n: int, scroll, view_h, row_h: f32) -> (first, last: int, 
 	return
 }
 
-// An edited preview tab is kept (editing makes it an ordinary tab, as a
-// double-click does). Main thread, every frame (editor_tick): cheap.
-files_keep_edited_preview :: proc() {
+// The preview tabs with unsaved edits: the window keeps them (editor_keep_edited_previews:
+// editing makes a preview an ordinary tab, as a double-click does). Main thread, every frame: cheap.
+files_edited_previews :: proc() -> []u64 {
+	out := make([dynamic]u64, context.temp_allocator)
 	for s in state.open_sessions do for tab in s.tabs {
 		et, is := tab.kind.(Editor_Tab)
-		if dirty, _ := window_tab_dirty(tab.id); is && et.preview && dirty do run_command(Keep_Tab{tab_id = tab.id}, {kind = .Internal})
+		if dirty, _ := window_tab_dirty(tab.id); is && et.preview && dirty do append(&out, tab.id)
 	}
+	return out[:]
 }
 
 // Lists a folder again when next needed (an error row's Retry).

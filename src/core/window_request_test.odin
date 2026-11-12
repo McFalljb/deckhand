@@ -8,9 +8,11 @@ package core
 
 import "base:runtime"
 import "core:fmt"
+import "core:os"
 import "core:reflect"
 import "core:strings"
 import "core:testing"
+import "core:time"
 import cw "../corewire"
 
 // A fake window on the link: it keeps the requests it got and answers those that want a reply.
@@ -67,6 +69,35 @@ fw_facts :: proc(f: Window_Facts) {
 	window_link_pump()
 }
 
+// Deckhand's own file commands tell the window which paths changed (path_changed), so a separate
+// core's window lists them again at once rather than behind its watcher's backlog.
+@(test)
+window_hears_our_file_changes :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	state = State{}
+	defer state = State{}
+	if !testing.expect(t, fw_attach()) do return
+	defer core_detach_window()
+	dir := fmt.tprintf("%s/dhx-wpc-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+	os.make_directory_all(dir)
+	defer os.remove_all(dir)
+	dir = fs_real(dir)
+	UI :: Caller{kind = .UI}
+	testing.expect(t, run_command(Add_Project{cwd = dir}, UI).ok)
+	r := run_command(Create_File{path = fmt.tprintf("%s/n.md", dir)}, UI)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, fw.last.op, Window_Op.Path_Changed)
+	testing.expect_value(t, fw.last.path, fmt.tprintf("%s/n.md", dir))
+	r = run_command(Rename_Path{from = fmt.tprintf("%s/n.md", dir), to = fmt.tprintf("%s/m.md", dir)}, UI)
+	testing.expect(t, r.ok, r.error)
+	n := 0
+	for op in fw.ops do if op == .Path_Changed do n += 1
+	testing.expect_value(t, n, 3) // the new file, then the rename's two names
+	r = run_command(Create_Dir{path = fmt.tprintf("%s/sub", dir)}, UI)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, fw.last.path, fmt.tprintf("%s/sub", dir))
+}
+
 @(test)
 window_request_round_trips :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -99,6 +130,8 @@ window_request_round_trips :: proc(t: ^testing.T) {
 	window_view_drop(6)
 	window_view_moved(6, "/tmp/b.txt")
 	window_files_deleted("/tmp")
+	window_path_changed("/tmp/n.md")
+	testing.expect_value(t, fw.last.path, "/tmp/n.md")
 	window_changes_diff(6, "/r/a", "diff", "")
 	testing.expect_value(t, fw.last.text, "diff")
 	window_changes_rewind(6)
@@ -123,7 +156,7 @@ window_request_round_trips :: proc(t: ^testing.T) {
 	testing.expect_value(t, fw.last.text, "nuc")
 	window_sound("Tink")
 	testing.expect_value(t, fw.last.text, "Tink")
-	want := []Window_Op{.Clipboard_Set, .Clipboard_Secret, .Clipboard_Clear_If, .Open_Url, .Reveal, .Appearance, .Copy_Selection, .Term_Fit, .View_Open, .View_Drop, .View_Moved, .Files_Deleted, .Changes_Diff, .Changes_Rewind, .Commit_Message_Clear, .Watch_Folder, .Watch_Sync, .Setup_Sheet, .Job_Sheet, .Job_Sheet_Saved, .Job_Sheet_Holds_Quit, .Notify, .Quit, .App_Boxes, .Viewed_From, .Sound}
+	want := []Window_Op{.Clipboard_Set, .Clipboard_Secret, .Clipboard_Clear_If, .Open_Url, .Reveal, .Appearance, .Copy_Selection, .Term_Fit, .View_Open, .View_Drop, .View_Moved, .Files_Deleted, .Path_Changed, .Changes_Diff, .Changes_Rewind, .Commit_Message_Clear, .Watch_Folder, .Watch_Sync, .Setup_Sheet, .Job_Sheet, .Job_Sheet_Saved, .Job_Sheet_Holds_Quit, .Notify, .Quit, .App_Boxes, .Viewed_From, .Sound}
 	testing.expectf(t, slice_eq(fw.ops[:], want), "%v", fw.ops)
 	// every op but None and View_Goto (it needs a tab record: show_file's tests) is covered
 	testing.expect_value(t, len(want), len(Window_Op) - 2)

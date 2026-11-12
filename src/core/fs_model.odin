@@ -694,6 +694,16 @@ fs_model_changed :: proc(path: string, watcher_flags: Maybe(u32) = nil) {
 
 // ---- commands ----
 
+// One of our own file commands changed path: this model forgets it at once, and so does the
+// window's when it is another process. Its watcher would tell it too, but behind whatever queued
+// first: a burst of thousands of events (a checkout, npm install) held the user's new file back
+// for seconds (the files scene under load).
+@(private = "file")
+fs_changed_ours :: proc(path: string) {
+	fs_model_changed(path)
+	window_path_changed(path)
+}
+
 fs_create_file :: proc(path: string, caller: Caller) -> (abs: string, err: string) {
 	p, _, e := fs_check_write(path, caller)
 	if e != "" do return "", e
@@ -702,7 +712,7 @@ fs_create_file :: proc(path: string, caller: Caller) -> (abs: string, err: strin
 	f, ferr := os.open(p, {.Write, .Create, .Excl}, os.Permissions_Default_File)
 	if ferr != nil do return "", fmt.tprintf("cannot create: %v", ferr)
 	os.close(f)
-	fs_model_changed(p)
+	fs_changed_ours(p)
 	return p, ""
 }
 
@@ -711,7 +721,7 @@ fs_create_dir :: proc(path: string, caller: Caller) -> (abs: string, err: string
 	if e != "" do return "", e
 	if os.exists(p) do return "", "already exists"
 	if derr := os.make_directory_all(p); derr != nil do return "", fmt.tprintf("cannot create: %v", derr)
-	fs_model_changed(p)
+	fs_changed_ours(p)
 	return p, ""
 }
 
@@ -725,8 +735,8 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 	if os.exists(b) do return "the new name already exists"
 	if os.make_directory_all(filepath.dir(b)) != nil && path_kind(filepath.dir(b)) != .Dir do return "cannot create the target folder"
 	if rerr := os.rename(a, b); rerr != nil do return fmt.tprintf("cannot rename: %v", rerr)
-	fs_model_changed(a)
-	fs_model_changed(b)
+	fs_changed_ours(a)
+	fs_changed_ours(b)
 	editors_renamed(a, b)
 	files_renamed(a, b)
 	return ""
@@ -738,7 +748,7 @@ fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 	if e != "" do return e
 	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
 	if !fs_trash_fn(p) do return "could not move it to the Trash"
-	fs_model_changed(p)
+	fs_changed_ours(p)
 	window_files_deleted(p) // open buffers of them say so
 	return ""
 }

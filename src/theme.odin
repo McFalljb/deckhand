@@ -205,7 +205,7 @@ PEEK_MIN_H :: 220
 PEEK_MARGIN :: SP_4
 PEEK_PAD :: SP_1
 PEEK_HEAD_H :: BUTTON_H + SP_2
-PEEK_NOTE_H :: SP_6 // "Open to answer" under the header while its tab waits
+PEEK_NOTE_H :: SP_6 // "Looking only · ⌘↩ to open" ("Open to answer" while its tab waits) under the header
 PULSE_FPS :: 10 // "running" dot redraw rate; no redraws without a running dot
 PULSE_PERIOD :: 1600 * time.Millisecond
 PULSE_MIN :: 0.4 // dimmest point of the running dot (alpha)

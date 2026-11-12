@@ -448,17 +448,24 @@ comments_click :: proc(h: Hit_Comments) {
 		s, _, _ := ask_target()
 		if s == nil do return
 		if ok, _ := core.comments_can_send(s, for_tab = a.tab_id != 0); !ok do return // disabled
-		if a.tab_id != 0 do ui_do(core.Close_Tab{tab_id = a.tab_id, comments = .Send})
+		if a.tab_id != 0 {
+			closed_tab_answered(core.Close_Tab{tab_id = a.tab_id}, true) // the user's yes: ⇧⌘T reopens it
+			ui_do(core.Close_Tab{tab_id = a.tab_id, comments = .Send})
+		}
 		else {
 			ui_do(core.Comments_Send_Now{session = a.session})
 			ui_do(core.Comments_Ask_Cancel{})
 		}
 		return
 	case .Ask_Drop:
-		if a.tab_id != 0 do ui_do(core.Close_Tab{tab_id = a.tab_id, comments = .Drop})
+		if a.tab_id != 0 {
+			closed_tab_answered(core.Close_Tab{tab_id = a.tab_id}, true) // the user's yes: ⇧⌘T reopens it
+			ui_do(core.Close_Tab{tab_id = a.tab_id, comments = .Drop})
+		}
 		else if a.session != 0 do ui_do(core.Close_Session{session = a.session, comments = .Drop})
 		return
 	case .Ask_Cancel:
+		if a.tab_id != 0 do closed_tab_answered(core.Close_Tab{tab_id = a.tab_id}, false) // kept open: nothing for ⇧⌘T
 		ui_do(core.Comments_Ask_Cancel{})
 		return
 	case .New_Add:

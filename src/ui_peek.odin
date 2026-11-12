@@ -276,7 +276,7 @@ peek_progress :: proc() -> f32 {
 // grown to show v's grid whole when its size is settled (a layout here gave it, or it is another
 // machine's, never resized), at most the centre less the margins (the window's when the centre
 // is too small).
-peek_box :: proc(w, h: f32, v: ^Term_View, remote := false, note := false) -> [4]f32 {
+peek_box :: proc(w, h: f32, v: ^Term_View, remote := false) -> [4]f32 {
 	c := [4]f32{0, 0, w, h}
 	if d := clay.GetElementData(clay.ID("centre")); d.found do c = {d.boundingBox.x, d.boundingBox.y, d.boundingBox.width, d.boundingBox.height}
 	m := px(PEEK_MARGIN)
@@ -286,7 +286,7 @@ peek_box :: proc(w, h: f32, v: ^Term_View, remote := false, note := false) -> [4
 	if v != nil && v.cols > 0 && v.rows > 0 && (remote || peek.tab in term_fits) {
 		inset := 2 * px(PEEK_PAD)
 		want_w = max(want_w, f32(v.cols) * font.cell_w + 2 * term_pad() + inset)
-		want_h = max(want_h, f32(v.rows) * font.cell_h + 2 * term_pad() + inset + px(PEEK_HEAD_H) + (note ? px(PEEK_NOTE_H) : 0))
+		want_h = max(want_h, f32(v.rows) * font.cell_h + 2 * term_pad() + inset + px(PEEK_HEAD_H) + px(PEEK_NOTE_H))
 	}
 	bw := math.floor(min(max(want_w, px(PEEK_MIN_W)), max_w))
 	bh := math.floor(min(max(want_h, px(PEEK_MIN_H)), max_h))
@@ -310,7 +310,7 @@ peek_layout :: proc(w, h: f32) {
 	th := theme()
 	e := peek_progress()
 	waiting := core.tab_need(tab^) == core.NEED_WAITING
-	b := peek_box(w, h, term_view_peek(peek.tab), remote = s.machine != 0, note = waiting)
+	b := peek_box(w, h, term_view_peek(peek.tab), remote = s.machine != 0)
 	b.y += math.round((1 - e) * px(PEEK_RISE))
 	if clay.UI(clay.ID("peek_scrim"))({
 		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(h)}},
@@ -326,12 +326,11 @@ peek_layout :: proc(w, h: f32) {
 	}) {
 		overlay_shadow("peek_shadow", PEEK_Z_BOX)
 		peek_header(s, tab, b.z - 2 * px(PEEK_PAD))
-		if waiting { 	// it waits for an answer: answering is Open's
-			if clay.UI(clay.ID("peek_note"))({
-				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(PEEK_NOTE_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}},
-			}) {
-				clay.TextDynamic("Open to answer", txt(th.text_muted, FONT_UI_SMALL))
-			}
+		// always: peek is for looking (it waits for an answer: answering is Open's)
+		if clay.UI(clay.ID("peek_note"))({
+			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(PEEK_NOTE_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}},
+		}) {
+			clay.TextDynamic(waiting ? "Open to answer" : "Looking only · ⌘↩ to open", txt(th.text_muted, FONT_UI_SMALL))
 		}
 		if clay.UI(clay.ID("peek_term"))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}},

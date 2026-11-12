@@ -1,7 +1,7 @@
 package main
 
 // The keyboard pack: Reopen closed tab (⇧⌘T; closed_tabs.odin, the window's), Recent session
-// (⌥⌘` ⌥⇧⌘`), Mark as unread (⇧⌘U), Mark all as read (⌥⇧⌘U; core/mark_read.odin) and Go to open
+// (⌥⌘` ⌥⇧⌘`), Mark as unread (⇧⌘U), Mark all sessions as read (⌥⇧⌘U; core/mark_read.odin) and Go to open
 // session 1–6 (⌥⌘1–⌥⌘6): only the user's three close gestures record (kinds, order, cap, nothing
 // secret, no app tabs), reopening, the recent toggle, the unread marks (waiting, errors untouched,
 // also when one arrives just before), the Open section's rows, and the menus and keys.
@@ -211,7 +211,7 @@ open_session_nth :: proc(t: ^testing.T) {
 
 // Review round 1. An app's declaration rewritten after its tab closed: ⇧⌘T does not run the
 // replacement (the closed tab's command and folder are what may reopen, nothing else).
-// Mark all as read clears finished-not-seen only: an error not seen yet stays (and its record).
+// Mark all sessions as read clears finished-not-seen only: an error not seen yet stays (and its record).
 @(test)
 mark_all_read_keeps_errors :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -262,8 +262,8 @@ recent_session_keys_are_cmd_chords :: proc(t: ^testing.T) {
 
 // A close an agent asked for and the user confirmed is the agent's: not kept for ⇧⌘T. The user's
 // own close, confirmed, is.
-// Only the user's own gestures record: a tab's ×, ⌘W and its menu's Close tab. Not the menu bar's or
-// the palette's Close tab, an agent's close (also confirmed by the user), a script's. The kinds kept,
+// Only the user's own gestures record: a tab's ×, ⌘W, its menu's Close tab, and the menu bar's and the
+// palette's Close tab. Not an agent's close (also confirmed by the user), a control caller's, a script's. The kinds kept,
 // their order and cap; nothing secret; app tabs never.
 @(test)
 closed_tabs_only_the_users_gestures :: proc(t: ^testing.T) {
@@ -332,16 +332,35 @@ closed_tabs_only_the_users_gestures :: proc(t: ^testing.T) {
 	core.inbox_drain()
 	testing.expect(t, closed_tabs[len(closed_tabs) - 1].tab_id == 20, "the tab menu recorded")
 	n := len(closed_tabs)
-	// not: the menu bar's and the palette's Close tab, an agent's, a script's
+	// the menu bar's File › Close Tab (and the palette's: the same action)
 	ui_do(core.Focus_Tab{21})
 	core.inbox_drain()
-	action_run("close_tab")
+	file: []Bar_Item
+	for top in MENUBAR do if top.title == "File" do file = top.sub
+	bar := -1
+	for it, i in file do if it.action == "close_tab" do bar = i
+	testing.expect(t, bar >= 0, "File › Close Tab")
+	if bar >= 0 do menubar_run(&file[bar])
 	core.inbox_drain()
+	_, gone, _ := core.find_tab(21)
+	testing.expect(t, gone == nil, "the menu bar's close did close it")
+	testing.expect(t, len(closed_tabs) == n + 1 && closed_tabs[len(closed_tabs) - 1].tab_id == 21, "the menu bar's Close tab recorded")
+	ui_do(core.Focus_Tab{24})
+	core.inbox_drain()
+	action_run("close_tab") // the palette's (run_action, as palette_run)
+	core.inbox_drain()
+	testing.expect(t, len(closed_tabs) == n + 2 && closed_tabs[len(closed_tabs) - 1].tab_id == 24, "the palette's Close tab recorded")
+	closed_tabs_settle()
+	toast_clear()
+	action_run("reopen_closed_tab") // ⇧⌘T brings it back: a new shell in its folder
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, fmt.tprintf("Reopened a new terminal in %s", core.path_tilde(dir)))
+	testing.expect_value(t, len(closed_tabs), n + 1)
+	n = len(closed_tabs)
+	// not: an agent's (control) or a script's
 	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 22}, {kind = .Control}).ok)
 	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 23}, {kind = .Script}).ok)
 	testing.expect_value(t, len(closed_tabs), n)
-	_, gone, _ := core.find_tab(21)
-	testing.expect(t, gone == nil, "the menu bar's close did close it")
 
 	// at most CLOSED_TABS_MAX: the oldest goes
 	s := core.find_session(100)
@@ -508,7 +527,7 @@ closed_tabs_cancel_and_repeat :: proc(t: ^testing.T) {
 		x.status = .Running
 		return x
 	}
-	kp_session(100, "/tmp", running(10), running(11))
+	kp_session(100, "/tmp", running(10), running(11), running(12))
 	state.current_session = 100
 	close_tab_click(10)
 	core.inbox_drain()
@@ -543,6 +562,30 @@ closed_tabs_cancel_and_repeat :: proc(t: ^testing.T) {
 	toast_clear()
 	action_run("reopen_closed_tab")
 	testing.expect_value(t, toast.text, "No closed tab to reopen")
+
+	// the palette's (and the menu bar's) Close tab asks too: Cancel records nothing, Confirm one
+	ui_do(core.Focus_Tab{12})
+	core.inbox_drain()
+	action_run("close_tab")
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect_value(t, len(state.pending_confirmations), 1)
+	if len(state.pending_confirmations) == 1 do cancel_pending(strings.clone(state.pending_confirmations[0].token, context.temp_allocator))
+	core.inbox_drain()
+	closed_tabs_settle()
+	_, kept, _ := core.find_tab(12)
+	testing.expect(t, kept != nil, "cancelled: the tab stays")
+	testing.expect_value(t, len(closed_tabs), 0)
+	action_run("close_tab")
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect_value(t, len(state.pending_confirmations), 1)
+	if len(state.pending_confirmations) == 1 do confirm_pending(strings.clone(state.pending_confirmations[0].token, context.temp_allocator))
+	core.inbox_drain()
+	closed_tabs_settle()
+	_, gone12, _ := core.find_tab(12)
+	testing.expect(t, gone12 == nil, "confirmed: closed")
+	testing.expect(t, len(closed_tabs) == 1 && closed_tabs[0].tab_id == 12 && !closed_tabs[0].pending, "the user's confirmed close is reopenable")
 }
 
 // Another machine's page ("Open a machine's web page…") is at 127.0.0.1 through an ssh forward
@@ -560,4 +603,43 @@ closed_tabs_not_machine_pages :: proc(t: ^testing.T) {
 	closed_tabs_settle()
 	testing.expect_value(t, len(closed_tabs), 1)
 	if len(closed_tabs) == 1 do testing.expect_value(t, closed_tabs[0].what, "http://localhost:3000/")
+}
+
+// Review: the user's close stopped by the comments prompt and cancelled, then an agent's close of
+// that tab: nothing to reopen. The prompt's Drop and close is the user's own: reopenable.
+@(test)
+closed_tabs_comments_prompt :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	defer state.comments_ask = {}
+	kp_session(100, "/tmp", kp_tab(10, core.Browser_Tab{url = strings.clone("https://example.com/a")}), kp_tab(11, core.Browser_Tab{url = strings.clone("https://example.com/b")}))
+	state.current_session = 100
+	testing.expect(t, core.run_command(core.Comment_Add{source = .Browser, tab_id = 10, what = "w", text = "keep me"}, {kind = .Internal}).ok)
+	close_tab_click(10)
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect_value(t, state.comments_ask, core.Comments_Ask{tab_id = 10, session = 100})
+	comments_click(Hit_Comments{part = .Ask_Cancel})
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 10, comments = .Drop}, {kind = .Control}).ok, "the agent's close")
+	core.inbox_drain()
+	closed_tabs_settle()
+	toast_clear()
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, "No closed tab to reopen")
+
+	// the user's Drop and close: reopenable
+	testing.expect(t, core.run_command(core.Comment_Add{source = .Browser, tab_id = 11, what = "w", text = "drop me"}, {kind = .Internal}).ok)
+	close_tab_click(11)
+	core.inbox_drain()
+	closed_tabs_settle()
+	comments_click(Hit_Comments{part = .Ask_Drop})
+	core.inbox_drain()
+	closed_tabs_settle()
+	_, gone, _ := core.find_tab(11)
+	testing.expect(t, gone == nil, "closed")
+	testing.expect(t, len(closed_tabs) == 1 && closed_tabs[0].tab_id == 11 && !closed_tabs[0].pending, "the user's Drop and close is reopenable")
 }

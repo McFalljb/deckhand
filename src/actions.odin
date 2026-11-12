@@ -191,6 +191,10 @@ ACTIONS := [?]Action {
 		cs := core.cur_view() // another machine's: closed there
 		if cs == nil || len(cs.tabs) == 0 || cs.active_tab == cs.tabs[0].id do return nil, false // the pi tab stays
 		return core.Close_Tab{tab_id = cs.active_tab}, true
+	}, prepare = proc() {
+		// the user's own close (the menu bar's, the palette's): ⇧⌘T reopens it (closed_tabs.odin);
+		// only the user runs actions (agents, scripts and control callers send Close_Tab)
+		if cs := core.cur_view(); cs != nil do closed_tab_record(cs.active_tab)
 	}},
 	// the Changes tab (changes.odin): the session's checkout
 	{id = "changes_open", label = "Show changes", make = proc() -> (core.Command, bool) {
@@ -305,18 +309,18 @@ ACTIONS := [?]Action {
 		if len(state.notices.items) == 0 do return nil, false
 		return core.Notifications_Clear{}, true
 	}},
-	{id = "bell_finished", label = "Notify me about: Finished", make = proc() -> (core.Command, bool) {
+	{id = "bell_finished", label = "Finished: bell", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{finished = .Finished in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Finished in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Finished alerts", .Finished not_in state.settings.bell_off)}},
-	{id = "bell_waiting", label = "Notify me about: Needs you", make = proc() -> (core.Command, bool) {
+	}, detail = proc() -> string {return .Finished in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Finished in the bell:", .Finished not_in state.settings.bell_off)}},
+	{id = "bell_waiting", label = "Needs you: bell", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{waiting = .Waiting in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Waiting in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Needs-you alerts", .Waiting not_in state.settings.bell_off)}},
-	{id = "bell_errors", label = "Notify me about: Errors", make = proc() -> (core.Command, bool) {
+	}, detail = proc() -> string {return .Waiting in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Needs you in the bell:", .Waiting not_in state.settings.bell_off)}},
+	{id = "bell_errors", label = "Errors: bell", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{errors = .Errors in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Errors in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Error alerts", .Errors not_in state.settings.bell_off)}},
-	{id = "bell_jobs", label = "Notify me about: Jobs", make = proc() -> (core.Command, bool) {
+	}, detail = proc() -> string {return .Errors in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Errors in the bell:", .Errors not_in state.settings.bell_off)}},
+	{id = "bell_jobs", label = "Jobs: bell", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{jobs = .Jobs in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Jobs in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Job alerts", .Jobs not_in state.settings.bell_off)}},
+	}, detail = proc() -> string {return .Jobs in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Jobs in the bell:", .Jobs not_in state.settings.bell_off)}},
 	// the gear's grid (ui_toolbar.odin): each steps to the next choice
 	{id = "bell_os_waiting", label = "Needs you: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Waiting), true}, detail = proc() -> string {return bell_os_detail(.Waiting)}},
 	{id = "bell_os_finished", label = "Finished: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Finished), true}, detail = proc() -> string {return bell_os_detail(.Finished)}},
@@ -332,7 +336,7 @@ ACTIONS := [?]Action {
 	{id = "toggle_left", label = "Toggle left column", keys = "⌘B", make = proc() -> (core.Command, bool) {
 		return core.Set_Layout{left_open = !state.layout.left_open}, true
 	}},
-	{id = "toggle_right", label = "Toggle right column", keys = "⌥⌘B", make = proc() -> (core.Command, bool) {
+	{id = "toggle_right", label = "Toggle right panels", keys = "⌥⌘B", make = proc() -> (core.Command, bool) {
 		return core.Set_Layout{right_open = !state.layout.right_open}, true
 	}},
 	{id = "settings", label = "Settings…", keys = "⌘,", prepare = proc() {ui_do(core.Set_Left_Tab{tab = .Settings})}, make = proc() -> (core.Command, bool) {
@@ -382,9 +386,18 @@ ACTIONS := [?]Action {
 		return core.Set_Remote_Machines{on = !state.settings.remote_machines}, true
 	}, detail = proc() -> string {return state.settings.remote_machines ? "on" : "off"}},
 	// the machines themselves: the same add field, commands and Settings group as the sidebar's
+	// with Machines over SSH off: its Settings row (Turn on) and why, never turned on for the user
 	{id = "machine_add", label = "Add a machine…", make = proc() -> (core.Command, bool) {
-		return core.Set_Left_Tab{tab = .Settings}, state.settings.remote_machines
-	}, ui = proc() {machine_add_open()}, detail = proc() -> string {return "over ssh"}},
+		return core.Set_Left_Tab{tab = .Settings}, true
+	}, ui = proc() {
+		if state.settings.remote_machines {
+			machine_add_open()
+			return
+		}
+		ui_do(core.Set_Left_Tab{tab = .Settings})
+		core.files_select_in(&core.settings_ui, core.MACHINE_SSH_ROW) // scrolled into view
+		toast_show("Turn on Machines over SSH to add a machine")
+	}, detail = proc() -> string {return "over ssh"}},
 	{id = "machine_remove", label = "Remove a machine…", make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"palette"}, state.settings.remote_machines && len(state.machines) > 0
 	}, prepare = proc() {palette_open_machines(.Remove)}},
@@ -392,7 +405,7 @@ ACTIONS := [?]Action {
 		if state.settings.remote_machines do for m in state.machines do if machine_connectable(m) do return core.Set_Focus{"palette"}, true
 		return nil, false
 	}, prepare = proc() {palette_open_machines(.Connect)}},
-	{id = "machines_settings", label = "Machines settings", make = proc() -> (core.Command, bool) {
+	{id = "machines_settings", label = "Machines settings…", make = proc() -> (core.Command, bool) {
 		return core.Set_Left_Tab{tab = .Settings}, state.settings.remote_machines || state.settings.machines_reachable
 	}, ui = proc() {
 		ui_do(core.Set_Left_Tab{tab = .Settings})
@@ -573,7 +586,7 @@ ACTIONS := [?]Action {
 	// "finished, not seen" by hand (core/agent_status.odin's set_unread, as the row menu's Mark as unread)
 	{id = "mark_unread", label = "Mark as unread", keys = "⇧⌘U", make = mark_unread},
 	// the core decides per tab as it applies (core/mark_read.odin): "Marked N as read", "Nothing unread"
-	{id = "mark_all_read", label = "Mark all as read", keys = "⌥⇧⌘U", make = proc() -> (core.Command, bool) {return core.Mark_All_Read{}, true}},
+	{id = "mark_all_read", label = "Mark all sessions as read", keys = "⌥⇧⌘U", make = proc() -> (core.Command, bool) {return core.Mark_All_Read{}, true}},
 	// the session shown before this one, as ⌘-Tab between two apps (shown_at); ⌥⇧⌘`: the one shown
 	// longest ago. ⌘ chords: ⌃⇥ is the programs' (a Kitty-protocol vim, an app, a page); ⌘` alone is macOS's
 	{id = "recent_session", label = "Recent session", keys = "⌥⌘`", make = proc() -> (core.Command, bool) {return session_recent(false)}},

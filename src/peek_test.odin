@@ -756,6 +756,42 @@ peek_panel_layout_and_hits :: proc(t: ^testing.T) {
 	state.layout.left_open, state.layout.right_open = true, false
 }
 
+// Every peek says it is for looking: "Looking only · ⌘↩ to open" when its tab does not wait,
+// "Open to answer" when it does (nothing typed reaches it either way).
+@(test)
+peek_note_says_look_only :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	pk_reset()
+	defer pk_reset()
+	pk_session(100, "Here", pk_tab(101))
+	pk_session(200, "Busy", pk_tab(201, "working"))
+	pk_session(300, "Asks", pk_tab(301, "waiting"))
+	state.current_session = 100
+	drawn :: proc(cmds: clay.ClayArray(clay.RenderCommand)) -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for i in 0 ..< cmds.length {
+			c := &cmds.internalArray[i]
+			if c.commandType != .Text do continue
+			tx := c.renderData.text
+			strings.write_string(&b, string(tx.stringContents.chars[:tx.stringContents.length]))
+			strings.write_byte(&b, '\n')
+		}
+		return strings.to_string(b)
+	}
+	for c in ([]struct {
+		sid:  u64,
+		want: string,
+	}{{200, "Looking only · ⌘↩ to open"}, {300, "Open to answer"}}) {
+		peek_close()
+		testing.expect(t, peek_open_session(c.sid), "peeks")
+		_ = pk_layout()
+		text := drawn(pk_layout())
+		_, ok := pk_box("peek_note")
+		testing.expectf(t, ok && strings.contains(text, c.want), "session %d: %q in %q", c.sid, c.want, text)
+	}
+}
+
 // The review's five: an input method's composition is dropped in the platform too while peeking,
 // and when a peek opens and closes; holding the peek's own ⌘W or Esc does not repeat into what is
 // under it once it closed (a new press does); a peek does not open while a mouse button is down

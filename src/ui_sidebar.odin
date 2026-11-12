@@ -951,7 +951,7 @@ projects_section :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 	n := 0
 	for p in state.projects do if p.group == .Projects && p.machine == 0 do n += 1 // this Mac's (other machines' are under their names)
 	if n == 0 do empty_state("No projects yet", "+ adds a folder, or drop one here", row_w)
-	else if len(rows) == 0 do empty_state("No matching projects", "Esc in the filter clears it", row_w)
+	else if len(rows) == 0 do empty_state("No matching projects", filter_clear_hint(), row_w)
 	for r, i in rows {
 		if core.pinned_divider_before(rows, i) do pinned_divider()
 		indent := f32(r.depth) * TREE_INDENT // nested rows (project_tidy.odin)
@@ -1709,7 +1709,7 @@ machine_run_action :: proc(no: u64) {
 		case "Install…", "Update", "Retry": ui_do_menu(core.Machine_Install{no = no}, label == "Update" ? "Update" : "Install")
 		case "Keep running…":  ui_do_menu(core.Machine_Linger{no = no}, label) // the user said yes: linger --enable there
 		case "Log in…":        ui_do_menu(core.Machine_Login{no = no}, label)
-		case "Connect", "Take back": ui_do_menu(core.Machine_Connect{no = no}, label)
+		case "Connect", "Take back", "Try again": ui_do_menu(core.Machine_Connect{no = no}, label)
 		}
 	}
 }
@@ -1725,6 +1725,7 @@ machine_action_tip :: proc(m: core.Machine_View) -> string {
 	case "Log in…":       return "Open a tab here that runs ssh to it, so you can type its password or passphrase"
 	case "Take back":     return "Show its sessions here again (its own window lets go)"
 	case "Connect":       return "Try to connect now"
+	case "Try again":     return "Try to connect again, once you have fixed it on that machine"
 	}
 	return ""
 }
@@ -1791,6 +1792,11 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 	}
 	gap(GAP_SECTION)
 	action_row(clay.ID("machadd"), Hit_Machine_Add{}, .Plus, "Add a machine…", 0, text_w_max)
+}
+
+// How to see everything again: Esc clears the filter's text, not a quick filter's chip.
+filter_clear_hint :: proc() -> string {
+	return state.sidebar.filter != "" ? "Esc in the filter clears it" : "Click the chip again to show all"
 }
 
 MACHINE_EMPTY_HINT :: "No projects there yet: start pi or Claude Code in a folder on it"
@@ -2038,7 +2044,7 @@ attention_list :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 	if len(rows) == 0 {
 		any_open := false
 		for s in state.open_sessions do if !s.home do any_open = true
-		if any_open do empty_state("No matching sessions", "Esc in the filter clears it", row_w)
+		if any_open do empty_state("No matching sessions", filter_clear_hint(), row_w)
 		else do attention_empty(row_w)
 		return
 	}

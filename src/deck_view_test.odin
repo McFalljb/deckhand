@@ -238,7 +238,7 @@ deck_card_content :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(c200, "\npi\n") && strings.contains(c200, "\nWorking for 12m\n") && strings.contains(c200, "\n1 tab\n"), "%q", c200)
 	testing.expectf(t, strings.contains(card(t, cmds, 300), "\nIdle\n"), "%q", card(t, cmds, 300))
 	c400 := card(t, cmds, 400)
-	testing.expectf(t, strings.contains(c400, "\nWaiting for permission\n") && strings.contains(c400, "\n2 tabs · 1 finished\n"), "%q", c400)
+	testing.expectf(t, strings.contains(c400, "\nWaiting for you\n") && strings.contains(c400, "\n2 tabs · 1 finished\n"), "%q", c400)
 	// the current session's card outlined in the accent, the others in the border colour
 	b200, _ := dk_card(200)
 	b100, _ := dk_card(100)

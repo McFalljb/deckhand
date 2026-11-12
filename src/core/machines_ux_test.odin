@@ -25,6 +25,18 @@ machines_ux_target_and_name :: proc(t: ^testing.T) {
 		testing.expectf(t, machine_target_error(machine_target_clean(port)) != "", "%q taken", port)
 	}
 	testing.expect_value(t, machine_target_error("fe80::1"), "") // an IPv6 address is not a port
+	// an empty side of the @, or a trailing :, is refused with what to type
+	// (the add field's check only: a target saved before is not refused at connect)
+	for half in ([?]string{"jb@", "@nuc", "jb@@nuc", "nuc:", "jb@nuc:", "ssh jb@"}) {
+		testing.expectf(t, machine_target_plain_error(machine_target_clean(half)) == MACHINE_PART_ERROR, "%q: %q", half, machine_target_plain_error(machine_target_clean(half)))
+		testing.expectf(t, machine_target_error(machine_target_clean(half)) == "", "%q: not checked again at connect", half)
+	}
+	// an IPv6 address ending in :: is whole, at the add and at connect
+	for v6 in ([?]string{"me@fd00:1234::", "fd00::"}) {
+		testing.expectf(t, machine_target_plain_error(v6) == "", "%q: %q", v6, machine_target_plain_error(v6))
+		_, w6 := ssh_argv(v6, .Master, "/tmp/dk-ux.sock")
+		testing.expectf(t, w6 == "", "%q at connect: %q", v6, w6)
+	}
 	// a bad target says what is allowed, with an example
 	testing.expect_value(t, machine_target_plain_error("jb@nuc"), "")
 	for bad in ([?]string{"", "jb@nuc -p 22", "-oProxyCommand=x", "a;b", "$(id)"}) {
@@ -67,7 +79,7 @@ machines_ux_status_words :: proc(t: ^testing.T) {
 		{{target = "nuc", status = .Offline, error = "kex_exchange_identification: read: Connection reset by peer"}, "Offline", "The connection failed", "kex_exchange_identification: read: Connection reset by peer"},
 		{{target = "nuc", status = .Offline, error = "no answer from its core"}, "Offline", "Deckhand there did not answer", ""},
 		{{target = "nuc", status = .Needs_Login, error = "jb@nuc: Permission denied (publickey)."}, "Needs you to log in", "ssh wants a password or a key", "jb@nuc: Permission denied (publickey)."},
-		{{target = "nuc", status = .Refused, error = HUB_NOT_ALLOWED}, "Not allowed", "Turn on Allow other machines to connect on that Mac", ""},
+		{{target = "nuc", status = .Refused, error = HUB_NOT_ALLOWED}, "Not allowed", "Turn on Allow other machines to connect on that machine", ""},
 		{{target = "nuc", status = .Unsupported, error = "FreeBSD amd64"}, "Not supported", "Not a Mac or Linux machine", "FreeBSD amd64"},
 		{{target = "nuc", status = .Taken, error = "viewed from Studio"}, "In use there", "Shown from Studio now: Take back shows it here", ""},
 		{{target = "nuc", status = .Needs_Update, error = "its core is newer: update Deckhand on this Mac"}, "Needs an update", "Its Deckhand is newer than this Mac's: update Deckhand on this Mac", ""},
@@ -82,10 +94,11 @@ machines_ux_status_words :: proc(t: ^testing.T) {
 		label, why, raw := machine_status_text(c.m)
 		testing.expectf(t, label == c.label && why == c.why && raw == c.raw, "case %d: %q %q %q", i, label, why, raw)
 	}
-	// the buttons: Retry after a failed install; never Connect where it cannot work
+	// the buttons: Retry after a failed install; Try again (the user's) where only that machine can fix it
 	testing.expect_value(t, machine_action_label({status = .Not_Installed, job = .Failed, job_note = "tar: Write error"}), "Retry")
-	testing.expect_value(t, machine_action_label({status = .Refused}), "")
-	testing.expect_value(t, machine_action_label({status = .Unsupported}), "")
+	testing.expect_value(t, machine_action_label({status = .Refused}), "Try again")
+	testing.expect_value(t, machine_action_label({status = .Unsupported}), "Try again")
+	testing.expect(t, machine_status_waits_for_user(.Refused) && machine_status_waits_for_user(.Unsupported), "never retried on a timer")
 	testing.expect_value(t, machine_action_label({status = .Needs_Login}), "Log in…")
 	testing.expect_value(t, machine_action_label({status = .Offline}), "Connect")
 	// no error: its label says Offline, nothing more
@@ -225,7 +238,6 @@ machines_ux_remote_new_session :: proc(t: ^testing.T) {
 	testing.expect(t, len(items) == 1 && items[0].label == "pi", "pi only")
 }
 
-} // when TEST_HOOKS
 
 // Allow other machines to connect: turning it on asks first, with the warning; off does not.
 @(test)
@@ -241,3 +253,40 @@ machines_ux_reachable_asks :: proc(t: ^testing.T) {
 	r = run_command(Set_Machines_Reachable{on = false}, {kind = .UI})
 	testing.expect(t, r.ok && !state.settings.machines_reachable, "off at once")
 }
+
+// The user's add found no core there and its install could not start (here: that machine's OS not
+// known): why is the machine's note, in plain words, and stays while it has no core (the timer's
+// next try finds the same), not only stderr; online again, it goes.
+@(test)
+machines_ux_install_cannot_start :: proc(t: ^testing.T) {
+	f := ux_up()
+	defer ux_down(&f)
+	install_here_for_test = {"darwin", "arm64"} // installs run from a Mac (the Linux CI too)
+	defer install_here_for_test = {}
+	r := machine_add_apply({target = "jb@nuc"})
+	testing.expect(t, r.ok, r.error)
+	no := r.created_id
+	view :: proc(no: u64) -> Machine_View {
+		for m in state.machines do if m.no == no do return m
+		return {}
+	}
+	machine_outcome_for_test(no, {exited = true, exit_code = 127})
+	m := view(no)
+	testing.expect_value(t, m.status, Machine_Status.Not_Installed)
+	label, why, raw := machine_status_text(m)
+	testing.expect_value(t, label, "No Deckhand there")
+	testing.expect_value(t, why, "Deckhand isn't installed there. That machine's OS is not known yet: connect to it first")
+	testing.expect_value(t, raw, "")
+	machine_outcome_for_test(no, {exited = true, exit_code = 127}) // the timer's next try
+	_, why, _ = machine_status_text(view(no))
+	testing.expect(t, strings.contains(why, "connect to it first"), why)
+	machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = "ssh: connect to host nuc port 22: Connection refused"})
+	machine_outcome_for_test(no, {exited = true, exit_code = 127})
+	_, why, _ = machine_status_text(view(no))
+	testing.expect_value(t, why, "Deckhand isn't installed there")
+	// a processor with no core is that machine's, not this Mac's
+	_, w := machine_install_plan("darwin", "arm64", "darwin", "amd64")
+	testing.expect(t, strings.contains(w, "that machine's processor"), w)
+}
+
+} // when TEST_HOOKS

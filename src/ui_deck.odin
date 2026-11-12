@@ -158,9 +158,7 @@ card_view :: proc(r: core.Attention_Row) -> (v: core.Tab_Status_View, from: ^cor
 // The card's status in plain words, when its tab sends no message.
 deck_words :: proc(v: core.Tab_Status_View) -> string {
 	#partial switch v.dot {
-	case .Waiting:
-		if v.kind != .None do return fmt.tprintf("Waiting for %s", core.PROG_KIND_NAMES[v.kind])
-		return "Waiting for you"
+	case .Waiting:  return "Waiting for you" // as its row says
 	case .Question: return "Asked you a question"
 	case .Error:    return "Stopped with an error"
 	case .Unseen:   return "Finished"

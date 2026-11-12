@@ -116,7 +116,7 @@ handoff_action_ui :: proc() {
 	case len(targets) == 0:
 		name := core.handoff_name(p.cwd)
 		if name == "" do name = filepath.base(p.cwd)
-		toast_show(fmt.tprintf("No other machine has a project called %s", name))
+		toast_show(fmt.tprintf("No online machine has a project called %s", name))
 	case len(targets) == 1 && targets[0].project_id != 0:
 		handoff_start(targets[0].project_id, nil) // just made from the state now: nothing to check
 	case:

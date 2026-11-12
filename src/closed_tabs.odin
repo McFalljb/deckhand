@@ -2,9 +2,10 @@ package main
 
 // Reopen closed tab (⇧⌘T; actions.odin): the window remembers the tabs the user closed by hand, at
 // most CLOSED_TABS_MAX, newest last, in the window's memory only (never saved, never sent).
-// Recorded ONLY by the user's own close gestures: a tab's × and ⌘W (close_tab_click) and the tab
-// menu's "Close tab" (menu_run). Nothing else records: the menu bar's and the palette's Close tab,
-// the confirm bar, the comments prompt, agents, scripts and other machines.
+// Recorded ONLY by the user's own close gestures: a tab's × and ⌘W (close_tab_click), the tab
+// menu's "Close tab" (menu_run), and the menu bar's and the palette's Close tab (the close_tab
+// action's prepare: only the user runs actions). Nothing else records: the confirm bar, the
+// comments prompt, agents, scripts, control callers and other machines.
 //
 // A gesture records a PENDING entry, one per tab (a repeated × replaces it). It becomes
 // reopenable only when the tab goes as the result of that same flow: at once when no confirmation
@@ -75,7 +76,7 @@ closed_tab_record :: proc(tab_id: u64) {
 	case core.Markdown_Tab: x.kind, x.what = .Markdown, k.path
 	case core.Browser_Tab:
 		if k.url == "" || k.url == "about:blank" do return
-		if strings.has_prefix(k.url, "http://127.0.0.1:") || strings.has_prefix(k.url, "http://127.0.0.1/") do return // maybe another machine's page
+		for pre in ([]string{"http://127.0.0.1:", "http://127.0.0.1/", "https://127.0.0.1:", "https://127.0.0.1/"}) do if strings.has_prefix(k.url, pre) do return // maybe another machine's page
 		x.kind, x.what = .Browser, core.browser_url_public(k.url)
 	case core.Claude_Tab:
 		if k.session_id == "" do return
@@ -103,9 +104,12 @@ closed_tab_drop :: proc(tab_id: u64) {
 	}
 }
 
-// The user's own confirmation to close tab_id is waiting.
+// The user's own confirmation to close tab_id is waiting: the confirm bar, or the comments prompt
+// (State.comments_ask: only the user's close gets it; its Send or Drop and close is the user's yes,
+// closed_tab_answered; its Cancel lets the entry go as the bar's does).
 @(private = "file")
 closed_tab_asking :: proc(tab_id: u64) -> bool {
+	if state.comments_ask.tab_id == tab_id do return true
 	for p in state.pending_confirmations {
 		if p.caller.kind != .UI || p.caller.hub do continue
 		if c, is := p.command.(core.Close_Tab); is && c.tab_id == tab_id do return true
@@ -136,7 +140,7 @@ closed_tabs_settle :: proc() {
 }
 
 // The bar's Confirm or Cancel on a close the user asked for (main.odin confirm_pending,
-// cancel_pending).
+// cancel_pending), or the comments prompt's Send now or Drop and close (ui_comments.odin).
 closed_tab_answered :: proc(cmd: core.Command, confirmed: bool) {
 	c, is := cmd.(core.Close_Tab)
 	if !is do return

@@ -209,15 +209,17 @@ machine_target_error :: proc(target: string) -> string {
 		if !ok do return "a target holds only letters, digits and . _ - @ :"
 	}
 	if machine_target_has_port(target) do return MACHINE_PORT_ERROR
-	if machine_target_part_missing(target) do return MACHINE_PART_ERROR
 	return ""
 }
 
-MACHINE_PART_ERROR :: "Type both sides of user@host, like jb@nuc.local"
+MACHINE_PART_ERROR :: "Type both sides of user@host, like me@nuc.local"
 
-// user@, @host, a@@b, host: — a side of the @ (or what follows a trailing :) left empty.
+// user@, @host, a@@b, host: — a side of the @, or the port after one trailing :, left empty (an
+// IPv6 address's :: is whole). The add field's check only (machine_target_plain_error): a target
+// saved before is never refused for it at connect.
 machine_target_part_missing :: proc(target: string) -> bool {
-	return strings.has_prefix(target, "@") || strings.has_suffix(target, "@") || strings.contains(target, "@@") || strings.has_suffix(target, ":")
+	if strings.has_prefix(target, "@") || strings.has_suffix(target, "@") || strings.contains(target, "@@") do return true
+	return strings.has_suffix(target, ":") && !strings.has_suffix(target, "::")
 }
 
 MACHINE_PORT_ERROR :: "To use another port, add a Host entry to ~/.ssh/config and type its name here."
@@ -1453,9 +1455,8 @@ machine_target_clean :: proc(s: string) -> string {
 // Why the add field's text cannot be used, in plain words with an example ("" = it can).
 machine_target_plain_error :: proc(target: string) -> string {
 	if target == "" do return "Type a machine: user@host or a name from ~/.ssh/config, like jb@nuc.local"
-	if machine_target_error(target) == "" do return ""
+	if machine_target_error(target) == "" do return machine_target_part_missing(target) ? MACHINE_PART_ERROR : ""
 	if machine_target_has_port(target) do return MACHINE_PORT_ERROR
-	if machine_target_part_missing(target) do return MACHINE_PART_ERROR
 	if len(target) > 255 do return "That is too long for a machine's address"
 	if strings.contains_any(target, " \t") || target[0] == '-' do return "Type only the machine, like jb@nuc.local: ssh's options go in ~/.ssh/config"
 	return fmt.tprintf("%q can't be used: type user@host or a name from ~/.ssh/config (letters, digits and . _ - @), like jb@nuc.local", text_clean(target, 40))

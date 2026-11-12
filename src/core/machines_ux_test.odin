@@ -26,9 +26,16 @@ machines_ux_target_and_name :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, machine_target_error("fe80::1"), "") // an IPv6 address is not a port
 	// an empty side of the @, or a trailing :, is refused with what to type
+	// (the add field's check only: a target saved before is not refused at connect)
 	for half in ([?]string{"jb@", "@nuc", "jb@@nuc", "nuc:", "jb@nuc:", "ssh jb@"}) {
-		testing.expectf(t, machine_target_error(machine_target_clean(half)) != "", "%q taken", half)
 		testing.expectf(t, machine_target_plain_error(machine_target_clean(half)) == MACHINE_PART_ERROR, "%q: %q", half, machine_target_plain_error(machine_target_clean(half)))
+		testing.expectf(t, machine_target_error(machine_target_clean(half)) == "", "%q: not checked again at connect", half)
+	}
+	// an IPv6 address ending in :: is whole, at the add and at connect
+	for v6 in ([?]string{"me@fd00:1234::", "fd00::"}) {
+		testing.expectf(t, machine_target_plain_error(v6) == "", "%q: %q", v6, machine_target_plain_error(v6))
+		_, w6 := ssh_argv(v6, .Master, "/tmp/dk-ux.sock")
+		testing.expectf(t, w6 == "", "%q at connect: %q", v6, w6)
 	}
 	// a bad target says what is allowed, with an example
 	testing.expect_value(t, machine_target_plain_error("jb@nuc"), "")

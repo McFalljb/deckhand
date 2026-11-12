@@ -604,3 +604,42 @@ closed_tabs_not_machine_pages :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(closed_tabs), 1)
 	if len(closed_tabs) == 1 do testing.expect_value(t, closed_tabs[0].what, "http://localhost:3000/")
 }
+
+// Review: the user's close stopped by the comments prompt and cancelled, then an agent's close of
+// that tab: nothing to reopen. The prompt's Drop and close is the user's own: reopenable.
+@(test)
+closed_tabs_comments_prompt :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	defer state.comments_ask = {}
+	kp_session(100, "/tmp", kp_tab(10, core.Browser_Tab{url = strings.clone("https://example.com/a")}), kp_tab(11, core.Browser_Tab{url = strings.clone("https://example.com/b")}))
+	state.current_session = 100
+	testing.expect(t, core.run_command(core.Comment_Add{source = .Browser, tab_id = 10, what = "w", text = "keep me"}, {kind = .Internal}).ok)
+	close_tab_click(10)
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect_value(t, state.comments_ask, core.Comments_Ask{tab_id = 10, session = 100})
+	comments_click(Hit_Comments{part = .Ask_Cancel})
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 10, comments = .Drop}, {kind = .Control}).ok, "the agent's close")
+	core.inbox_drain()
+	closed_tabs_settle()
+	toast_clear()
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, "No closed tab to reopen")
+
+	// the user's Drop and close: reopenable
+	testing.expect(t, core.run_command(core.Comment_Add{source = .Browser, tab_id = 11, what = "w", text = "drop me"}, {kind = .Internal}).ok)
+	close_tab_click(11)
+	core.inbox_drain()
+	closed_tabs_settle()
+	comments_click(Hit_Comments{part = .Ask_Drop})
+	core.inbox_drain()
+	closed_tabs_settle()
+	_, gone, _ := core.find_tab(11)
+	testing.expect(t, gone == nil, "closed")
+	testing.expect(t, len(closed_tabs) == 1 && closed_tabs[0].tab_id == 11 && !closed_tabs[0].pending, "the user's Drop and close is reopenable")
+}

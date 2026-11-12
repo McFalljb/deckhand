@@ -631,13 +631,15 @@ files_visible :: proc(n: int, scroll, view_h, row_h: f32) -> (first, last: int, 
 	return
 }
 
-// An edited preview tab is kept (editing makes it an ordinary tab, as a
-// double-click does). Main thread, every frame (editor_tick): cheap.
-files_keep_edited_preview :: proc() {
+// The preview tabs with unsaved edits: the window keeps them (editor_keep_edited_previews:
+// editing makes a preview an ordinary tab, as a double-click does). Main thread, every frame: cheap.
+files_edited_previews :: proc() -> []u64 {
+	out := make([dynamic]u64, context.temp_allocator)
 	for s in state.open_sessions do for tab in s.tabs {
 		et, is := tab.kind.(Editor_Tab)
-		if dirty, _ := window_tab_dirty(tab.id); is && et.preview && dirty do run_command(Keep_Tab{tab_id = tab.id}, {kind = .Internal})
+		if dirty, _ := window_tab_dirty(tab.id); is && et.preview && dirty do append(&out, tab.id)
 	}
+	return out[:]
 }
 
 // Lists a folder again when next needed (an error row's Retry).

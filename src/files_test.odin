@@ -238,7 +238,13 @@ files_preview_tabs :: proc(t: ^testing.T) {
 	e := editor_of(rb.created_id)
 	ed_insert(e, "x")
 	client_test_facts() // the buffer's unsaved change, as the window reports it (client.odin)
-	core.files_keep_edited_preview()
+	// as a window process with a separate core would: sent to the core, not run on its replica
+	runs := core.replica_core_runs
+	core.replica_process = true
+	editor_keep_edited_previews()
+	core.replica_process = false
+	testing.expect_value(t, core.replica_core_runs, runs)
+	testing.expect(t, preview(s, 1), "not kept on the replica")
 	core.inbox_drain()
 	testing.expect(t, !preview(s, 1))
 	// now a preview opens beside it

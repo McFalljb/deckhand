@@ -137,7 +137,7 @@ editor_tick :: proc() {
 	// every editor on screen (any pane's: an outside change shows in its gutter there too)
 	for id, e in editors {
 		if !core.tab_on_screen(id) do continue
-		core.files_keep_edited_preview()
+		editor_keep_edited_previews()
 		git_gutter_update(e)
 		// a slow reparse waited for typing to pause (editor_syntax.odin): now
 		if e.sx.stale && e.sx.tree != nil && !syntax_deferring(&e.sx) do app.redraw = true
@@ -162,5 +162,15 @@ editor_path_changed :: proc(path: string, flags: u32 = 0) {
 			continue
 		}
 		if rp == path || e.path == path || dir_of(rp) == path do editor_check_disk(e)
+	}
+}
+
+// An edited preview tab is kept, as a double-click does: Keep_Tab goes to the core (a separate
+// core's too: never run on the window's replica). Once per tab until its preview flag is gone.
+editor_keep_edited_previews :: proc() {
+	@(static) sent: u64
+	for id in core.files_edited_previews() do if id != sent {
+		sent = id
+		ui_do(core.Keep_Tab{tab_id = id})
 	}
 }

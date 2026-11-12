@@ -1,0 +1,13 @@
+# Codex tabs, run 4 (tests/scripts/codex.sh): the codex found is 0.160.0, older than 0.163.0 (no
+# OSC 7501): a Codex tab never starts, and says how to update.
+wait 1500
+window_active on
+command {"type":"select_project","project_id":$project}
+command {"type":"new_claude_session","project_id":$project,"harness":"codex"}
+assert_result error could not start Codex
+command {"type":"open_session","project_id":$project,"pi_session_id":"cccc-1"}
+assert_result ok true
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

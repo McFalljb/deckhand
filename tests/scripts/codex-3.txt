@@ -1,0 +1,20 @@
+# Codex tabs, run 3 (tests/scripts/codex.sh): Codex is signed out (`codex login status` exits 1).
+# A new Codex tab shows Codex's own login screen (no OSC 7501) and Deckhand's bar says so; signed in
+# there, its composer comes up and the bar goes.
+wait 1500
+window_active on
+ui_command {"type":"close_session","session":$session}
+ui_command {"type":"close_session","session":$session,"confirm":"$token"}
+command {"type":"select_project","project_id":$project}
+ui_command {"type":"new_claude_session","project_id":$project,"harness":"codex"}
+assert_result ok true
+waitfor Sign in with ChatGPT 10000
+waitstate 15000 open_sessions.0.tabs.0.signed_out true
+shot codex/signed-out
+type login
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.osc7501.state idle
+waitstate 5000 open_sessions.0.tabs.0.signed_out <missing>
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}

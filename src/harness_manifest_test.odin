@@ -239,18 +239,21 @@ harness_plans_aim_at_the_detected_copy :: proc(t: ^testing.T) {
 facts_both :: proc(root: string) -> core.Harness_Facts {
 	f: core.Harness_Facts
 	f.agent_dir = fmt.tprintf("%s/.pi/agent", root)
-	f.installed = {.Pi = true, .Claude = true}
-	// pi from npm under a prefix with its npm; Claude Code from its native installer
+	f.installed = {.Pi = true, .Claude = true, .Codex = true}
+	// pi from npm under a prefix with its npm; Claude Code from its native installer; Codex from npm
 	prefix := fmt.tprintf("%s/opt", root)
 	pi_real := fmt.tprintf("%s/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js", prefix)
 	hm_write(pi_real, "#!/bin/sh\nexit 1\n", 0o755)
 	hm_write(fmt.tprintf("%s/bin/npm", prefix), "#!/bin/sh\nexit 1\n", 0o755)
 	hm_link(pi_real, fmt.tprintf("%s/bin/pi", prefix))
 	c := fake_install(root, .Managed)
-	f.bin = {.Pi = fmt.tprintf("%s/bin/pi", prefix), .Claude = c.bin}
-	f.real = {.Pi = pi_real, .Claude = c.real}
-	f.version = {.Pi = "1.5.0", .Claude = "2.1.300"}
-	f.integration = {.Pi = true, .Claude = true}
+	codex_real := fmt.tprintf("%s/lib/node_modules/@openai/codex/bin/codex.js", prefix)
+	hm_write(codex_real, "#!/bin/sh\nexit 1\n", 0o755)
+	hm_link(codex_real, fmt.tprintf("%s/bin/codex", prefix))
+	f.bin = {.Pi = fmt.tprintf("%s/bin/pi", prefix), .Claude = c.bin, .Codex = fmt.tprintf("%s/bin/codex", prefix)}
+	f.real = {.Pi = pi_real, .Claude = c.real, .Codex = codex_real}
+	f.version = {.Pi = "1.5.0", .Claude = "2.1.300", .Codex = "0.167.2"}
+	f.integration = {.Pi = true, .Claude = true, .Codex = true}
 	f.packages = make(map[string]core.Pi_Package_Found, allocator = context.temp_allocator)
 	f.packages["pi-subagents"] = {listed = true, spec = "0.84.0", installed = "0.84.0"}
 	f.packages["@juicesharp/rpiv-todo"] = {listed = true, spec = "2.15.0"}
@@ -278,7 +281,7 @@ harness_checklist_states :: proc(t: ^testing.T) {
 	f.installed = {}
 	f.bin, f.real, f.version = {}, {}, {}
 	items = core.harness_checklist(f)
-	for id in ([]string{"pi", "claude"}) {
+	for id in ([]string{"pi", "claude", "codex"}) {
 		it := item_of(items, id)
 		testing.expectf(t, it.state == .Missing && it.action == .Install && it.runnable && it.command == row_of(id).install && it.target == "", "%s missing: Install (%v)", id, it)
 	}
@@ -286,16 +289,19 @@ harness_checklist_states :: proc(t: ^testing.T) {
 
 	// too old: Update aimed at the detected copy (its path, the npm next to it)
 	f = facts_both(root)
-	f.version = {.Pi = "1.3.2", .Claude = "2.1.100"}
+	f.version = {.Pi = "1.3.2", .Claude = "2.1.100", .Codex = "0.141.0"}
 	items = core.harness_checklist(f)
 	pi, cl := item_of(items, "pi"), item_of(items, "claude")
+	// Codex older than 0.163.0 (OSC 7501): Update with the npm next to it
+	cx := item_of(items, "codex")
+	testing.expectf(t, cx.state == .Too_Old && cx.runnable && cx.command == fmt.tprintf("%s/opt/bin/npm install -g --prefix %s/opt @openai/codex@latest", root, root) && cx.target == f.bin[.Codex], "codex too old: %v", cx)
 	testing.expect(t, pi.state == .Too_Old && pi.runnable && pi.command == fmt.tprintf("%s update --self", f.bin[.Pi]), pi.command)
 	testing.expect(t, pi.target == f.bin[.Pi] && pi.target_real == f.real[.Pi] && pi.path_dir == fmt.tprintf("%s/opt/bin", root), pi.path_dir)
 	testing.expect(t, cl.state == .Too_Old && cl.runnable && cl.command == fmt.tprintf("%s update", f.bin[.Claude]) && cl.target == f.bin[.Claude])
 	testing.expect_value(t, item_of(items, "pi-integration").state, core.Harness_Item_State.Not_Loaded)
 
 	// too old on nix and mise: shown only
-	f.real = {.Pi = "/nix/store/abc-pi-1.3.2/bin/pi", .Claude = "/Users/u/.local/share/mise/installs/npm-anthropic-ai-claude-code/2.1.100/bin/claude"}
+	f.real = {.Pi = "/nix/store/abc-pi-1.3.2/bin/pi", .Claude = "/Users/u/.local/share/mise/installs/npm-anthropic-ai-claude-code/2.1.100/bin/claude", .Codex = f.real[.Codex]}
 	items = core.harness_checklist(f)
 	pi, cl = item_of(items, "pi"), item_of(items, "claude")
 	testing.expect(t, pi.action == .Update && !pi.runnable && pi.command == "nix profile upgrade pi" && pi.note != "")

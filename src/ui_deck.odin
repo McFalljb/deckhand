@@ -410,7 +410,7 @@ deck_click :: proc(h: Hit, at: [2]f32) {
 		for c, i in deck.cards do if c.sid == u64(x) {
 			if d := clay.GetElementData(clay.ID("deckmore", u32(i))); d.found do at = {d.boundingBox.x, d.boundingBox.y + d.boundingBox.height}
 		}
-		sidebar_context(Hit_Open_Row(u64(x)), at) // another machine's has none (as its row)
+		sidebar_context(Hit_Open_Row(u64(x)), at) // as its row's (another machine's: Peek and Mark as unread only)
 	}
 }
 
@@ -486,7 +486,7 @@ deck_event :: proc(e: ^sapp.Event) -> bool {
 		p := [2]f32{e.mouse_x, e.mouse_y}
 		clay.SetPointerState(p, false)
 		if x, ok := deck_hit().(Hit_Deck_Card); ok {
-			sidebar_context(Hit_Open_Row(u64(x)), p) // as its row's (another machine's has none)
+			sidebar_context(Hit_Open_Row(u64(x)), p) // as its row's (another machine's: Peek and Mark as unread only)
 			return true
 		}
 	}

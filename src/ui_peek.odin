@@ -86,7 +86,7 @@ peek_view :: proc() -> ^Term_View {
 
 // ---- what can be peeked ----
 
-@(private = "file")
+// Whether machine no is online (this Mac always is).
 machine_online :: proc(no: u64) -> bool {
 	if no == 0 do return true
 	for m in state.machines do if m.no == no do return m.status == .Online

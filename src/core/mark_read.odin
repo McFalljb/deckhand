@@ -1,17 +1,23 @@
 package core
 
-// Mark all sessions as read (mark_all_read; ⌥⇧⌘U): every tab of this Mac's open sessions whose status is
-// "finished, not seen" right now (tab_status_view's Unseen dot) is seen. Decided here, in one
-// command, against the core's State as it applies: a tab waiting for the user, with an error or a
-// question is never touched, whatever the window last saw (an error that arrived a moment before
-// keeps its unseen flag, so its record stays until the user looks: agent_status.odin). Other
-// machines' sessions and Home are left as they are. Result data: {"count": sessions marked}.
+// Mark all sessions as read (mark_all_read; ⌥⇧⌘U): every tab of this machine's open sessions whose
+// status is "finished, not seen" right now (tab_status_view's Unseen dot) is seen. Decided here, in
+// one command, against the core's State as it applies: a tab waiting for the user, with an error or
+// a question is never touched, whatever the window last saw (an error that arrived a moment before
+// keeps its unseen flag, so its record stays until the user looks: agent_status.odin). Home and
+// the mirrored copies of other machines' sessions are left as they are here.
+//
+// The user's at this Mac also goes to every online machine (machine_route.odin's
+// machine_mark_all_read), as the user's: each marks its own sessions by the same rule and answers
+// its count; an offline one is skipped. One toast says the total once they answered. A hub's (another
+// machine viewing this one, on behalf of its user) marks this machine's own and goes no further.
+// Result data: {"count": sessions marked}.
 
 import "core:fmt"
 
 Mark_All_Read :: struct {}
 
-mark_all_read_apply :: proc(caller: Caller) -> (Result, bool) {
+mark_all_read_apply :: proc(caller: Caller, request_id: u64 = 0) -> (Result, bool) {
 	n := 0
 	for &s in state.open_sessions {
 		if s.home || s.machine != 0 do continue
@@ -23,6 +29,7 @@ mark_all_read_apply :: proc(caller: Caller) -> (Result, bool) {
 		}
 		if marked do n += 1
 	}
-	if caller.kind == .UI do window_toast(n == 0 ? "Nothing unread" : fmt.tprintf("Marked %d as read", n))
+	if r, fanned := machine_mark_all_read(caller, request_id, n); fanned do return r, n > 0
+	if caller.kind == .UI && !caller_from_hub(caller) do window_toast(n == 0 ? "Nothing unread" : fmt.tprintf("Marked %d as read", n))
 	return {ok = true, data = fmt.tprintf(`{{"count":%d}}`, n)}, n > 0
 }

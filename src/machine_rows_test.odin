@@ -74,12 +74,25 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	testing.expect_value(t, menu_labels(), "Add a machine…|Machines settings…")
 	menu_open(Menu_Machine(3), {})
 	testing.expect_value(t, menu_labels(), "Open web page…|-|Rename…|Remove…|-|Machines settings…")
-	// its open session's menu: no Mark as unread or read (it would change only this Mac's copy,
-	// which that machine's next update overwrites); Close session goes there
+	// its open session's menu (#114; right-click on its row, online): only what acts there, Peek
+	// and Mark as unread (by its "m3:" id, which the route sends to that machine); nothing of this
+	// Mac's (pins, paths, accounts, new tabs)
 	if rs := core.find_session(sid); testing.expect(t, rs != nil, "its session merged") {
-		menu_open(Menu_Session{project_id = pid, pi_session_id = rs.pi_session_id}, {})
+		testing.expect(t, sidebar_context(Hit_Open_Row(sid), {}), "its row has a menu")
 		labels := menu_labels()
-		testing.expectf(t, strings.contains(labels, "Close session") && !strings.contains(labels, "Mark as"), "its session's menu: %q", labels)
+		testing.expectf(t, labels == "Peek|Mark as unread" || labels == "Mark as unread", "its session's menu: %q", labels)
+		for it in menu_items() do if it.label == "Mark as unread" {
+			c, is := it.cmd.(core.Set_Unread)
+			testing.expect(t, is && c.unread && c.tab_id == 0 && c.pi_session_id == rs.pi_session_id, "Set_Unread by its m3: id")
+		}
+		// marked unread (its state came back): Mark as read
+		_, rt, _ := core.find_tab(tab_id)
+		rt.unseen = true
+		menu_open(Menu_Session{project_id = pid, pi_session_id = rs.pi_session_id}, {})
+		testing.expectf(t, strings.has_suffix(menu_labels(), "Mark as read"), "%q", menu_labels())
+		rt.unseen = false
+		// its project's and sessions' rows: none yet
+		testing.expect(t, !sidebar_context(Hit_Project(pid), {}), "its project row: no menu")
 	}
 	menu_close()
 	testing.expectf(t, strings.contains(got, "garden ·\nPlant the beans\nWaiting for you\n"), "its open row: %q", got)

@@ -1892,7 +1892,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Program_Status, Set_Unread:
 		return status_apply(cmd, caller)
 	case Mark_All_Read:
-		return mark_all_read_apply(caller)
+		return mark_all_read_apply(caller, request_id)
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
 		return update_apply(cmd, caller)
 	case Set_Home_Dir, Set_Folder, Setup_Sheet:

@@ -161,6 +161,24 @@ divider_release :: proc() {
 
 // ---- menus ----
 
+// An open session's Mark as unread, or Mark as read when it is ("done, not seen yet" by hand:
+// agent_status.odin; looking at it marks it seen). Another machine's goes there by its "m<no>:"
+// pi_session_id (machine_route.odin), which marks it and sends it back through the mirror.
+@(private = "file")
+unread_item :: proc(items: ^[dynamic]core.Menu_Item, id: u64, pi_session_id: string) {
+	unread := false
+	if s := core.find_session(id); s != nil do for tab in s.tabs do if tab.unseen do unread = true
+	append(items, core.Menu_Item{label = unread ? "Mark as read" : "Mark as unread", cmd = core.Set_Unread{pi_session_id = pi_session_id, unread = !unread}})
+}
+
+// Another machine's open session's menu (#114): what acts there as the user's and nothing of this
+// Mac's (no pins, paths, accounts or new tabs): Peek, Mark as unread or read.
+@(private = "file")
+remote_session_items :: proc(items: ^[dynamic]core.Menu_Item, id: u64, pi_session_id: string) {
+	if peek_tab_of(find_session(id)) != nil do append(items, core.Menu_Item{label = "Peek", peek = id})
+	unread_item(items, id, pi_session_id)
+}
+
 Menu_Project :: distinct u64 // project id
 Menu_Session :: struct {
 	project_id:    u64,
@@ -286,6 +304,10 @@ menu_items :: proc() -> []core.Menu_Item {
 			info_items(&items, t)
 			break
 		}
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.id_machine(id) != 0 {
+			remote_session_items(&items, id, t.pi_session_id)
+			break
+		}
 		at := core.session_pinned(t.pi_session_id)
 		known := core.session_known(t.pi_session_id)
 		if known {
@@ -310,14 +332,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		if len(items) > 0 do sep(&items)
 		// a look at it without leaving the session on screen (ui_peek.odin), when it can be peeked
 		if id := core.open_session_any(t.pi_session_id); id != 0 && peek_tab_of(find_session(id)) != nil do append(&items, core.Menu_Item{label = "Peek", peek = id})
-		// not another machine's: Set_Unread by pi_session_id runs here, on this Mac's copy of its
-		// session, which that machine's next update overwrites (as ⇧⌘U, this Mac's only)
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.id_machine(id) == 0 {
-			// "done, not seen yet" by hand (agent_status.odin); looking at it marks it seen
-			unread := false
-			if s := core.find_session(id); s != nil do for tab in s.tabs do if tab.unseen do unread = true
-			append(&items, core.Menu_Item{label = unread ? "Mark as read" : "Mark as unread", cmd = core.Set_Unread{pi_session_id = t.pi_session_id, unread = !unread}})
-		}
+		if id := core.open_session_any(t.pi_session_id); id != 0 do unread_item(&items, id, t.pi_session_id)
 		if known {
 			hidden := core.session_hidden(t.pi_session_id)
 			append(&items, core.Menu_Item{label = hidden ? "Show again" : "Hide", cmd = core.Set_Hidden{pi_session_id = t.pi_session_id, hidden = !hidden}})
@@ -806,7 +821,7 @@ open_group :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 
 // An open session's row: its place's icon, [place ·], its agent's icon, title, then "Waiting for
 // you" or its age and its dot, or (hovered) its "…" and close buttons. Another machine's (remote)
-// has no buttons (its rows have no menu yet: sidebar_context) and no age (its session file is not
+// has no buttons (right-click: Peek and Mark as unread only, sidebar_context) and no age (its session file is not
 // on this Mac); while that machine is not online (live false) it is greyed, without a status.
 // The Attention view's rows also name their machine (mach, in a column mach_w wide, before the
 // mark) and show the keyboard's row (key_sel) as hovered; a row that can be peeked (peek) shows an
@@ -1542,10 +1557,18 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 
 // A right click (or ⌃-click): the row's context menu. True if it had one.
 sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
-	// another machine's rows have no menu yet: what it offers would act there (M6-C)
+	// another machine's rows have no full menu yet: what it offers would act there (M6-C). Its open
+	// session, while that machine is online: only what acts there as the user's (#114: Peek, Mark as
+	// unread or read; remote_session_items)
 	#partial switch h in hit {
 	case Hit_Project: if core.id_machine(u64(h)) != 0 do return false
-	case Hit_Open_Row: if core.id_machine(u64(h)) != 0 do return false
+	case Hit_Open_Row:
+		if core.id_machine(u64(h)) != 0 {
+			s := core.find_session(u64(h))
+			if s == nil || !machine_online(s.machine) || s.pi_session_id == "" do return false
+			menu_open(Menu_Session{project_id = s.project_id, pi_session_id = s.pi_session_id}, at)
+			return true
+		}
 	case Hit_Session: if core.id_machine(state.selected_project) != 0 do return false
 	}
 	#partial switch h in hit {

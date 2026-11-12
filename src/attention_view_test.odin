@@ -330,8 +330,13 @@ attention_machines_and_narrow :: proc(t: ^testing.T) {
 		testing.expect(t, off != nil && off.machine == 4, "the offline machine's session idle, last")
 	}
 	testing.expectf(t, strings.contains(av_texts(cmds), "3 machines · By project\n"), "footer: %q", av_texts(cmds))
-	// a click on another machine's row has no menu (as its Open row); a click goes there
-	testing.expect(t, !sidebar_context(Hit_Open_Row(av_drawn()[0]), {}), "no menu for another machine's row")
+	// another machine's row (as its Open row): only Peek and Mark as unread or read, there (#114),
+	// while it is online; an offline machine's: none
+	if testing.expect(t, sidebar_context(Hit_Open_Row(av_drawn()[0]), {}), "an online machine's row: its menu") {
+		for it in menu_items() do testing.expectf(t, it.label == "Peek" || strings.has_prefix(it.label, "Mark as "), "only what acts there: %q", it.label)
+		menu_close()
+	}
+	if len(av_drawn()) == 3 do testing.expect(t, !sidebar_context(Hit_Open_Row(av_drawn()[2]), {}), "an offline machine's row: no menu")
 
 	// the narrowest column, every window width, rows and IDLE hovered: nothing overlaps or spills
 	problems := 0

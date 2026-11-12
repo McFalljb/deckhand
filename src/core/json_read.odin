@@ -619,6 +619,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "move_tab":            cmd = Move_Tab{tab_id = get_u64(&r, "tab_id"), pane = get_u64(&r, "pane"), index = opt_index(&r, "index").? or_else -1}
 	case "set_split":           cmd = Set_Split{split = get_u64(&r, "split"), ratio = opt_f32(&r, "ratio").? or_else -1}
 	case "equalize_panes":      cmd = Equalize_Panes{session = opt_u64(&r, "session")}
+	case "zoom_pane":           cmd = Zoom_Pane{pane = opt_u64(&r, "pane"), zoom = opt_bool(&r, "zoom")}
 	case "close_tab":           cmd = Close_Tab{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true), comments = opt_comments(&r)}
 	case "focus_tab":           cmd = Focus_Tab{tab_id = get_u64(&r, "tab_id")}
 	case "copy_selection":      cmd = Copy_Selection{tab_id = get_u64(&r, "tab_id")}
@@ -680,6 +681,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_close_confirm":   cmd = Set_Close_Confirm{tab_kind = get_enum(&r, "tab_kind", TAB_KIND_NAMES), rule = get_enum(&r, "rule", CLOSE_NAMES)}
 	case "set_theme":           cmd = Set_Theme{name = get_enum(&r, "name", THEME_NAMES)}
 	case "set_reduce_motion":   cmd = Set_Reduce_Motion{on = get_bool(&r, "on")}
+	case "set_dim_panes":       cmd = Set_Dim_Panes{on = get_bool(&r, "on")}
 	case "set_terminal_text_size": cmd = Set_Terminal_Text_Size{pt = int(min(get_u64(&r, "pt"), 1000))}
 	case "set_appearance":      cmd = Set_Appearance{mode = get_enum(&r, "mode", APPEARANCE_NAMES)}
 	case "set_text_size":       cmd = Set_Text_Size{size = get_enum(&r, "size", TEXT_SIZE_NAMES)}
@@ -1068,6 +1070,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 		sr := Rd{obj = st, a = allocator}
 		if _, has := st["theme"]; has do s.settings.theme = get_enum(&sr, "theme", THEME_NAMES)
 		s.settings.reduce_motion = opt_bool(&sr, "reduce_motion").? or_else false
+		s.settings.dim_panes_off = !(opt_bool(&sr, "dim_panes").? or_else true)
 		s.settings.term_text_pt = opt_index(&sr, "terminal_text_size").? or_else 0
 		if _, has := st["appearance"]; has do s.settings.appearance = get_enum(&sr, "appearance", APPEARANCE_NAMES)
 		if s.settings.appearance == .System do s.system_light = opt_bool(&sr, "light").? or_else false

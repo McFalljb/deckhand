@@ -234,6 +234,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `move_tab` | `tab_id`, `pane`, `index`? | moves a tab into another pane of its session at strip position `index` (default: the end), or reorders it within its own pane. The pi tab may move but stays first in `tabs`, and nothing goes before it. The moved tab is shown in its new pane; the keyboard follows it if it had it. A pane it leaves empty closes |
 | `set_split` | `split`, `ratio` | a divider's place: the share (0–1, clamped to 0.05–0.95) of the split's first child; `split` is a split node's id in the session's `layout`. Drawn kept off the panes' minimum sizes |
 | `equalize_panes` | `session`? | evens every divider of a session (default: the current one) by the panes on each side |
+| `zoom_pane` | `pane`?, `zoom`? | a pane (default: the current session's focused one) fills its session's pane area; its other panes are hidden (not drawn, not on screen) and keep running at their sizes. `zoom: false` brings the layout back, unset toggles. Zooming gives the pane the keyboard. A split, a close, or focusing another pane ends it. In State (`zoomed_pane`, get_state's `zoomed_pane` on the session's panes), never saved |
 | `copy_selection` | `tab_id` | side effect only |
 | `terminal_link` | `tab_id`, `url`, `external`? | **user only** (a ⌘-click on a link in a terminal tab, or its right-click menu; `src/term_links.odin`): http and https open in a new browser tab of that tab's session, in front (→ its tab id); with `external`, from Home's terminal, or without a working browser, in the default browser; mailto in the mail app. Other schemes are refused (`"only http, https and mailto links open from a terminal"`) |
 | `send_text` | `tab_id`, `text` | pasted into the terminal (bracketed if asked); raw keystrokes into pi's TUI. From `control`: refused into a pi tab (`"send prompts to a pi tab with pi_prompt, not send_text"`) and into any tab of a session whose pi is `waiting` (`"pi in this session is waiting for the user"`); only at a shell prompt, never while another program runs in the tab's foreground (`"a program is running in this tab; …"`) |
@@ -292,6 +293,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `set_theme` | `name` (`graphite`\|`warm`\|`ghostty`) | the look: chrome colours and the terminals' default colours (`src/theme.odin`) |
 | `set_appearance` | `mode` (`system`\|`light`\|`dark`) | light or dark variant of the look; `system` follows the OS. Terminals get the new default colours and, if they enabled mode 2031, the report `CSI ? 997 ; 1\|2 n` |
 | `set_reduce_motion` | `on` | no hover/selection fades, no pulsing status dot |
+| `set_dim_panes` | `on` | split panes: the panes without the keyboard dim slightly (default on; settings' `dim_panes`) |
 | `set_text_size` | `size` (`small`\|`medium`\|`default`\|`large`) | the chrome's text, body/secondary pt: 12/11, 13/11, 14/12, 15/13; terminals and the editor keep theirs |
 
 Editor tabs and files (`src/editor_commands.odin`). Paths may be absolute, `~/…`, or relative:

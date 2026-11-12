@@ -165,6 +165,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Move_Tab:            return "move_tab"
 	case Set_Split:           return "set_split"
 	case Equalize_Panes:      return "equalize_panes"
+	case Zoom_Pane:           return "zoom_pane"
 	case Copy_Selection:      return "copy_selection"
 	case Terminal_Link:       return "terminal_link"
 	case Send_Text:           return "send_text"
@@ -227,6 +228,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Close_Confirm:   return "set_close_confirm"
 	case Set_Theme:           return "set_theme"
 	case Set_Reduce_Motion:   return "set_reduce_motion"
+	case Set_Dim_Panes:       return "set_dim_panes"
 	case Set_Terminal_Text_Size: return "set_terminal_text_size"
 	case Set_Appearance:      return "set_appearance"
 	case Set_Text_Size:       return "set_text_size"
@@ -547,6 +549,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		fmt.sbprintf(w.b, `,"ratio":%.3f`, c.ratio)
 	case Equalize_Panes:
 		if c.session != 0 do kv_u64(&w, "session", c.session)
+	case Zoom_Pane:
+		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
+		if z, ok := c.zoom.?; ok do kv_bool(&w, "zoom", z)
 	case Close_Tab:
 		kv_u64(&w, "tab_id", c.tab_id)
 		token(&w, c.confirm, redact)
@@ -595,6 +600,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Set_Theme:
 		kv_str(&w, "name", THEME_NAMES[c.name])
 	case Set_Reduce_Motion:
+		kv_bool(&w, "on", c.on)
+	case Set_Dim_Panes:
 		kv_bool(&w, "on", c.on)
 	case Set_Terminal_Text_Size:
 		kv_u64(&w, "pt", u64(c.pt))
@@ -1775,6 +1782,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		obj_end(&cc)
 		kv_str(&st, "theme", THEME_NAMES[s.settings.theme])
 		kv_bool(&st, "reduce_motion", s.settings.reduce_motion)
+		kv_bool(&st, "dim_panes", !s.settings.dim_panes_off)
 		kv_u64(&st, "terminal_text_size", u64(s.settings.term_text_pt))
 		kv_str(&st, "appearance", APPEARANCE_NAMES[s.settings.appearance])
 		kv_bool(&st, "light", s.settings.appearance == .System ? s.system_light : s.settings.appearance == .Light) // what shows now
@@ -2001,6 +2009,7 @@ panes_json :: proc(b: ^strings.Builder, o: ^Jw, os: Open_Session) {
 	s := os
 	fp := session_focused_pane(&s)
 	kv_u64(o, "focused_pane", fp != nil ? fp.id : 0)
+	if z := session_zoomed(&s); z != 0 do kv_u64(o, "zoomed_pane", z) // zoom_pane: the others are hidden
 	key(o, "panes")
 	strings.write_byte(b, '[')
 	if len(s.panes) == 0 && fp != nil {

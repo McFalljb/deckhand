@@ -258,6 +258,7 @@ Pop_Item :: enum {
 	Sound_Waiting,
 	Sound_Errors,
 	Sound_Jobs,
+	Dim_Panes, // split panes: the ones without the keyboard dim (ui_pane_motion.odin); drawn after Reduce motion; last so earlier rows keep their ids
 }
 
 // The rows top to bottom, in their groups (POP_GROUPS): the keyboard walks them in this order.
@@ -266,7 +267,7 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Appearance_System, .Appearance_Light, .Appearance_Dark,
 	.Look_Graphite, .Look_Warm, .Look_Ghostty,
 	.Text_Small, .Text_Medium, .Text_Default, .Text_Large,
-	.Reduce_Motion,
+	.Reduce_Motion, .Dim_Panes,
 	// Notifications: the switch, then the grid row by row (Bell, macOS, Sound), the Dock
 	.Notifications,
 	.Bell_Waiting, .Os_Waiting, .Sound_Waiting,
@@ -293,6 +294,7 @@ POP_ACTIONS := [Pop_Item]string {
 	.Look_Warm         = "look_warm",
 	.Look_Ghostty      = "look_ghostty",
 	.Reduce_Motion     = "reduce_motion",
+	.Dim_Panes         = "dim_panes",
 	.Notifications     = "agent_notify",
 	.Bell_Finished     = "bell_finished",
 	.Bell_Waiting      = "bell_waiting",
@@ -668,6 +670,7 @@ settings_layout :: proc(w, h: f32) {
 			}
 		}
 		pop_row(.Reduce_Motion, state.settings.reduce_motion)
+		pop_row(.Dim_Panes, !state.settings.dim_panes_off)
 		pop_head(1)
 		pop_row(.Notifications, !state.settings.notify_off)
 		bell_grid() // per kind: Bell, macOS, Sound
@@ -974,6 +977,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		for m in state.machines do if m.no == u64(x) do return machine_tip(m), ""
 	case Hit_Close_Session:
 		return act("close_session")
+	case Hit_Pane_Zoom: // the zoomed pane's marker
+		return act("zoom_pane")
 	case Hit_More_Project, Hit_More_Session, Hit_More_Open:
 		return "More actions", ""
 	case Hit_Info_Session:

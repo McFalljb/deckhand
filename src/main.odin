@@ -540,12 +540,7 @@ frame :: proc "c" () {
 		// and the replica's, which the window's own reads take (term_target_rect, tab_rect)
 		if rs := find_session(state.current_session); rs != nil && rs != cs do ui_pane_rects(rs)
 		if cs != nil && len(cs.panes) == 0 do if p := core.session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
-		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows (another
-		// machine's too: its core resizes them, machine_route.odin)
-		if vs := core.cur_view(); vs != nil do for tab in vs.tabs do if tab.has_term {
-			r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
-			if r.z > 0 do term_fit_rect(tab.id, r.x, r.y, r.z, r.w)
-		}
+		panes_fit_terms() // every terminal tab to its pane's rect (ui_panes.odin)
 	}
 	if app.pane.z > 0 && !client_separate() do core.persist_after_layout(skip = app.pending_start)
 	browser_tick() // browser tabs follow the pane; new textures (browser.odin)
@@ -571,7 +566,7 @@ frame :: proc "c" () {
 	typing := state.focus_widget == "" // no text field has the keyboard
 	// the tab each pane shows, in its pane (pages and apps too); marked text in the focused one's (panes.odin)
 	if cs := core.cur(); cs != nil && len(cs.panes) > 1 {
-		for &p in cs.panes do pane_draw(&p, t, typing)
+		panes_draw(cs, t, typing) // and their dim, the focus line, a zoom's outline (ui_pane_motion.odin)
 	} else if p := core.focused_pane(); p != nil {
 		pane_draw(p, t, typing)
 	} else if vs := core.cur_view(); vs != nil && vs.machine != 0 {
@@ -948,6 +943,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Comments:  comments_click(hit) // pending comments (ui_comments.odin)
 		case Hit_Claude:    claude_click(fp, hit) // a Claude tab's held messages (ui_claude.odin)
 		case Hit_Pane_New:  pane_click(hit) // a pane strip's "+" (ui_panes.odin)
+		case Hit_Pane_Zoom: pane_zoom_click(hit) // the zoomed pane's "⤢ 1 of 3": restore
 		case Hit_Pane_Divider: // pane_divider_press took it
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))

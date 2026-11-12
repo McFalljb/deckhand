@@ -234,6 +234,10 @@ panes_saved_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, pp_desc(s), want)
 	testing.expect_value(t, core.session_focused_tab(s).title, "shell 1")
 	saved := strings.clone(core.workspace_json(), context.temp_allocator)
+	// a zoom is not saved: it follows the session while Deckhand runs
+	testing.expect(t, core.run_command(core.Zoom_Pane{pane = left}).ok, "zoom")
+	testing.expect_value(t, core.session_zoomed(s), left)
+	testing.expect(t, core.workspace_json() == saved, "a zoom is not in the file")
 	testing.expectf(t, strings.contains(saved, `"tabs":[{"kind":"pi"},{"kind":"shell","title":"shell 2"`) && strings.contains(saved, `"active_tab":2,"panes":{"tree":{"split":"right","ratio":0.347,"a":{"pane":0},"b":{"split":"down","ratio":0.620,"a":{"pane":1},"b":{"pane":2}}},"tab_pane":[1,1,0,2],"active":[2,1,3],"focused":0}}`), "%s", saved)
 
 	// after a restart: the same layout, the current session started in its focused pane
@@ -245,6 +249,7 @@ panes_saved_round_trip :: proc(t: ^testing.T) {
 	if len(state.open_sessions) != 1 do return
 	s = &state.open_sessions[0]
 	testing.expect_value(t, pp_desc(s), want)
+	testing.expect_value(t, core.session_zoomed(s), u64(0)) // restored unzoomed
 	testing.expect_value(t, core.session_focused_tab(s).title, "shell 1")
 	testing.expect(t, s.tabs[0].title == "pi")
 	testing.expect_value(t, state.current_session, s.id)

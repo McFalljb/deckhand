@@ -173,6 +173,19 @@ FLASH_SETTLE :: 1 * time.Second
 DUR_SHINE :: 250 * time.Millisecond
 SHINE_W :: 0.3
 SHINE_ALPHA :: 0.22
+// Split panes (ui_pane_motion.odin). A pane without the keyboard is dimmed: the background's
+// colour over its content at PANE_DIM (per look, dark and light; body text keeps 7:1 and
+// secondary text 4.5:1 under it: pane_motion_test), fading over DUR_DIM when the focus moves. The
+// focus line glides from the strip it was under to the new one over DUR_GLIDE. A zoom or restore
+// (⇧⌘↩) switches the layout at once; an outline of the pane (ZOOM_GHOST_ALPHA of the accent at the
+// start, fading out) eases from its old rect to its new one over DUR_ZOOM. All ease-out cubic.
+DUR_DIM :: 120 * time.Millisecond
+DUR_GLIDE :: 140 * time.Millisecond
+DUR_ZOOM :: 160 * time.Millisecond
+PANE_DIM := [core.Theme_Id]f32{.Graphite = 0.10, .Warm = 0.10, .Ghostty = 0.12}
+PANE_DIM_LIGHT := [core.Theme_Id]f32{.Graphite = 0.06, .Warm = 0.06, .Ghostty = 0.06}
+ZOOM_GHOST_ALPHA :: 0.55
+ZOOM_GHOST_W :: 2 // its line, logical px
 PULSE_FPS :: 10 // "running" dot redraw rate; no redraws without a running dot
 PULSE_PERIOD :: 1600 * time.Millisecond
 PULSE_MIN :: 0.4 // dimmest point of the running dot (alpha)

@@ -115,12 +115,50 @@ session_focused_tab :: proc(s: ^Open_Session) -> ^Tab {
 	return nil
 }
 
-// Tab `tab_id` is the active tab of one of s's panes (shown when s is on screen).
+// Tab `tab_id` is the active tab of one of s's panes (shown when s is on screen); not of a pane
+// another pane's zoom hides.
 session_tab_shown :: proc(s: ^Open_Session, tab_id: u64) -> bool {
 	if s == nil || tab_id == 0 do return false
 	if len(s.panes) == 0 do return s.active_tab == tab_id
-	for p in s.panes do if p.active == tab_id do return true // every pane's: pages and apps too (live in every pane)
+	for p in s.panes do if p.active == tab_id do return !pane_zoom_hidden(s, p.id) // every pane's: pages and apps too (live in every pane)
 	return false
+}
+
+// ---- zoom (zoom_pane, panes_commands.odin) ----
+//
+// One pane may fill the session's whole pane area for a while (s.zoomed_pane): the others are
+// not laid out, drawn or hit, and keep running at their sizes. It follows the session (State,
+// not the saved layout) and ends when the tree changes (pane_split, pane_remove) or the keyboard
+// moves to another pane (pane_focus).
+
+// The session's zoomed pane (0: none): one of its panes, while it has more than one.
+session_zoomed :: proc(s: ^Open_Session) -> u64 {
+	if s == nil || s.zoomed_pane == 0 || len(s.panes) <= 1 do return 0
+	if session_pane(s, s.zoomed_pane) == nil do return 0
+	return s.zoomed_pane
+}
+
+// The zoom ends (pane_focus, pane_split, pane_remove, zoom_pane false): every pane is drawn
+// again. True when one was zoomed: the caller marks what shows now seen (pane_zoom_seen) once
+// the tree is as it will be.
+pane_zoom_end :: proc(s: ^Open_Session) -> bool {
+	was := s.zoomed_pane != 0
+	s.zoomed_pane = 0
+	return was
+}
+
+// The panes hidden by a zoom are on screen again: their shown tabs are seen and the session's
+// bell entries read, as when a tab comes on screen any other way (focus_session).
+pane_zoom_seen :: proc(s: ^Open_Session) {
+	if s == nil || s.id != state.current_session do return
+	notify_seen(s.id)
+	status_seen(s)
+}
+
+// Pane `pane_id` of s is hidden by another pane's zoom.
+pane_zoom_hidden :: proc(s: ^Open_Session, pane_id: u64) -> bool {
+	z := session_zoomed(s)
+	return z != 0 && z != pane_id
 }
 
 // The tab gets the keyboard's actions: the focused pane's active tab of the current session.
@@ -196,7 +234,7 @@ session_panes_free :: proc(s: ^Open_Session) {
 	delete(s.nodes)
 	delete(s.pane_mru)
 	s.panes, s.nodes, s.pane_mru = {}, {}, {}
-	s.focused_pane, s.root = 0, 0
+	s.focused_pane, s.root, s.zoomed_pane = 0, 0, 0
 }
 
 // Keeps s.active_tab equal to the focused pane's active tab.
@@ -235,6 +273,8 @@ pane_adopt :: proc(s: ^Open_Session, tab_id: u64) -> ^Pane {
 // Pane `pane_id` gets the keyboard (most recent in pane_mru).
 pane_focus :: proc(s: ^Open_Session, pane_id: u64) {
 	if session_pane(s, pane_id) == nil do return
+	ended := s.zoomed_pane != pane_id && pane_zoom_end(s) // the keyboard leaves the zoomed pane: the layout comes back
+	defer if ended do pane_zoom_seen(s)
 	s.focused_pane = pane_id
 	for id, i in s.pane_mru do if id == pane_id {
 		ordered_remove(&s.pane_mru, i)
@@ -326,6 +366,7 @@ pane_split :: proc(s: ^Open_Session, pane_id: u64, dir: Split_Dir, first := fals
 	if leaf < 0 do return 0
 	np := Pane{id = new_id()}
 	append(&s.panes, np)
+	if pane_zoom_end(s) do pane_zoom_seen(s) // a new pane is seen (it gets its tab next)
 	old := s.nodes[leaf]
 	nl := len(s.nodes)
 	append(&s.nodes, Layout_Node{id = old.id, leaf = true, pane = old.pane, parent = leaf}) // the old pane, moved down
@@ -346,6 +387,8 @@ pane_remove :: proc(s: ^Open_Session, pane_id: u64) {
 	if leaf < 0 do return
 	parent := s.nodes[leaf].parent
 	if parent < 0 do return
+	ended := pane_zoom_end(s) // the tree changes: every pane is seen again
+	defer if ended do pane_zoom_seen(s)
 	sib := s.nodes[parent].a == leaf ? s.nodes[parent].b : s.nodes[parent].a
 	// the sibling's subtree moves up into the parent's slot
 	moved := s.nodes[sib]
@@ -682,7 +725,7 @@ terms_on_screen :: proc() -> []^Term {
 	out := make([dynamic]^Term, context.temp_allocator)
 	s := cur()
 	if s == nil do return out[:]
-	for &p in s.panes do if t := pane_term(&p); t != nil do append(&out, t)
+	for &p in s.panes do if !pane_zoom_hidden(s, p.id) do if t := pane_term(&p); t != nil do append(&out, t)
 	return out[:]
 }
 

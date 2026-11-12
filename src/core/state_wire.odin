@@ -76,6 +76,7 @@ STATE_WIRE_SKIPS := [?]Wire_Skip {
 	{"Open_Session", "root", .Section, "panes:<session id>"},
 	{"Open_Session", "focused_pane", .Section, "panes:<session id>"},
 	{"Open_Session", "pane_mru", .Section, "panes:<session id>"},
+	{"Open_Session", "zoomed_pane", .Section, "panes:<session id>"},
 	{"Tab", "panels", .Section, "panels:<tab id>"},
 }
 
@@ -108,7 +109,7 @@ SECTION_PANES :: "panes:"
 SECTION_PANELS :: "panels:"
 
 // An open session's fields in its panes:<id> section (an object of them).
-SESSION_PANE_FIELDS := [?]string{"panes", "nodes", "root", "focused_pane", "pane_mru"}
+SESSION_PANE_FIELDS := [?]string{"panes", "nodes", "root", "focused_pane", "pane_mru", "zoomed_pane"}
 
 STATE_FULL :: "state.full"
 STATE_DELTA :: "state.delta"

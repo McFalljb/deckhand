@@ -225,7 +225,7 @@ Other files of the core and the window:
 
 When the core starts, after the store scan and before `deckhand DIR`, the file is replayed as
 ordinary commands with caller `internal` (so they appear in the command log): `set_theme`,
-`set_reduce_motion`, `set_appearance`, `set_text_size`, `set_terminal_text_size`,
+`set_reduce_motion`, `set_dim_panes`, `set_appearance`, `set_text_size`, `set_terminal_text_size`,
 `set_confirm_policy`, `set_close_confirm`, `add_project` (projects the scan did not find),
 `rename_project`, `restore_session` (internal only: an open session with its tabs `not_started`;
 with `"home": true` the Home session), `set_panel`, `set_panel_collapsed`, `set_left_tab`,

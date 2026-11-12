@@ -484,24 +484,35 @@ panes until you go back.
 
 ```
 8 sessions · 2 need you · 1 finished · 3 working
-NEEDS YOU  2
+NEEDS YOU  2 ────────────────────────────────────────────────────
 ┌──────────────────────────────┐ ┌──────────────────────────────┐
 │ ⚿  web · Login page       3m │ │ ?  api · Schema           9m │
-│ this Mac · Claude Code       │ │ nuc · pi                     │
-│ Apply these edits?           │ │ Which index?                 │
-│                              │ │                              │
-│ 3 tabs · 1 working           │ │ 1 tab                        │
+│ Apply these edits to the     │ │ Which index should orders    │
+│ login form and its tests?    │ │ use: (created_at) alone, or… │
+│ ✳ Claude Code [mac] ● 3 tabs │ │ π pi [nuc]                   │
 └──────────────────────────────┘ └──────────────────────────────┘
+WORKING  3 ──────────────────────────────────────────────────────
+┌──────────────────────────────┐
+│ ◌  api · Relay           12m │
+│ Running the tests            │
+│ π pi [nuc]                   │
+└──────────────────────────────┘
 ```
 
 - Each card has the mark of the tab that needs you (or works), the session's project and title,
-  and how long it has been so; the machine it runs on (when you have more than one) and its agent;
-  what the agent says (up to three lines), else its state in plain words ("Working for 12m",
-  "Finished", "Idle"); and how many tabs it has and what the others are doing. The session you
-  were in is outlined. A card flashes when its session starts to need you, as its row does.
+  and how long it has been so (in the waiting or error colour while it needs you); what the agent
+  says, else its state in plain words ("Working for 12m", "Finished"): two lines on a card that
+  needs you, one on a working or finished one, none on an idle one; then its agent (pi, Claude
+  Code or Codex), the machine it runs on as a small tag (when you have more than one) and, when it
+  has more than one tab, a dot for what the others are doing and how many tabs it has. A card
+  that needs you is tinted (red for an error); an idle one is quieter. A card's height depends
+  only on its group, so nothing moves while a status holds. The session you were in is outlined;
+  the card the arrow keys are on has an accent ring around it. A card flashes when its session
+  starts to need you, as its row does.
 - Click a card, or move to it with the arrow keys and press Enter (↩), to go to that session, on
-  the tab that needs you; the deck goes away. Hover a card for its **…** (the session's menu, as
-  on its row; right-click works too). Esc, ⇧⌘\ again or the button goes back to the session.
+  the tab that needs you; the deck goes away. Hover a card for **Peek** (look at it without going
+  there: [Peek](#peek)) and its **…** (the session's menu, as on its row; right-click works too;
+  another machine's card has Peek only). Esc, ⇧⌘\ again or the button goes back to the session.
   Opening a session any other way (its row, ⌥⌘A, a notification) closes the deck too.
 - Since no session is on screen, nothing you type, paste, click or scroll reaches one, and none is
   marked seen: a session that finishes meanwhile stays unread. Shortcuts that act on a tab (⌘W,
@@ -514,9 +525,10 @@ NEEDS YOU  2
 - [Peek](#peek) works over the deck: **Peek** in a card's **…** menu, or ⌃⌥⌘A, shows that session
   in its panel over the cards (the session you were in too); Esc closes the peek and leaves the
   deck, **Open** (⌘↩) goes to the session and the deck goes too. Opening the deck closes a peek.
-- As many columns as fit (each card at least 260 px wide); the grid scrolls when it is taller
-  than the window. Opened with no session on screen, the deck keeps the empty centre's buttons;
-  with nothing open at all it says "Nothing running. Start a chat or open a project."
+- Every card is 288 px wide, as many columns as fit, never stretched (one column: up to 360 px);
+  the grid scrolls when it is taller than the window. Opened with no session on screen, the deck
+  keeps the empty centre's buttons; with nothing open at all it says "No sessions open" and what
+  to do, with **New chat** and **Add project…**.
 
 ### Peek
 

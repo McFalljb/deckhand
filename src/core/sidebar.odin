@@ -145,6 +145,14 @@ harness_row_icon :: proc(h: Harness, dimmed: bool) -> Icon {return dimmed ? HARN
 
 session_harness :: proc(s: Session) -> Harness {return s.codex ? .Codex : s.claude ? .Claude : .Pi}
 
+// An open session's harness: a Claude-only session's main tab (its first) says Claude Code or
+// Codex (a Codex session is a Claude session whose main tab has codex set: codex.odin), else pi.
+open_session_harness :: proc(s: ^Open_Session) -> Harness {
+	if s.agent != .Claude do return .Pi
+	if len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(Claude_Tab); is && ct.codex do return .Codex
+	return .Claude
+}
+
 // A Claude row's account label while there are several accounts ("" = no tag).
 session_account_tag :: proc(s: Session) -> string {
 	if !s.claude || s.codex do return ""

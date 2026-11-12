@@ -1,11 +1,13 @@
 package main
 
 // The Deck view (ui_deck.odin): the cards' order (the Attention view's, past no filter, online
-// machines only), the columns for a width, a card's content per state (the message or plain words,
-// the machine only with several machines, another machine's text drawn cleaned, the footer), the
-// current card outlined, every card the same size whatever its status, a click and Enter, the
-// arrows across the grid and into view, closing on other navigation, the action and its key, the
-// empty centre's place, and the layout audit at narrow and wide centres in every look.
+// machines only), the columns for a width (fixed-width cards), a card's content per group (the
+// message's lines or none, plain words, the harness (Codex too), the machine's chip only with
+// several machines, another machine's text drawn cleaned, the other tabs' dots and count), its
+// fill and edge, the current card outlined and the keyboard's ringed, each card its group's height
+// whatever its status, its Peek (the look-only peek), a click and Enter, the arrows across the grid
+// and into view, closing on other navigation, the action and its key, the empty centre's place,
+// and the layout audit at narrow and wide centres in every look and with 1, 6 and 30 sessions.
 
 import "base:runtime"
 import "core:fmt"
@@ -125,6 +127,39 @@ dk_border :: proc(cmds: clay.ClayArray(clay.RenderCommand), b: clay.BoundingBox)
 	return {}, false
 }
 
+// The dots drawn inside a box (DOT px squares: a card's other tabs), their colours in order.
+@(private = "file")
+dk_dots :: proc(cmds: clay.ClayArray(clay.RenderCommand), b: clay.BoundingBox) -> []core.Rgba {
+	out := make([dynamic]core.Rgba, context.temp_allocator)
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType == .Rectangle && c.boundingBox.width == px(DOT) && c.boundingBox.height == px(DOT) && dk_in(c.boundingBox, b) do append(&out, to_rgba(c.renderData.rectangle.backgroundColor))
+	}
+	return out[:]
+}
+
+// A box's own background (its Rectangle command).
+@(private = "file")
+dk_fill :: proc(cmds: clay.ClayArray(clay.RenderCommand), b: clay.BoundingBox) -> core.Rgba {
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType == .Rectangle && c.boundingBox == b do return to_rgba(c.renderData.rectangle.backgroundColor)
+	}
+	return {}
+}
+
+// The colour of a text drawn inside a box ({}: none).
+@(private = "file")
+dk_text_color :: proc(cmds: clay.ClayArray(clay.RenderCommand), b: clay.BoundingBox, s: string) -> core.Rgba {
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType != .Text || !dk_in(c.boundingBox, b) do continue
+		tx := c.renderData.text
+		if string(tx.stringContents.chars[:tx.stringContents.length]) == s do return to_rgba(tx.textColor)
+	}
+	return {}
+}
+
 // The deck opened or closed, as the next frame sees it (show_no_session or focus_session, through
 // the inbox).
 @(private = "file")
@@ -169,18 +204,22 @@ deck_order_and_columns :: proc(t: ^testing.T) {
 	testing.expectf(t, dk_same(dk_ids(deck_rows()), want), "the deck: every session: %v", dk_ids(deck_rows()))
 	core.run_command(core.Set_Filter{text = ""}, {kind = .UI})
 
-	// the columns: as many 260 px cards with 12 px gaps as fit, at least one
+	// the columns: as many 288 px cards with 12 px gaps as fit, at least one; never stretched (one
+	// column: up to 360 px, no wider than the room)
 	testing.expect_value(t, deck_columns(200), 1)
-	testing.expect_value(t, deck_columns(260), 1)
-	testing.expect_value(t, deck_columns(531), 1)
-	testing.expect_value(t, deck_columns(532), 2)
-	testing.expect_value(t, deck_columns(1100), 4)
-	testing.expect_value(t, deck_columns(1640), 6)
-	testing.expect_value(t, deck_card_w(532, 2), f32(260))
-	testing.expect_value(t, deck_card_w(1100, 4), f32(266))
+	testing.expect_value(t, deck_columns(288), 1)
+	testing.expect_value(t, deck_columns(587), 1)
+	testing.expect_value(t, deck_columns(588), 2)
+	testing.expect_value(t, deck_columns(1100), 3)
+	testing.expect_value(t, deck_columns(1640), 5)
+	testing.expect_value(t, deck_card_w(588, 2), f32(288))
+	testing.expect_value(t, deck_card_w(1100, 3), f32(288))
+	testing.expect_value(t, deck_card_w(330, 1), f32(330))
+	testing.expect_value(t, deck_card_w(587, 1), f32(360))
+	testing.expect_value(t, deck_card_w(200, 1), f32(200))
 
-	// drawn: in that order, the cards of a grid row on one line, equal sizes, 12 px apart, each
-	// group from a row of its own, all inside the deck
+	// drawn: in that order, the cards of a grid row on one line, 288 px wide and their group's
+	// height, 12 px apart, each group from a row of its own, all inside the deck
 	dk_toggle()
 	cmds := ui_layout(1600, 900)
 	testing.expectf(t, dk_same(dk_drawn(), want), "drawn: %v", dk_drawn())
@@ -189,10 +228,11 @@ deck_order_and_columns :: proc(t: ^testing.T) {
 	first, _ := dk_box("deckcard", 0)
 	cols := deck.cols
 	testing.expect(t, cols >= 2, "a wide centre: several columns")
+	rows := deck_rows()
 	for c, i in deck.cards {
 		b, found := dk_box("deckcard", u32(i))
 		testing.expectf(t, found && dk_in(b, dk), "card %d inside the deck: %v", i, b)
-		testing.expectf(t, b.width == first.width && b.height == first.height, "card %d: %v, first %v", i, b, first)
+		testing.expectf(t, b.width == f32(DECK_CARD_W) && b.height == deck_card_h(rows[i].group), "card %d: %v, %v", i, b, rows[i].group)
 		if i > 0 {
 			p, _ := dk_box("deckcard", u32(i - 1))
 			prev := deck.cards[i - 1]
@@ -202,6 +242,19 @@ deck_order_and_columns :: proc(t: ^testing.T) {
 	}
 	// NEEDS YOU (3) then FINISHED: a new row, under its label
 	testing.expect(t, deck.cards[3].row > deck.cards[2].row, "FINISHED on a row of its own")
+	// a card's height is its group's: needs you (two lines) > working and finished (one) > idle
+	testing.expect(t, deck_card_h(.Needs_You) > deck_card_h(.Working) && deck_card_h(.Working) == deck_card_h(.Finished) && deck_card_h(.Finished) > deck_card_h(.Idle), "heights by group")
+	// a group's label has its hairline across the rest of the row
+	for g in ([]core.Attention_Group{.Needs_You, .Finished, .Working, .Idle}) {
+		lb, _ := dk_box("decklabel", u32(g))
+		rule := false
+		for i in 0 ..< cmds.length {
+			c := &cmds.internalArray[i]
+			bb := c.boundingBox
+			if c.commandType == .Rectangle && bb.height == f32(core.BORDER_W) && bb.width > lb.width / 2 && dk_in(bb, lb) && to_rgba(c.renderData.rectangle.backgroundColor) == theme().border do rule = true
+		}
+		testing.expectf(t, rule, "%v: its hairline", g)
+	}
 	text := dk_texts(cmds, dk)
 	for label in ([]string{"NEEDS YOU\n3\n", "FINISHED\n1\n", "WORKING\n2\n", "IDLE\n1\n", "7 sessions · 3 need you (1 error) · 1 finished · 2 working\n"}) do testing.expectf(t, strings.contains(text, label), "%q in %q", label, text)
 	// the panes are not laid out under it (they keep their sizes and run on)
@@ -231,21 +284,48 @@ deck_card_content :: proc(t: ^testing.T) {
 		testing.expectf(t, ok, "card %d", sid, loc = loc)
 		return dk_texts(cmds, b)
 	}
+	// needs you: its title, age, message (body text), harness, and "3 tabs" with a dot for what
+	// the others do (one works, one is idle: the working colour)
 	c100 := card(t, cmds, 100)
-	for want in ([]string{"dk-proj ·\nUntitled Claude session\n3m\n", "\nClaude Code\n", "\nApply these edits?\n", "\n3 tabs · 1 working\n"}) do testing.expectf(t, strings.contains(c100, want), "%q in %q", want, c100)
+	for want in ([]string{"dk-proj ·\nUntitled Claude", "\n3m\nApply these edits?\nClaude Code\n3 tabs\n"}) do testing.expectf(t, strings.contains(c100, want), "%q in %q", want, c100)
 	testing.expectf(t, !strings.contains(c100, "this Mac"), "one machine: no machine: %q", c100)
-	c200 := card(t, cmds, 200)
-	testing.expectf(t, strings.contains(c200, "\npi\n") && strings.contains(c200, "\nWorking for 12m\n") && strings.contains(c200, "\n1 tab\n"), "%q", c200)
-	testing.expectf(t, strings.contains(card(t, cmds, 300), "\nIdle\n"), "%q", card(t, cmds, 300))
-	c400 := card(t, cmds, 400)
-	testing.expectf(t, strings.contains(c400, "\nWaiting for you\n") && strings.contains(c400, "\n2 tabs · 1 finished\n"), "%q", c400)
-	// the current session's card outlined in the accent, the others in the border colour
-	b200, _ := dk_card(200)
 	b100, _ := dk_card(100)
+	d100 := dk_dots(cmds, b100)
+	testing.expectf(t, len(d100) == 1 && d100[0] == th.running, "the others: one working: %v", d100)
+	testing.expect(t, dk_text_color(cmds, b100, "Apply these edits?") == th.text, "needs you: its message in body text")
+	testing.expect(t, dk_text_color(cmds, b100, "3m") == th.waiting, "its age in the waiting colour")
+	// working: one line, its words; one tab: no tab count, no dots
+	c200 := card(t, cmds, 200)
+	testing.expectf(t, strings.contains(c200, "\n12m\nWorking for 12m\npi\n") && !strings.contains(c200, "tab"), "%q", c200)
+	b200, _ := dk_card(200)
+	testing.expectf(t, len(dk_dots(cmds, b200)) == 0, "one tab: no dots")
+	// idle: the title and the meta line only, on a quieter fill
+	c300 := card(t, cmds, 300)
+	testing.expectf(t, strings.count(c300, "\n") == 4 && strings.contains(c300, "\nQuiet\n") && strings.has_suffix(c300, "\npi\n") && !strings.contains(c300, "Idle"), "%q", c300)
+	c400 := card(t, cmds, 400)
+	testing.expectf(t, strings.contains(c400, "\nWaiting for you\n") && strings.contains(c400, "\n2 tabs\n"), "%q", c400)
+	b400, _ := dk_card(400)
+	d400 := dk_dots(cmds, b400)
+	testing.expectf(t, len(d400) == 1 && d400[0] == status_color(.Unseen), "the other tab finished: %v", d400)
+	// each card's height is its group's
+	b300, _ := dk_card(300)
+	testing.expectf(t, b100.height == deck_card_h(.Needs_You) && b200.height == deck_card_h(.Working) && b300.height == deck_card_h(.Idle), "heights: %v %v %v", b100, b200, b300)
+	// fills: needs you tinted in the waiting colour with its hairline; idle quieter; working plain
+	f100, e100 := deck_fill(.Needs_You, false)
+	f300, _ := deck_fill(.Idle, false)
+	testing.expectf(t, dk_fill(cmds, b100) == f100 && f100 != th.bg_elevated, "needs you: tinted: %v", dk_fill(cmds, b100))
+	testing.expectf(t, dk_fill(cmds, b300) == f300 && f300 != th.bg_elevated, "idle: quieter: %v", dk_fill(cmds, b300))
+	testing.expectf(t, dk_fill(cmds, b200) == th.bg_elevated, "working: %v", dk_fill(cmds, b200))
+	ferr, _ := deck_fill(.Needs_You, true)
+	testing.expect(t, ferr != f100, "an error's tint is its own")
+	// the current session's card outlined in the accent; one that needs you, its hairline; the
+	// others none
 	col, found := dk_border(cmds, b200)
 	testing.expectf(t, found && col == th.accent, "current: %v", col)
 	col, found = dk_border(cmds, b100)
-	testing.expectf(t, found && col == th.border, "another: %v", col)
+	testing.expectf(t, found && col == e100 && e100 == with_alpha(th.waiting, DECK_EDGE_ALPHA), "needs you: %v", col)
+	_, found = dk_border(cmds, b300)
+	testing.expect(t, !found, "idle: no border")
 	// a status change (working to waiting, with a message): every card where it was
 	before := make([dynamic]clay.BoundingBox, context.temp_allocator)
 	for _, i in deck.cards {
@@ -261,12 +341,23 @@ deck_card_content :: proc(t: ^testing.T) {
 		b, _ := dk_box("deckcard", u32(i))
 		testing.expectf(t, b == before[i], "card %d moved: %v, was %v", i, b, before[i])
 	}
-	b300, _ := dk_card(200)
 	lines := strings.count(card(t, cmds, 200), "\n")
-	testing.expectf(t, lines == 8 && strings.contains(card(t, cmds, 200), "…"), "a long message: at most 3 lines, cut: %q", card(t, cmds, 200))
-	for i in 0 ..< cmds.length {
-		c := &cmds.internalArray[i]
-		if c.commandType == .Text && c.boundingBox.y >= b300.y && c.boundingBox.y < b300.y + b300.height && c.boundingBox.x >= b300.x && c.boundingBox.x < b300.x + b300.width do testing.expectf(t, dk_in(c.boundingBox, b300), "a text spills out of its card: %v in %v", c.boundingBox, b300)
+	testing.expectf(t, lines == 5 && strings.contains(card(t, cmds, 200), "…"), "a long message while working: one line, cut: %q", card(t, cmds, 200))
+	// needs you: two lines, cut
+	core.find_session(100).tabs[0] = dk_tab(101, "waiting", 3 * time.Minute, "Apply these edits to the login form and its tests? They touch twelve files across the app and its fixtures, and the docs")
+	cmds = ui_layout(1600, 900)
+	for _, i in deck.cards {
+		b, _ := dk_box("deckcard", u32(i))
+		testing.expectf(t, b == before[i], "card %d moved: %v, was %v", i, b, before[i])
+	}
+	lines = strings.count(card(t, cmds, 100), "\n")
+	testing.expectf(t, lines == 7 && strings.contains(card(t, cmds, 100), "…"), "a long question: two lines, cut: %q", card(t, cmds, 100))
+	for sid in ([]u64{100, 200}) {
+		bx, _ := dk_card(sid)
+		for i in 0 ..< cmds.length {
+			c := &cmds.internalArray[i]
+			if c.commandType == .Text && c.boundingBox.y >= bx.y && c.boundingBox.y < bx.y + bx.height && c.boundingBox.x >= bx.x && c.boundingBox.x < bx.x + bx.width do testing.expectf(t, dk_in(c.boundingBox, bx), "a text spills out of its card: %v in %v", c.boundingBox, bx)
+		}
 	}
 
 	// other machines: this Mac's and theirs named; another machine's text drawn as the mirror
@@ -304,9 +395,11 @@ deck_card_content :: proc(t: ^testing.T) {
 	testing.expectf(t, len(ids) == 5 && ids[2] == nuc && deck_rows()[2].group == .Needs_You, "nuc's, studio's left out: %v", ids)
 	for id in ids do testing.expect(t, id != offline, "no offline machine's card")
 	cn := card(t, cmds, nuc)
-	testing.expectf(t, strings.contains(cn, "\nnuc · pi\n") && strings.contains(cn, "Sch") && strings.contains(cn, "index?"), "%q", cn)
+	testing.expectf(t, strings.has_suffix(cn, "\npi\nnuc\n") && strings.contains(cn, "Sch") && strings.contains(cn, "index?"), "%q", cn)
 	for bad in ([]string{"\x1b", "\x07", "‮"}) do testing.expectf(t, !strings.contains(cn, bad), "cleaned: %q", cn)
-	testing.expectf(t, strings.contains(card(t, cmds, 100), "\nthis Mac · Claude Code\n"), "%q", card(t, cmds, 100))
+	testing.expectf(t, strings.contains(card(t, cmds, 100), "\nClaude Code\nthis Mac\n3 tabs\n"), "the machine as a chip: %q", card(t, cmds, 100))
+	bn, _ := dk_card(nuc)
+	testing.expect(t, dk_text_color(cmds, bn, "nuc") == th.text_secondary, "the chip's text")
 	// another machine's card has no "…" (its row has no menu): hovered, its age stays
 	ui_hover = Hit_Deck_Card(nuc)
 	_ = ui_layout(1600, 900)
@@ -488,21 +581,76 @@ deck_toggle_and_navigation :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(deck.cards), 2)
 	for c, i in deck.cards {
 		cb, _ := dk_box("deckcard", u32(i))
-		col, _ := dk_border(cmds, cb)
-		testing.expectf(t, col == theme().border, "card %d not outlined: no session on screen", c.sid)
+		col, found := dk_border(cmds, cb)
+		testing.expectf(t, !found || col != theme().accent, "card %d not outlined: no session on screen", c.sid)
 	}
-	// nothing open at all: what to do
+	// nothing open at all: the deck's icon, what to do and the buttons, centred
 	clear(&state.open_sessions)
 	cmds = ui_layout(1600, 900)
 	dk, _ = dk_box("deck")
 	text = dk_texts(cmds, dk)
-	testing.expectf(t, strings.contains(text, "Nothing running. Start a chat or open a project.\n") && strings.contains(text, "Add project…\n"), "%q", text)
+	testing.expectf(t, strings.has_prefix(text, "No sessions open\nStart a chat or open a project.") && strings.has_suffix(text, "online.\nAdd project…\n"), "%q", text) // (no chats folder here: no New chat)
 	testing.expect_value(t, len(deck.cards), 0)
+	empty, _ := dk_box("deckempty")
+	mid := empty.x + empty.width / 2
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		bb := c.boundingBox
+		if (c.commandType == .Text || c.commandType == .Custom) && dk_in(bb, empty) && !strings.has_prefix(dk_texts(cmds, bb), "Add") && !strings.has_prefix(dk_texts(cmds, bb), "New") do testing.expectf(t, abs(bb.x + bb.width / 2 - mid) <= 1, "centred: %v in %v", bb, empty)
+	}
+}
+
+// The layout's cards: each DECK_CARD_W wide (one column: its own width, up to DECK_CARD_W_ONE) and
+// its group's height, inside the deck, apart from every other card, its texts and icons inside it.
+// Problems counted in problems (the first 40 reported).
+@(private = "file")
+dk_cards_ok :: proc(t: ^testing.T, cmds: clay.ClayArray(clay.RenderCommand), where_: string, problems: ^int) {
+	bad :: proc(t: ^testing.T, problems: ^int, msg: string) {
+		problems^ += 1
+		if problems^ <= 40 do testing.expectf(t, false, "%s", msg)
+	}
+	dk, _ := dk_box("deck")
+	grid, _ := dk_box("deckscroll")
+	rows := deck_rows()
+	if len(rows) != len(deck.cards) {
+		bad(t, problems, fmt.tprintf("%s: %d cards for %d rows", where_, len(deck.cards), len(rows)))
+		return
+	}
+	want_w := deck.cols == 1 ? deck_card_w(centre_width() - 2 * px(DECK_PAD), 1) : px(DECK_CARD_W)
+	for _, i in deck.cards {
+		b, _ := dk_box("deckcard", u32(i))
+		if b.width != want_w || b.height != deck_card_h(rows[i].group) || b.x < dk.x - 0.5 || b.x + b.width > dk.x + dk.width + 0.5 {
+			bad(t, problems, fmt.tprintf("%s: card %d %v (%v; width %v, deck %v)", where_, i, b, rows[i].group, want_w, dk))
+		}
+		for j in 0 ..< i {
+			o, _ := dk_box("deckcard", u32(j))
+			if b.x < o.x + o.width + px(DECK_GAP) - 0.5 && o.x < b.x + b.width + px(DECK_GAP) - 0.5 && b.y < o.y + o.height + px(DECK_GAP) - 0.5 && o.y < b.y + b.height + px(DECK_GAP) - 0.5 {
+				bad(t, problems, fmt.tprintf("%s: cards %d and %d closer than the gap: %v %v", where_, j, i, o, b))
+			}
+		}
+		if b.y < grid.y || b.y + b.height > grid.y + grid.height do continue // scrolled out of view
+		for j in 0 ..< cmds.length {
+			c := &cmds.internalArray[j]
+			x := c.boundingBox
+			if c.commandType != .Text && c.commandType != .Custom do continue
+			if x.x < b.x || x.x >= b.x + b.width || x.y < b.y || x.y >= b.y + b.height do continue
+			if !dk_in(x, b) do bad(t, problems, fmt.tprintf("%s: card %d spills: %v in %v", where_, i, x, b))
+		}
+	}
+}
+
+@(private = "file")
+dk_report :: proc(t: ^testing.T, bad: []string, problems: ^int) {
+	for b in bad {
+		problems^ += 1
+		if problems^ <= 40 do testing.expectf(t, false, "%s", b)
+	}
 }
 
 // The layout audit: the deck at the narrowest centre (one column) to a wide one (four or more), in
-// every look, light and dark, every text size, a card hovered and the keyboard's: nothing
-// overlaps or spills; every card the same size and inside the deck; the marks turn while shown.
+// every look, light and dark, every text size, a card hovered (its Peek and "…") and the
+// keyboard's: nothing overlaps or spills; every card its width and its group's height, inside the
+// deck; the marks turn while shown.
 @(test)
 deck_layout_audit :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -511,10 +659,14 @@ deck_layout_audit :: proc(t: ^testing.T) {
 	defer {
 		state.settings.text_size = .Default
 		fonts_apply(theme_font_config(theme()), 1)
+		if x := core.terms[101]; x != nil do free(x)
+		delete_key(&core.terms, 101)
 		dk_reset()
 	}
 	s := dk_session(100, "Login page with a rather long title that has to be cut", dk_tab(101, "waiting", 3 * time.Minute, "Apply these edits to the login form and its tests? They touch twelve files across the app"), dk_tab(102, "working"), dk_tab(103, "unseen"))
 	s.agent = .Claude
+	s.tabs[0].has_term = true // it can be peeked (the core has its terminal): its Peek shows while hovered
+	core.terms[101] = new(core.Term)
 	dk_session(200, "Relay", dk_tab(201, "working", 12 * time.Hour))
 	dk_session(300, "Quiet", dk_tab(301))
 	dk_session(400, "Crash", dk_tab(401, "error", 2 * time.Minute, "exit 1"))
@@ -523,36 +675,6 @@ deck_layout_audit :: proc(t: ^testing.T) {
 	state.current_session = 200
 	dk_toggle()
 	problems := 0
-	report :: proc(t: ^testing.T, bad: []string, problems: ^int) {
-		for b in bad {
-			problems^ += 1
-			if problems^ <= 40 do testing.expectf(t, false, "%s", b)
-		}
-	}
-	// every card the same size, inside the deck, its texts inside it
-	cards_ok :: proc(t: ^testing.T, cmds: clay.ClayArray(clay.RenderCommand), where_: string, problems: ^int) {
-		dk, _ := dk_box("deck")
-		grid, _ := dk_box("deckscroll")
-		first, _ := dk_box("deckcard", 0)
-		for _, i in deck.cards {
-			b, _ := dk_box("deckcard", u32(i))
-			if b.width != first.width || b.height != first.height || b.x < dk.x - 0.5 || b.x + b.width > dk.x + dk.width + 0.5 {
-				problems^ += 1
-				if problems^ <= 40 do testing.expectf(t, false, "%s: card %d %v (first %v, deck %v)", where_, i, b, first, dk)
-			}
-			if b.y + b.height > grid.y + grid.height do continue // below the fold
-			for j in 0 ..< cmds.length {
-				c := &cmds.internalArray[j]
-				x := c.boundingBox
-				if c.commandType != .Text && c.commandType != .Custom do continue
-				if x.x < b.x || x.x >= b.x + b.width || x.y < b.y || x.y >= b.y + b.height do continue
-				if !dk_in(x, b) {
-					problems^ += 1
-					if problems^ <= 40 do testing.expectf(t, false, "%s: card %d spills: %v in %v", where_, i, x, b)
-				}
-			}
-		}
-	}
 	for size in TEXT_SIZE_ORDER {
 		state.settings.text_size = size
 		fonts_apply(theme_font_config(theme()), 1)
@@ -563,13 +685,17 @@ deck_layout_audit :: proc(t: ^testing.T) {
 			for w in AUDIT_WIDTHS {
 				for cols in 0 ..< 2 { 	// the columns open (the narrowest centre) and closed
 					state.layout.left_open, state.layout.right_open = cols == 0, cols == 0
-					for hv in ([]Hit{nil, Hit_Deck_Card(100), Hit_Deck_More(100)}) {
+					for hv in ([]Hit{nil, Hit_Deck_Card(100), Hit_Deck_More(100), Hit_Peek_Row(100)}) {
 						ui_hover = hv
 						deck.sel = hv == nil ? 300 : 0
 						cmds := ui_layout(w, AUDIT_H)
 						where_ := fmt.tprintf("deck %v %v %s w=%v columns=%v hover %v", size, look, light ? "light" : "dark", w, cols == 0, hv)
-						report(t, audit(cmds, where_, w)[:], &problems)
-						cards_ok(t, cmds, where_, &problems)
+						dk_report(t, audit(cmds, where_, w)[:], &problems)
+						dk_cards_ok(t, cmds, where_, &problems)
+						if hv != nil {
+							_, peek_shown := dk_box("deckpeek", 0)
+							testing.expectf(t, peek_shown, "%s: its Peek", where_)
+						}
 						if cols == 0 && w == WINDOW_MIN_W do testing.expectf(t, deck.cols == 1, "%s: one column, %d", where_, deck.cols)
 						if cols == 1 && w == 2000 do testing.expectf(t, deck.cols >= 4, "%s: four columns or more, %d", where_, deck.cols)
 					}
@@ -585,4 +711,176 @@ deck_layout_audit :: proc(t: ^testing.T) {
 	_ = ui_layout(1600, AUDIT_H)
 	testing.expect(t, ui_spinning(), "the working marks turn")
 	state.settings.reduce_motion = true
+}
+
+// 1, 6 and 30 sessions (mixed states, a long title and question, several tabs) at the narrowest
+// centre and a wide one, the keyboard's card on the first and the last: nothing overlaps or
+// spills, cards keep their width and their group's height; one session is one card at its width,
+// never stretched.
+@(test)
+deck_layout_counts :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	dk_reset()
+	defer dk_reset()
+	needs := []string{"waiting", "error", "unseen", "working", ""}
+	problems := 0
+	for n in ([]int{1, 6, 30}) {
+		dk_reset()
+		for i in 0 ..< n {
+			id := u64(100 + i * 10)
+			need := needs[i % len(needs)]
+			title := i % 3 == 0 ? "A session with a rather long title that is cut at the card's edge" : fmt.tprintf("Job %d", i)
+			msg := i % 2 == 0 ? "Which index should orders use: (created_at) alone, or (customer_id, created_at)? The second makes the account page six times faster" : ""
+			if i % 4 == 1 do dk_session(id, title, dk_tab(id + 1, need, time.Duration(i + 1) * time.Minute, msg), dk_tab(id + 2, "working"), dk_tab(id + 3))
+			else do dk_session(id, title, dk_tab(id + 1, need, time.Duration(i + 1) * time.Minute, msg))
+		}
+		dk_toggle()
+		for wide in ([]bool{false, true}) {
+			state.layout.left_open, state.layout.right_open = !wide, !wide
+			w := wide ? f32(2000) : WINDOW_MIN_W
+			for sel in 0 ..< 2 {
+				deck.sel = state.open_sessions[sel == 0 ? 0 : n - 1].id
+				deck.scroll = true
+				for _ in 0 ..< 2 do _ = ui_layout(w, AUDIT_H)
+				cmds := ui_layout(w, AUDIT_H)
+				where_ := fmt.tprintf("deck n=%d w=%v sel=%d", n, w, sel)
+				dk_report(t, audit(cmds, where_, w)[:], &problems)
+				dk_cards_ok(t, cmds, where_, &problems)
+				testing.expectf(t, len(deck.cards) == n, "%s: %d cards", where_, len(deck.cards))
+				if n == 1 {
+					b, _ := dk_box("deckcard", 0)
+					want := wide ? f32(DECK_CARD_W) : deck_card_w(centre_width() - 2 * px(DECK_PAD), 1)
+					testing.expectf(t, b.width == want, "%s: one card, %v wide (want %v)", where_, b.width, want)
+				}
+			}
+		}
+		dk_toggle()
+	}
+	testing.expectf(t, problems == 0, "%d layout problems", problems)
+}
+
+// A card's harness is the session's: pi, Claude Code or Codex (a Claude session whose main tab is
+// Codex's: no longer "Claude Code"); its Peek (hovered) is the look-only peek's, hit as a row's eye
+// (nothing reaches a terminal; the deck stays); the keyboard's card has a 2 px accent ring outside
+// it, the session it was opened from a 1 px accent outline inside it.
+@(test)
+deck_card_harness_peek_and_ring :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	dk_reset()
+	terms: [dynamic]u64
+	defer {
+		peek_close()
+		for id in terms {
+			if x := core.terms[id]; x != nil do free(x)
+			delete_key(&core.terms, id)
+		}
+		delete(terms)
+		dk_reset()
+	}
+	th := theme()
+	pi := dk_session(100, "Pi one", dk_tab(101, "working", time.Minute))
+	_ = pi
+	cl := dk_tab(201, "working", time.Minute)
+	cl.kind = core.Claude_Tab{}
+	c := dk_session(200, "Claude one", cl)
+	c.agent = .Claude
+	cx := dk_tab(301, "waiting", time.Minute, "Run the migration?")
+	cx.kind = core.Claude_Tab{codex = true}
+	cx.has_term = true
+	x := dk_session(300, "Codex one", cx)
+	x.agent = .Claude
+	core.terms[301] = new(core.Term)
+	append(&terms, 301)
+	testing.expect_value(t, core.open_session_harness(core.find_session(100)), core.Harness.Pi)
+	testing.expect_value(t, core.open_session_harness(core.find_session(200)), core.Harness.Claude)
+	testing.expect_value(t, core.open_session_harness(core.find_session(300)), core.Harness.Codex)
+	state.current_session = 200
+	dk_toggle()
+	cmds := ui_layout(1600, 900)
+	for want, i in ([3]string{"pi", "Claude Code", "Codex"}) {
+		b, _ := dk_card(u64(100 * (i + 1)))
+		text := dk_texts(cmds, b)
+		testing.expectf(t, strings.contains(text, fmt.tprintf("\n%s\n", want)), "%s: %q", want, text)
+	}
+	bx, _ := dk_card(300)
+	testing.expect(t, !strings.contains(dk_texts(cmds, bx), "Claude Code"), "a Codex session is not Claude Code")
+	glyph := false
+	for i in 0 ..< cmds.length {
+		cmd := &cmds.internalArray[i]
+		if cmd.commandType != .Custom || !dk_in(cmd.boundingBox, bx) do continue
+		if ic, _, _ := icon_of_command(cmd); ic == .Harness_Codex do glyph = true
+	}
+	testing.expect(t, glyph, "Codex's glyph")
+
+	// the keyboard's card: a 2 px accent ring DECK_RING_GAP outside it; the session it was opened
+	// from (200): 1 px inside
+	deck.sel = 300
+	cmds = ui_layout(1600, 900)
+	bx, _ = dk_card(300)
+	o := px(DECK_RING + DECK_RING_GAP)
+	ring := clay.BoundingBox{bx.x - o, bx.y - o, bx.width + 2 * o, bx.height + 2 * o}
+	found := false
+	for i in 0 ..< cmds.length {
+		cmd := &cmds.internalArray[i]
+		if cmd.commandType == .Border && cmd.boundingBox == ring {
+			found = true
+			testing.expect(t, to_rgba(cmd.renderData.border.color) == th.accent && cmd.renderData.border.width.left == u16(DECK_RING), "the ring: 2 px of the accent")
+		}
+	}
+	testing.expect(t, found, "the keyboard's ring")
+	b200, _ := dk_card(200)
+	under := false
+	for i in 0 ..< cmds.length {
+		cmd := &cmds.internalArray[i]
+		if cmd.commandType == .Border && cmd.boundingBox == b200 do under = to_rgba(cmd.renderData.border.color) == th.accent && cmd.renderData.border.width.left == u16(core.BORDER_W)
+	}
+	testing.expect(t, under, "the session it was opened from: 1 px, inside")
+	_, ring_on_200 := dk_box("deckring", 0)
+	for c2, i in deck.cards do if c2.sid == 200 {
+		_, ring_on_200 = dk_box("deckring", u32(i))
+	}
+	testing.expect(t, !ring_on_200, "no ring on a card the keyboard is not on")
+
+	// hovered: Peek and "…" in its age's place; another card, neither
+	deck.sel = 0
+	ui_hover = Hit_Deck_Card(300)
+	cmds = ui_layout(1600, 900)
+	k := -1
+	for c2, i in deck.cards do if c2.sid == 300 do k = i
+	pb, peek_shown := dk_box("deckpeek", u32(k))
+	_, more_shown := dk_box("deckmore", u32(k))
+	testing.expect(t, peek_shown && more_shown, "hovered: Peek and …")
+	testing.expect(t, !strings.contains(dk_texts(cmds, bx), "1m"), "its age gives way")
+	_, pi_peek := dk_box("deckpeek", 0)
+	testing.expect(t, deck.cards[0].sid == 300 || !pi_peek, "only the hovered card's Peek")
+	// a card that cannot be peeked (no terminal): "…" only
+	ui_hover = Hit_Deck_Card(200)
+	_ = ui_layout(1600, 900)
+	for c2, i in deck.cards do if c2.sid == 200 do k = i
+	_, peek_shown = dk_box("deckpeek", u32(k))
+	testing.expect(t, !peek_shown, "nothing to peek: no Peek")
+	// its hit is a row's eye; its tip; a click peeks (look only) and the deck stays
+	ui_hover = Hit_Deck_Card(300)
+	_ = ui_layout(1600, 900)
+	for c2, i in deck.cards do if c2.sid == 300 do k = i
+	pb, _ = dk_box("deckpeek", u32(k))
+	clay.SetPointerState({pb.x + pb.width / 2, pb.y + pb.height / 2}, false)
+	h := ui_hit()
+	testing.expectf(t, h == Hit(Hit_Peek_Row(300)), "Peek's hit: %v", h)
+	label, _ := hit_tip(h)
+	testing.expect_value(t, label, PEEK_ROW_TIP)
+	ui_hover = h
+	_ = ui_layout(1600, 900)
+	_, peek_shown = dk_box("deckpeek", u32(k))
+	testing.expect(t, peek_shown, "its Peek stays while the pointer is on it")
+	ev := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = pb.x + pb.width / 2, mouse_y = pb.y + pb.height / 2}
+	event(&ev)
+	core.inbox_drain()
+	testing.expect(t, peek_is_open() && peek.session == 300 && peek.tab == 301, "the peek opens on its tab")
+	testing.expect(t, dk_shown(), "the deck stays under it")
+	testing.expect_value(t, state.current_session, u64(0))
+	ev.type = .MOUSE_UP
+	event(&ev)
 }

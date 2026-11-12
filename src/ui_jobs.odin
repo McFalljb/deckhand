@@ -304,6 +304,9 @@ jobs_panel :: proc(row_w: f32) {
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 	}) {
 		if len(state.jobs) == 0 && len(state.machine_jobs) == 0 do empty_state("No jobs yet", "New job (+) writes a job note", row_w)
+		// this Mac's, under its name while Machines over SSH is on (as other machines' are below;
+		// no header while it has none)
+		if state.settings.remote_machines && len(state.jobs) > 0 do jobs_machine_header(0, core.machine_here_name(), "this Mac", fmt.tprintf("%d", len(state.jobs)), row_w)
 		// grouped by owner (jobs_owner.odin): projects by name, then Atlas, Chats, Other
 		for g in core.jobs_groups() {
 			folded := core.list_index(ju.folded[:], core.job_owner_key(g.owner)) >= 0
@@ -329,15 +332,7 @@ machine_jobs_sections :: proc(row_w: f32) {
 		if n == 0 do continue
 		live := m.status == .Online
 		gap(SP_2)
-		if clay.UI(clay.ID("jobmach", u32(m.no)))({
-			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
-		}) {
-			label := fmt.tprintf("On %s", m.name)
-			note := live ? fmt.tprintf("%d", n) : "not connected"
-			clay.TextDynamic(clip(label, inner - text_w(note) - px(GAP_INLINE), WEIGHT_BOLD), txt(th.text_secondary, WEIGHT_BOLD))
-			spacer()
-			clay.TextDynamic(note, txt(th.text_muted))
-		}
+		jobs_machine_header(m.no, m.name, "", live ? fmt.tprintf("%d", n) : "not connected", row_w)
 		k := 0
 		for r in state.machine_jobs do if r.machine == m.no {
 			k += 1
@@ -356,6 +351,25 @@ machine_jobs_sections :: proc(row_w: f32) {
 				}
 			}
 		}
+	}
+}
+
+// A machine's header in the Jobs tab: On <name>, a muted note after it ("this Mac", for no 0), and
+// on the right its count (or why it shows what it showed last).
+@(private = "file")
+jobs_machine_header :: proc(no: u64, name, note, right: string, row_w: f32) {
+	th := theme()
+	inner := row_w - px(2 * PAD_ROW)
+	if clay.UI(clay.ID("jobmach", u32(no)))({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
+	}) {
+		label := fmt.tprintf("On %s", name)
+		room := inner - text_w(right) - px(GAP_INLINE)
+		lw := clip(label, room, WEIGHT_BOLD)
+		clay.TextDynamic(lw, txt(th.text_secondary, WEIGHT_BOLD))
+		if nr := room - text_w(lw, WEIGHT_BOLD) - px(GAP_INLINE); note != "" && nr > px(SP_6) do clay.TextDynamic(clip(note, nr), txt(th.text_muted))
+		spacer()
+		clay.TextDynamic(right, txt(th.text_muted))
 	}
 }
 

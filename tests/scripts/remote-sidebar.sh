@@ -52,6 +52,8 @@ assert_rows machines m2:online:3
 assert_drawn m2
 assert_not_drawn M2
 assert_drawn Add a machine…
+# this Mac's own header (its name from the core's live section)
+assert_drawn this Mac
 rclickid machhead 1
 assert_menurows Open web page…|-|Rename…|Remove…
 key escape

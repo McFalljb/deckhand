@@ -550,6 +550,8 @@ sidebar :: proc(cs: ^core.Open_Session, h: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		}) {
+			// this Mac's header over its own sections, while Machines over SSH is on (other machines below)
+			if state.settings.remote_machines do machine_header(0, th.done, core.machine_here_name(), "this Mac", "", text_w_max)
 			open_group(cs, text_w_max)
 			projects_section(cs, text_w_max, row_w)
 			gap(GAP_SECTION)
@@ -1272,6 +1274,7 @@ sidebar_hit :: proc() -> Hit {
 		if clay.PointerOver(clay.ID("open", u32(i))) do return Hit_Open_Row(id)
 	}
 	for path, i in drawn.group do if clay.PointerOver(clay.ID("grp", u32(i))) do return Hit_Group(path)
+	if state.settings.remote_machines && clay.PointerOver(clay.ID("machhead", 0)) do return Hit_Machine_Head(0) // this Mac's
 	for m in state.machines {
 		if clay.PointerOver(clay.ID("machact", u32(m.no))) do return Hit_Machine(m.no)
 		if clay.PointerOver(clay.ID("machhead", u32(m.no))) do return Hit_Machine_Head(m.no)
@@ -1394,7 +1397,9 @@ sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
 		else do return false
 	case Hit_New_Job_In:
 		menu_open(Menu_Project(u64(h)), at)
-	case Hit_Machine_Head: menu_open(Menu_Machine(u64(h)), at)
+	case Hit_Machine_Head:
+		if h == 0 do return false // this Mac's: no menu
+		menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Machine:      menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Session:
 		menu_open(Menu_Session{project_id = state.selected_project, pi_session_id = string(h)}, at)
@@ -1591,37 +1596,11 @@ machine_add_open :: proc() {machine_edit_begin()}
 @(private = "file")
 machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 	if !state.settings.remote_machines do return
-	th := theme()
 	if core.machines_in_sidebar() do for m in state.machines {
 		live := m.status == .Online
 		gap(GAP_SECTION)
 		label, why, _ := core.machine_status_text(m)
-		hid := clay.ID("machhead", u32(m.no))
-		if clay.UI(hid)({
-			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
-		}) {
-			dot(machine_dot(m))
-			act := core.machine_action_label(m)
-			// its name (never cut to nothing: the status gives way first), its status, its button
-			room := text_w_max - px(DOT) - 3 * px(GAP_INLINE)
-			if act != "" do room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2 + GAP_INLINE)
-			nw := text_w(m.name, FONT_UI_SMALL | WEIGHT_HEADER)
-			name_w := max(min(nw, max(room * 0.6, room - text_w(label, FONT_UI_SMALL))), min(nw, px(48))) // never cut to nothing
-			clay.TextDynamic(clip(m.name, name_w, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_secondary, FONT_UI_SMALL | WEIGHT_HEADER))
-			if lw := room - name_w; lw > px(SP_6) do clay.TextDynamic(clip(label, lw, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
-			spacer()
-			if act != "" {
-				id := clay.ID("machact", u32(m.no))
-				bg, em := overlay(id, false, ui_hover == Hit(Hit_Machine(m.no)))
-				if clay.UI(id)({
-					layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(ROW_BUTTON))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
-					backgroundColor = bg,
-					cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-				}) {
-					clay.TextDynamic(act, txt(mix(th.text_secondary, th.text, em), FONT_UI_SMALL))
-				}
-			}
-		}
+		machine_header(m.no, machine_dot(m), m.name, label, core.machine_action_label(m), text_w_max)
 		// what is wrong, in plain words, while it is not online (its tooltip has ssh's own)
 		if why != "" && !live do list_note(why, 0, text_w_max)
 		n := 0
@@ -1640,6 +1619,39 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 	gap(GAP_SECTION)
 	action_row(clay.ID("machadd"), Hit_Machine_Add{}, .Plus, "Add a machine…", 0, text_w_max)
 }
+
+// A machine's header: its dot, its name, its status (or "this Mac"), its button. no 0 = this Mac
+// (no button, no menu: its tooltip says where other machines go).
+@(private = "file")
+machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, text_w_max: f32) {
+	th := theme()
+	if clay.UI(clay.ID("machhead", u32(no)))({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
+	}) {
+		dot(dot_col)
+		// its name (never cut to nothing: the status gives way first), its status, its button
+		room := text_w_max - px(DOT) - 3 * px(GAP_INLINE)
+		if act != "" do room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2 + GAP_INLINE)
+		nw := text_w(name, FONT_UI_SMALL | WEIGHT_HEADER)
+		name_w := max(min(nw, max(room * 0.6, room - text_w(label, FONT_UI_SMALL))), min(nw, px(48))) // never cut to nothing
+		clay.TextDynamic(clip(name, name_w, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_secondary, FONT_UI_SMALL | WEIGHT_HEADER))
+		if lw := room - name_w; lw > px(SP_6) do clay.TextDynamic(clip(label, lw, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+		spacer()
+		if act != "" {
+			id := clay.ID("machact", u32(no))
+			bg, em := overlay(id, false, ui_hover == Hit(Hit_Machine(no)))
+			if clay.UI(id)({
+				layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(ROW_BUTTON))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
+				backgroundColor = bg,
+				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+			}) {
+				clay.TextDynamic(act, txt(mix(th.text_secondary, th.text, em), FONT_UI_SMALL))
+			}
+		}
+	}
+}
+
+MACHINE_HERE_TIP :: "This Mac. Other machines you add appear below it."
 
 @(private = "file")
 machine_dot :: proc(m: core.Machine_View) -> core.Rgba {

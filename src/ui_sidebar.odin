@@ -308,7 +308,9 @@ menu_items :: proc() -> []core.Menu_Item {
 		if len(items) > 0 do sep(&items)
 		// a look at it without leaving the session on screen (ui_peek.odin), when it can be peeked
 		if id := core.open_session_any(t.pi_session_id); id != 0 && peek_tab_of(find_session(id)) != nil do append(&items, core.Menu_Item{label = "Peek", peek = id})
-		if id := core.open_session_any(t.pi_session_id); id != 0 {
+		// not another machine's: Set_Unread by pi_session_id runs here, on this Mac's copy of its
+		// session, which that machine's next update overwrites (as ⇧⌘U, this Mac's only)
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.id_machine(id) == 0 {
 			// "done, not seen yet" by hand (agent_status.odin); looking at it marks it seen
 			unread := false
 			if s := core.find_session(id); s != nil do for tab in s.tabs do if tab.unseen do unread = true

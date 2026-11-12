@@ -74,6 +74,13 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	testing.expect_value(t, menu_labels(), "Add a machine…|Machines settings…")
 	menu_open(Menu_Machine(3), {})
 	testing.expect_value(t, menu_labels(), "Open web page…|-|Rename…|Remove…|-|Machines settings…")
+	// its open session's menu: no Mark as unread or read (it would change only this Mac's copy,
+	// which that machine's next update overwrites); Close session goes there
+	if rs := core.find_session(sid); testing.expect(t, rs != nil, "its session merged") {
+		menu_open(Menu_Session{project_id = pid, pi_session_id = rs.pi_session_id}, {})
+		labels := menu_labels()
+		testing.expectf(t, strings.contains(labels, "Close session") && !strings.contains(labels, "Mark as"), "its session's menu: %q", labels)
+	}
 	menu_close()
 	testing.expectf(t, strings.contains(got, "garden ·\nPlant the beans\nWaiting for you\n"), "its open row: %q", got)
 	testing.expectf(t, strings.contains(got, "\ngarden\n1\n"), "its project row with its open count: %q", got)

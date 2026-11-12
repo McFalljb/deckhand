@@ -400,6 +400,7 @@ State :: struct {
 	files:                 Files_State,
 	open_sessions:         [dynamic]Open_Session,
 	current_session:       u64, // open session id, 0 = none
+	shown_before:          u64, // the session show_no_session took off screen (the window's Deck view; 0: none): saved as current_session, cleared once any session shows or it closes
 	focus_widget:          string, // "" = the current tab's terminal has the keyboard
 	layout:                Layout,
 	pending_confirmations: [dynamic]Pending_Confirmation,

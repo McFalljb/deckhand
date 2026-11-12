@@ -45,6 +45,10 @@ Focus_Session :: struct {
 	session: u64, // open session id
 	reopen:  bool, // the user opened it (its row, the palette): its pi starts again if it exited (UI only)
 }
+// No session in the centre: the open sessions stay open and run on, none is current (the window's
+// Deck view shows them all there; ui_deck.odin), and the one that was is remembered (shown_before:
+// saved as the current one, so a relaunch shows it). focus_session shows one again.
+Show_No_Session :: struct {}
 // The next open session that needs the user, on any online machine, and its tab that does
 // (needing_you.odin: the order), focused as a click on that tab would. back: the previous one.
 Next_Needing_You :: struct {
@@ -508,6 +512,7 @@ Command :: union {
 	Open_Session_Cmd,
 	New_Chat,
 	Focus_Session,
+	Show_No_Session,
 	Next_Needing_You,
 	Close_Session,
 	New_Shell_Tab,
@@ -1087,6 +1092,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if s.home do return fail(HOME_NOT_A_SESSION), false
 		focus_session(c.session, caller)
 		if c.reopen do restart_if_dead(s, caller.kind == .UI)
+		return {ok = true}, true
+	case Show_No_Session:
+		if state.current_session == 0 do return {ok = true}, false
+		state.shown_before, state.current_session = state.current_session, 0
 		return {ok = true}, true
 	case Next_Needing_You:
 		s, tab := next_needing_target(c.back, hub = caller_from_hub(caller))
@@ -2257,6 +2266,7 @@ close_session :: proc(id: u64, caller: Caller) {
 		ordered_remove(&state.open_sessions, i)
 		break
 	}
+	if state.shown_before == id do state.shown_before = 0
 	if state.current_session == id {
 		state.current_session = 0
 		#reverse for o in state.open_sessions do if !o.home {
@@ -2331,6 +2341,7 @@ focus_session :: proc(id: u64, caller: Caller) {
 	// inside the window's last centre (tab_rect, panes.odin)
 	if id != state.current_session do if s := find_session(id); s != nil do for &p in s.panes do p.rect, p.frame = {}, {}
 	state.current_session = id
+	state.shown_before = 0 // a session on screen: the Deck view's is over (Show_No_Session)
 	if s := find_session(id); s != nil do s.shown_at = time.now()._nsec
 	notify_seen(id) // its bell entries are read (notify.odin)
 	status_seen(find_session(id)) // its tab on screen is seen (agent_status.odin)

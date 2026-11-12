@@ -158,6 +158,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Open_Session_Cmd:    return "open_session"
 	case New_Chat:            return "new_chat"
 	case Focus_Session:       return "focus_session"
+	case Show_No_Session:     return "show_no_session"
 	case Next_Needing_You:    return "next_needing_you"
 	case Close_Session:       return "close_session"
 	case New_Shell_Tab:       return "new_shell_tab"
@@ -395,6 +396,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_u64(&w, "project_id", c.project_id)
 	case Focus_Session:
 		kv_u64(&w, "session", c.session)
+	case Show_No_Session:
 	case Next_Needing_You:
 		if c.back do kv_bool(&w, "back", true)
 	case Close_Session:
@@ -1617,6 +1619,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	}
 	strings.write_byte(b, ']')
 	kv_u64(&w, "current_session", s.current_session)
+	kv_u64(&w, "shown_before", s.shown_before)
 	fmt.sbprintf(b, `,"pi_installed":%v`, pi_installed()) // pi found (harness.odin): stat, else the login shell's answer
 	fmt.sbprintf(b, `,"claude_installed":%v`, claude_installed()) // Claude Code found (claude.odin): new_claude_session would start
 	if !writing_tab_view do claude_accounts_json(b) // the Claude Code accounts (claude_accounts.odin): labels and folders; the full snapshot only

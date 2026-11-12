@@ -471,6 +471,48 @@ IDLE  4 ›
 - Machine headings, Projects, Chats and **+ Add a machine…** are not shown here. The line at the
   bottom ("3 machines · By project") goes back to the tree.
 
+**The Deck view** shows the whole fleet at a glance: the centre becomes a grid of cards, one for
+each open session on this Mac and on every machine that is online, in the Attention view's order
+(needs you, finished, working, idle), each group under its own label. Open it with ⇧⌘\ (as
+Safari shows all its tabs), the four-cards button left of the fleet pill in the top bar, **Deck
+view** in the View menu or **Toggle Deck view** in the palette. While it shows, no session is on
+screen, as when none is open: every session keeps running, and none has a tab bar, tabs or
+panes until you go back.
+
+```
+8 sessions · 2 need you · 1 finished · 3 working
+NEEDS YOU  2
+┌──────────────────────────────┐ ┌──────────────────────────────┐
+│ ⚿  web · Login page       3m │ │ ?  api · Schema           9m │
+│ this Mac · Claude Code       │ │ nuc · pi                     │
+│ Apply these edits?           │ │ Which index?                 │
+│                              │ │                              │
+│ 3 tabs · 1 working           │ │ 1 tab                        │
+└──────────────────────────────┘ └──────────────────────────────┘
+```
+
+- Each card has the mark of the tab that needs you (or works), the session's project and title,
+  and how long it has been so; the machine it runs on (when you have more than one) and its agent;
+  what the agent says (up to three lines), else its state in plain words ("Working for 12m",
+  "Finished", "Idle"); and how many tabs it has and what the others are doing. The session you
+  were in is outlined. A card flashes when its session starts to need you, as its row does.
+- Click a card, or move to it with the arrow keys and press Enter (↩), to go to that session, on
+  the tab that needs you; the deck goes away. Hover a card for its **…** (the session's menu, as
+  on its row; right-click works too). Esc, ⇧⌘\ again or the button goes back to the session.
+  Opening a session any other way (its row, ⌥⌘A, a notification) closes the deck too.
+- Since no session is on screen, nothing you type, paste, click or scroll reaches one, and none is
+  marked seen: a session that finishes meanwhile stays unread. Shortcuts that act on a tab (⌘W,
+  ⌘T, split…) do nothing, as with no session open; the ones that go somewhere (⌥⌘A, the session
+  shortcuts, ⌥⌘`) go there, and the deck goes. The window's title is "Deckhand" and the Open
+  section has no current row while it shows. If you quit with the deck showing, Deckhand opens
+  next time on the session you were in.
+- [Peek](#peek) works over the deck: **Peek** in a card's **…** menu, or ⌃⌥⌘A, shows that session
+  in its panel over the cards (the session you were in too); Esc closes the peek and leaves the
+  deck, **Open** (⌘↩) goes to the session and the deck goes too. Opening the deck closes a peek.
+- As many columns as fit (each card at least 260 px wide); the grid scrolls when it is taller
+  than the window. Opened with no session on screen, the deck keeps the empty centre's buttons;
+  with nothing open at all it says "Nothing running. Start a chat or open a project."
+
 ### Peek
 
 **Peek** shows one tab of another session in a panel over the centre, live, so you can see where
@@ -2151,6 +2193,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Toggle left column | ⌘B | |
 | Sessions, Files, Settings | ⇧⌘E (Files) | the left column's tabs (⇧⌘E again: back to Sessions) |
 | Attention view | ⌥⌘. | the Sessions tab as one list across every machine, by what needs you, or back to the tree ([The Attention view](#what-needs-you-everywhere)) |
+| Deck view | ⇧⌘\ | the centre as a grid of cards, one per open session on every machine, or back to the session ([The Deck view](#what-needs-you-everywhere)) |
 | Jobs |  | the left column's Jobs tab (Atlas's jobs) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Toggle right panels | ⌥⌘B | the right column |
@@ -2225,6 +2268,12 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | ⌘↑, ⌘↓ | Editor: start, end of the file |
 | ⌘A, ⌘X | Select all, cut |
 | ⌥←, ⌥→ | Move by word |
+
+**Deck view**
+
+| Shortcut | Action |
+|---|---|
+| ←→↑↓, ↩, Esc | Deck view: move between the cards, open one, back |
 
 **Files tab**
 
@@ -2308,6 +2357,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | |
 | Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | |
 | Toggle Attention view | ⌥⌘. | the Sessions tab by what needs you, or by project |
+| Toggle Deck view | ⇧⌘\ | the centre as a grid of every open session, or back |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | |
 | Close pane (its tabs stay) | ⇧⌘W | |
 | Even out panes |  | |

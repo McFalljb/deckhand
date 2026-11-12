@@ -828,6 +828,7 @@ event :: proc(e: ^sapp.Event) {
 	if browser_url_key(fp, e) do return // a browser tab's URL field: Enter and Esc (browser_nav.odin)
 	if browser_polish_event(fp, e) do return // a browser tab's bars, ⋯, ⌘F, zoom keys, pointer shape (browser_polish.odin)
 	if state.focus_widget != "" && widget_event(e) do return
+	if state.focus_widget == "" && deck_event(e) do return // the Deck view: its keys, wheel, a card's menu (ui_deck.odin)
 	if drawer_event(e) do return // the drawer: resizing, the mouse in Atlas's terminal
 	if files_event(e) do return // the Files tab: rows, drag, its keys (ui_files.odin)
 	if changes_event(fp, e) do return // the Changes tab's list, bars and keys, the "±" button (ui_changes.odin)
@@ -968,6 +969,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Fleet_Row: fleet_go(u64(hit)) // as ⌥⌘A would go there (ui_fleet.odin)
 		case Hit_Peek_Row:  peek_open_session(u64(hit)) // a row's eye: Peek (ui_peek.odin)
 		case Hit_Peek: // peek_event takes the panel's clicks first
+		case Hit_Deck_Card, Hit_Deck_More: deck_click(hit, app.pointer) // the Deck view's cards (ui_deck.odin)
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
 		}
 		clay.SetPointerState(app.pointer, false)

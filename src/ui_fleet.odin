@@ -133,10 +133,12 @@ pill_compact: bool
 pill_hidden: bool
 
 // The pill whole while the bar has room for it beside the tabs at their narrowest (as the "±"
-// decides: ui_changes.odin), else its most urgent part (always in a compact bar), else none.
+// decides: ui_changes.odin), else its most urgent part (always in a compact bar), else none. The
+// Deck view's button (ui_deck.odin) gives way before the pill goes: ⇧⌘\, the View menu and the
+// palette still have it.
 fleet_pill_decide :: proc(cs: ^core.Open_Session, bar_w: f32) {
 	pill_compact, pill_hidden = bar_compact, false
-	if !core.fleet_any(fleet) do return
+	deck_btn_shown = true
 	changes_btn_shown = false // decided after it (changes_button_decide): the "±" gives way first
 	room := bar_w - remote_marker_w(cs)
 	if cs != nil && len(cs.panes) <= 1 && len(cs.tabs) > 0 {
@@ -144,8 +146,12 @@ fleet_pill_decide :: proc(cs: ^core.Open_Session, bar_w: f32) {
 		room -= tab_close_w()
 	}
 	if top_bar_fixed_w() <= room do return
-	pill_compact = true
-	if top_bar_fixed_w() <= room do return
+	if core.fleet_any(fleet) {
+		pill_compact = true
+		if top_bar_fixed_w() <= room do return
+	}
+	deck_btn_shown = false
+	if top_bar_fixed_w() <= room || !core.fleet_any(fleet) do return
 	pill_hidden = true
 }
 

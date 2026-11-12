@@ -9,6 +9,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "core"
+import clay "../build/clay-odin"
 
 @(private = "file")
 drawn_now :: proc() -> string {
@@ -56,4 +57,30 @@ machine_header_this_mac :: proc(t: ^testing.T) {
 	state.settings.remote_machines = false
 	got = drawn_now()
 	testing.expect(t, !strings.contains(got, "this Mac") && strings.contains(got, "Nightly"), "off: the jobs, no header")
+}
+
+// A long tooltip (the sidebar's + Add a machine…) wraps at TIP_WRAP_W and stays in the window
+// when the pointer is near its right and bottom edges.
+@(test)
+tooltip_wraps :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	saved := state.settings.remote_machines
+	defer {
+		state.settings.remote_machines = saved
+		ui_hover, tip = nil, {}
+	}
+	state.settings.remote_machines = true
+	ui_hover = Hit_Machine_Add{}
+	w, h := f32(2000), f32(1400)
+	tip = {shown = true, at = {w - 5, h - 5}}
+	got := drawn_now()
+	testing.expect(t, !strings.contains(got, MACHINE_ADD_TIP), "not one line")
+	testing.expect(t, strings.contains(got, "Add a machine you reach"), "its start")
+	d := clay.GetElementData(clay.ID("tooltip"))
+	if !testing.expect(t, d.found, "shown") do return
+	bb := d.boundingBox
+	testing.expectf(t, bb.width <= px(TIP_WRAP_W + 2 * SP_2) + 1, "wrapped: %v wide", bb.width)
+	testing.expectf(t, bb.height > px(TIP_H), "more than one line: %v", bb.height)
+	testing.expectf(t, bb.x >= 0 && bb.y >= 0 && bb.x + bb.width <= w && bb.y + bb.height <= h, "in the window: %v", bb)
 }

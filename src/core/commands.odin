@@ -839,6 +839,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 		if changed && tidy_shown_sig() != tidy_shown do projects_tidy()
 	}
 	if changed {
+		jobs_owners_refresh() // a project renamed, added or hidden: whose a job is (jobs_owner.odin)
 		state.version += 1
 		window_state_changed()
 	}

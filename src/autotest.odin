@@ -320,6 +320,7 @@ autotest_platform :: proc() {
 		return true
 	}
 	win_os.left_button = proc() -> bool {return autotest.left_down}
+	win_os.set_badge = nil // never the Dock's (scenes run beside the user's Deckhand)
 }
 
 autotest_paste_set :: proc(text: string) {

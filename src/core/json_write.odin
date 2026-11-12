@@ -1792,6 +1792,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)
 		kv_bool(&bo, "os", !s.settings.bell_os_off)
+		kv_bool(&bo, "dock", !s.settings.bell_dock_off)
 		obj_end(&bo)
 		// the main folder and the effective subfolders (folders.odin)
 		kv_str(&st, "home_dir", s.settings.home_dir)
@@ -2047,6 +2048,8 @@ write_machine_jobs :: proc(b: ^strings.Builder, rows: []Job_Row) {
 		kv_str(&w, "id", r.id)
 		kv_str(&w, "machine", machine_name(r.machine))
 		kv_str(&w, "name", r.name)
+		kv_str(&w, "owner", r.owner_name != "" ? JOB_OWNER_NAMES[r.owner] : "") // as that machine groups it ("" = an older core)
+		kv_str(&w, "owner_name", r.owner_name) // display text, cleaned
 		kv_str(&w, "schedule", r.schedule)
 		kv_bool(&w, "enabled", r.enabled)
 		kv_bool(&w, "paused", r.paused)

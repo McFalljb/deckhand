@@ -571,11 +571,12 @@ workspace_json :: proc() -> string {
 	if st.remote_machines != remote_machines_default_on do kb(&w, "remote_machines", st.remote_machines) // Machines over SSH (machines.odin): saved when it differs from the default
 	if st.machines_reachable != machines_reachable_default_on do kb(&w, "machines_reachable", st.machines_reachable) // the hub door (window_sock.odin)
 	if st.last_harness != .Pi do ks(&w, "last_harness", HARNESS_KEYS[st.last_harness]) // the picker's first row (harness.odin)
-	if st.bell_off != {} || st.bell_os_off {
+	if st.bell_off != {} || st.bell_os_off || st.bell_dock_off {
 		k(&w, "bell")
 		open_obj(&w)
 		for g in Bell_Group do if g in st.bell_off do kb(&w, BELL_GROUP_NAMES[g], false)
 		if st.bell_os_off do kb(&w, "os", false)
+		if st.bell_dock_off do kb(&w, "dock", false)
 		close_obj(&w)
 	}
 	// Claude Code accounts (claude_accounts.odin): what the user changed, and the last used
@@ -728,7 +729,7 @@ workspace_restore :: proc(text: string) -> string {
 				if v, ok := o[k].(json.Boolean); ok do return bool(v)
 				return nil
 			}
-			run(Set_Bell{finished = on(bo, "finished"), waiting = on(bo, "waiting"), errors = on(bo, "errors"), jobs = on(bo, "jobs"), os = on(bo, "os")})
+			run(Set_Bell{finished = on(bo, "finished"), waiting = on(bo, "waiting"), errors = on(bo, "errors"), jobs = on(bo, "jobs"), os = on(bo, "os"), dock = on(bo, "dock")})
 		}
 		// the folders (folders.odin): overrides, then the main folder. Older
 		// files: notes_dir becomes the main folder, and chats keep running

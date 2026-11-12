@@ -714,6 +714,12 @@ void dh_mac_activity(int on) {
     }
 }
 
+// ---- the Dock icon's badge (win_os.odin dock_badge_update): the sessions waiting for you ----
+
+void dh_mac_set_badge(int n) {
+    NSApp.dockTile.badgeLabel = n > 0 ? [NSString stringWithFormat:@"%d", n] : nil;
+}
+
 // ---- Dock Quit, logout, restart, shutdown (main.odin's quit_route) ----
 //
 // sokol's app delegate has no applicationShouldTerminate:, so -[NSApp terminate:] (the Dock's

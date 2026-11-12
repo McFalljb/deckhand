@@ -255,3 +255,18 @@ job_owner_for_create :: proc(value: string) -> (for_project, folder, err: string
 	t := path_tilde(p.cwd)
 	return t, t, ""
 }
+
+// Each row's owner as this machine's Jobs tab groups it (Job_Row.owner, owner_name): what another
+// machine viewing this one shows for it, and the bell's title. After each command that changed
+// State (a project renamed, added or hidden moves a job) and each rebuild of the rows.
+jobs_owners_refresh :: proc() {
+	if len(state.jobs) == 0 do return
+	projects := owner_projects()
+	for &r in state.jobs {
+		o := job_owner_of(r, projects)
+		name := job_owner_label(o)
+		if r.owner == o.kind && r.owner_name == name do continue
+		delete(r.owner_name)
+		r.owner, r.owner_name = o.kind, strings.clone(name)
+	}
+}

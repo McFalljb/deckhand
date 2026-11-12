@@ -291,7 +291,7 @@ mirror_alerts_ring_once :: proc(t: ^testing.T) {
 	needs := proc(r: ^State, run: string) {
 		for &j in r.jobs do delete(j.needs_you)
 		clear(&r.jobs)
-		j := Job_Row{id = strings.clone("daily"), name = strings.clone("Dai​ly‮\nreport"), last_run = strings.clone(run), unread = 1, last_status = strings.clone("needs_you"), path = strings.clone("/home/me/jobs/daily.md")}
+		j := Job_Row{id = strings.clone("daily"), name = strings.clone("Dai​ly‮\nreport"), owner = .Atlas, owner_name = strings.clone("No‮va\x1b[31m\nnext"), last_run = strings.clone(run), unread = 1, last_status = strings.clone("needs_you"), path = strings.clone("/home/me/jobs/daily.md")}
 		append(&j.needs_you, strings.clone("sign the\x1b[31m form"))
 		append(&r.jobs, j)
 	}
@@ -311,9 +311,12 @@ mirror_alerts_ring_once :: proc(t: ^testing.T) {
 		testing.expect_value(t, j.id, "m3:daily")
 		testing.expect(t, j.path == "" && j.folder == "", "no paths")
 		testing.expect(t, !strings.contains(j.name, "​") && !strings.contains(j.name, "‮") && !strings.contains(j.name, "\n"), "its name: one line, nothing invisible")
+		testing.expect_value(t, j.owner, Job_Owner_Kind.Atlas)
+		testing.expectf(t, strings.has_prefix(j.owner_name, "No") && !strings.contains(j.owner_name, "‮") && !strings.contains(j.owner_name, "\x1b") && !strings.contains(j.owner_name, "\n"), "its owner's name: cleaned, one line: %q", j.owner_name)
 	}
 	for x in state.notices.items do if x.kind == .Job_Needs_You {
-		testing.expect(t, strings.has_prefix(x.title, "nuc · "), "it names the machine")
+		// its owner as that machine names it (its agent is not this Mac's Atlas)
+		testing.expectf(t, strings.has_prefix(x.title, fmt.tprintf("nuc · %s · Dai", state.machine_jobs[0].owner_name)) && !strings.contains(x.title, agent_name()), "it names the machine and the owner: %q", x.title)
 		testing.expect(t, !strings.contains(x.summary, "\x1b") && x.run_dir == "", "cleaned, no folder")
 	}
 	// the same state again, a reconnect (the same core), a fresh full: nothing new rings
@@ -356,4 +359,24 @@ mirror_alerts_ring_once :: proc(t: ^testing.T) {
 	n := 0
 	for x in state.notices.items do if x.machine == 3 do n += 1
 	testing.expect_value(t, n, 0)
+}
+
+// Another machine's owner fields: the kind is one of the fixed set (else Other), the name cleaned;
+// an older core that sends no name gets none.
+@(test)
+mirror_job_owner_fields :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	mm_reset()
+	defer state = State{}
+	r := mm_replica(5, 9, 1)
+	append(&r.jobs, Job_Row{id = strings.clone("a"), name = strings.clone("A"), owner = Job_Owner_Kind(77), owner_name = strings.clone("x")})
+	append(&r.jobs, Job_Row{id = strings.clone("b"), name = strings.clone("B"), owner = .Project, owner_name = strings.clone("garden")})
+	append(&r.jobs, Job_Row{id = strings.clone("c"), name = strings.clone("C")})
+	m: Machine_Mirror
+	mirror_merge(3, &r, &m)
+	defer mirror_drop(3, &m)
+	if !testing.expect_value(t, len(state.machine_jobs), 3) do return
+	testing.expect_value(t, state.machine_jobs[0].owner, Job_Owner_Kind.Other)
+	testing.expect_value(t, state.machine_jobs[1].owner_name, "garden")
+	testing.expect_value(t, state.machine_jobs[2].owner_name, "")
 }

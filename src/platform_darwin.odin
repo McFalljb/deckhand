@@ -102,6 +102,7 @@ platform_core_timer :: proc(every: time.Duration, fire: proc()) {
 		// it is still in use (the fire is skipped then, but this handler still runs)
 		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 		if app.ready && core_timer_proc != nil do core_timer_proc()
+		if app.ready do dock_badge_update() // frames stop while hidden: the badge still follows (win_os.odin)
 		// sokol closes the window (its quit) only from a frame: none came (minimised, App Nap)
 		if app.ready && core.core_quit_stalled(time.tick_now()) do window_close()
 		else if app.ready && separate_close_stalled(time.tick_now()) {
@@ -192,6 +193,7 @@ foreign pdplatform {
 	dh_mac_pasteboard_set_secret :: proc(text: cstring) -> c.long ---
 	dh_mac_pasteboard_clear_if :: proc(count: c.long) ---
 	dh_mac_activity :: proc(on: c.int) ---
+	dh_mac_set_badge :: proc(n: c.int) ---
 	dh_mac_display_hook :: proc() ---
 	dh_mac_display_fps :: proc() -> c.int ---
 	dh_mac_display_scale :: proc() -> f32 ---
@@ -223,6 +225,9 @@ platform_test_display_fps :: proc(fps: int) {dh_mac_test_display_fps(c.int(fps))
 // While a job runs or a terminal had output in the last 2 s (activity_hold): no App Nap (timers on
 // time; the system may still sleep).
 platform_activity :: proc(on: bool) {dh_mac_activity(on ? 1 : 0)}
+
+// The Dock icon's badge: n, none at 0 (win_os.set_badge).
+platform_set_badge :: proc(n: int) {dh_mac_set_badge(c.int(n))}
 
 // Quiet test mode, before sokol starts: never activates, window off-screen
 // (src/native/platform_macos.m).

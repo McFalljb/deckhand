@@ -386,3 +386,29 @@ jobs_groups_cached :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(g3), 1)
 	testing.expect_value(t, len(g3[0].rows), 2)
 }
+
+// Each job row carries its owner as this machine's Jobs tab groups it (what another machine shows
+// for it): set again when a command changes the projects (a rename).
+@(test)
+jobs_owners_sent :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	old_jobs, old_projects := state.jobs, state.projects
+	defer {
+		for &r in state.jobs do delete(r.owner_name)
+		state.jobs, state.projects = old_jobs, old_projects
+		state.version += 1
+	}
+	dir := fmt.tprintf("%s/pd-owners-%d/garden", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	os.make_directory_all(dir)
+	state.projects = {}
+	append(&state.projects, core.Project{id = 41, group = .Projects, cwd = strings.clone(dir), label = strings.clone("garden")})
+	state.jobs = {}
+	append(&state.jobs, core.Job_Row{id = "a", name = "A", folder = strings.clone(dir)}, core.Job_Row{id = "b", name = "B", project = "none", folder = "/x"})
+	core.jobs_owners_refresh()
+	testing.expect_value(t, state.jobs[0].owner, core.Job_Owner_Kind.Project)
+	testing.expect_value(t, state.jobs[0].owner_name, "garden")
+	testing.expect_value(t, state.jobs[1].owner, core.Job_Owner_Kind.Other)
+	testing.expect_value(t, state.jobs[1].owner_name, "Other")
+	testing.expect(t, core.run_command(core.Rename_Project{project_id = 41, name = "Veg"}, {kind = .UI}).ok)
+	testing.expect_value(t, state.jobs[0].owner_name, "Veg")
+}

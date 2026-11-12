@@ -168,6 +168,16 @@ text_clean_remote :: proc(s: string, max: int) -> string {
 	return strings.trim_space(text_clean(one_line(s, context.temp_allocator), max))
 }
 
+// "<machine> · <owner> · <job>", without the owner when it is "" (heap or a).
+job_title_with_owner :: proc(machine, owner, job: string, a: runtime.Allocator) -> string {
+	if owner == "" do return fmt.aprintf("%s · %s", machine, job, allocator = a)
+	return fmt.aprintf("%s · %s · %s", machine, owner, job, allocator = a)
+}
+
+// A job's owner as a bell title's part: its name as its machine sent it; "" for Other (and for an
+// older core that sends none).
+job_owner_title :: proc(r: Job_Row) -> string {return r.owner == .Other ? "" : r.owner_name}
+
 @(private = "file")
 remote_text :: proc(s: string, max: int, a: runtime.Allocator) -> string {
 	return strings.clone(text_clean_remote(s, max), a)
@@ -291,6 +301,10 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			last_run      = remote_text(j.last_run, 64, a),
 			unread        = clamp(j.unread, 0, 999),
 		}
+		// whose it is, as that machine's own Jobs tab groups it (jobs_owners_refresh there): a kind
+		// of the fixed set, else Other; its name cleaned. None from an older core: a flat list here
+		row.owner = j.owner >= min(Job_Owner_Kind) && j.owner <= max(Job_Owner_Kind) ? j.owner : .Other
+		row.owner_name = remote_text(j.owner_name, MIRROR_TEXT_MAX, a)
 		row.needs_you = make([dynamic]string, a)
 		for x in j.needs_you {
 			if len(row.needs_you) >= MIRROR_JOB_LINES do break
@@ -389,7 +403,7 @@ mirror_alerts :: proc(no: u64, r: ^State, m: ^Machine_Mirror, run: string) {
 			delete(prev, heap)
 			m.jobs_rang[j.id] = strings.clone(j.last_run, heap)
 		} else do m.jobs_rang[strings.clone(j.id, heap)] = strings.clone(j.last_run, heap)
-		n := Notice{kind = .Job_Needs_You, machine = no, job_id = strings.clone(j.id, heap), title = fmt.aprintf("%s · %s", machine_name(no), j.name, allocator = heap), summary = strings.clone(j.needs_you[0], heap)}
+		n := Notice{kind = .Job_Needs_You, machine = no, job_id = strings.clone(j.id, heap), title = job_title_with_owner(machine_name(no), job_owner_title(j), j.name, heap), summary = strings.clone(j.needs_you[0], heap)}
 		mirror_ring(no, m, n, now)
 	}
 	// jobs it no longer has
@@ -415,7 +429,11 @@ remote_notice :: proc(no: u64, x: Notice) -> Notice {
 	n.summary = remote_text(x.summary, MIRROR_LINE_MAX, heap)
 	if x.job_id != "" {
 		n.job_id = fmt.aprintf("m%d:%s", no, text_clean_remote(x.job_id, 64), allocator = heap)
-		n.title = fmt.aprintf("%s · %s", machine_name(no), title, allocator = heap)
+		// its project, from its mirrored row, unless that machine's title says it already
+		owner := ""
+		for j in state.machine_jobs do if j.id == n.job_id do owner = job_owner_title(j)
+		if strings.has_prefix(title, fmt.tprintf("%s · ", owner)) do owner = ""
+		n.title = job_title_with_owner(machine_name(no), owner, title, heap)
 		return n
 	}
 	n.title = strings.clone(title, heap)

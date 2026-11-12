@@ -152,6 +152,7 @@ Set_Bell :: struct {
 	errors:   Maybe(bool),
 	jobs:     Maybe(bool),
 	os:       Maybe(bool), // OS notifications while in the background
+	dock:     Maybe(bool), // the Dock icon's badge: the sessions waiting for you
 }
 
 notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
@@ -191,9 +192,12 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		kind := Notice_Kind.Job_Finished
 		if j.status == .Needs_You do kind = .Job_Needs_You
 		if j.status == .Failed do kind = .Job_Failed
+		title := j.title != "" ? j.title : j.job_id
+		// its owner first (its project, Atlas, Chats), as another machine's say theirs (machine_mirror.odin)
+		for r in state.jobs do if r.id == j.job_id do if owner := job_owner_title(r); owner != "" do title = fmt.tprintf("%s · %s", owner, title)
 		n := Notice {
 			kind    = kind,
-			title   = notice_text(j.title != "" ? j.title : j.job_id),
+			title   = notice_text(title),
 			summary = notice_text(j.summary),
 			job_id  = strings.clone(cut_utf8(j.job_id, NOTICE_TEXT_MAX)),
 			run_dir = strings.clone(j.run_dir),
@@ -201,7 +205,7 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		return {ok = true}, notice_post(n)
 	case Set_Bell:
 		st := &state.settings
-		was_off, was_os := st.bell_off, st.bell_os_off
+		was_off, was_os, was_dock := st.bell_off, st.bell_os_off, st.bell_dock_off
 		vals := [Bell_Group]Maybe(bool){.Finished = c.finished, .Waiting = c.waiting, .Errors = c.errors, .Jobs = c.jobs}
 		for v, g in vals {
 			on, set := v.?
@@ -210,7 +214,8 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 			else do st.bell_off += {g}
 		}
 		if on, set := c.os.?; set do st.bell_os_off = !on
-		return {ok = true}, st.bell_off != was_off || st.bell_os_off != was_os
+		if on, set := c.dock.?; set do st.bell_dock_off = !on
+		return {ok = true}, st.bell_off != was_off || st.bell_os_off != was_os || st.bell_dock_off != was_dock
 	}
 	return fail("unknown command"), false
 }
@@ -529,5 +534,6 @@ notify_write :: proc(b: ^strings.Builder, cmd: Command) {
 		vals := [Bell_Group]Maybe(bool){.Finished = c.finished, .Waiting = c.waiting, .Errors = c.errors, .Jobs = c.jobs}
 		for v, g in vals do if on, set := v.?; set do kv(b, BELL_GROUP_NAMES[g], on)
 		if on, set := c.os.?; set do kv(b, "os", on)
+		if on, set := c.dock.?; set do kv(b, "dock", on)
 	}
 }

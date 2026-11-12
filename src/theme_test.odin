@@ -49,3 +49,12 @@ theme_contrast :: proc(t: ^testing.T) {
 		testing.expectf(t, (core.contrast_ratio(tc.fg, tc.bg) > 1) && (light == (core.lab_of(tc.fg).l < core.lab_of(tc.bg).l)), "%s: variant is the wrong way round", name)
 	}
 }
+
+// "Finished, not seen yet" is the accent (as unread is in the Jobs tab and the bell); green
+// (done) is left for "online" and "ran ok".
+@(test)
+theme_unseen_is_accent :: proc(t: ^testing.T) {
+	th := theme()
+	testing.expect_value(t, status_color(.Unseen), th.accent)
+	testing.expect(t, status_color(.Unseen) != th.done, "not green")
+}

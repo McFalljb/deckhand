@@ -382,6 +382,16 @@ open_group_and_browsing :: proc(t: ^testing.T) {
 	core.run_command(core.Focus_Session{session = sa}, {kind = .UI})
 	testing.expect_value(t, core.sidebar_open()[0].id, sa)
 	testing.expect_value(t, core.sidebar_open()[1].id, chat)
+	// one waiting for you: after the current one, before those shown more recently; the Dock's count
+	testing.expect_value(t, core.sessions_waiting_count(), 0)
+	core.find_session(sbid).tabs[0].waiting = true
+	open = core.sidebar_open()
+	testing.expect_value(t, open[0].id, sa)
+	testing.expect_value(t, open[1].id, sbid)
+	testing.expect_value(t, open[2].id, chat)
+	testing.expect_value(t, core.sessions_waiting_count(), 1)
+	core.find_session(sbid).tabs[0].waiting = false
+	testing.expect_value(t, core.sessions_waiting_count(), 0)
 	// the filter applies: title or project name
 	core.run_command(core.Set_Filter{text = "second"})
 	testing.expect_value(t, len(core.sidebar_open()), 1)

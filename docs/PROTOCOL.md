@@ -269,7 +269,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `notifications_list` | `limit`? | query (any caller but pi tabs; listed in `list_commands`): the bell's entries, newest first, at most `limit` (default 20, at most 200); see [Notifications](GUIDE.md#notifications) |
 | `notifications_mark_read` | `id`? \| `session`? \| `all`? | **user only**: marks one entry, an open session's, or all read |
 | `notifications_clear` | | **user only**: removes every entry |
-| `set_notifications` | `finished`?, `waiting`?, `errors`?, `jobs`?, `os`? | **user only**: what the bell collects (all on by default) and whether entries that need the user raise an OS notification while Deckhand is in the background (`os`, default on) |
+| `set_notifications` | `finished`?, `waiting`?, `errors`?, `jobs`?, `os`?, `dock`? | **user only**: what the bell collects (all on by default), whether entries that need the user raise an OS notification while Deckhand is in the background (`os`, default on), and whether the window badges its Dock icon with the number of open sessions waiting for the user, this Mac's and online machines' (`dock`, default on; macOS) |
 | `pi_prompt` | `tab_id`, `text`, `images`? | sent to the pi tab's bridge as `pi.prompt` (§4); **long-running**; refused while the tab is `waiting` (not for `question`). `images`: `[{"mime", "data"}]`, base64 data, `image/png`, `image/jpeg`, `image/gif` or `image/webp`, at most 8 and 2 MB decoded in all (the request line's 1 MiB limit applies to callers too) |
 | `comment_edit` | `comment_id`, `text` | a pending comment's new text (not empty; cut to 2000 bytes) |
 | `comment_delete` | `comment_id` | removes a pending comment and its crop |
@@ -711,7 +711,7 @@ without asking. Exited tabs never ask.
               "confirm_close": {"pi": "auto", "shell": "auto"},
               "theme": "graphite", "reduce_motion": false, "appearance": "system", "light": false, "text_size": "default", "chats_readonly": false,
               "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true, "remote_machines": true, "machines_reachable": false,
-              "bell": {"finished": true, "waiting": true, "errors": true, "jobs": true, "os": true},
+              "bell": {"finished": true, "waiting": true, "errors": true, "jobs": true, "os": true, "dock": true},
               "home_dir": "/Users/me/deckhand", "setup_seen": false,
               "folders": {"sessions": {"path": "/Users/me/deckhand/sessions", "custom": false}, "jobs": {…}, "memory": {…}, "atlas": {…},
                           "chats": {"path": "/Users/me/Chats", "custom": true}},
@@ -1313,8 +1313,13 @@ mark without ringing: a reconnect or a fresh `state.full` never rings what it ha
 the newest 20 entries are read per state, and at most 4 ring per machine a minute (the rest are
 dropped). Its entries are in `notifications_list` with `"machine"`: the title and `place` start
 with the machine's name, its `session_id`/`tab_id` are packed ids of its mirrored session (else 0),
-its `job_id` reads `m<no>:<its id>`, and no `pi_session_id` or run folder is kept. Its jobs (at most
-100) are in `get_state`'s `machine_jobs` (`id` `m<no>:<its id>`, `machine`, `name`, `schedule`,
+its `job_id` reads `m<no>:<its id>` (and a job's title is `<machine> · <owner_name> · <job>`, without the owner
+for `other` or when none was sent), and no `pi_session_id` or run folder is kept. Its jobs (at most
+100) are in `get_state`'s `machine_jobs` (`id` `m<no>:<its id>`, `machine`, `name`, `owner` (`project`,
+`atlas`, `chats`, `other`: whose it is, as that machine's own Jobs tab groups it and sends it; any
+other value is `other`; `""` from an older core that sends none) and `owner_name` (that group's label
+there: the project's name, its agent's name, `Chats`, `Other`; display text only, never one of this
+Mac's projects), `schedule`,
 `enabled`, `paused`, `running`, `next_due`, `last_at`, `last_status` (a known word, else
 `unknown`), `last_headline`, `unread`, `needs_you`: at most 5 lines): read-only, no paths; no job
 command finds one. Every string is one line without control, bidi or invisible characters, and

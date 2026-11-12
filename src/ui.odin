@@ -606,7 +606,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	age_minute_drawn = age_minute()
 	ui_win_w = w
 	fleet_tally_frame() // once per frame: the pill's, the machine headers', the Dock's (ui_fleet.odin)
-	deck_sync() // another session opened: the Deck view goes (ui_deck.odin)
+	deck_sync() // a session shown again: the Deck view goes (ui_deck.odin)
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
 	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"
@@ -783,10 +783,10 @@ centre :: proc(cs: ^core.Open_Session) {
 		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
 		machine_bar() // another machine's session while it is not online (ui_dead_tab.odin)
-		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane; the Deck view
-		// in their place (ui_deck.odin: not laid out, they keep their sizes and run on)
+		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane; with no
+		// session current, the Deck view in the empty centre's place (ui_deck.odin)
 		if clay.UI(clay.ID("panes"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
-			if deck.shown do deck_layout(cs)
+			if deck_shown() do deck_layout()
 			// zoomed (zoom_pane): that pane alone fills the area; the others are not laid out (not drawn, not hit)
 			else if zp := core.session_pane(cs, core.session_zoomed(cs)); zp != nil do pane_layout(cs, zp)
 			else if cs != nil && len(cs.nodes) > 0 && len(cs.panes) > 0 do pane_tree_layout(cs, cs.root)
@@ -1050,7 +1050,7 @@ tab_strip :: proc(cs: ^core.Open_Session, w: f32) {
 		spacer()
 		search_pill(wide)
 		spacer()
-		if deck_btn_shown do tool_button(.Deck, deck.shown) // the Deck view: every session as a card (ui_deck.odin; it gives way in a narrow bar: fleet_pill_decide)
+		if deck_btn_shown do tool_button(.Deck, deck_shown()) // the Deck view: every session as a card (ui_deck.odin; it gives way in a narrow bar: fleet_pill_decide)
 		fleet_pill() // what needs you and what works, on every machine (ui_fleet.odin)
 		bell_button() // the notification centre (ui_bell.odin)
 		tool_button(.Settings, settings_open())

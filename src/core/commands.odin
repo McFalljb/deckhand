@@ -45,6 +45,9 @@ Focus_Session :: struct {
 	session: u64, // open session id
 	reopen:  bool, // the user opened it (its row, the palette): its pi starts again if it exited (UI only)
 }
+// No session in the centre: the open sessions stay open and run on, none is current (the window's
+// Deck view shows them all there; ui_deck.odin). focus_session shows one again.
+Show_No_Session :: struct {}
 // The next open session that needs the user, on any online machine, and its tab that does
 // (needing_you.odin: the order), focused as a click on that tab would. back: the previous one.
 Next_Needing_You :: struct {
@@ -508,6 +511,7 @@ Command :: union {
 	Open_Session_Cmd,
 	New_Chat,
 	Focus_Session,
+	Show_No_Session,
 	Next_Needing_You,
 	Close_Session,
 	New_Shell_Tab,
@@ -1087,6 +1091,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if s.home do return fail(HOME_NOT_A_SESSION), false
 		focus_session(c.session, caller)
 		if c.reopen do restart_if_dead(s, caller.kind == .UI)
+		return {ok = true}, true
+	case Show_No_Session:
+		if state.current_session == 0 do return {ok = true}, false
+		state.current_session = 0
 		return {ok = true}, true
 	case Next_Needing_You:
 		s, tab := next_needing_target(c.back, hub = caller_from_hub(caller))

@@ -27,7 +27,7 @@ dk_reset :: proc() {
 	append(&state.projects, p)
 	state.selected_project = p.id
 	ui_hover = nil
-	deck.shown, deck.sel, deck.scroll = false, 0, false
+	deck = {cards = deck.cards} // closed, nothing remembered (its cards' array kept)
 	state.settings.reduce_motion = true
 	toast_clear()
 }
@@ -125,6 +125,20 @@ dk_border :: proc(cmds: clay.ClayArray(clay.RenderCommand), b: clay.BoundingBox)
 	return {}, false
 }
 
+// The deck opened or closed, as the next frame sees it (show_no_session or focus_session, through
+// the inbox).
+@(private = "file")
+dk_toggle :: proc() {
+	deck_toggle()
+	core.inbox_drain()
+}
+
+@(private = "file")
+dk_shown :: proc() -> bool {
+	core.inbox_drain()
+	return deck_shown()
+}
+
 @(private = "file")
 dk_key :: proc(k: sapp.Keycode, mods: u32 = 0) -> bool {
 	ev := sapp.Event{type = .KEY_DOWN, key_code = k, modifiers = mods}
@@ -167,7 +181,7 @@ deck_order_and_columns :: proc(t: ^testing.T) {
 
 	// drawn: in that order, the cards of a grid row on one line, equal sizes, 12 px apart, each
 	// group from a row of its own, all inside the deck
-	deck_toggle()
+	dk_toggle()
 	cmds := ui_layout(1600, 900)
 	testing.expectf(t, dk_same(dk_drawn(), want), "drawn: %v", dk_drawn())
 	dk, ok := dk_box("deck")
@@ -209,7 +223,7 @@ deck_card_content :: proc(t: ^testing.T) {
 	dk_session(300, "Quiet", dk_tab(301))
 	dk_session(400, "Bump deps", dk_tab(401, "unseen", time.Minute), dk_tab(402, "waiting", 0)) // its waiting tab places it
 	state.current_session = 200
-	deck_toggle()
+	dk_toggle()
 	cmds := ui_layout(1600, 900)
 	th := theme()
 	card :: proc(t: ^testing.T, cmds: clay.ClayArray(clay.RenderCommand), sid: u64, loc := #caller_location) -> string {
@@ -318,7 +332,7 @@ deck_keys_and_clicks :: proc(t: ^testing.T) {
 	for i in u64(0) ..< 3 do dk_session(100 + i * 100, fmt.tprintf("Ask %d", i), dk_tab(101 + i * 100, "waiting", time.Duration(30 - i) * time.Minute))
 	for i in u64(0) ..< 5 do dk_session(1000 + i * 100, fmt.tprintf("Job %d", i), dk_tab(1001 + i * 100, "working", time.Duration(30 - i) * time.Minute))
 	state.layout.right_open = false
-	deck_toggle()
+	dk_toggle()
 	_ = ui_layout(1300, 800)
 	testing.expect(t, deck.cols >= 2, "two columns or more")
 	cards := deck.cards[:]
@@ -346,12 +360,12 @@ deck_keys_and_clicks :: proc(t: ^testing.T) {
 	sel := deck.sel
 	dk_key(.ENTER)
 	core.inbox_drain()
-	testing.expect(t, !deck.shown, "Enter leaves the deck")
+	testing.expect(t, !dk_shown(), "Enter leaves the deck")
 	testing.expect_value(t, state.current_session, sel)
 	_ = ui_layout(1300, 800)
 
-	// a click on a card (its hit, then deck_event's click): there
-	deck_toggle()
+	// a click on a card (its hit, then the window's click: main.odin): there
+	dk_toggle()
 	_ = ui_layout(1300, 800)
 	b, _ := dk_box("deckcard", 4)
 	clay.SetPointerState({b.x + b.width / 2, b.y + b.height / 2}, false)
@@ -361,34 +375,28 @@ deck_keys_and_clicks :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(label, "working"), "tip: %q", label)
 	want := deck.cards[4].sid
 	ev := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = b.x + b.width / 2, mouse_y = b.y + b.height / 2}
-	testing.expect(t, deck_event(&ev), "the click is the deck's")
+	event(&ev)
 	core.inbox_drain()
-	testing.expect(t, !deck.shown, "a click leaves the deck")
+	testing.expect(t, !dk_shown(), "a click leaves the deck")
 	testing.expect_value(t, state.current_session, want)
 	testing.expect_value(t, core.find_session(want).active_tab, want + 1)
 
-	// Esc goes back; typing and pastes stay out of the terminal; ⌘ shortcuts go on
+	// Esc goes back to the session it was opened from; ⌘ chords and other keys go on (no session
+	// is current: they reach no tab; deck_modal_test.odin)
 	_ = ui_layout(1300, 800)
-	deck_toggle()
-	ev = {type = .CHAR, char_code = 'x'}
-	testing.expect(t, deck_event(&ev), "a character is the deck's")
-	ev = {type = .CLIPBOARD_PASTED}
-	testing.expect(t, deck_event(&ev), "a paste is the deck's")
-	testing.expect(t, dk_key(.C, u32(sapp.MODIFIER_CTRL)), "⌃C never reaches the terminal")
-	testing.expect(t, dk_key(.LEFT, u32(sapp.MODIFIER_SUPER)), "⌘← (line start) never reaches it")
-	testing.expect(t, !dk_key(.K, u32(sapp.MODIFIER_SUPER)), "⌘K goes on")
+	dk_toggle()
 	_ = ui_layout(1300, 800)
-	db, _ := dk_box("deck")
-	ev = {type = .FILES_DROPPED, mouse_x = db.x + db.width / 2, mouse_y = db.y + db.height / 2}
-	testing.expect(t, deck_event(&ev), "files dropped on the deck: not pasted into the terminal under it")
-	testing.expect(t, deck.shown, "still shown")
+	testing.expect(t, !dk_key(.C, u32(sapp.MODIFIER_CTRL)), "⌃C: not the deck's")
+	testing.expect(t, !dk_key(.W, u32(sapp.MODIFIER_SUPER)), "⌘W: not the deck's")
+	testing.expect(t, dk_shown(), "still shown")
 	dk_key(.ESCAPE)
-	testing.expect(t, !deck.shown, "Esc goes back")
-	testing.expect(t, !dk_key(.DOWN), "closed: the keys are the terminal's again")
+	testing.expect(t, !dk_shown(), "Esc goes back")
+	testing.expect_value(t, state.current_session, want)
+	testing.expect_value(t, state.focus_widget, "") // the keys are the tabs' again
 
 	// many cards in a short window: ↓ to the last one scrolls it into the grid's view
 	for i in u64(0) ..< 30 do dk_session(5000 + i * 10, fmt.tprintf("More %d", i), dk_tab(5001 + i * 10, "working", time.Duration(60 - i) * time.Minute))
-	deck_toggle()
+	dk_toggle()
 	for _ in 0 ..< 3 do _ = ui_layout(1300, 500)
 	for _ in 0 ..< 30 {
 		dk_key(.DOWN)
@@ -435,38 +443,41 @@ deck_toggle_and_navigation :: proc(t: ^testing.T) {
 	testing.expect(t, ui_hit() == Hit(Hit_Button(.Deck)), "the button's hit")
 	core.inbox_drain()
 	button_click(.Deck)
-	testing.expect(t, deck.shown, "the button shows it")
+	testing.expect(t, dk_shown(), "the button shows it")
 	cmd, applies := action_by_id("deck_view").make()
 	testing.expect(t, applies && cmd == nil, "no command: the window's own")
 	action_run("deck_view")
-	testing.expect(t, !deck.shown, "again: back")
+	testing.expect(t, !dk_shown(), "again: back")
 
-	// its row clicked (also the session already on screen): the deck goes
+	testing.expect_value(t, state.current_session, u64(100)) // back where it was opened
+
+	// its row clicked (also the session it was opened from): the deck goes
 	action_run("deck_view")
+	core.inbox_drain() // the frame runs it before its layout
+	_ = ui_layout(1600, 900)
+	testing.expect(t, dk_shown(), "shown")
+	testing.expect_value(t, state.current_session, u64(0)) // no session current while it shows
 	ui_do(core.Focus_Session{session = 100})
-	testing.expect(t, !deck.shown, "a row's click")
+	testing.expect(t, !dk_shown(), "a row's click")
+	_ = ui_layout(1600, 900)
+	testing.expect(t, !deck.on, "ended")
+	// another session shown (⌥⌘A from the core, a notification): the deck goes
+	action_run("deck_view")
 	core.inbox_drain()
-	// another session on screen (⌥⌘A from the core, a notification): at the next layout
-	action_run("deck_view")
 	_ = ui_layout(1600, 900)
-	testing.expect(t, deck.shown, "shown")
-	state.current_session = 200
+	testing.expect(t, dk_shown(), "shown")
+	ui_do(core.Focus_Session{session = 200})
+	core.inbox_drain()
 	_ = ui_layout(1600, 900)
-	testing.expect(t, !deck.shown, "another session on screen")
-	// another tab of the session on screen
-	action_run("deck_view")
-	_ = ui_layout(1600, 900)
-	core.find_session(200).active_tab = 202
-	for &p in core.find_session(200).panes do p.active = 202
-	_ = ui_layout(1600, 900)
-	testing.expect(t, !deck.shown, "another tab on screen")
+	testing.expect(t, !dk_shown() && !deck.on, "another session on screen")
 
-	// no session open: in the empty centre's place, its summary line and buttons kept
-	state.current_session = 0
+	// opened with no session shown: in the empty centre's place, its summary line and buttons kept
+	core.run_command(core.Show_No_Session{}, {kind = .UI})
 	_ = ui_layout(1600, 900)
 	_, rows := dk_box("fleetrow", 0)
 	testing.expect(t, rows, "the empty centre's rows without the deck")
 	action_run("deck_view")
+	core.inbox_drain() // the frame runs it before its layout
 	cmds := ui_layout(1600, 900)
 	_, rows = dk_box("fleetrow", 0)
 	testing.expect(t, !rows, "the deck in their place")
@@ -509,7 +520,7 @@ deck_layout_audit :: proc(t: ^testing.T) {
 	dk_session(500, "Bump deps", dk_tab(501, "unseen", time.Minute))
 	for i in u64(0) ..< 6 do dk_session(1000 + i * 10, fmt.tprintf("Job %d", i), dk_tab(1001 + i * 10, "working", time.Duration(i + 1) * time.Minute))
 	state.current_session = 200
-	deck_toggle()
+	dk_toggle()
 	problems := 0
 	report :: proc(t: ^testing.T, bad: []string, problems: ^int) {
 		for b in bad {

@@ -102,7 +102,7 @@ MENUBAR := [?]Bar_Item {
 		{action = "toggle_left", check = proc() -> bool {return state.layout.left_open}},
 		{action = "show_sessions", title = "Sessions", check = proc() -> bool {return left_tab_shown(.Sessions)}},
 		{action = "attention_view", title = "Attention view", check = proc() -> bool {return left_tab_shown(.Sessions) && state.sidebar.view == .Attention}},
-		{action = "deck_view", title = "Deck view", check = proc() -> bool {return deck.shown}},
+		{action = "deck_view", title = "Deck view", check = proc() -> bool {return deck_shown()}},
 		{action = "show_files", title = "Files", check = proc() -> bool {return left_tab_shown(.Files)}},
 		{id = "settings_tab", action = "settings", title = "Settings", no_key = true, check = proc() -> bool {return left_tab_shown(.Settings)}},
 		{action = "show_jobs", title = "Jobs", check = proc() -> bool {return left_tab_shown(.Jobs)}},

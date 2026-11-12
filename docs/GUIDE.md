@@ -475,8 +475,9 @@ IDLE  4 ›
 each open session on this Mac and on every machine that is online, in the Attention view's order
 (needs you, finished, working, idle), each group under its own label. Open it with ⇧⌘\ (as
 Safari shows all its tabs), the four-cards button left of the fleet pill in the top bar, **Deck
-view** in the View menu or **Toggle Deck view** in the palette. The session you were in keeps
-running behind it.
+view** in the View menu or **Toggle Deck view** in the palette. While it shows, no session is on
+screen, as when none is open: every session keeps running, and none has a tab bar, tabs or
+panes until you go back.
 
 ```
 8 sessions · 2 need you · 1 finished · 3 working
@@ -499,8 +500,17 @@ NEEDS YOU  2
   the tab that needs you; the deck goes away. Hover a card for its **…** (the session's menu, as
   on its row; right-click works too). Esc, ⇧⌘\ again or the button goes back to the session.
   Opening a session any other way (its row, ⌥⌘A, a notification) closes the deck too.
+- Since no session is on screen, nothing you type, paste, click or scroll reaches one, and none is
+  marked seen: a session that finishes meanwhile stays unread. Shortcuts that act on a tab (⌘W,
+  ⌘T, split…) do nothing, as with no session open; the ones that go somewhere (⌥⌘A, the session
+  shortcuts, ⌥⌘`) go there, and the deck goes. The window's title is "Deckhand" and the Open
+  section has no current row while it shows. If you quit with the deck showing, Deckhand opens
+  next time with no session on screen.
+- [Peek](#peek) works over the deck: **Peek** in a card's **…** menu, or ⌃⌥⌘A, shows that session
+  in its panel over the cards (the session you were in too); Esc closes the peek and leaves the
+  deck, **Open** (⌘↩) goes to the session and the deck goes too. Opening the deck closes a peek.
 - As many columns as fit (each card at least 260 px wide); the grid scrolls when it is taller
-  than the window. With no session open the deck keeps the empty centre's counts and buttons;
+  than the window. Opened with no session on screen, the deck keeps the empty centre's buttons;
   with nothing open at all it says "Nothing running. Start a chat or open a project."
 
 ### Peek

@@ -607,6 +607,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "open_session":        cmd = Open_Session_Cmd{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id")}
 	case "new_chat":            cmd = New_Chat{project_id = get_u64(&r, "project_id")}
 	case "focus_session":       cmd = Focus_Session{session = get_u64(&r, "session"), reopen = ui_flag(&r, "reopen")}
+	case "show_no_session":     cmd = Show_No_Session{}
 	case "next_needing_you":    cmd = Next_Needing_You{back = opt_bool(&r, "back").? or_else false}
 	case "close_session":       cmd = Close_Session{session = get_u64(&r, "session"), confirm = get_str(&r, "confirm", optional = true), ask = ui_flag(&r, "ask"), comments = opt_comments(&r)}
 	case "new_shell_tab":       cmd = New_Shell_Tab{session = get_u64(&r, "session"), cwd = get_str(&r, "cwd", optional = true), pane = opt_u64(&r, "pane")}

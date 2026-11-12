@@ -556,6 +556,8 @@ sidebar :: proc(cs: ^core.Open_Session, h: f32) {
 			here_folded := state.settings.remote_machines && state.sidebar.folded[.This_Mac]
 			if state.settings.remote_machines do machine_header(0, th.done, core.machine_here_name(), "this Mac", "", here_folded ? len(core.sidebar_open()) : 0, text_w_max)
 			if here_folded {
+				// renaming a row it hides (the palette's Rename project): the field on top, as under a folded Projects
+				if state.focus_widget == "rename_project" || state.focus_widget == "rename_session" do rename_field_layout()
 				for s in core.sidebar_open() do if core.session_waiting(s.pi_session_id) do open_row(s, cs, text_w_max)
 			} else {
 				open_group(cs, text_w_max)
@@ -804,8 +806,8 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		if !chat do n += 1
 		// which agent it runs (a Claude-only session, else pi), and the account of several
 		harness := s.agent == .Claude ? core.Harness.Claude : core.Harness.Pi
-		tag := ""
-		if s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account)
+		tag := "" // another machine's account is that machine's, unknown here: never this Mac's label
+		if !remote && s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account)
 		if tag != "" {
 			right += text_w(tag, FONT_UI_SMALL)
 			n += 1
@@ -1109,7 +1111,7 @@ session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_S
 			if st != .Waiting && !r.hidden && state.sidebar.sort[chat ? .Chats : .Sessions] == .Recent do when_ = core.ago(s.modified)
 			if st != .Waiting && !r.hidden && s.path == "" && !s.claude do when_ = "new" // pi has not written it yet
 			if st != .Waiting && s.gone do when_ = "transcript gone" // Claude Code removed it (claude_disk.odin)
-			tag := core.session_account_tag(s^) // several Claude accounts: which one (claude_accounts.odin)
+			tag := remote ? "" : core.session_account_tag(s^) // several Claude accounts: which one (claude_accounts.odin; another machine's is unknown here)
 			// children: harness icon, title, [account], spacer, then time and dot, or the buttons
 			right: f32
 			n := 3

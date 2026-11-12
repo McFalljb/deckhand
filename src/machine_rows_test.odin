@@ -9,6 +9,7 @@ package main
 
 import "base:runtime"
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -154,4 +155,64 @@ machine_rows_remote :: proc(t: ^testing.T) {
 clay_found :: proc(name: string, i: u32) -> bool {
 	_ = ui_layout(2000, 1400)
 	return clay.GetElementData(clay.ID(name, i)).found
+}
+
+// Review round 1: a remote Claude row never shows this Mac's account label; Enter in the filter
+// selects a remote project the filter left; renaming while this Mac is folded still shows the field.
+@(test)
+machine_rows_review :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	state^ = core.State{}
+	state.settings.remote_machines = true
+	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 400, .Sessions
+	state.machines = make([]core.Machine_View, 1)
+	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online}
+	r: core.State
+	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/jb/garden"), label = strings.clone("garden")})
+	append(&r.projects, core.Project{id = 6, group = .Projects, cwd = strings.clone("/home/jb/orchard"), label = strings.clone("orchard")})
+	s := core.Open_Session{id = 9, project_id = 5, agent = .Claude, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/jb/garden"), title = strings.clone("Prune the roses")}
+	append(&s.tabs, core.Tab{id = 10, kind = core.Claude_Tab{}, title = strings.clone("claude"), status = .Running})
+	s.active_tab = 10
+	append(&r.open_sessions, s)
+	r.selected_project = 5
+	append(&r.sessions, core.Session{id = strings.clone("def"), path = strings.clone("/home/jb/.claude/def.jsonl"), title = strings.clone("Water the tomatoes"), when_ = strings.clone("2026-11-10 10:00"), modified = time.time_add(time.now(), -2 * time.Hour), claude = true})
+	m: core.Machine_Mirror
+	core.mirror_merge(3, &r, &m)
+	acct := fmt.tprintf("%s/pd-mrows-acct-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	os.make_directory_all(acct)
+	append(&state.settings.claude_accounts, core.Claude_Account_Setting{dir = strings.clone(acct), label = strings.clone("Work"), added = true})
+	defer {
+		core.mirror_unmerge(3)
+		core.mirror_free(&m)
+		core.replica_free(&r, runtime.heap_allocator())
+		state^ = core.State{}
+		os.remove(acct)
+	}
+	pid, _ := core.id_pack(3, 5)
+	orchard, _ := core.id_pack(3, 6)
+
+	// several accounts here: a remote Claude row (open, or its project's) has no tag (its account is
+	// that machine's, unknown here), never this Mac's default's
+	testing.expect(t, core.claude_accounts_many(), "two accounts here")
+	state.selected_project = pid
+	core.mirror_sessions_show(3, &m)
+	got := drawn_text()
+	testing.expectf(t, strings.contains(got, "Prune the roses") && strings.contains(got, "Water the tomatoes") && !strings.contains(got, "\nClaude\n"), "no account tag: %q", got)
+
+	// Enter in the filter: the remote project it left is selected, as a click would
+	state.selected_project = 0
+	state.sidebar.filter = "orch"
+	cmd, ok := core.sidebar_best_match().(core.Select_Project)
+	testing.expectf(t, ok && cmd.project_id == orchard, "best match: %v", core.sidebar_best_match())
+	state.sidebar.filter = ""
+
+	// renaming while this Mac's header is folded: its field shows (on top, as under a folded Projects)
+	state.sidebar.folded[.This_Mac] = true
+	for w in ([]string{"rename_project", "rename_session"}) {
+		state.focus_widget = w
+		_ = ui_layout(2000, 1400)
+		testing.expectf(t, clay.GetElementData(clay.ID("rename_field")).found, "%s: the field shows", w)
+	}
+	state.focus_widget = ""
 }

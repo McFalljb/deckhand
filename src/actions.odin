@@ -540,6 +540,9 @@ ACTIONS := [?]Action {
 	{id = "tab_9", label = "Tab 9", keys = "⌘9", no_palette = true, make = proc() -> (core.Command, bool) {return tab_nth(8)}},
 	{id = "next_session", label = "Next session", keys = "⌥⌘↓", make = proc() -> (core.Command, bool) {return session_step(1)}},
 	{id = "prev_session", label = "Previous session", keys = "⌥⌘↑", make = proc() -> (core.Command, bool) {return session_step(-1)}},
+	// the core picks where (core/needing_you.odin): "Nothing needs you" when nothing does
+	{id = "next_needing_you", label = "Next needing you", keys = "⌥⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{}, true}},
+	{id = "prev_needing_you", label = "Previous needing you", keys = "⌥⇧⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{back = true}, true}},
 	// the guide's copy in the data dir (agent.odin), in a Markdown tab: read-only (editor_load)
 	{id = "user_guide", label = "Deckhand user guide", make = proc() -> (core.Command, bool) {
 		p := core.agent_guide_path()

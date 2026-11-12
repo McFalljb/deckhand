@@ -45,6 +45,11 @@ Focus_Session :: struct {
 	session: u64, // open session id
 	reopen:  bool, // the user opened it (its row, the palette): its pi starts again if it exited (UI only)
 }
+// The next open session that needs the user, on any online machine, and its tab that does
+// (needing_you.odin: the order), focused as a click on that tab would. back: the previous one.
+Next_Needing_You :: struct {
+	back: bool,
+}
 // Stops an open session's tabs and forgets it (open sessions, saved
 // workspace); pi's session file stays. Confirms (class tab_close) while any
 // of its tabs would ask to close.
@@ -490,6 +495,7 @@ Command :: union {
 	Open_Session_Cmd,
 	New_Chat,
 	Focus_Session,
+	Next_Needing_You,
 	Close_Session,
 	New_Shell_Tab,
 	Close_Tab,
@@ -1064,6 +1070,23 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		focus_session(c.session, caller)
 		if c.reopen do restart_if_dead(s, caller.kind == .UI)
 		return {ok = true}, true
+	case Next_Needing_You:
+		s, tab := next_needing_target(c.back, hub = caller_from_hub(caller))
+		if s == nil || tab == nil {
+			if caller.kind == .UI do window_toast("Nothing needs you")
+			return {ok = true}, false
+		}
+		data := fmt.tprintf(`{{"session":%d,"tab_id":%d}}`, s.id, tab.id)
+		if s.machine == 0 { 	// as focus_tab
+			session_show_tab(s, tab.id)
+			focus_session(s.id, caller)
+			return {ok = true, data = data}, true
+		}
+		// another machine's: as a click on its row, then on its tab (machine_route.odin: the
+		// session is focused here and there; the tab, on that machine)
+		if r := run_command(Focus_Session{session = s.id}, caller); !r.ok do return r, false
+		if session_focused_id(s) != tab.id do run_command(Focus_Tab{tab_id = tab.id}, caller)
+		return {ok = true, data = data}, false
 	case Close_Session:
 		s := find_session(c.session)
 		if s == nil do return fail("no such session"), false

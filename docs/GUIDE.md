@@ -495,6 +495,13 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   address field. Type an address and press Enter (or **Go**). See [Browser tabs](#browser-tabs).
 - **To switch tabs**, click one or press ⌘1–⌘9; ⇧⌘] and ⇧⌘[ go to the next and previous tab.
   ⌥⌘↓ and ⌥⌘↑ go to the next and previous open session (Window menu).
+- **To go to what needs you**, press ⌥⌘A (**Next needing you**, Window menu or the palette): the
+  next open session that needs you, on this Mac or another machine that is online, with the tab
+  that needs you on screen. Waiting for you (a permission, a question, a login) comes first, then
+  errors, then finished and not seen; within each, this Mac's sessions and then each machine's, in
+  the order you opened them. Press it again for the next one; it goes round. The session you are
+  in counts only when nothing else needs you (then its next tab that does). ⌥⇧⌘A (**Previous
+  needing you**) goes back. With nothing needing you it says "Nothing needs you".
 - **To close a tab**, click its **×** or press ⌘W. Closing a tab that is busy asks first: a shell
   running a command, or an editor with unsaved changes.
 - **Right-click a tab** for its menu: **Split pane right**, **Split pane down**, the **Move tab to
@@ -1974,6 +1981,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | round the tabs of the pane with the keyboard |
 | Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | the pane with the keyboard's tabs; in the palette: run its rows |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
+| Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | waiting for you, then errors, then finished and not seen, on every online machine ([To go to what needs you](#tabs)) |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | a new shell in the new pane |
 | Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |
 | Even out panes |  | every pane gets equal room |
@@ -2085,6 +2093,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Bigger text, Smaller text, Actual text size | ⌘+, ⌘−, ⌘0 | the terminals' and the editor's text |
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | |
+| Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | |
 | Close pane (its tabs stay) | ⇧⌘W | |
 | Even out panes |  | |

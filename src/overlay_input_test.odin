@@ -189,3 +189,76 @@ overlay_deck_enter_does_not_repeat :: proc(t: ^testing.T) {
 	release(.X)
 	testing.expect_value(t, pk_take(state.current_session + 1), "x")
 }
+
+// Review of #122: a modifier pressed while a suppressed key is still held (Esc held after it
+// closed a peek, then Shift) does not let that key's repeats through.
+@(test)
+overlay_modifier_does_not_resume_repeat :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	pk_reset()
+	defer pk_reset()
+	pk_session(100, "Here", pk_tab(101))
+	pk_session(200, "There", pk_tab(201, "waiting", 3 * time.Minute))
+	state.current_session = 100
+	_ = pk_view(101, 80, 24)
+	_ = pk_view(201, 80, 24)
+	testing.expect(t, peek_open_session(200), "peeks")
+	press(.ESCAPE, 0)
+	testing.expect(t, !peek_is_open(), "Esc closed it")
+	press(.ESCAPE, 0, repeat = true)
+	press(.LEFT_SHIFT, 0)
+	press(.ESCAPE, 0, repeat = true)
+	testing.expect_value(t, pk_take(101), "")
+	release(.LEFT_SHIFT)
+	release(.ESCAPE)
+}
+
+// Review of #122: a key held in an app tab gets its release there (it is never left down) when
+// a menu came and went over it and a repeat was swallowed meanwhile.
+@(test)
+overlay_app_key_released :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	pk_reset()
+	defer pk_reset()
+	pk_session(100, "Here", pk_tab(101))
+	state.current_session = 100
+	a := new(App_Proc)
+	a^ = {tab_id = 101, pid = 1}
+	apps[101] = a
+	defer {
+		delete_key(&apps, 101)
+		delete(a.held)
+		free(a)
+	}
+	press(.J, 'j')
+	testing.expect(t, len(a.held) == 1, "J down in the app")
+	menu_open(Menu_New{}, {200, 40})
+	press(.J, 'j', repeat = true)
+	menu_close()
+	press(.J, 'j', repeat = true)
+	release(.J)
+	testing.expectf(t, len(a.held) == 0, "J let go in the app: %v", a.held)
+}
+
+// Review of #122: Enter held to close the job sheet does not repeat into the terminal after it.
+@(test)
+overlay_job_sheet_enter_does_not_repeat :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	pk_reset()
+	defer pk_reset()
+	pk_session(100, "Here", pk_tab(101))
+	state.current_session = 100
+	_ = pk_view(101, 80, 24)
+	press(.J, 'j')
+	release(.J)
+	_ = pk_take(101)
+	job_sheet.open = true
+	press(.ENTER, '\r')
+	job_sheet.open = false // as its Enter closed it
+	press(.ENTER, '\r', repeat = true)
+	press(.ENTER, '\r', repeat = true)
+	testing.expect_value(t, pk_take(101), "")
+	release(.ENTER)
+}

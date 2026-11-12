@@ -473,9 +473,6 @@ peek_key :: proc(e: ^sapp.Event) -> bool {
 // Input while peeking (main.odin event, before anything else takes it): its own ⌘ chords, then
 // the bell popover's (popover_event). Nothing reaches the peeked terminal. True: taken.
 peek_event :: proc(e: ^sapp.Event) -> bool {
-	// a key's repeats after an overlay (this one too) opened or closed go nowhere: the key that
-	// opened or closed it (⌘W, Esc, ⌘↩), one held in the terminal under it (ui_bell.odin)
-	if popover_repeat_event(e) do return true
 	// the buttons down (the system's word on a move)
 	peek_buttons |= peek_pressed
 	peek_pressed = 0

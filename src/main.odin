@@ -667,6 +667,9 @@ event :: proc(e: ^sapp.Event) {
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
 	if e.type == .MOUSE_DOWN || e.type == .KEY_DOWN || e.type == .MOUSE_SCROLL do tip_dismiss()
 	only_cmd := e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) == sapp.MODIFIER_SUPER
+	// a key's repeats after an overlay or sheet opened or closed go nowhere: the key that opened
+	// or closed it (Esc, Enter, ⌘W), one held in the terminal under it (ui_bell.odin)
+	if popover_repeat_event(e) do return
 	// the job sheet (ui_job_sheet.odin) is modal: it takes all input, the
 	// global ⌘ shortcuts too (they would move the keyboard from under it),
 	// and files dropped on it go nowhere; ⌘Q still quits

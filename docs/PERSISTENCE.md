@@ -167,9 +167,10 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
 - `sidebar`: only what differs from the defaults. Pins (in pinned order) and hidden items by
   identity (project cwd with symlinks resolved, pi session id or a Claude row's Claude session id), so they survive rescans; project
   entries whose folder no longer exists are dropped at save;
-  the sort per section (`projects`, `sessions`, `chats`; default `recent`), folded sections and
+  the sort per section (`projects`, `sessions`, `chats`; default `recent`), folded sections,
+  `view` (`attention`: the Sessions column's Attention view; default `projects`, not written) and
   `show_hidden`. The filter text and quick filters are not saved. Restored with the internal
-  `restore_sidebar`, then `set_sort`, `set_sidebar_folded`, `set_filter`.
+  `restore_sidebar`, then `set_sort`, `set_sidebar_folded`, `set_sidebar_view`, `set_filter`.
 - `settings`: only non-default values. `confirm`/`confirm_close` are user-only settings; reading
   them back from the user's own file is the user setting them.
 - Focus always comes back to the terminal (a text field's content is not saved).
@@ -230,7 +231,7 @@ ordinary commands with caller `internal` (so they appear in the command log): `s
 `rename_project`, `restore_session` (internal only: an open session with its tabs `not_started`;
 with `"home": true` the Home session), `set_panel`, `set_panel_collapsed`, `set_left_tab`,
 `set_layout`, `files_expand`, `restore_sidebar` (internal only), `set_sort`,
-`set_sidebar_folded`, `set_filter` (`show_hidden`), `select_project`.
+`set_sidebar_folded`, `set_sidebar_view`, `set_filter` (`show_hidden`), `select_project`.
 
 - **Held tabs first.** Tabs with a `held` id the session holder still lists are adopted at once
   (not lazily): the terminal comes back from the handover snapshot plus the holder's tail

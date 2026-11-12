@@ -566,15 +566,19 @@ sidebar_open :: proc() -> []^Open_Session {
 	words := filter_words()
 	for &s in state.open_sessions {
 		if s.home || s.machine != 0 do continue // another machine's: under its name (machine_sessions)
-		st := session_quick_status(&s)
-		if st != .Waiting { 	// waiting work always shows
-			if _, ok := filter_score(words, open_session_title(&s), session_project_name(&s)); !ok do continue
-			if !quick_ok(st, session_pinned(s.pi_session_id) >= 0) do continue
-		}
-		append(&rows, &s)
+		if open_row_shown(&s, words) do append(&rows, &s)
 	}
 	open_order(rows[:])
 	return rows[:]
+}
+
+// Whether an open session's row passes the filter (words: filter_words) and the quick filters:
+// the Open group's, another machine's and the Attention view's rows. Waiting work always shows.
+open_row_shown :: proc(s: ^Open_Session, words: []string) -> bool {
+	st := session_quick_status(s)
+	if st == .Waiting do return true
+	if _, ok := filter_score(words, open_session_title(s), session_project_name(s)); !ok do return false
+	return quick_ok(st, session_pinned(s.pi_session_id) >= 0)
 }
 
 // The Open group's order (sidebar_open, machine_open_rows): the current session, the waiting ones,
@@ -602,12 +606,7 @@ machine_open_rows :: proc(no: u64) -> []^Open_Session {
 	words := filter_words()
 	for &s in state.open_sessions {
 		if s.home || s.machine != no do continue
-		st := session_quick_status(&s)
-		if st != .Waiting {
-			if _, ok := filter_score(words, open_session_title(&s), session_project_name(&s)); !ok do continue
-			if !quick_ok(st, session_pinned(s.pi_session_id) >= 0) do continue
-		}
-		append(&rows, &s)
+		if open_row_shown(&s, words) do append(&rows, &s)
 	}
 	open_order(rows[:])
 	return rows[:]

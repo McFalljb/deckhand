@@ -1,5 +1,8 @@
 package core
 
+import "core:slice"
+import "core:time"
+
 // "Next needing you" (next_needing_you; ⌥⌘A, ⇧⌥⌘A back): the open session that needs the user
 // next, on this Mac or on another machine that is online, and the tab in it that does. The core
 // picks it from State; the window only sends the command.
@@ -9,12 +12,14 @@ package core
 //      ended its turn asking something (the Waiting and Question dots);
 //   2. stopped with an error (Error);
 //   3. finished, not seen yet (Unseen).
-// Within a tier: this Mac's sessions, then each online machine's (state.machines' order), each in
-// the order they were opened (state.open_sessions). That order does not move when the user visits
-// one, so pressing again walks on and wraps round (the Open group's own order puts the current
-// session first and the most recently shown next, which would bounce between two). No time is
-// used: a tab's status time is not known for every source (Claude Code's hooks, other machines'
-// tabs), so "longest waiting first" would rank only some of them.
+// Within a tier: the longest in that state first (the session's earliest Tab.status_since among
+// its tabs of that tier: status_since_sweep here, mirror_merge for another machine's), then those
+// whose start is not known; ties (and the unknown) in machine order (this Mac, then each online
+// machine in state.machines' order), each in the order opened (state.open_sessions). A visit
+// moves nothing (the time is the status's, not the focus's), so pressing again walks on and wraps
+// round (the Open group's own order puts the current session first and the most recently shown
+// next, which would bounce between two). The Attention view (attention_rows) lists the same order:
+// ⌥⌘A walks it, starting after the current session.
 //
 // next_needing_target: the one after the current session in that order (before it, back), wrapping
 // round; the first (the last, back) when the current session needs nothing. The current session is
@@ -42,6 +47,7 @@ tab_need :: proc(t: Tab) -> int {
 Needing :: struct {
 	session: ^Open_Session,
 	tier:    int, // its most urgent tab's
+	since:   time.Time, // since when it has been at that tier ({}: not known)
 }
 
 // Whether machine no's sessions count: this Mac's always, another machine's while it is online
@@ -63,21 +69,79 @@ needing_you :: proc(hub := false, working := false) -> []Needing {
 			if s.home || s.machine != no do continue
 			best := session_need(&s)
 			if best == NEED_WORKING && !working do continue
-			if best != NEED_NONE do append(out, Needing{session = &s, tier = best})
+			if best != NEED_NONE do append(out, Needing{session = &s, tier = best, since = session_need_since(&s, best)})
 		}
 	}
 	if needing_machine_ok(0, hub) do add(&out, 0, working)
 	for m in state.machines do if needing_machine_ok(m.no, hub) do add(&out, m.no, working)
-	// by tier; stable, so each tier keeps the machines' and the opening order
-	for i in 1 ..< len(out) {
-		x := out[i]
-		j := i
-		for j > 0 && out[j - 1].tier > x.tier {
-			out[j] = out[j - 1]
-			j -= 1
-		}
-		out[j] = x
+	// by tier, then the longest in it first; stable, so ties keep the machines' and the opening order
+	slice.stable_sort_by(out[:], needing_less)
+	return out[:]
+}
+
+// needing_you's order: tier, then the earlier start (a known one before an unknown one).
+needing_less :: proc(a, b: Needing) -> bool {
+	if a.tier != b.tier do return a.tier < b.tier
+	if (a.since == {}) != (b.since == {}) do return b.since == {}
+	return a.since._nsec < b.since._nsec
+}
+
+// Since when s has been at tier: its tier tab's status_since ({}: not known).
+session_need_since :: proc(s: ^Open_Session, tier: int) -> time.Time {
+	if t := session_tier_tab(s, tier); t != nil do return t.status_since
+	return {}
+}
+
+// The tab that puts s at tier in needing_you's order and that its Attention row draws (mark, age,
+// message): of its tabs at that tier, the longest so (the earliest known status_since), else the
+// first in tab order; nil: none is.
+session_tier_tab :: proc(s: ^Open_Session, tier: int) -> (best: ^Tab) {
+	for &t in s.tabs {
+		if tab_tier(t) != tier do continue
+		if best == nil || (t.status_since != {} && (best.status_since == {} || t.status_since._nsec < best.status_since._nsec)) do best = &t
 	}
+	return
+}
+
+// The Attention view's groups (ui_sidebar.odin attention_list), in its order.
+Attention_Group :: enum {
+	Needs_You, // waiting for you, then errors
+	Finished, // finished, not seen yet
+	Working,
+	Idle, // every other open session
+}
+
+Attention_Row :: struct {
+	session: ^Open_Session,
+	group:   Attention_Group,
+	tier:    int, // needing_you's (NEED_NONE: idle)
+}
+
+attention_group :: proc(tier: int) -> Attention_Group {
+	switch tier {
+	case NEED_WAITING, NEED_ERROR: return .Needs_You
+	case NEED_UNSEEN:              return .Finished
+	case NEED_WORKING:             return .Working
+	}
+	return .Idle
+}
+
+// The Attention view's rows (temp allocator): needing_you's order with the working sessions (so
+// its first row is where ⌥⌘A goes), then every other open session but Home, idle, the most
+// recently shown first (an offline machine's too: what it showed last). Through the left column's
+// filter and quick filters as the Open group's rows (open_row_shown: waiting work always shows).
+attention_rows :: proc() -> []Attention_Row {
+	out := make([dynamic]Attention_Row, context.temp_allocator)
+	words := filter_words()
+	for x in needing_you(working = true) do if open_row_shown(x.session, words) do append(&out, Attention_Row{x.session, attention_group(x.tier), x.tier})
+	first_idle := len(out)
+	for &s in state.open_sessions {
+		if s.home do continue
+		listed := false
+		for r in out[:first_idle] do if r.session == &s do listed = true
+		if !listed && open_row_shown(&s, words) do append(&out, Attention_Row{&s, .Idle, NEED_NONE})
+	}
+	slice.stable_sort_by(out[first_idle:], proc(a, b: Attention_Row) -> bool {return a.session.shown_at > b.session.shown_at})
 	return out[:]
 }
 

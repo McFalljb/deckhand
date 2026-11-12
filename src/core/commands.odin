@@ -178,6 +178,11 @@ Set_Sidebar_Folded :: struct {
 	section: Sidebar_Fold,
 	folded:  bool,
 }
+// The Sessions column's view: By project (the tree) or Attention (one list by what needs you).
+// The user's at this Mac only (a layout setting); saved.
+Set_Sidebar_View :: struct {
+	view: Sidebar_View,
+}
 // Opens or collapses a parent or group row of the Projects tree (its folder
 // path; project_tidy.odin). Saved; collapsed by default.
 Set_Row_Expanded :: struct {
@@ -535,6 +540,7 @@ Command :: union {
 	Set_Hidden,
 	Set_Sort,
 	Set_Sidebar_Folded,
+	Set_Sidebar_View,
 	Set_Row_Expanded,
 	Set_Filter,
 	Reveal_Path,
@@ -1407,6 +1413,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Set_Sidebar_Folded:
 		if state.sidebar.folded[c.section] == c.folded do return {ok = true}, false
 		state.sidebar.folded[c.section] = c.folded
+		return {ok = true}, true
+	case Set_Sidebar_View:
+		if state.sidebar.view == c.view do return {ok = true}, false
+		state.sidebar.view = c.view
 		return {ok = true}, true
 	case Set_Row_Expanded:
 		if !strings.has_prefix(c.path, "/") do return fail("path must be absolute"), false

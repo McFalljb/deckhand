@@ -363,12 +363,21 @@ Sidebar :: struct {
 	hidden_sessions: [dynamic]string, // pi session ids
 	sort:            [Sort_Section]Sort_By,
 	folded:          [Sidebar_Fold]bool, // a section's rows are folded under its header
+	view:            Sidebar_View, // the Sessions column: the tree, or one list by what needs you
 	show_hidden:     bool,
 	filter:          string, // words matched fuzzily against names, paths and titles
 	only_running:    bool, // quick filters: running or waiting (either), pinned (also)
 	only_waiting:    bool,
 	only_pinned:     bool,
 	expanded:        [dynamic]string, // parent and group rows shown open, by folder path (project_tidy.odin); others are collapsed
+}
+
+// How the Sessions column shows: the tree (machine › project › session), or one flat list of the
+// open sessions on every machine, by what needs you (the Attention view: needing_you.odin
+// attention_rows, ui_sidebar.odin attention_list). Saved.
+Sidebar_View :: enum {
+	Projects, // "By project"
+	Attention,
 }
 
 // Left column sections that fold.

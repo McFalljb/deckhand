@@ -101,6 +101,7 @@ MENUBAR := [?]Bar_Item {
 	{title = "View", sub = []Bar_Item {
 		{action = "toggle_left", check = proc() -> bool {return state.layout.left_open}},
 		{action = "show_sessions", title = "Sessions", check = proc() -> bool {return left_tab_shown(.Sessions)}},
+		{action = "attention_view", title = "Attention view", check = proc() -> bool {return left_tab_shown(.Sessions) && state.sidebar.view == .Attention}},
 		{action = "show_files", title = "Files", check = proc() -> bool {return left_tab_shown(.Files)}},
 		{id = "settings_tab", action = "settings", title = "Settings", no_key = true, check = proc() -> bool {return left_tab_shown(.Settings)}},
 		{action = "show_jobs", title = "Jobs", check = proc() -> bool {return left_tab_shown(.Jobs)}},
@@ -380,6 +381,7 @@ parse_keys :: proc(keys: string) -> (k: Bar_Key, ok: bool) {
 	}
 	switch rest {
 	case ",": k.code, k.equiv = .COMMA, ","
+	case ".": k.code, k.equiv = .PERIOD, "."
 	case "/": k.code, k.equiv = .SLASH, "/"
 	case "[": k.code, k.equiv = .LEFT_BRACKET, "["
 	case "]": k.code, k.equiv = .RIGHT_BRACKET, "]"

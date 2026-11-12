@@ -427,6 +427,36 @@ for how long. Click a row to go there. **Go to next** (⌥⌘A) shows while some
 next to **New chat** and **Add project…**. With nothing going on, it says "No session open" as
 before.
 
+**The Attention view** turns the Sessions tab into one list of your open sessions on every
+machine, ordered by what needs you. Switch with **By project | Attention** at the top of the
+Sessions tab, ⌥⌘. (**Attention view** in the View menu; **Toggle Attention view** in the
+palette); Deckhand remembers which one you use.
+
+```
+NEEDS YOU  2
+ api · Schema              9m · Which index?        nuc       ?
+ web · Login page          3m · Apply these edits?  this Mac  ⚿
+FINISHED  1
+ infra · Bump deps                              1m  studio    ✓
+WORKING  3
+ deckhand · Relay                              12m  this Mac  ◜
+IDLE  4 ›
+```
+
+- **NEEDS YOU** is waiting for you (a permission, a question, a login), then stopped with an
+  error; **FINISHED** finished while you were not looking; **WORKING** is busy and needs nothing;
+  **IDLE** is every other open session (folded: click its heading to show them). An empty group
+  is left out.
+- Within a group, the one that has been in that state longest comes first. ⌥⌘A walks this same
+  order, starting after the session you are in.
+- Each row is an open session's row, as in the Open section: its project, title, how long, what it
+  asks, its mark, and the machine it runs on when you have more than one. Click a row (or press
+  Enter) to go to that session, on the tab that needs you. With the filter field focused (⇧⌘F),
+  ↑ and ↓ move through the rows. The filter and the **Running**, **Waiting** and **Pinned** chips
+  work on the list too; waiting sessions always show.
+- Machine headings, Projects, Chats and **+ Add a machine…** are not shown here. The line at the
+  bottom ("3 machines · By project") goes back to the tree.
+
 ### Everyday tasks
 
 - **To add a project**, click **+** on the PROJECTS heading and pick a folder, drop a folder onto
@@ -554,8 +584,9 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
 - **To go to what needs you**, press ⌥⌘A (**Next needing you**, Window menu or the palette): the
   next open session that needs you, on this Mac or another machine that is online, with the tab
   that needs you on screen. Waiting for you (a permission, a question, a login) comes first, then
-  errors, then finished and not seen; within each, this Mac's sessions and then each machine's, in
-  the order you opened them. Press it again for the next one; it goes round. The session you are
+  errors, then finished and not seen; within each, the one that has been so longest first (then
+  this Mac's sessions and each machine's, in the order you opened them), the order of the
+  [Attention view](#what-needs-you-everywhere). Press it again for the next one; it goes round. The session you are
   in counts only when nothing else needs you (then its next tab that does). ⌥⇧⌘A (**Previous
   needing you**) goes back. With nothing needing you it says "Nothing needs you".
 - **To close a tab**, click its **×** or press ⌘W. Closing a tab that is busy asks first: a shell
@@ -2067,6 +2098,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 |---|---|---|
 | Toggle left column | ⌘B | |
 | Sessions, Files, Settings | ⇧⌘E (Files) | the left column's tabs (⇧⌘E again: back to Sessions) |
+| Attention view | ⌥⌘. | the Sessions tab as one list across every machine, by what needs you, or back to the tree ([The Attention view](#what-needs-you-everywhere)) |
 | Jobs |  | the left column's Jobs tab (Atlas's jobs) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Toggle right panels | ⌥⌘B | the right column |
@@ -2092,7 +2124,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | round the tabs of the pane with the keyboard |
 | Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | the pane with the keyboard's tabs; in the palette: run its rows |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
-| Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | waiting for you, then errors, then finished and not seen, on every online machine ([To go to what needs you](#tabs)) |
+| Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | waiting for you, then errors, then finished and not seen, on every online machine, the longest first: the [Attention view](#what-needs-you-everywhere)'s order ([To go to what needs you](#tabs)) |
 | Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | the last one you looked at; the oldest |
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | the Open section's rows |
 | Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | this tab; this Mac's sessions |
@@ -2220,6 +2252,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | |
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | |
 | Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | |
+| Toggle Attention view | ⌥⌘. | the Sessions tab by what needs you, or by project |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | |
 | Close pane (its tabs stay) | ⇧⌘W | |
 | Even out panes |  | |

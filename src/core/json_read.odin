@@ -646,6 +646,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_hidden":          cmd = Set_Hidden{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), hidden = get_bool(&r, "hidden")}
 	case "set_sort":            cmd = Set_Sort{section = get_enum(&r, "section", SORT_SECTION_NAMES), by = get_enum(&r, "by", SORT_BY_NAMES)}
 	case "set_row_expanded":    cmd = Set_Row_Expanded{path = get_str(&r, "path"), expanded = get_bool(&r, "expanded")}
+	case "set_sidebar_view":    cmd = Set_Sidebar_View{view = get_enum(&r, "view", SIDEBAR_VIEW_NAMES)}
 	case "set_sidebar_folded":  cmd = Set_Sidebar_Folded{section = get_enum(&r, "section", FOLD_NAMES), folded = get_bool(&r, "folded")}
 	case "set_filter":          cmd = Set_Filter{text = opt_string(&r, "text"), running = opt_bool(&r, "running"), waiting = opt_bool(&r, "waiting"), pinned = opt_bool(&r, "pinned"), show_hidden = opt_bool(&r, "show_hidden")}
 	case "reveal":              cmd = Reveal_Path{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true)}
@@ -950,6 +951,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 		if fo, fok := sbv["folded"].(json.Object); fok {
 			for f in Sidebar_Fold do if b, has := fo[FOLD_NAMES[f]].(json.Boolean); has do sb.folded[f] = bool(b)
 		}
+		if _, has := sbv["view"]; has do sb.view = get_enum(&sr, "view", SIDEBAR_VIEW_NAMES)
 		sb.show_hidden = opt_bool(&sr, "show_hidden").? or_else false
 		for v in get_strings(&sr, "expanded") do append(&sb.expanded, v)
 		if fl, flok := sbv["filter"].(json.Object); flok {

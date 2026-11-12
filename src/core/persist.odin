@@ -514,6 +514,7 @@ workspace_json :: proc() -> string {
 		for f in Sidebar_Fold do if sb.folded[f] do kb(&w, FOLD_NAMES[f], true)
 		close_obj(&w)
 	}
+	if sb.view != .Projects do ks(&w, "view", SIDEBAR_VIEW_NAMES[sb.view])
 	if sb.show_hidden do kb(&w, "show_hidden", true)
 	if len(sb.expanded) > 0 {
 		k(&w, "expanded")
@@ -993,6 +994,7 @@ workspace_restore :: proc(text: string) -> string {
 		if fo, fok := sb["folded"].(json.Object); fok {
 			for f in Sidebar_Fold do if b, bok := fo[FOLD_NAMES[f]].(json.Boolean); bok do run(Set_Sidebar_Folded{section = f, folded = bool(b)})
 		}
+		if v, vok := enum_of(sb, "view", SIDEBAR_VIEW_NAMES); vok do run(Set_Sidebar_View{view = v})
 		if b, bok := sb["show_hidden"].(json.Boolean); bok do run(Set_Filter{show_hidden = bool(b)})
 		for x in strs(sb, "expanded") do if strings.has_prefix(x, "/") do run(Set_Row_Expanded{path = x, expanded = true})
 	}

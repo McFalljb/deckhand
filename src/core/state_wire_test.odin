@@ -700,7 +700,9 @@ state_wire_decode_is_bounded :: proc(t: ^testing.T) {
 	testing.expectf(t, track.peak_memory_allocated < 8 << 20, "peak %d bytes before refusing", track.peak_memory_allocated)
 	// many tabs with panels, in one full: the checks are not quadratic. Measured as a ratio
 	// (10x the tabs: about 10x the time if linear, 100x if quadratic), not a wall-clock
-	// limit, so a slow machine cannot fail it.
+	// limit, so a slow machine cannot fail it; in this thread's CPU time, the best of three
+	// each, so a busy one cannot either (wall time measured 44x at load 22: time spent
+	// waiting for a core).
 	took :: proc(t: ^testing.T, n: int) -> time.Duration {
 		big: State
 		big.open_sessions = make([dynamic]Open_Session, context.temp_allocator)
@@ -709,13 +711,13 @@ state_wire_decode_is_bounded :: proc(t: ^testing.T) {
 		for &tab, i in os.tabs do tab.id = u64(100 + i)
 		append(&big.open_sessions, os)
 		text := state_full_json(&big)
-		start := time.tick_now()
+		start := thread_cpu_now()
 		rb := replica_of(t, text)
-		d := time.tick_since(start)
+		d := thread_cpu_since(start)
 		testing.expect_value(t, len(rb.open_sessions[0].tabs), n)
 		return d
 	}
-	small := min(took(t, 2_000), took(t, 2_000))
-	large := took(t, 20_000)
+	small := min(took(t, 2_000), took(t, 2_000), took(t, 2_000))
+	large := min(took(t, 20_000), took(t, 20_000), took(t, 20_000))
 	testing.expectf(t, large < 40 * max(small, time.Millisecond), "10x the tabs took %v / %v = %.0fx (linear is ~10x)", large, small, f64(large) / f64(max(small, 1)))
 }

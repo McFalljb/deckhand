@@ -169,10 +169,10 @@ status_mirror_cleaned_and_skew_safe :: proc(t: ^testing.T) {
 	state^ = core.State{}
 	state.settings.remote_machines = true
 	state.machines = make([]core.Machine_View, 1)
-	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online}
+	state.machines[0] = {no = 3, name = "nuc", target = "me@nuc", status = .Online}
 	r: core.State
-	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/jb/garden"), label = strings.clone("garden")})
-	os := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/jb/garden"), title = strings.clone("Plant the beans")}
+	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/me/garden"), label = strings.clone("garden")})
+	os := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me/garden"), title = strings.clone("Plant the beans")}
 	tab := core.Tab{id = 10, kind = core.Claude_Tab{}, title = strings.clone("claude"), status = .Running, status_since = time.time_add(now, 10 * time.Minute)}
 	tab.prog = {state = .Blocked, kind = .Permission, progress = -1, app = strings.clone("claude-code"), msg = strings.clone("Apply\u202e these\nedits?"), at = now}
 	append(&os.tabs, tab)

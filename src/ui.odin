@@ -220,7 +220,15 @@ shine_drawn: bool // a terminal drew a copy shine this frame (term_draw): draw t
 // rest, for stamp 0 and under Reduce motion. A key first seen with a stamp starts too (the caller
 // decides what is new: status_flash). No allocation but a new key's entry; the table is bounded.
 flash :: proc(key: u64, stamp: i64, dur: time.Duration = DUR_FLASH) -> f32 {
-	return flash_at(key, stamp, dur, time.tick_now())
+	return flash_at(key, stamp, dur, flash_held.tick != {} ? flash_held.tick : time.tick_now())
+}
+
+// Tests: the flashes' clock held at one instant (flash_hold_for_test), so a layout that a busy
+// machine makes late still sees the age the test set (flash_age_for_test); {} = the real clock.
+@(private = "file")
+flash_held: struct {
+	tick: time.Tick,
+	wall: time.Time,
 }
 
 flash_at :: proc(key: u64, stamp: i64, dur: time.Duration, now: time.Tick) -> f32 {
@@ -271,7 +279,13 @@ flash_age_for_test :: proc(d: time.Duration) {
 
 flashes_for_test :: proc() -> map[u64]Flash {return flashes}
 
+// Tests: the flashes' clock stops now (on), or runs again.
+flash_hold_for_test :: proc(on: bool) {
+	flash_held = on ? {tick = time.tick_now(), wall = time.now()} : {}
+}
+
 flash_reset_for_test :: proc() {
+	flash_held = {}
 	clear(&flashes)
 	flash_quiet_until = {}
 	clear(&flash_machines)
@@ -321,7 +335,7 @@ flash_color :: proc(dot: core.Row_Status) -> core.Rgba {
 // It starts when v's status began (since) a moment ago, as a status that flashes, after that
 // machine's link settled; a repeat report keeps since, so it never starts again.
 status_flash :: proc(host: clay.ElementId, key: u64, v: core.Tab_Status_View, machine: u64 = 0, live := true, now := time.Time{}) -> f32 {
-	now := now != {} ? now : time.now()
+	now := now != {} ? now : flash_held.wall != {} ? flash_held.wall : time.now()
 	if flash_quiet_until == {} do flash_quiet(now) // the window's first frames
 	quiet := flash_quiet_until
 	if machine != 0 {

@@ -21,7 +21,7 @@ walkthrough_machine_try_again_and_add_off :: proc(t: ^testing.T) {
 	state.settings.remote_machines = true
 	views := make([]core.Machine_View, 3)
 	defer delete(views)
-	views[0] = {no = 2, name = "nuc", target = "jb@nuc", status = .Refused}
+	views[0] = {no = 2, name = "nuc", target = "me@nuc", status = .Refused}
 	views[1] = {no = 3, name = "box", target = "box", status = .Unsupported, error = "FreeBSD amd64"}
 	views[2] = {no = 4, name = "lab", target = "lab", status = .Online}
 	state.machines = views

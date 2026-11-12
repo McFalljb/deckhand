@@ -69,7 +69,7 @@ handoff_targets :: proc(pid: u64) -> []Handoff_Target {
 	return out[:]
 }
 
-// The user a machine's link logs in as, when its target says ("jb@nuc": "jb"); "" = not known
+// The user a machine's link logs in as, when its target says ("me@nuc": "me"); "" = not known
 // (a name from ~/.ssh/config).
 handoff_user :: proc(target: string) -> string {
 	i := strings.last_index_byte(target, '@')

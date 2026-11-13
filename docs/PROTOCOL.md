@@ -511,13 +511,15 @@ read-only (`"Codex can't run read-only yet …"`), for another machine's project
 this Mac only for now …"`), and for a `resume` id that is not a UUID or is another harness's
 conversation (`"that id is another harness's conversation"`). A Codex older than 0.163.0 never
 starts (`"could not start Codex"`; the tab says why). Its hooks report with the same commands as
-the plugin's (`claude.session`: its `session_id` must be a UUID; `claude.turn`); `claude.comments`
-and `claude.attached` are refused for it, as are comments' Send now. `claude_prompt` text for a
+the plugin's (`claude.session`: its `session_id` must be a UUID; `claude.turn`), and its
+UserPromptSubmit hook takes the comments with `claude.comments` and `claude.attached` as Claude's
+does (comments' Send now pastes the same fixed line, under the rule below). `claude_prompt` text for a
 Codex tab is refused when its first non-blank character is `/`, `!` or `$`, or it has an `@word` or
 `$name` where a word starts; held text goes only while its OSC 7501 says it is not working or
 blocked (`held_wait` `"Codex is starting (or a dialog of its own is open)"` while it reports
 nothing) and its hooks, once they report, agree; `claude_held send` likewise. Snapshot: the tab
-entry and its `claude_sessions` entry add `"harness": "codex"`; a Codex tab adds `signed_out: true`
+entry and its `claude_sessions` entry add `"harness": "codex"` (also a conversation found in
+Codex's `sessions/` folder, `"found": true`; `open_session` with its id resumes it); a Codex tab adds `signed_out: true`
 while `codex login status` said signed out and its Codex has not reported OSC 7501 in this run;
 top level `codex_installed`.
 

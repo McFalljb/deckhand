@@ -1102,14 +1102,20 @@ the session's folder, with your login shell's environment and **your own Codex s
 that run, so it knows the conversation's id and when Codex is working or waiting for you; nothing
 is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
 
-- **Start one**: **New session** and pick **Codex** (listed once Codex is installed), or **New Codex
-  tab** in a project's or session's menu. A Codex-only session reads "Codex · <project>".
+- **Start one**: **New session** and pick **Codex** (listed once Codex is installed), **New Codex
+  tab** in a project's or session's menu, or the palette's **New Codex tab** (in the session on
+  screen). A Codex-only session reads "Codex · <project>".
 - **Status**: Codex reports its own status, so its tab and session get the same marks, bell
   entries and counts (**What needs you**, ⌥⌘A, the fleet pill) as a Claude tab.
 - **Its row**: Codex starts its conversation with your first message, so the row (titled by that
   message) appears then. **Resume** from the row continues it (`codex resume`); a session that was
   open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
-  title only; Codex keeps its own.
+  title only; Codex keeps its own. Codex conversations you ran outside Deckhand in the project's
+  folder are listed too (from `~/.codex/sessions/`, the last 60 days or so; read, never changed),
+  as "Untitled Codex session" with their date: a click resumes one.
+- **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when
+  Codex is idle and you have typed nothing), and **Send and close**; Changes' button reads **Ask
+  Codex to review**.
 - **Messages from Atlas or a script** wait until Codex is idle and you have typed nothing, as for
   Claude, and never go during a turn (Enter would steer it). Deckhand never types a slash command,
   a `!` shell line, a `$skill` or an `@mention` into Codex: such a text is refused, with why.
@@ -1117,14 +1123,15 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
   in a dialog). A Codex older than 0.163.0 does not start: the tab says how to update
   (`npm install -g @openai/codex@latest`), as does Settings › **Coding agents**.
-- **Not yet**: comments, the `deckhand` command inside Codex, read-only chats (Codex is not offered
-  in Chats while **Start chats read-only** is on), conversations found on disk, extra flags, and Codex
-  on another machine. [CODEX.md](CODEX.md) has the details.
+- **Not yet**: the `deckhand` command inside Codex, read-only chats (Codex is not offered in Chats
+  while **Start chats read-only** is on: Codex's read-only sandbox does not cover your MCP servers,
+  and you can lift it from its composer), extra flags, and Codex on another machine.
+  [CODEX.md](CODEX.md) has the details.
 
 ### Comments for the agent
 
 You can point at part of a tab and write a note for the session's agent; the note waits and goes
-to that tab's session's pi or Claude tab **with your next message**: your text, what you picked,
+to that tab's session's pi, Claude or Codex tab **with your next message**: your text, what you picked,
 and a cropped picture of it.
 Today: **an app tab's Inspect boxes**: with **Inspect** on, click a box; a bar "Comment on box
 “coin”:" takes your text (**Add** or Enter; **Cancel** or Esc). The picker for browser pages is on

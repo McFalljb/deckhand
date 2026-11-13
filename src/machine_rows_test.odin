@@ -73,7 +73,7 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	menu_open(Menu_Machine(0), {})
 	testing.expect_value(t, menu_labels(), "Add a machine…|Machines settings…")
 	menu_open(Menu_Machine(3), {})
-	testing.expect_value(t, menu_labels(), "Open web page…|-|Rename…|Remove…|-|Machines settings…")
+	testing.expect_value(t, menu_labels(), "Add folder on nuc…|Open web page…|-|Rename…|Remove…|-|Machines settings…")
 	// its open session's menu (#114; right-click on its row, online): only what acts there, Peek
 	// and Mark as unread (by its "m3:" id, which the route sends to that machine); nothing of this
 	// Mac's (pins, paths, accounts, new tabs)
@@ -143,6 +143,17 @@ machine_rows_remote :: proc(t: ^testing.T) {
 
 	// an online machine with nothing: what makes a project appear there
 	testing.expect(t, strings.contains(drawn_text(), "No projects there yet"), "the empty machine's hint")
+	// ...and a folder of it added from here: the palette asks for a path there (#135)
+	got = drawn_text()
+	testing.expectf(t, strings.contains(got, "No projects there yet\nAdd folder on box…\n") && clay_found("machfolder", 4), "its Add folder row: %q", got)
+	palette_open_folders(4)
+	testing.expect_value(t, len(palette_results()), 0) // nothing until a full path
+	tf_set(&palette.field, "~/code/app")
+	if fr := palette_results(); testing.expect_value(t, len(fr), 1) {
+		testing.expect_value(t, fr[0].title, "Add ~/code/app on box")
+		testing.expect(t, fr[0].kind == .Folder && fr[0].id == 4, "on that machine")
+	}
+	palette_reset()
 
 	// a note under the header says what is wrong: no status beside the name, no pointer at the button
 	state.machines[0].status = .Needs_Login

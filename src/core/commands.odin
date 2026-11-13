@@ -25,7 +25,8 @@ import "core:thread"
 import "core:time"
 
 Add_Project :: struct {
-	cwd: string, // added at the top if not listed yet (and shown again if hidden), then selected
+	cwd:     string, // added at the top if not listed yet (and shown again if hidden), then selected
+	machine: u64, // another machine's number (0 = this Mac): added there, by its core (machine_route.odin)
 }
 Select_Project :: struct {
 	project_id: u64,
@@ -1011,8 +1012,15 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	switch c in cmd {
 	case Add_Project:
 		if c.cwd == "" do return fail("cwd is empty"), false
+		if c.machine != 0 do return fail("no such machine"), false // machine_route.odin sends (or refuses) every other machine's
 		want := c.cwd
-		if !filepath.is_abs(want) {
+		if caller.hub {
+			// the user at another machine's window adding a folder of this machine (machine_route.odin):
+			// it must be one, and nothing here is relative to this core's own working directory
+			at, why := hub_folder(c.cwd)
+			if why != "" do return fail(why), false
+			want = at
+		} else if !filepath.is_abs(want) {
 			wd, err := os.get_working_directory(context.temp_allocator)
 			if err != nil do return fail("cwd must be an absolute path"), false
 			want, _ = filepath.join({wd, want}, context.temp_allocator)

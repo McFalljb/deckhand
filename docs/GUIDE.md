@@ -270,8 +270,8 @@ code: a shell tab here runs `ssh` to it so you can answer, in a new chat if no s
 and the link connects once you are in), **Connect**, **Take back**, **Try again**, **Install…**, **Retry** (an
 install that failed), **Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
 and **Cancel** while an install runs. Point at its name for why, and ssh's own words. Its **…**
-button (or a right click on it) has **Connect**, **Log in…** or **Take back**, **Open web page…**,
-**Rename…**, **Remove…** and **Machines settings…** (Settings › Machines). This Mac's **…** has
+button (or a right click on it) has **Connect**, **Log in…** or **Take back**, **Add folder on nuc…**,
+**Open web page…**, **Rename…**, **Remove…** and **Machines settings…** (Settings › Machines). This Mac's **…** has
 **Add a machine…** and **Machines settings…**. Click a header (this Mac's too) to fold it, as Open, Projects and Chats
 fold: a folded machine shows only its sessions that wait for you, and its header counts its open
 sessions. This Mac's fold is saved; other machines' last until Deckhand quits.
@@ -282,12 +282,20 @@ this Mac): it tries again when you click. An offline machine is retried on its o
 often. Under it are its open sessions, then its projects, drawn as this Mac's are (the status
 mark, how long it has been so and what it asks; an open session's age is not known here) and thinned by the filter and
 the Running, Waiting and Pinned chips like this Mac's (its header stays). Click a project to list its sessions,
-as that machine has them. A machine with no projects yet says so: Deckhand can't add a folder on
-another machine, so start pi or Claude Code in a folder there and the project shows here. The
+as that machine has them. Its projects are the folders where pi or Claude Code have sessions there,
+and the folders you add from here: **Add folder on nuc…** (its **…** menu, and under a machine
+with no projects yet) asks for the folder's path on that machine in the palette (`~/code/app` or
+`/srv/app`; there is no file browser of another machine). That machine's Deckhand checks it is a
+folder there and keeps the project, as if you had added it at its own window; a path that is not
+there is refused with its words. A machine whose Deckhand is too old for this says to update
+Deckhand there. The
 palette names the machine of its items that are on another one (*… · on nuc*). Click an open session to show it, or one of a project's sessions to open
 it there (**+ New session** under it starts one there, with what that machine has installed and its
 own Claude Code account; Codex once that machine runs a Deckhand that starts Codex tabs: an older
-one says to update Deckhand there), and work in its terminals as in a local tab.
+one says to update Deckhand there), and work in its terminals as in a local tab. On a machine with
+no coding agent yet, **+ New session** still opens a session there: its pi tab says pi is missing
+and how to install it, and a shell tab beside it (⌘T) is a terminal on that machine, to install
+pi or Claude Code from.
 **New session on another machine.** The menu of one of this Mac's projects, sessions or open
 sessions (right click, or its **…**) has **New session on nuc in api** for each online machine with
 a project of the same folder name (`api`): the last part of its folder, exactly, upper and lower
@@ -1500,7 +1508,8 @@ core restarts or updates, as on a Mac: they run in a session holder of their own
 (`deckhand-holder-…` in `systemctl --user list-units`). Under each online machine, its coding
 agents (pi, Claude Code and their extras, as that machine's own checklist has them) are listed
 read-only, each with **Copy** for the command that installs or updates it there: open a shell tab
-on that machine and paste it.
+on that machine and paste it (a fresh machine: **Add folder on nuc…**, then **+ New session**
+under that project and ⌘T, as above).
 
 #### Installing and updating other machines
 

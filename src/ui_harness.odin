@@ -414,6 +414,9 @@ harness_used :: proc(cmd: core.Command) {
 	if h, ok := core.harness_of(cmd); ok do client_internal(core.Set_Last_Harness{harness = h})
 }
 
+// Another machine with no coding agent: its New session still opens one there (new_session_ui).
+REMOTE_NO_HARNESS :: "No coding agent is installed on that machine yet: its pi tab says how to install one, and ⌘T opens a terminal there"
+
 // The user's "New session" in project pid (in cwd, a checkout of it; "" = its folder), see the top.
 // at: where the picker opens (nil = new_session_anchor).
 new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
@@ -426,8 +429,13 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
 	items := core.new_session_choices(p, cwd)
 	switch len(items) {
 	case 0:
-		if core.id_machine(pid) != 0 do toast_show("No coding agent is installed on that machine: Settings › Machines lists what it needs", err = true)
-		else do toast_show(core.NO_HARNESS, err = true)
+		if core.id_machine(pid) != 0 {
+			// none there yet (a fresh machine): a session anyway, as new_chat makes one here without
+			// pi (its pi tab says pi is missing and how to install it), so a shell tab beside it (⌘T)
+			// is a terminal on that machine to install one with
+			toast_show(REMOTE_NO_HARNESS)
+			ui_do_menu(core.New_Chat{project_id = pid}, "New session")
+		} else do toast_show(core.NO_HARNESS, err = true)
 	case 1:
 		harness_used(items[0].cmd)
 		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")

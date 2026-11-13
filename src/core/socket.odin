@@ -1117,8 +1117,11 @@ core_installed :: proc() -> bool {
 // What a core says it can do beyond its generation (the framed hello's `features`): optional
 // behaviour is gated on these (§7.5). codex_tabs: a hub may start and resume Codex tabs here (an
 // older core would start Claude Code for one, or refuse it: machine_route.odin asks for this first).
-CORE_FEATURES := [?]string{"challenge_hello", FEATURE_CODEX_TABS}
+// hub_add_project: a hub's add_project names a folder here that this core checks (absolute or ~/…,
+// there, a folder; an older core would take a relative or ~ path against its own working directory).
+CORE_FEATURES := [?]string{"challenge_hello", FEATURE_CODEX_TABS, FEATURE_HUB_ADD_PROJECT}
 FEATURE_CODEX_TABS :: "codex_tabs"
+FEATURE_HUB_ADD_PROJECT :: "hub_add_project"
 
 // This core's release version ("X.Y.Z" from its bundle's Info.plist; on Linux, which has no
 // Info.plist, LINUX_RELEASE_VERSION), or "" for a development build. Read once.

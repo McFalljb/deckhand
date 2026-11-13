@@ -26,6 +26,7 @@ Palette_Kind :: enum {
 	App, // "New app tab…": a command line or an apps.json entry (app_tab.odin)
 	Page, // "Open a machine's web page…": PORT[/path] on an online machine (machine_page.odin)
 	Machine, // "Remove a machine…", "Connect to a machine": one of the machines (machines.odin)
+	Folder, // "Add folder on <machine>…": a path on that machine (machine_route.odin)
 }
 
 PALETTE_KIND_NAMES := [Palette_Kind]string {
@@ -37,6 +38,7 @@ PALETTE_KIND_NAMES := [Palette_Kind]string {
 	.App     = "App",
 	.Page    = "Page",
 	.Machine = "Machine",
+	.Folder  = "Folder",
 }
 
 Palette_Item :: struct {
@@ -68,6 +70,7 @@ Palette :: struct {
 	apps:     bool, // app mode ("New app tab…"): the query is a command line to run in an app tab
 	pages:    bool, // page mode ("Open a machine's web page…"): the query is PORT[/path]
 	page_for: u64, // ...on this machine (0 = each online one)
+	folder_for: u64, // folder mode ("Add folder on <machine>…"): the query is a path on this machine (0 = not this mode)
 	machine_pick: Machine_Pick, // machine mode: the query picks a machine to remove or connect to
 }
 
@@ -90,6 +93,7 @@ palette_reset :: proc() {
 	palette.files = false
 	palette.apps = false
 	palette.pages, palette.page_for = false, 0
+	palette.folder_for = 0
 	palette.machine_pick = .None
 	palette.was_open = true
 }
@@ -214,6 +218,7 @@ palette_results :: proc() -> []Palette_Item {
 	if palette.files do return file_finder_results(tf_text(&palette.field))
 	if palette.apps do return app_palette_results(tf_text(&palette.field))
 	if palette.pages do return page_palette_results(tf_text(&palette.field))
+	if palette.folder_for != 0 do return folder_palette_results(tf_text(&palette.field))
 	if palette.machine_pick != .None do return machine_palette_results(tf_text(&palette.field))
 	return palette_search(tf_text(&palette.field))
 }
@@ -278,6 +283,8 @@ palette_run :: proc(it: Palette_Item) {
 		if it.path != "" do ui_do(core.New_App_Tab{session = cs.id, command = it.path})
 	case .Page:
 		if port, path, ok := core.machine_page_spec(it.path); ok do ui_do_menu(core.Machine_Open_Page{no = it.id, port = port, path = path}, "Open web page") // a failure shows (a later one: machine_page.odin)
+	case .Folder:
+		ui_do(core.Add_Project{cwd = it.path, machine = it.id}) // a refusal, now or from there, is a toast (machine_route.odin)
 	case .Machine:
 		// the same commands as the sidebar's: Remove asks first, Connect is the row's button
 		if palette.machine_pick == .Remove do ui_do_menu(core.Machine_Remove{no = it.id}, "Remove")
@@ -356,6 +363,25 @@ palette_open_pages :: proc(no: u64) {
 	palette_reset()
 	palette.pages, palette.page_for = true, no
 	palette.was_open = true
+}
+
+// Folder mode for machine no (the sidebar's Add folder on <machine>…): the palette asks for a path
+// there (typed: no file browser of another machine); its core checks that it is a folder.
+palette_open_folders :: proc(no: u64) {
+	palette_reset()
+	palette.folder_for = no
+	palette.was_open = true
+}
+
+// Folder mode: one row, "Add <path> on <machine>", once the query is a full path (/… or ~/…).
+folder_palette_results :: proc(query: string) -> []Palette_Item {
+	out := make([dynamic]Palette_Item, context.temp_allocator)
+	q := strings.trim_space(query)
+	if !core.hub_folder_form(q) do return out[:]
+	for m in state.machines do if m.no == palette.folder_for {
+		append(&out, Palette_Item{kind = .Folder, key = fmt.tprintf("folder:%d", m.no), title = fmt.tprintf("Add %s on %s", q, m.name), path = strings.clone(q, context.temp_allocator), id = m.no})
+	}
+	return out[:]
 }
 
 // Machine mode ("Remove a machine…", "Connect to a machine"): the machines it applies to, matching

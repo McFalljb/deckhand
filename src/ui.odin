@@ -738,7 +738,7 @@ palette_layout :: proc(w, h: f32) {
 			if clay.UI(clay.ID("palette_input"))({
 				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H + SP_2))}, padding = {pu(SP_3), pu(SP_3), 0, 0}, childAlignment = {y = .Center}},
 			}) {
-				field_text(clay.ID("palette_text"), &palette.field, palette.files ? "Open a file in this project" : palette.apps ? "A command to run in an app tab" : palette.pages ? "A port on that machine, e.g. 3000 or 3000/admin" : palette.machine_pick == .Remove ? "Which machine to remove" : palette.machine_pick == .Connect ? "Which machine to connect to" : "Search actions, tabs, sessions, projects")
+				field_text(clay.ID("palette_text"), &palette.field, palette.files ? "Open a file in this project" : palette.apps ? "A command to run in an app tab" : palette.pages ? "A port on that machine, e.g. 3000 or 3000/admin" : palette.folder_for != 0 ? "A folder on that machine, e.g. ~/code/app or /srv/app" : palette.machine_pick == .Remove ? "Which machine to remove" : palette.machine_pick == .Connect ? "Which machine to connect to" : "Search actions, tabs, sessions, projects")
 			}
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(th.border)}) {}
 			gap(SP_1)
@@ -1460,6 +1460,7 @@ Hit :: union {
 	Hit_Machine_Head, // its header: the tooltip says why, a click folds it, right click its menu
 	Hit_Machine_More, // its header's "…": its menu
 	Hit_Machine_Add, // + Add a machine…
+	Hit_Machine_Add_Folder, // + Add folder on <machine>… (its empty list)
 	// the toolbar, settings popover, shortcuts sheet (ui_toolbar.odin)
 	Hit_Button,
 	Hit_Pop,
@@ -1527,6 +1528,7 @@ Hit_Machine :: distinct u64 // a machine row's button: Log in…, Connect, Take 
 Hit_Machine_Head :: distinct u64 // a machine's header (machine number)
 Hit_Machine_More :: distinct u64 // another machine's header's "…" (machine number)
 Hit_Machine_Add :: struct {}
+Hit_Machine_Add_Folder :: distinct u64 // machine number
 Hit_Button :: distinct Button
 Hit_Pop :: distinct Pop_Item
 Hit_Sheet_Close :: struct {}

@@ -9,6 +9,7 @@ package core
 import "base:runtime"
 import "core:encoding/endian"
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -737,6 +738,81 @@ route_terminal_link_remote :: proc(t: ^testing.T) {
 	testing.expectf(t, json_path(got, "result.ok") == "false", "a hub's terminal_link: %s", got)
 	testing.expect_value(t, len(rt_opened), 3)
 	testing.expect_value(t, len(machine_test_links.texts), n)
+}
+
+// Add a folder on another machine (#135): refused here, nothing sent, to a core whose hello does
+// not say it checks one (an older core would take a ~ or relative path against its own folder),
+// and for a path that is not /… or ~/…; else sent as the user's plain add_project {cwd} (its
+// machine cleared), no project added here; its project, mirrored, is selected once it answers.
+@(test)
+route_add_project :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	rt_begin()
+	defer rt_end_test()
+	add := Add_Project{cwd = "~/code/app", machine = 3}
+	r := run_command(add, {kind = .UI}, 1)
+	testing.expect(t, !r.ok && !r.pending && strings.contains(r.error, "update Deckhand there"), r.error)
+	testing.expect_value(t, len(machine_test_links.texts), 0)
+	state.machines[0].hub_add_project = true
+	for bad in ([]string{"code/app", "", "~x"}) {
+		r = run_command(Add_Project{cwd = bad, machine = 3}, {kind = .UI}, 2)
+		testing.expect(t, !r.ok && !r.pending && strings.contains(r.error, "full path"), r.error)
+	}
+	r = run_command(Add_Project{cwd = "/srv/app", machine = 9}, {kind = .UI}, 2)
+	testing.expect(t, !r.ok && r.error == "no such machine", r.error)
+	testing.expect_value(t, len(machine_test_links.texts), 0)
+	// only the user's and Atlas's at this Mac
+	r = run_command(add, {kind = .Script}, 3)
+	testing.expect(t, !r.ok && !r.pending, "a script's")
+	r = run_command(add, {kind = .UI, hub = true}, 3)
+	testing.expect(t, !r.ok && !r.pending, "a hub's (no third machine)")
+	testing.expect_value(t, len(machine_test_links.texts), 0)
+	r = run_command(add, {kind = .UI}, 4)
+	testing.expect(t, r.ok && r.pending, r.error)
+	sent := rt_last_text()
+	testing.expect_value(t, json_path(sent, "command.type"), "add_project")
+	testing.expect_value(t, json_path(sent, "command.cwd"), "~/code/app")
+	testing.expect(t, !strings.contains(sent, `"machine"`), sent)
+	testing.expect(t, strings.contains(sent, `"on_behalf":{"kind":"ui"}`), sent)
+	testing.expect_value(t, len(state.projects), 0) // nothing on this Mac
+	// it answers with its project, which the mirror brought first: selected here
+	pid, _ := id_pack(3, 21)
+	append(&state.projects, Project{id = pid, machine = 3, group = .Projects, cwd = "/home/me/code/app", label = "app"})
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"created_id":21}}}}`, json_path(sent, "id")))
+	if testing.expect_value(t, len(rt_finished), 1) do testing.expect_value(t, rt_finished[0].created_id, pid)
+	testing.expect_value(t, state.selected_project, pid)
+	testing.expect_value(t, len(state.projects), 1)
+	// its refusal comes back as a toast here, in its words
+	run_command(add, {kind = .UI}, 5)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"no such folder: /home/me/code/app"}}}}`, json_path(rt_last_text(), "id")))
+	toasts := rt_toasts()
+	testing.expect(t, len(toasts) > 0 && strings.contains(toasts[len(toasts) - 1], "on nuc: no such folder"), "the refusal's toast")
+}
+
+// The other side: a hub's add_project names a folder of this machine, checked here (absolute or
+// ~/… under HOME, there, a folder), never relative to this core's working directory.
+@(test)
+hub_add_project_checks :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	state = State{}
+	defer state = State{}
+	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
+	dir := fmt.tprintf("%s/deckhand-hubadd-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+	testing.expect(t, os.make_directory_all(fmt.tprintf("%s/sub", dir)) == nil)
+	defer os.remove_all(dir)
+	_ = os.write_entire_file(fmt.tprintf("%s/file", dir), []u8{'x'})
+	hub := Caller{kind = .UI, hub = true}
+	for bad in ([]string{"sub", fmt.tprintf("%s/missing", dir), fmt.tprintf("%s/file", dir), "~/../../no-such-folder-here"}) {
+		r := run_command(Add_Project{cwd = bad}, hub)
+		testing.expect(t, !r.ok, bad)
+	}
+	testing.expect_value(t, len(state.projects), 0)
+	r := run_command(Add_Project{cwd = fmt.tprintf("%s/sub/", dir)}, hub)
+	testing.expect(t, r.ok && r.created_id != 0, r.error)
+	if testing.expect_value(t, len(state.projects), 1) do testing.expect_value(t, state.projects[0].cwd, real_path(fmt.tprintf("%s/sub", dir)))
+	// ~/… is under this machine's HOME
+	at, why := hub_folder("~")
+	testing.expect(t, why == "" && at == home, why)
 }
 
 } // when TEST_HOOKS

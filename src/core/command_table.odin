@@ -32,7 +32,7 @@ Command_Spec :: struct {
 COMMAND_SPECS := [?]Command_Spec {
 	{type = "get_state", does = "the state snapshot", who = .Query},
 	{type = "list_commands", does = "the commands this caller may send", who = .Query},
-	{type = "add_project", args = "cwd", does = "add (or find) a project and select it; created_id = project id", who = .Anyone},
+	{type = "add_project", args = "cwd, machine?", does = "add (or find) a project and select it; created_id = project id; machine: another machine's number (state machines), the folder added there as that machine's project (cwd: absolute or ~/…, a folder that exists there; its core checks it): the user's and Atlas's at this Mac only, refused before sending when that machine's Deckhand is too old", who = .Anyone},
 	{type = "select_project", args = "project_id", does = "select a project and list its sessions", who = .Anyone},
 	{type = "rename_project", args = "project_id, name", does = `rename a project ("" = path label)`, who = .Anyone},
 	{type = "open_session", args = "project_id, pi_session_id", does = "resume a pi session, or a Claude Code session of the project (Deckhand's history, or a transcript found in an account's projects/ folder: a Claude-only session under its account, no flags) (focuses it if open); created_id = open session id", who = .Anyone},

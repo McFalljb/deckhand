@@ -155,8 +155,8 @@ open_session_harness :: proc(s: ^Open_Session) -> Harness {
 
 // A Claude row's account label while there are several accounts ("" = no tag).
 session_account_tag :: proc(s: Session) -> string {
-	if !s.claude || s.codex do return ""
-	return claude_account_tag(s.account)
+	if !s.claude do return ""
+	return claude_account_tag(s.account, s.codex)
 }
 
 // Whether a session needs the user's answer (tab_need's NEED_WAITING: blocked, or its agent asked a

@@ -1160,7 +1160,7 @@ tab_label :: proc(cs: ^core.Open_Session, tab: core.Tab) -> (ic: core.Icon, labe
 	if is_claude {
 		ic = core.harness_icon(ct.codex ? .Codex : .Claude)
 		// several accounts: which one (claude_accounts.odin)
-		tag = core.claude_account_tag(ct.account)
+		tag = core.claude_account_tag(ct.account, ct.codex)
 		if tag != "" do label = fmt.tprintf("%s · %s", tab.title, tag)
 	}
 	// a Claude-only session's main tab: Claude and where it runs

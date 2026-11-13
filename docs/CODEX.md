@@ -33,7 +33,7 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   `additionalContext`, as for Claude; **Send now**, **Send and close** and Changes' **Ask Codex to
   review** work for a Codex tab.
 - **Sessions found on disk** (§2b): Codex conversations of the project's folder in
-  `~/.codex/sessions/` are rows; a click runs `codex resume <id>`.
+  `~/.codex/sessions/` (and each account's home) are rows; a click runs `codex resume <id>`.
 - **Palette**: **New Codex tab** in the session on screen.
 - **Deckhand's tools** (phase 2a): the `deckhand` command's show, browser and app commands, as MCP
   tools of a per-run stdio server (§7).
@@ -41,11 +41,11 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   own; and **Full access in new Codex tabs**, a default for the tabs the user starts.
 - **On another machine** (phase 2d, §8): New session's picker in that machine's project, its
   rows, the palette in one of its sessions; Codex runs there, on that machine's own core.
+- **Accounts** (§6a): Codex homes (`CODEX_HOME`) the user adds; a tab of one runs with
+  `CODEX_HOME=<home>`, set again after the login profile.
 
 ## What does not yet (phase 2 and later)
 
-- No accounts: Codex runs with the user's own `~/.codex` (or their `CODEX_HOME`); Deckhand never
-  sets `CODEX_HOME`.
 - No profiles per tab (`-p`, `-c profile…` are refused): where a profile layers against Deckhand's
   trailing `-c` overrides is unchecked, and a profile may carry `features.hooks`, `hooks.*` or
   `mcp_servers.deckhand`. Revisit after a real-run check.
@@ -58,8 +58,8 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 ## 1. The command
 
 ```
-$SHELL -l -c '<CODEX_TAB_CMD>' codex <user flags> --no-daemon -C <cwd> -c hooks.SessionStart=[…] … -c hooks.state={…} -c mcp_servers.deckhand={…}
-$SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> <user flags> --no-daemon -C <cwd> -c … (a resume)
+$SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex <user flags> --no-daemon -C <cwd> -c hooks.SessionStart=[…] … -c hooks.state={…} -c mcp_servers.deckhand={…}
+$SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> --no-daemon -C <cwd> -c … (a resume)
 ```
 
 - **`--no-daemon` is mandatory.** Since 0.157 the TUI otherwise attaches to Codex's shared
@@ -69,8 +69,9 @@ $SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> <user flags> --no-daemon -C <cw
   `-p`, `projects` or `notify`; `mcp_servers` only for Deckhand's own server (§7). Never
   `--dangerously-bypass-hook-trust` (it would run every hook unreviewed, a repository's `.codex/`
   hooks too). The user's own flags (§1a) go before Deckhand's, so Deckhand's `-c` come last.
-- **Deckhand writes nothing under `~/.codex`** and never sets `CODEX_HOME`. Codex itself writes
-  there as it always does (its sessions, history, logs).
+- **Deckhand writes nothing under `~/.codex`** or any Codex home, and sets `CODEX_HOME` only for
+  a tab of an account the user added (§6a). Codex itself writes there as it always does (its
+  sessions, history, logs).
 - The argv is an argv: the cwd is its own element after `-C` (absolute; never inside TOML), the
   session id after `resume` passed `codex_id_ok` (a UUID: anything else would be taken for a
   session *name*). The only text inside a `-c` value is Deckhand's own: the CLI's absolute path
@@ -156,10 +157,12 @@ at each file rather than "the Read tool". Nothing pending: nothing printed. If t
 `claude_disk_scan` (`src/core/claude_disk.odin`) lists Codex conversations beside Claude Code's for
 the selected project and Chats. **Read only, never written.**
 
-- **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), `YYYY/MM/DD/` folders
-  newest first: at most 60 day folders and 400 files (`CODEX_DISK_DAYS_MAX`, `CODEX_DISK_FILES_MAX`),
+- **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), and each Codex
+  account's `<home>/sessions` (§6a), `YYYY/MM/DD/` folders
+  newest first: at most 60 day folders and 400 files a home (`CODEX_DISK_DAYS_MAX`, `CODEX_DISK_FILES_MAX`),
   regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
-  (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set.
+  (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set or a home they added,
+  never the real home's `~/.codex`.
 - **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
   through the Claude scan's cache, budget and worker (`found_info`). The payload's `id` must be
   the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source` a string (a
@@ -170,7 +173,8 @@ the selected project and Chats. **Read only, never written.**
   id Claude Code's transcript has (one id, one harness: Claude's wins, in the scan and again at
   resume, `claude_conversation_seen`); at most `MAX_SESSIONS`.
 - **A click** (`open_session` with its id; `codex_disk_resume`): a Codex-only session of the
-  project running `codex resume <id>` in the project's folder; the history keeps it from then on.
+  project running `codex resume <id>` in the project's folder, under the account whose home it was
+  found in (refused once that account is removed); the history keeps it from then on.
   An agent's `open_session` finds only the rows listed for the selected project and Chats.
 
 ## 3. The token and the process check
@@ -232,18 +236,67 @@ commands either.
   `Caskroom/codex/<v>/`). Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab says
   how to update, the checklist offers Update.
 - **Signed out**: `codex login status` (exit 1), run once per recheck through the login shell on a
-  worker when a Codex tab starts or the checklist looks. Only its exit status is used. While it
-  says signed out and the tab's Codex has reported no OSC 7501, the bar says to sign in on Codex's
-  own screen; once the composer reports, the bar goes and the next start asks again.
+  worker when a Codex tab starts or the checklist looks, per Codex home: a tab of an account asks
+  under its `CODEX_HOME` (set after the login profile, as the tab's), the checklist for the
+  default (up to 16 homes; past that no bar). Only its exit status is used. While it says signed
+  out for the tab's home and the tab's Codex has reported no OSC 7501, the bar says to sign in on
+  Codex's own screen; once the composer reports, the bar goes and the next start asks again.
 
 ## 6. Credentials
 
 `~/.codex/auth.json` (and `CODEX_HOME`'s, when the user sets one: its whole folder, never HOME or
 above; with `CODEX_HOME` at HOME or above, `$CODEX_HOME/auth.json` itself), anything
-named `.codex/auth.json`, and everything in Codex's folder but its config (`config.toml`,
+named `.codex/auth.json`, and everything in a Codex home but its config (`config.toml`,
 `AGENTS.md`, `AGENTS.override.md`, `prompts/`, `skills/`, `rules/`) is refused wherever Deckhand
 refuses Claude's credentials (`settings_credential`: open, show, upload, list, watch, hard links by
-inode): `sessions/` transcripts, `history.jsonl`, logs and databases included.
+inode): `sessions/` transcripts, `history.jsonl`, logs and databases included. The Codex homes
+(`claude_account_dirs(codex = true)`): `~/.codex`, the default (`CODEX_HOME`), every account's
+home, and a removed account's while it still holds `auth.json` or `sessions/` (one that never
+held Codex's files is given back); never HOME or a folder above it.
+
+## 6a. Accounts
+
+An account is a **Codex home**: the folder `CODEX_HOME` names (its sign-in, config, sessions).
+Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/CLAUDE.md §1b):
+
+- **Which**: the default, `CODEX_HOME` as tabs get it when absolute (never HOME or above it), else
+  `~/.codex` (`codex_home`); `~/.codex` too while `CODEX_HOME` names another; then the folders the
+  user added (Settings › Coding agents › Codex › **Add account…**, a folder picker; the wire's
+  `add_claude_account` with `"harness":"codex"`). Nothing is looked for (Claude's found folders
+  have no Codex equivalent). The folder must exist: **Deckhand never makes or writes a home**. A
+  home is refused when it is HOME or above it, holds a project, the main folder or the chats
+  folder, or is inside or holds another guarded Codex home or Claude config folder (or is one; a
+  Claude account is never a Codex home either); a project is
+  refused inside a non-default account's home.
+- **Signing in**: on Codex's own screen in the account's first tab (the signed-out bar is per
+  home, §5), or in a terminal with `CODEX_HOME=<home> codex login` (the Add row says so).
+- **A tab**: `Claude_Tab.account` and the record's `account` are the home's folder (the default's
+  when none was named; an older record's `""` is the default). Every start (new, resume, restore,
+  restart, a found row) checks it is still configured (else the tab says so, nothing starts) and
+  sets `DECKHAND_CODEX_ACCOUNT` and `CODEX_HOME` in the tab's environment; `CODEX_ACCOUNT_SH` sets
+  `CODEX_HOME` again after the login profile ran and drops the marker, so a profile that exports
+  `CODEX_HOME` cannot move a tab to another account. `~/.codex` while the default is another:
+  `CODEX_HOME` unset. The default sets nothing: the environment as the profile leaves it.
+- **Which account starts**: `account` on `new_claude_tab` / `new_claude_session` names a
+  configured one by label or folder (`"no such Codex account …"` otherwise, an agent's folder and a
+  hub's too: a forwarded start is resolved against that machine's own accounts); a resume stays in
+  its record's account; else the project's last Codex account, the chosen default
+  (`set_claude_account_default` with harness codex), the last used, the environment's.
+- **Picker and menus**: with several accounts, **Codex · Name** once per account in New session's
+  picker, **New Codex tab · Name** in the menus and the palette; tabs and rows show the account's
+  name. Another machine's project or session: one row (its own accounts there).
+- **Found sessions** (§2b): each account's `sessions/` is scanned (the caps per home); a row
+  resumes under the home it was found in.
+- **Settings** (Coding agents › Codex, once Codex is installed): with several accounts each with
+  **Rename…**, **Make default**, **Remove**; **Add account…** (one account: **More accounts…**).
+  `rename_claude_account`, `remove_claude_account`, `set_claude_account_default` take
+  `"harness":"codex"`; all `user` only, as Claude's. Saved as `codex_accounts`,
+  `codex_account_last`, `codex_account_default`; the snapshot lists `codex_accounts` as
+  `claude_accounts` (labels and folders, no secret).
+- Not done: the setup sheet's accounts step (Claude's lists found folders; Codex finds none),
+  per-account hot-reload or settings-file rows, and a copy button for the sign-in command.
+- Not checked without a real sign-in: that `codex login status` under an added home answers for
+  that home, and that Codex's own sign-in screen in such a tab writes that home's `auth.json`.
 
 ## 7. Deckhand's tools: a per-run MCP server
 

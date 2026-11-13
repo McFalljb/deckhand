@@ -146,7 +146,7 @@ claude_status_tick :: proc(now := time.Tick{}) {
 					r.osc = true
 					window_state_changed()
 					// signed in now (its composer is up): ask again at the next start
-					if codex_login_state() == .Signed_Out do codex_login_set(.Unknown)
+					if codex_login_state(ct.account) == .Signed_Out do codex_login_set(.Unknown, ct.account)
 				}
 				if r.worked == {} && (v.state == .Working || v.state == .Blocked || v.state == .Done) do r.worked = now
 			}
@@ -239,7 +239,7 @@ claude_update_command_now :: proc() -> string {
 codex_signed_out_due :: proc(tab: ^Tab) -> bool {
 	ct, is := tab.kind.(Claude_Tab)
 	// another machine's tab: this Mac's sign-in says nothing of it (its own screen is in its terminal)
-	if !is || !ct.codex || tab.machine != 0 || tab.status != .Running || codex_login_state() != .Signed_Out do return false
+	if !is || !ct.codex || tab.machine != 0 || tab.status != .Running || codex_login_state(ct.account) != .Signed_Out do return false
 	r, has := status_rt[tab.id]
 	return !(has && r.start == claude_wait_run(tab.id) && r.osc)
 }

@@ -173,6 +173,9 @@ CLAUDE_ACCOUNT_ROW :: "deckhand:claude-account:"
 CLAUDE_ACCOUNT_ADD_ROW :: "deckhand:claude-account-add"
 CLAUDE_ACCOUNT_SCAN_ROW :: "deckhand:claude-account-scan"
 CLAUDE_ACCOUNT_MORE_ROW :: "deckhand:claude-account-more"
+// The Codex accounts group's (claude_accounts.odin with codex): an account's row, Add account….
+CODEX_ACCOUNT_ROW :: "deckhand:codex-account:"
+CODEX_ACCOUNT_ADD_ROW :: "deckhand:codex-account-add"
 
 
 // The Settings tab's Atlas group: its model is a row that is no file; its
@@ -370,6 +373,17 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 			// one account (most setups): one quiet row
 			add(&out, {group = "claude-accounts", label = "More accounts…", detail = "another Claude Code config folder", path = CLAUDE_ACCOUNT_MORE_ROW, button = "Add…"})
 		}
+	}
+	// Codex's accounts (claude_accounts.odin with codex), once Codex is installed: each one's row
+	// once there are several, and Add account… (a Codex home the user made; Deckhand never makes or
+	// writes one: the user signs in on Codex's screen in its first tab)
+	if codex_installed() {
+		caccts := claude_accounts(codex = true)
+		if len(caccts) > 1 do for a in caccts {
+			what := a.chosen ? "default" : a.default ? "your shell's" : CLAUDE_ACCOUNT_SOURCE_NAMES[a.source]
+			add(&out, {group = "codex-accounts", label = a.label, detail = fmt.tprintf("%s · %s", fs_display(a.dir), what), path = strings.concatenate({CODEX_ACCOUNT_ROW, a.dir}, context.temp_allocator), button = "Rename…", remove = !a.default, make_default = !a.chosen})
+		}
+		add(&out, {group = "codex-accounts", label = len(caccts) > 1 ? "Add account…" : "More accounts…", detail = "another Codex home (CODEX_HOME): sign in on Codex's screen in its first tab, or run CODEX_HOME=<home> codex login", path = CODEX_ACCOUNT_ADD_ROW, button = "Add…"})
 	}
 	// Coding agents (ui_harness.odin): the harness checklist's states; Install…/Update… open the sheet
 	for r in harness_settings_rows() do add(&out, r)
@@ -894,6 +908,7 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "folders": return "Folders"
 	case "claude":  return "Claude Code (global)"
 	case "claude-accounts": return "Claude accounts"
+	case "codex-accounts": return "Codex accounts"
 	case "agents":  return "Coding agents"
 	case "machines": return "Machines"
 	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))

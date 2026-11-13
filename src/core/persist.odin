@@ -589,11 +589,13 @@ workspace_json :: proc() -> string {
 		if st.bell_dock_off do kb(&w, "dock", false)
 		close_obj(&w)
 	}
-	// Claude Code accounts (claude_accounts.odin): what the user changed, and the last used
-	if len(st.claude_accounts) > 0 {
-		k(&w, "claude_accounts")
+	// Claude Code accounts and Codex accounts (claude_accounts.odin): what the user changed, and
+	// the last used
+	for list, n in ([2][]Claude_Account_Setting{st.claude_accounts[:], st.codex_accounts[:]}) {
+		if len(list) == 0 do continue
+		k(&w, n == 0 ? "claude_accounts" : "codex_accounts")
 		strings.write_byte(&w.b, '[')
-		for a, i in st.claude_accounts {
+		for a, i in list {
 			if i > 0 do strings.write_byte(&w.b, ',')
 			open_obj(&w)
 			ks(&w, "dir", a.dir)
@@ -606,6 +608,8 @@ workspace_json :: proc() -> string {
 	}
 	if st.claude_account_last != "" do ks(&w, "claude_account_last", st.claude_account_last)
 	if st.claude_account_default != "" do ks(&w, "claude_account_default", st.claude_account_default)
+	if st.codex_account_last != "" do ks(&w, "codex_account_last", st.codex_account_last)
+	if st.codex_account_default != "" do ks(&w, "codex_account_default", st.codex_account_default)
 	if st.home_dir != "" do ks(&w, "home_dir", st.home_dir)
 	if st.folders != {} {
 		k(&w, "folders")
@@ -1081,7 +1085,7 @@ ensure_project :: proc(cwd: string) -> ^Project {
 	want = real_path(want)
 	if c := chats_project(); c != nil && c.cwd == want do return nil
 	if p := project_by_cwd(want); p != nil do return p
-	if claude_account_holding(want) != "" do return nil
+	if account_holding_why(want) != "" do return nil
 	c := strings.clone(want)
 	inject_at(&state.projects, 0, Project{id = new_id(), cwd = c, label = short_label(c), missing = !os.exists(c), repo = is_repo_root(c)})
 	return &state.projects[0]

@@ -194,7 +194,7 @@ folders_changed :: proc(chats_before: string) {
 home_dir_apply :: proc(c: Set_Home_Dir, caller: Caller) -> (r: Result, changed: bool) {
 	path, err := folder_arg(c.path)
 	if err != "" do return fail(err), false
-	if l := claude_account_holding(path); l != "" && caller.kind != .Internal do return fail(fmt.tprintf("that folder is inside the Claude account %s's config folder (Settings → Claude accounts)", l)), false
+	if why := account_holding_why(path); why != "" && caller.kind != .Internal do return fail(why), false
 	if path != "" {
 		if c.create do os.make_directory_all(path)
 		// a saved main folder on a drive that is not there stays set
@@ -240,7 +240,7 @@ folders_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool
 		path, err := folder_arg(c.path)
 		if err != "" do return fail(err), false
 		if path != "" {
-			if l := claude_account_holding(path); l != "" && caller.kind != .Internal do return fail(fmt.tprintf("that folder is inside the Claude account %s's config folder (Settings → Claude accounts)", l)), false
+			if why := account_holding_why(path); why != "" && caller.kind != .Internal do return fail(why), false
 			if c.kind == .Sessions && filepath.base(path) != "sessions" do return fail("pi-kit writes session notes to <notes root>/sessions/: pick a folder named sessions"), false
 			if c.kind == .Chats do path = real_path(path) // pi's cwd, and so its store dir, has no symlinks; made on the first chat
 			else if !os.is_dir(path) && caller.kind != .Internal do return fail("no such folder"), false

@@ -209,7 +209,8 @@ sp_edit_commit :: proc() {
 		if no, ok := core.machine_row_no(spage.edit.target); ok do r = ui_run(core.Machine_Rename{no = no, name = name})
 	case .Rename_Account:
 		if name == "" do break
-		r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name})
+		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, codex = true})
+		else do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name})
 	case .New_File, .New_Folder, .Rename_File:
 		if err := files_name_error(name); err != "" {
 			r = {error = err}
@@ -964,6 +965,8 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 			for r in rows do if strings.has_prefix(r.path, core.MACHINE_ROW) || strings.has_prefix(r.path, core.MACHINE_CHECK_ROW) do sp_list_row(r)
 		case "claude_accounts":
 			for r in rows do if r.group == "claude-accounts" do sp_list_row(r)
+		case "codex_accounts":
+			for r in rows do if r.group == "codex-accounts" do sp_list_row(r)
 		case "subfolders":
 			for r in rows do if r.group == "folders" && r.path != core.FOLDER_MAIN_ROW do sp_list_row(r)
 		}

@@ -988,9 +988,11 @@ settings_row_op :: proc(path: string, op: Settings_Row_Op) {
 		if k, ok := core.folder_row_kind(path); ok do ui_do(core.Set_Folder{kind = k, path = ""})
 	case .Remove:
 		if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = path[len(core.CLAUDE_ACCOUNT_ROW):]})
+		else if strings.has_prefix(path, core.CODEX_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = path[len(core.CODEX_ACCOUNT_ROW):], codex = true})
 		else if no, ok := core.machine_row_no(path); ok do ui_do_menu(core.Machine_Remove{no = no}, "Remove") // asks first
 	case .Default:
 		if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = path[len(core.CLAUDE_ACCOUNT_ROW):]})
+		else if strings.has_prefix(path, core.CODEX_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = path[len(core.CODEX_ACCOUNT_ROW):], codex = true})
 	case .Reveal:
 		if path == core.FOLDER_MAIN_ROW do ui_do(core.Reveal_In_Finder{path = state.settings.home_dir})
 		else if k, ok := core.folder_row_kind(path); ok do ui_do(core.Reveal_In_Finder{path = core.folder_of(k)})
@@ -1012,6 +1014,16 @@ settings_folder_button :: proc(path: string) -> bool {
 	if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) {
 		settings_page_open(.Agents)
 		sp_edit_begin(.Rename_Account, path, core.claude_account_label_now(path[len(core.CLAUDE_ACCOUNT_ROW):]))
+		return true
+	}
+	// a Codex account's (the same, with codex)
+	if path == core.CODEX_ACCOUNT_ADD_ROW {
+		action_run("codex_account_add")
+		return true
+	}
+	if strings.has_prefix(path, core.CODEX_ACCOUNT_ROW) {
+		settings_page_open(.Agents)
+		sp_edit_begin(.Rename_Account, path, core.claude_account_label_now(path[len(core.CODEX_ACCOUNT_ROW):], codex = true))
 		return true
 	}
 	// Machines (machines.odin): Add a machine… opens the add field; a machine's button does what

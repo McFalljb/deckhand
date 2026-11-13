@@ -18,6 +18,7 @@ LEGACY_ENV_PREFIX :: "PI_DESK_"
 DESK_SET_ENV := [?]string {
 	"SOCKET", "TOKEN", "CONTROL_TOKEN", "SHOTS_DIR", // every tab kind's transport
 	"CLAUDE_TOKEN", "CLAUDE_TAB", "CLAUDE_ACCOUNT", "CLI", // Claude tabs
+	"CLAUDE_READONLY", // no longer set (read-only chats are gone); still dropped, so a tab never inherits an old one
 	"APP", // app tabs
 	"JOB", "RUN", "RUN_DIR", "SCHEDULED_AT", // job runs
 }

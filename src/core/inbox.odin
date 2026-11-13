@@ -148,7 +148,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Panel:           return Set_Panel{panel = s(c.panel, allocator), open = c.open}
 	case Cancel_Confirmation: return Cancel_Confirmation{token = s(c.token, allocator)}
 	case Quit:                return Quit{confirm = s(c.confirm, allocator), stop_sessions = c.stop_sessions}
-	case Set_Claude_Default_Flags: return Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = s(c.confirm, allocator)}
+	case Set_Claude_Default_Flags: return Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, codex = c.codex, confirm = s(c.confirm, allocator)}
 	case Set_Pi_Extension:    return Set_Pi_Extension{name = s(c.name, allocator), on = c.on}
 	case Pi_Session_Update:   return Pi_Session_Update{tab_id = c.tab_id, pi_session_id = s(c.pi_session_id, allocator), session_file = s(c.session_file, allocator), cwd = s(c.cwd, allocator)}
 	case Pi_Status_Update:

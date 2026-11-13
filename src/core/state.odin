@@ -305,6 +305,7 @@ Settings :: struct {
 	text_size:     Text_Size, // the chrome's text (theme.odin); terminals keep their size
 	chats_readonly: bool, // chats' pi starts with its read tools only (chat_args) and PI_KIT_READONLY=1
 	claude_skip_permissions: bool, // the user's default flag for Claude tabs THEY start (claude_with_defaults); user-only, off by default
+	codex_full_access: bool, // the same for Codex tabs: --dangerously-bypass-approvals-and-sandbox (codex_with_defaults)
 	agent_name:    string, // the built-in agent's name ("" = AGENT_NAME_DEFAULT)
 	agent_model:   string, // the agent's model, "provider/id[:thinking]" ("" = pi's default); user-only
 	notify_off:    bool, // no OS notifications from the agent while the window is in the background

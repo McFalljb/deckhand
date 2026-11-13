@@ -37,6 +37,8 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 - **Palette**: **New Codex tab** in the session on screen.
 - **Deckhand's tools** (phase 2a): the `deckhand` command's show, browser and app commands, as MCP
   tools of a per-run stdio server (§7).
+- **The user's flags** (§1a): extra flags on a tab, from the user only, checked against Codex's
+  own; and **Full access in new Codex tabs**, a default for the tabs the user starts.
 
 ## What does not yet (phase 2 and later)
 
@@ -46,8 +48,11 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   it: the user's MCP servers and apps (Claude's read-only profile denies `mcp__*`), a trusted
   folder's `.codex/` MCP servers and hooks, memories; and `/permissions` in the composer lifts it.
   It does not match what Deckhand promises for a read-only Claude, so it is not offered.
-- No extra flags and no accounts: the user's own Codex settings (`~/.codex/config.toml`, profiles)
-  apply as they are.
+- No accounts: Codex runs with the user's own `~/.codex` (or their `CODEX_HOME`); Deckhand never
+  sets `CODEX_HOME`.
+- No profiles per tab (`-p`, `-c profile…` are refused): where a profile layers against Deckhand's
+  trailing `-c` overrides is unchecked, and a profile may carry `features.hooks`, `hooks.*` or
+  `mcp_servers.deckhand`. Revisit after a real-run check.
 - **Rename** changes Deckhand's title only, not Codex's own.
 - Conversation ids are one space across harnesses: when a Codex record and Claude Code's own
   transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
@@ -59,16 +64,17 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 ## 1. The command
 
 ```
-$SHELL -l -c '<CODEX_TAB_CMD>' codex --no-daemon -C <cwd> -c hooks.SessionStart=[…] … -c hooks.state={…} -c mcp_servers.deckhand={…}
-$SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> --no-daemon -C <cwd> -c … (a resume)
+$SHELL -l -c '<CODEX_TAB_CMD>' codex <user flags> --no-daemon -C <cwd> -c hooks.SessionStart=[…] … -c hooks.state={…} -c mcp_servers.deckhand={…}
+$SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> <user flags> --no-daemon -C <cwd> -c … (a resume)
 ```
 
 - **`--no-daemon` is mandatory.** Since 0.157 the TUI otherwise attaches to Codex's shared
   background server; its hooks would not descend from the tab's process and the token's process
   check (below) would refuse them.
-- **Nothing that overrides the user's settings**: no `-s`, `-a`, `-m`, `-p`, `projects` or
-  `notify`; `mcp_servers` only for Deckhand's own server (§7). Never `--dangerously-bypass-hook-trust` (it would run every hook unreviewed, a
-  repository's `.codex/` hooks too).
+- **Nothing of Deckhand's that overrides the user's settings**: Deckhand adds no `-s`, `-a`, `-m`,
+  `-p`, `projects` or `notify`; `mcp_servers` only for Deckhand's own server (§7). Never
+  `--dangerously-bypass-hook-trust` (it would run every hook unreviewed, a repository's `.codex/`
+  hooks too). The user's own flags (§1a) go before Deckhand's, so Deckhand's `-c` come last.
 - **Deckhand writes nothing under `~/.codex`** and never sets `CODEX_HOME`. Codex itself writes
   there as it always does (its sessions, history, logs).
 - The argv is an argv: the cwd is its own element after `-C` (absolute; never inside TOML), the
@@ -80,6 +86,39 @@ $SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> --no-daemon -C <cwd> -c … (a 
   to install it and exit 127. `DECKHAND_CODEX_CMD` replaces it in tests (test mode never runs the
   real codex); `DECKHAND_CODEX_BIN` names the binary whose version is read (test mode and unit
   tests find codex only this way, never on the developer's PATH).
+
+## 1a. The user's flags
+
+- **A tab's flags**: `args` on `new_claude_tab` / `new_claude_session` with harness codex, from the
+  user only (`ui`, `script`, Deckhand itself; as Claude's), at most 16. Kept with the tab and its
+  history entry and passed again on the user's resume, restore and restart (an agent's resume or
+  restart starts without them). Checked by `codex_args_check` when given and again at every start
+  (a saved tab whose flags fail does not start; the tab says why).
+- **An allowlist** (Codex 0.167.2's `--help`): `-m`/`--model`, `-s`/`--sandbox`,
+  `-a`/`--ask-for-approval`, `-c`/`--config`, `--add-dir`, `--local-provider`, `--oss`, `--search`, `--no-alt-screen`, `--strict-config`,
+  `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`; a value as `-m o3`, `-mo3` or
+  `--model=o3` (a separate value never starts with `-`: it would take Deckhand's next flag). Refused,
+  each with its reason: anything else, so a newer Codex's new flag waits until it is looked at; a
+  word that is no flag's value (`codex exec`, `login` … would run a subcommand, else it is a
+  prompt); `--no-daemon`, `-C`/`--cd`, `--worktree` (another folder), `--remote` and
+  `--remote-auth-token-env` (another Codex: the hooks and the token check need the tab's own),
+  `--dangerously-bypass-hook-trust`, `--last`, `--all`, `--include-non-interactive`, `-i`/`--image`,
+  `-h`, `-V`; `--enable`, `--disable` and a `-c` under `features` (Codex features are set in the
+  user's `config.toml`, not per tab: some turn hooks off, `codex_hooks` is an alias of `hooks`, and
+  others bear on the daemon and MCP); `-p`/`--profile` and a `-c` of `profile` or `profiles` (not
+  per tab yet); a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
+  `hooks`, is `mcp_servers` or under `mcp_servers.deckhand`.
+- **Full access in new Codex tabs** (`set_claude_default_flags` with `"harness": "codex"`,
+  `User_Here`, off by default; Settings › Coding agents › Codex and the palette): turning it on is
+  confirmed (`CODEX_FULL_ACCESS_CONFIRM`). It adds `--dangerously-bypass-approvals-and-sandbox` after
+  the tab's flags at each start the user makes (as Claude's skip-permissions: new tab or session,
+  the user's resume, a restored tab shown, the user's restart), never saved into a tab's flags.
+  Left out when the tab's flags set `-s`, `-a`, `--approve-for-me` (Codex refuses the flag beside
+  `-a` or `--approve-for-me`) or a `-c` of `approval_policy`, `sandbox_mode` or
+  `sandbox_workspace_write`, or name it, and past 16 flags. Agents', scripts', panels' and apps'
+  starts never get it. A restart or resume of a Codex tab forwarded by a machine allowed to connect
+  counts as the user's (its saved flags and this default apply), as for Claude tabs: such a machine
+  acts as the user here.
 
 ## 2. The hooks and their trust
 

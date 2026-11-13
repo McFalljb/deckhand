@@ -420,6 +420,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Set_Claude_Default_Flags:
 		kv_bool(&w, "skip_permissions", c.skip_permissions)
+		if c.codex do kv_str(&w, "harness", "codex")
 		token(&w, c.confirm, redact)
 	case Set_Pinned:
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
@@ -1804,6 +1805,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_str(&st, "text_size", TEXT_SIZE_NAMES[s.settings.text_size])
 		kv_bool(&st, "chats_readonly", s.settings.chats_readonly)
 		kv_bool(&st, "claude_skip_permissions", s.settings.claude_skip_permissions)
+		kv_bool(&st, "codex_full_access", s.settings.codex_full_access)
 		// the pi integration's optional extensions, on or off for the pi tabs started from now on
 		key(&st, "pi_extensions")
 		pe := obj_begin(b)

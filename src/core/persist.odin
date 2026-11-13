@@ -561,6 +561,7 @@ workspace_json :: proc() -> string {
 	if st.text_size != .Default do ks(&w, "text_size", TEXT_SIZE_NAMES[st.text_size])
 	if st.chats_readonly do kb(&w, "chats_readonly", true)
 	if st.claude_skip_permissions do kb(&w, "claude_skip_permissions", true)
+	if st.codex_full_access do kb(&w, "codex_full_access", true)
 	if len(st.pi_extensions) > 0 {
 		k(&w, "pi_extensions")
 		open_obj(&w)
@@ -727,6 +728,7 @@ workspace_restore :: proc(text: string) -> string {
 		if ts, tok := enum_of(st, "text_size", TEXT_SIZE_NAMES); tok do run(Set_Text_Size{size = ts})
 		if ro, rok := st["chats_readonly"].(json.Boolean); rok do run(Set_Chats_Readonly{on = bool(ro)})
 		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp)})
+		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), codex = true})
 		if pe, pok := st["pi_extensions"].(json.Object); pok {
 			names := make([dynamic]string, context.temp_allocator)
 			for n in pe do append(&names, n)

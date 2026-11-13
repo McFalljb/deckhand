@@ -191,6 +191,98 @@ codex_argv :: proc(t: ^testing.T) {
 	}
 }
 
+// The user's flags: only Codex flags known safe for a tab, never one that touches Deckhand's hooks,
+// its MCP server, the folder or the daemon, nor a subcommand; they go before Deckhand's own.
+@(test)
+codex_user_flags :: proc(t: ^testing.T) {
+	ok := [][]string{
+		{"-m", "o3"}, {"-mo3"}, {"--model=o3"}, {"-s", "danger-full-access", "-a", "never"}, {"--dangerously-bypass-approvals-and-sandbox"},
+		{"-c", `model="o3"`}, {"--config=mcp_servers.mine.command=\"x\""}, {"--search", "--oss"},
+	}
+	for a in ok do testing.expectf(t, core.codex_args_check(a) == "", "%v: %s", a, core.codex_args_check(a))
+	refused := [][2]string{
+		{"exec", `"exec" is not a flag: Codex would take it for a command or a prompt`},
+		{"--no-daemon", "--no-daemon is refused: Deckhand sets it (its hooks must run under the tab's own Codex)"},
+		{"-C", "-C is refused: Deckhand sets the tab's folder"},
+		{"--cd=/tmp", "--cd is refused: Deckhand sets the tab's folder"},
+		{"--dangerously-bypass-hook-trust", "--dangerously-bypass-hook-trust is refused: it would run every hook unreviewed, a repository's too"},
+		{"--remote=ws://x", "--remote is refused: the tab runs its own Codex: Deckhand's hooks and token check need it"},
+		{"--worktree", "--worktree is refused: it moves the session to another folder than the tab's"},
+		{"--last", "--last is refused: Deckhand picks the conversation"},
+		{"-cmcp_servers.deckhand.command=\"/bin/sh\"", "-c mcp_servers.deckhand is Deckhand's own MCP server"},
+		{"--config= hooks.Stop =[]", "-c hooks… would change Deckhand's hooks or their trust"},
+		{`-c"hooks".state={}`, "-c hooks… would change Deckhand's hooks or their trust"},
+		{"-cfeatures.codex_hooks=false", "-c features… is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"-c features.daemon_auto_start=true", "-c features… is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"--disable=codex_hooks", "--disable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"--enable", "--enable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"-p", "-p is refused: profiles are not supported per tab yet"},
+		{"--profile=work", "--profile is refused: profiles are not supported per tab yet"},
+		{"-cprofile=\"work\"", "-c profile… is refused: profiles are not supported per tab yet"},
+		{"-c profiles.work.model=\"o3\"", "-c profile… is refused: profiles are not supported per tab yet"},
+		{"--frobnicate", "--frobnicate is not a Codex flag Deckhand passes on"},
+		{"-m", "--model needs a value"},
+		{"--search=yes", "--search takes no value"},
+	}
+	for r in refused do testing.expect_value(t, core.codex_args_check({r[0]}), r[1])
+	testing.expect_value(t, core.codex_args_check({"-m", "--no-daemon"}), "--model needs a value") // never eats Deckhand's next flag
+	testing.expect_value(t, core.codex_args_check({"-c", "mcp_servers={}"}), "-c mcp_servers.deckhand is Deckhand's own MCP server")
+	testing.expect_value(t, core.codex_args_check({"-m", "o3", "login"}), `"login" is not a flag: Codex would take it for a command or a prompt`)
+	// Deckhand's own arguments come after the user's: --no-daemon, -C and every -c of Deckhand's last
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad530"
+	args, why := core.codex_args(CX_CLI, "/w/p", sid, {"-m", "o3", "-c", `model_reasoning_effort="high"`})
+	testing.expect_value(t, why, "")
+	testing.expectf(t, len(args) > 9 && args[0] == "resume" && args[1] == sid && args[2] == "-m" && args[3] == "o3" && args[5] == `model_reasoning_effort="high"` && args[6] == "--no-daemon" && args[7] == "-C" && args[8] == "/w/p", "%v", args)
+	testing.expect(t, strings.has_prefix(args[len(args) - 1], "mcp_servers.deckhand="))
+	_, why = core.codex_args(CX_CLI, "/w/p", "", {"--dangerously-bypass-hook-trust"})
+	testing.expect(t, why != "", "refused in the argv too")
+}
+
+// Full access in new tabs (the Codex card's switch, set_claude_default_flags with harness codex):
+// asks first; added at the user's starts only, after the tab's flags, never with its own -a or -s.
+@(test)
+codex_full_access_default :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	defer state.settings.codex_full_access = false
+	action_run("codex_full_access")
+	core.inbox_drain()
+	testing.expect(t, !state.settings.codex_full_access, "not before the user confirms")
+	testing.expect_value(t, len(state.pending_confirmations), 1)
+	if len(state.pending_confirmations) == 1 {
+		p := state.pending_confirmations[0]
+		testing.expect_value(t, p.summary, core.CODEX_FULL_ACCESS_CONFIRM)
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, codex = true, confirm = p.token}, CX_UI).ok)
+	}
+	testing.expect(t, state.settings.codex_full_access && !state.settings.claude_skip_permissions, "Codex's, not Claude's")
+	// never from an agent (User_Here)
+	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = false, codex = true}, CX_CONTROL).ok)
+	dir := cx_dir("full")
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	argv_of :: proc(t: ^testing.T, pid: u64, args: []string, caller: core.Caller) -> string {
+		f := fmt.tprintf("%s/argv-%d", cx_dir("fa"), time.now()._nsec)
+		os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, f))
+		r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true, args = args}, caller)
+		testing.expect(t, r.ok, r.error)
+		for _ in 0 ..< 50 {
+			data, _ := os.read_entire_file(f, context.temp_allocator)
+			if strings.contains(string(data), "mcp_servers.deckhand") do return string(data)
+			time.sleep(20 * time.Millisecond)
+		}
+		return ""
+	}
+	got := argv_of(t, pid, {"-m", "o3"}, CX_UI)
+	testing.expectf(t, strings.has_prefix(got, "-m\no3\n--dangerously-bypass-approvals-and-sandbox\n--no-daemon\n"), "the user's: %q", got)
+	got = argv_of(t, pid, nil, CX_SCRIPT)
+	testing.expectf(t, strings.has_prefix(got, "--no-daemon\n") && !strings.contains(got, "bypass"), "a script's: %q", got)
+	got = argv_of(t, pid, {"-a", "never"}, CX_UI)
+	testing.expectf(t, strings.has_prefix(got, "-a\nnever\n--no-daemon\n") && !strings.contains(got, "bypass"), "its own -a: %q", got)
+	for own in ([]string{`-capproval_policy="on-request"`, `--config=sandbox_mode="read-only"`, `-c sandbox_workspace_write.network_access=false`}) {
+		got = argv_of(t, pid, {own}, CX_UI)
+		testing.expectf(t, strings.has_prefix(got, fmt.tprintf("%s\n--no-daemon\n", own)) && !strings.contains(got, "bypass"), "its own %s: %q", own, got)
+	}
+}
+
 // ---- text into Codex's composer ----
 
 @(test)
@@ -511,8 +603,9 @@ codex_resume_from_row :: proc(t: ^testing.T) {
 	// harness mismatch: a Claude tab never resumes a Codex conversation, nor the reverse
 	s, _, _ := core.find_tab(r.created_id)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, resume = sid}, CX_UI).error, "that id is another harness's conversation")
-	// flags and accounts: refused for Codex
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"-m", "o3"}}, CX_UI).error, core.CODEX_NO_FLAGS)
+	// accounts: refused for Codex; flags: Codex's own rule (codex_user_flags)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"exec"}}, CX_UI).error, `"exec" is not a flag: Codex would take it for a command or a prompt`)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"-m", "o3"}}, CX_CONTROL).error, "only the user sets Codex's flags")
 	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = s.id, codex = true, account = "/x"}, CX_UI).ok)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, resume = "--last"}, CX_UI).error, "resume must be a Codex session id")
 }

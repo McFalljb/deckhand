@@ -795,6 +795,28 @@ codex_too_old_and_missing :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.codex_label("New Codex tab"), "New Codex tab — Codex not installed")
 }
 
+// #135: a standalone install (no npm or Homebrew path) gets its version from `codex --version`,
+// once per binary; output that is not a version gives none.
+@(test)
+codex_version_from_run :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	d := cx_dir("standalone")
+	defer os.remove_all(d)
+	bin := fmt.tprintf("%s/codex", d)
+	count := fmt.tprintf("%s/runs", d)
+	script := fmt.tprintf("#!/bin/sh\n[ \"$1\" = --version ] || exit 2\necho x >> '%s'\necho 'codex-cli 0.168.0'\n", count)
+	_ = os.write_entire_file(bin, transmute([]u8)script)
+	posix.chmod(strings.clone_to_cstring(bin, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+	testing.expect_value(t, core.codex_version_of(bin), "0.168.0")
+	testing.expect_value(t, core.codex_version_of(bin), "0.168.0")
+	runs, _ := os.read_entire_file(count, context.temp_allocator)
+	testing.expect_value(t, string(runs), "x\n") // cached: run once
+	other := fmt.tprintf("%s/codex2", d)
+	_ = os.write_entire_file(other, transmute([]u8)string("#!/bin/sh\necho 'something else'\n"))
+	posix.chmod(strings.clone_to_cstring(other, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+	testing.expect_value(t, core.codex_version_of(other), "")
+}
+
 // The version from where codex links to (never run).
 @(test)
 codex_version_detection :: proc(t: ^testing.T) {

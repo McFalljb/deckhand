@@ -531,9 +531,9 @@ codex_installed_now :: proc() -> bool {
 	return codex_installed()
 }
 
-// codex's version from where its binary links to (never run): npm's package
+// codex's version from where its binary links to: npm's package
 // (<…>/node_modules/@openai/codex/bin/codex.js -> its package.json), Homebrew's cask
-// (Caskroom/codex/<v>/). "" = unknown.
+// (Caskroom/codex/<v>/); else, only then, from `codex --version` (codex_version_run). "" = unknown.
 codex_version_of :: proc(bin: string) -> string {
 	if bin == "" do return ""
 	real := fs_real(bin)
@@ -554,7 +554,44 @@ codex_version_of :: proc(bin: string) -> string {
 			dir = filepath.dir(dir)
 		}
 	}
-	return ""
+	return codex_version_run(real)
+}
+
+// Any other install (the standalone one: ~/.local/bin/codex -> ~/.codex/packages/standalone/…,
+// #135): `<real> --version` run (argv, no shell, stdin /dev/null, 3 s at most: run_group), its
+// last word ("codex-cli 0.46.0" -> 0.46.0) if it looks like a version. Once per binary: cached by
+// its real path and stamp (main thread). "" = unknown.
+@(private = "file")
+codex_ran: struct {
+	real:    string, // heap
+	stamp:   Disk_Stamp,
+	version: string, // heap
+}
+
+@(private = "file")
+codex_version_run :: proc(real: string) -> string {
+	k, st := path_stat(real)
+	if k != .File || !exe_in(filepath.dir(real), filepath.base(real)) do return ""
+	if codex_ran.real == real && codex_ran.stamp.mtime == st.mtime && codex_ran.stamp.size == st.size && codex_ran.stamp.inode == st.inode do return codex_ran.version
+	out, rs := run_group({real, "--version"}, 3 * time.Second, cap = 4096)
+	v := ""
+	if rs == .Ok {
+		line, _, _ := strings.partition(strings.trim_space(out), "\n")
+		f := strings.fields(line, context.temp_allocator)
+		if len(f) > 0 && codex_version_word(f[len(f) - 1]) do v = f[len(f) - 1]
+	}
+	heap := runtime.heap_allocator()
+	delete(codex_ran.real, heap)
+	delete(codex_ran.version, heap)
+	codex_ran = {real = strings.clone(real, heap), stamp = st, version = strings.clone(v, heap)}
+	return codex_ran.version
+}
+
+@(private = "file")
+codex_version_word :: proc(v: string) -> bool {
+	if v == "" || len(v) > 40 || v[0] < '0' || v[0] > '9' do return false
+	for c in v do if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '.' || c == '-' || c == '+') do return false
+	return true
 }
 
 // The version of the codex new tabs start ("" = unknown or none).

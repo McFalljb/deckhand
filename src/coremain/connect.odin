@@ -39,15 +39,16 @@ connect_main :: proc(args: []string) -> int {
 		return 1
 	}
 	core.home_root = data
-	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
+	run, rwhy := core.sock_runtime_dir_why() // heap: the login shell's merge below frees the temp allocator
 	if rwhy != "" {
 		fmt.eprintln("deckhand-core-serve connect:", rwhy)
 		return 1
 	}
-	path := fmt.tprintf("%s/%s", run, core.CORE_SOCK)
+	path := fmt.aprintf("%s/%s", run, core.CORE_SOCK)
 	fd: core.Sock_Fd = -1
 	deadline := time.tick_add(time.tick_now(), 15 * time.Second)
 	last_launch: time.Tick
+	asked_shell := false
 	for fd < 0 {
 		if s, ok := core.sock_connect(path); ok {
 			if core.window_token_read(run) != "" do fd = s
@@ -56,6 +57,13 @@ connect_main :: proc(args: []string) -> int {
 		if fd >= 0 do break
 		if last_launch == {} || time.tick_since(last_launch) >= time.Second {
 			last_launch = time.tick_now()
+			// a Mac's core started from here has no window's environment to inherit: this process
+			// (ssh's, never a terminal's) asks the login shell first, as a Dock launch does, and the
+			// core gets the merge and DECKHAND_GUI_LAUNCH=1 (core_launch). Linux: the core asks itself
+			when ODIN_OS == .Darwin {
+				if !asked_shell do core.login_env_startup(no_window = true)
+				asked_shell = true
+			}
 			if _, ok, why := core.core_launch(core.executable_path(), run, data); !ok {
 				fmt.eprintln("deckhand-core-serve connect: cannot start the core:", why)
 				return 1

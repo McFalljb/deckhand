@@ -41,6 +41,7 @@ loop: struct {
 	next_fire:      time.Tick,
 	quit:           bool,
 	idle_since:     time.Tick, // nothing to do since ({} = something; core_idle_due)
+	signal:         int, // atomic: the signal that stopped it (0: none, 1: SIGTERM, 2: SIGINT)
 }
 
 SERVE_USAGE :: "usage: deckhand-core-serve serve --run DIR --data DIR [--ready PATH] [--secret-stdin]"
@@ -94,7 +95,9 @@ serve_main :: proc(args: []string) -> int {
 	core.core_separate = true
 	core.app_context = context
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
-	core.login_env_adopt() // a refresh of the login shell's environment (login_env.odin)
+	// a refresh of the login shell's environment (login_env.odin); a Linux core has no window to
+	// inherit it from, so it asks at its start (a successor inherited its predecessor's)
+	core.login_env_adopt(no_window = ODIN_OS == .Linux, inherited = secret_stdin)
 	if !serve_platform() do return 1
 	if !serve_platform_prepare(run) do return 1
 	core.home_root = strings.clone(data)
@@ -252,6 +255,7 @@ loop_again: bool
 
 @(private = "file")
 serve_on_signal :: proc "c" (sig: posix.Signal) {
+	sync.atomic_store(&loop.signal, sig == .SIGTERM ? 1 : 2)
 	loop.quit = true
 	b := [1]u8{1}
 	posix.write(loop.wake_w, &b[0], 1)
@@ -268,6 +272,13 @@ terms_bytes_in :: proc() -> int {
 // The end (Quit, or a signal): as the in-process window's quit and cleanup do.
 @(private = "file")
 serve_stop :: proc(run: string) {
+	// the journal (Linux) or core.log says why it stopped, and that the stop was clean
+	why := core.app_stop_sessions ? "Quit and stop all sessions" : "Quit, or the idle exit"
+	switch sync.atomic_load(&loop.signal) {
+	case 1: why = "SIGTERM"
+	case 2: why = "SIGINT"
+	}
+	core.log_fln("deckhand-core serve: stopping (%s)", why)
 	core.core_loop_stop()
 	if core.core_handover_due() do core.jobs_shutdown(.Update) // runs that did not end in time (core_handover.odin)
 	if core.app_stop_sessions do core.holder_shutdown()
@@ -279,6 +290,7 @@ serve_stop :: proc(run: string) {
 	core.socket_stop()
 	core.jobs_shutdown()
 	core.close_all()
+	core.holder_stop_clean() // nothing handed over: still a GOODBYE, so the holder sees a clean stop (#135)
 	core.holder_client_stop()
 	core.comments_shutdown()
 	core.machines_stop()
@@ -287,6 +299,7 @@ serve_stop :: proc(run: string) {
 	// the window's link (not one of srv.conns) goes last: a window that reconnects finds the core
 	// gone, not one still holding core.lock through its handover and save
 	core.window_door_stop()
+	core.log_ln("deckhand-core serve: stopped cleanly")
 	if core.autotest_active do fmt.println("[autotest] core: stopped")
 }
 

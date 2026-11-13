@@ -1314,12 +1314,13 @@ that machine's own window) and waits for `machine_connect`. Notifications on a c
 hub are its own banners. This Mac reads the hello reply (the first JSON line: lines a remote rc
 file prints before it are skipped; 1 MiB without one, or 30 s, ends the attempt, as do 4 KiB or 30 s
 from the `uname -sm` probe) through `skew_check`; `state.machines`
-(and `get_state`'s `machines`, without targets) has each machine's `status` (`connecting`,
+(and `get_state`'s `machines`, without targets; `[]` with none) has each machine's `status` (`connecting`,
 `online`, `offline`, `needs_login`: ssh's exit 255 asking for a password, host key or code;
 `needs_update`; `not_installed`; `taken`; `refused`: its hub door is closed; `unsupported`: not a Mac or Linux. `needs_login`, `refused` and `unsupported` wait for the user's `machine_connect`, `machine_login` or `machine_rename`; `offline` retries with the backoff and keeps that status during a retry), `version`, `os`, `arch` and `error` (another machine's
 text, cleaned: printable runes only, no bidi controls; `version` at most 64 bytes, `error` 128),
 `job` and `job_note` (`machine_install`), `update` (`none`, `button`, `command`), `linger`
-(`unknown`, `on`, `off`) and `checklist` (`[{id, state, command}]`: that core's coding agents
+(`unknown`, `on`, `off`), `codex` (its hello's features list `codex_tabs`: Codex tabs may be
+started there) and `checklist` (`[{id, state, command}]`: that core's coding agents
 checklist, from its `live.checklist`, which a core fills only while a hub is attached; ids this
 build knows, at most 16, commands cleaned, at most 512 bytes; shown read-only with Copy).
 A Linux core whose data dir holds `machines-reachable.grant` (a regular 0600 file of this user's,

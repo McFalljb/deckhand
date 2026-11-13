@@ -233,7 +233,8 @@ commands either.
   Coding agents) has a Codex row: Install runs `npm install -g @openai/codex@latest` after the
   user's click, as for the other harnesses.
 - **Version**: from the npm package's `package.json` next to where `codex` links (or Homebrew's
-  `Caskroom/codex/<v>/`). Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab says
+  `Caskroom/codex/<v>/`); any other install (the standalone one in `~/.local/bin`) runs
+  `codex --version` (argv, no shell, 3 s at most), once per binary. Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab says
   how to update, the checklist offers Update.
 - **Signed out**: `codex login status` (exit 1), run once per recheck through the login shell on a
   worker when a Codex tab starts or the checklist looks, per Codex home: a tab of an account asks

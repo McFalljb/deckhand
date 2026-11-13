@@ -330,6 +330,29 @@ holder_handover_unwritable_keeps :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.fake_holder_count(&f, .Release), 0)
 }
 
+// #135: a separate core's clean stop with no held tab (holder_handover has nothing to hand over)
+// still says GOODBYE, so the holder records a handover, not a crash; once only.
+@(test)
+holder_clean_stop_says_goodbye :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, previous = "none"}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	testing.expect(t, core.holder_wanted(), "attached")
+	testing.expect(t, !core.holder_handover(), "no held tab: nothing handed over")
+	core.holder_stop_clean()
+	core.holder_stop_clean()
+	for i := 0; i < 200 && core.fake_holder_count(&f, .Goodbye) == 0; i += 1 do time.sleep(10 * time.Millisecond)
+	time.sleep(50 * time.Millisecond) // a second one would be there by now
+	got := core.fake_holder_got(&f)
+	n := 0
+	for g in got do if g.kind == .Goodbye {
+		n += 1
+		testing.expect_value(t, g.mode, "handover")
+	}
+	testing.expect_value(t, n, 1)
+}
+
 // ---- adopt at launch, against a fake holder ----
 
 @(private = "file")

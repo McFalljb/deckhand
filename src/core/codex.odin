@@ -222,7 +222,31 @@ codex_args :: proc(cli, cwd, resume: string) -> (args: []string, why: string) {
 	if resume != "" do append(&out, "resume", resume)
 	append(&out, "--no-daemon", "-C", cwd)
 	append(&out, ..hooks)
+	append(&out, "-c", codex_mcp_override(cli))
 	return out[:], ""
+}
+
+// The variables Codex passes to Deckhand's MCP server (env_vars: by name, from the tab's
+// environment; never a value on the command line, which `ps` shows).
+CODEX_MCP_ENV := [?]string{"DECKHAND_SOCKET", "DECKHAND_CLAUDE_TOKEN", "DECKHAND_SHOTS_DIR"}
+
+// Deckhand's tools for this run (temp): the CLI's `mcp` as a stdio MCP server, one inline table (it
+// replaces a `deckhand` server of the user's own for the run, never merges with it). cli: checked by
+// codex_hook_overrides. Codex runs it outside its sandbox, as its own child: the token's process
+// check (socket.odin) holds, and its authority is the tab's, as the `deckhand` command's is in a
+// Claude tab.
+codex_mcp_override :: proc(cli: string) -> string {
+	q, _ := codex_toml_string(cli)
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, "mcp_servers.deckhand={command=")
+	strings.write_string(&b, q)
+	strings.write_string(&b, `,args=["mcp"],env_vars=[`)
+	for v, i in CODEX_MCP_ENV {
+		if i > 0 do strings.write_byte(&b, ',')
+		strings.write_string(&b, strings.concatenate({`"`, v, `"`}, context.temp_allocator))
+	}
+	strings.write_string(&b, "],tool_timeout_sec=620}") // Codex gives a tool 60 s: an app call may take 600, an upload waits 120 for the user
+	return strings.to_string(b)
 }
 
 // Starts codex in the tab's terminal (claude_start for a Codex tab): the login shell, CODEX_TAB_CMD

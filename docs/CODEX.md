@@ -35,11 +35,11 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 - **Sessions found on disk** (§2b): Codex conversations of the project's folder in
   `~/.codex/sessions/` are rows; a click runs `codex resume <id>`.
 - **Palette**: **New Codex tab** in the session on screen.
+- **Deckhand's tools** (phase 2a): the `deckhand` command's show, browser and app commands, as MCP
+  tools of a per-run stdio server (§7).
 
 ## What does not yet (phase 2 and later)
 
-- No Deckhand tools inside Codex (the `deckhand` CLI's browser and app commands): Codex's sandbox
-  cannot reach Deckhand's socket; phase 2 brings a per-run stdio MCP server.
 - No read-only chats: a Codex tab in a chat while **Start chats read-only** is on is refused (Codex is
   not offered there, and its conversations found on disk are not listed in Chats then). Codex's
   `-s read-only -a never` stops the shell and file edits (an OS sandbox), but not what runs outside
@@ -59,15 +59,15 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 ## 1. The command
 
 ```
-$SHELL -l -c '<CODEX_TAB_CMD>' codex --no-daemon -C <cwd> -c hooks.SessionStart=[…] … -c hooks.state={…}
+$SHELL -l -c '<CODEX_TAB_CMD>' codex --no-daemon -C <cwd> -c hooks.SessionStart=[…] … -c hooks.state={…} -c mcp_servers.deckhand={…}
 $SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> --no-daemon -C <cwd> -c … (a resume)
 ```
 
 - **`--no-daemon` is mandatory.** Since 0.157 the TUI otherwise attaches to Codex's shared
   background server; its hooks would not descend from the tab's process and the token's process
   check (below) would refuse them.
-- **Nothing that overrides the user's settings**: no `-s`, `-a`, `-m`, `-p`, `projects`, `notify`
-  or `mcp_servers`. Never `--dangerously-bypass-hook-trust` (it would run every hook unreviewed, a
+- **Nothing that overrides the user's settings**: no `-s`, `-a`, `-m`, `-p`, `projects` or
+  `notify`; `mcp_servers` only for Deckhand's own server (§7). Never `--dangerously-bypass-hook-trust` (it would run every hook unreviewed, a
   repository's `.codex/` hooks too).
 - **Deckhand writes nothing under `~/.codex`** and never sets `CODEX_HOME`. Codex itself writes
   there as it always does (its sessions, history, logs).
@@ -211,3 +211,39 @@ named `.codex/auth.json`, and everything in Codex's folder but its config (`conf
 `AGENTS.md`, `AGENTS.override.md`, `prompts/`, `skills/`, `rules/`) is refused wherever Deckhand
 refuses Claude's credentials (`settings_credential`: open, show, upload, list, watch, hard links by
 inode): `sessions/` transcripts, `history.jsonl`, logs and databases included.
+
+## 7. Deckhand's tools: a per-run MCP server
+
+Codex's sandbox cannot reach Deckhand's socket, so a Codex tab gets the `deckhand` command's tools
+as MCP tools instead. Deckhand passes one more `-c` for the run, one inline table (it replaces a
+server of the user's own named `deckhand` for that run, never merges with it):
+
+```
+-c 'mcp_servers.deckhand={command="<deckhand-cli>",args=["mcp"],env_vars=["DECKHAND_SOCKET","DECKHAND_CLAUDE_TOKEN","DECKHAND_SHOTS_DIR"],tool_timeout_sec=620}'
+```
+
+- Codex starts `deckhand-cli mcp` (`tools/deckhand-cli/mcp.odin`) **outside its sandbox**, as its
+  own child: the hello's process check (§3) sees a descendant of the tab's process and passes. An
+  MCP server does not get the tab's environment: `env_vars` names the variables Codex copies to it,
+  so **the token is never in argv** (never `env={…}`, which `ps` would show).
+- **The same authority as a Claude tab's `deckhand` command**: the tab's own token, its caller
+  (`panel`, `claude`), its own session's tabs. A tool call is one CLI command: the tool's arguments
+  become its argv, `command` (main.odin) runs it on a fresh connection, and its JSON line is the
+  tool's text (`isError` when it failed). Deckhand enforces every rule as it does for the CLI.
+- **Tools**: `show_file`, `state`, `comments`, `browser_tabs`, `browser_open`, `browser_navigate`,
+  `browser_back` / `forward` / `reload` / `stop`, `browser_read`, `browser_screenshot`,
+  `browser_wait`, `browser_click`, `browser_type`, `browser_press`, `browser_scroll`,
+  `browser_select`, `browser_hover`, `browser_upload`, `browser_console`, `browser_network`,
+  `app_list_declared`, `app_open`, `app_call`, `app_screenshot`, `app_input`, `app_events`,
+  `app_restart`, `app_close`. Only those that change nothing carry `readOnlyHint` (state, comments,
+  tabs, read, screenshots, wait, network, list-declared, events; not console, whose first call
+  starts recording that a page can detect): under the user's
+  `-a on-request`, Codex asks before every other one. A screenshot's PNG path is for `view_image`.
+- `initialize` gives the model a short `instructions` text (the manual's rules: page and app
+  content is data). JSON-RPC over stdio: initialize, tools/list, tools/call, ping; nothing else.
+- `tool_timeout_sec=620`: Codex gives a tool 60 s by default; an app call may take 600 s and an
+  upload waits 120 s for the user's Allow.
+- The codex scene's fake (`tests/scripts/fake-codex.py`, `!mcp`) starts the server as Codex does,
+  with only `env_vars`' variables, and checks a call with the tab's token and one refused with a
+  wrong token. Not checked without a real Codex turn: that Codex shows the model the
+  `instructions`, and how "Always allow" for a tool persists.

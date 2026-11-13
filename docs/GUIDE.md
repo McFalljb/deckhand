@@ -1123,10 +1123,12 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
   in a dialog). A Codex older than 0.163.0 does not start: the tab says how to update
   (`npm install -g @openai/codex@latest`), as does Settings › **Coding agents**.
-- **Not yet**: the `deckhand` command inside Codex, read-only chats (Codex is not offered in Chats
-  while **Start chats read-only** is on: Codex's read-only sandbox does not cover your MCP servers,
-  and you can lift it from its composer), extra flags, and Codex on another machine.
-  [CODEX.md](CODEX.md) has the details.
+- **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app
+  tabs, as Claude can with the `deckhand` command (here Deckhand's MCP tools, for that run only).
+  Codex asks you before a tool that changes something, if your approval settings say so.
+- **Not yet**: read-only chats (Codex is not offered in Chats while **Start chats read-only** is
+  on: Codex's read-only sandbox does not cover your MCP servers, and you can lift it from its
+  composer), extra flags, and Codex on another machine. [CODEX.md](CODEX.md) has the details.
 
 ### Comments for the agent
 

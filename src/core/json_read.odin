@@ -656,7 +656,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "setup_sheet":         cmd = Setup_Sheet{open = get_bool(&r, "open")}
 	case "set_chats_readonly":  cmd = Set_Chats_Readonly{on = get_bool(&r, "on")}
 	case "set_pi_extension":    cmd = Set_Pi_Extension{name = get_str(&r, "name"), on = get_bool(&r, "on")}
-	case "set_claude_default_flags": cmd = Set_Claude_Default_Flags{skip_permissions = get_bool(&r, "skip_permissions"), confirm = get_str(&r, "confirm", optional = true)}
+	case "set_claude_default_flags": cmd = Set_Claude_Default_Flags{skip_permissions = get_bool(&r, "skip_permissions"), codex = harness_codex(&r), confirm = get_str(&r, "confirm", optional = true)}
 	case "set_pinned":          cmd = Set_Pinned{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), pinned = get_bool(&r, "pinned"), index = opt_index(&r, "index")}
 	case "set_hidden":          cmd = Set_Hidden{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), hidden = get_bool(&r, "hidden")}
 	case "set_sort":            cmd = Set_Sort{section = get_enum(&r, "section", SORT_SECTION_NAMES), by = get_enum(&r, "by", SORT_BY_NAMES)}
@@ -1106,6 +1106,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 		}
 		s.settings.chats_readonly = opt_bool(&sr, "chats_readonly").? or_else false
 		s.settings.claude_skip_permissions = opt_bool(&sr, "claude_skip_permissions").? or_else false
+		s.settings.codex_full_access = opt_bool(&sr, "codex_full_access").? or_else false
 		s.settings.agent_name = get_str(&sr, "agent_name", optional = true)
 		s.settings.agent_model = get_str(&sr, "agent_model", optional = true)
 		s.settings.notify_off = !(opt_bool(&sr, "notify").? or_else true)

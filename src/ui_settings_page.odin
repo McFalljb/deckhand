@@ -847,6 +847,7 @@ sp_switch_on :: proc(s: ^core.Setting) -> bool {
 	case "bell_dock":               return !st.bell_dock_off
 	case "agent_notify":            return !st.notify_off
 	case "claude_skip_permissions": return st.claude_skip_permissions
+	case "codex_full_access":       return st.codex_full_access
 	case "remote_machines":         return st.remote_machines
 	case "machines_reachable":      return st.machines_reachable
 	case "keep_sessions":           return st.keep_sessions

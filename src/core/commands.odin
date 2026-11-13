@@ -217,9 +217,11 @@ Copy_Path :: struct {
 Set_Chats_Readonly :: struct {
 	on: bool,
 }
-// The default Claude Code flags for the tabs the user starts (user-only; claude_with_defaults).
+// The default Claude Code flags for the tabs the user starts (user-only; claude_with_defaults), or
+// with codex (harness "codex") Codex's (codex_with_defaults).
 Set_Claude_Default_Flags :: struct {
-	skip_permissions: bool, // --dangerously-skip-permissions
+	skip_permissions: bool, // --dangerously-skip-permissions; Codex: --dangerously-bypass-approvals-and-sandbox
+	codex:            bool,
 	confirm:          string, // turning it on: the user's confirmation (confirm_gate)
 }
 Set_Agent_Name :: struct {
@@ -1501,13 +1503,14 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		state.settings.chats_readonly = c.on
 		return {ok = true}, true
 	case Set_Claude_Default_Flags:
-		if state.settings.claude_skip_permissions == c.skip_permissions do return {ok = true}, false
+		on := c.codex ? &state.settings.codex_full_access : &state.settings.claude_skip_permissions
+		if on^ == c.skip_permissions do return {ok = true}, false
 		// on: the user confirms first, with the warning (a saved setting coming back does not ask)
 		if c.skip_permissions && caller.kind != .Internal {
-			gr, go_on, ch := confirm_gate(cmd, .Settings_Write, caller, c.confirm, CLAUDE_SKIP_CONFIRM, force_ask = true)
+			gr, go_on, ch := confirm_gate(cmd, .Settings_Write, caller, c.confirm, c.codex ? CODEX_FULL_ACCESS_CONFIRM : CLAUDE_SKIP_CONFIRM, force_ask = true)
 			if !go_on do return gr, ch
 		}
-		state.settings.claude_skip_permissions = c.skip_permissions
+		on^ = c.skip_permissions
 		settings_gen += 1 // the Settings tab's row
 		return {ok = true}, true
 	case Set_Agent_Name:
@@ -2186,7 +2189,7 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok
 	case Set_Claude_Default_Flags:
 		y, ok := b.(Set_Claude_Default_Flags)
-		return ok && x.skip_permissions == y.skip_permissions
+		return ok && x.skip_permissions == y.skip_permissions && x.codex == y.codex
 	case Update_Install:
 		_, ok := b.(Update_Install)
 		return ok

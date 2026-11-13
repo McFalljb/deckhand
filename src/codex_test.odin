@@ -494,9 +494,7 @@ codex_hub_starts :: proc(t: ^testing.T) {
 	testing.expect(t, core.run_command(core.New_Claude_Tab{session = sess, codex = true}, hub).ok)
 	state.settings.codex_full_access = false
 	got = read_argv(argf)
-	testing.expectf(t, strings.has_prefix(got, "--dangerously-bypass-approvals-and-sandbox
---no-daemon
-"), "this machine's default: %q", got)
+	testing.expectf(t, strings.has_prefix(got, "--dangerously-bypass-approvals-and-sandbox\n--no-daemon\n"), "this machine's default: %q", got)
 	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, codex = true, args = {"--no-daemon"}}, hub).ok, "Codex's flag rule")
 	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, codex = true, account = "/x"}, hub).ok)
 	// its row (open_session with its id, as a hub's click sends it): resumed in Codex

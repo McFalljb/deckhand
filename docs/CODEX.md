@@ -1,6 +1,6 @@
 # Codex tabs
 
-How Deckhand runs the [Codex CLI](https://github.com/openai/codex) as a tab, phase 1 (issue #112):
+How Deckhand runs the [Codex CLI](https://github.com/openai/codex) as a tab, phases 1 and 2 (issue #112):
 what works, what does not yet, and the rules that keep it safe. The user's view is in
 [GUIDE.md](GUIDE.md#codex-tabs); the wire in [PROTOCOL.md](PROTOCOL.md) ("Claude Code tabs":
 `harness`). Code: `src/core/codex.odin`, and the Claude tab's code it shares
@@ -29,16 +29,23 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 - **Held prompts** (`claude_prompt`, Atlas, scripts), with a stricter rule than Claude's (below).
 - **Bars**: signed out, hooks not running; a Codex too old is not started; not installed.
 - **Dead tab**: Restart resumes the conversation (no "Restart with model…").
+- **Comments** (§2a): pending comments go with the user's next message as UserPromptSubmit's
+  `additionalContext`, as for Claude; **Send now**, **Send and close** and Changes' **Ask Codex to
+  review** work for a Codex tab.
+- **Sessions found on disk** (§2b): Codex conversations of the project's folder in
+  `~/.codex/sessions/` are rows; a click runs `codex resume <id>`.
+- **Palette**: **New Codex tab** in the session on screen.
 - **Deckhand's tools** (phase 2a): the `deckhand` command's show, browser and app commands, as MCP
   tools of a per-run stdio server (§7).
 
 ## What does not yet (phase 2 and later)
 
-- No comments: **Send now**, **Send and close** and Changes' review asks refuse a Codex tab
-  (`"Codex tabs don't take comments yet …"`), and `claude.comments` is refused for it.
 - No read-only chats: a Codex tab in a chat while **Start chats read-only** is on is refused (Codex is
-  not offered there).
-- No sessions found on disk (`~/.codex/sessions/`): only conversations Deckhand ran are listed.
+  not offered there, and its conversations found on disk are not listed in Chats then). Codex's
+  `-s read-only -a never` stops the shell and file edits (an OS sandbox), but not what runs outside
+  it: the user's MCP servers and apps (Claude's read-only profile denies `mcp__*`), a trusted
+  folder's `.codex/` MCP servers and hooks, memories; and `/permissions` in the composer lifts it.
+  It does not match what Deckhand promises for a read-only Claude, so it is not offered.
 - No extra flags and no accounts: the user's own Codex settings (`~/.codex/config.toml`, profiles)
   apply as they are.
 - **Rename** changes Deckhand's title only, not Codex's own.
@@ -78,11 +85,11 @@ $SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> --no-daemon -C <cwd> -c … (a 
 
 Deckhand passes four hooks per run, each `'<deckhand-cli>' hook codex-<event>` with `timeout=10`:
 SessionStart → `claude.session` (its id, cwd, source, model), UserPromptSubmit → `claude.turn
-submitted` (the prompt's first line names the row), PermissionRequest → `claude.turn waiting`,
-Stop → `claude.turn idle` (with `question` when Codex's last message ends with `?`; the text is
-never sent). SessionEnd is not passed: it carries nothing Deckhand uses. The CLI **never prints
-anything** for these: Codex would add SessionStart's or UserPromptSubmit's output to the model's
-context and read Stop's or PermissionRequest's as a decision.
+submitted` (the prompt's first line names the row) and the pending comments (§2a),
+PermissionRequest → `claude.turn waiting`, Stop → `claude.turn idle` (with `question` when Codex's
+last message ends with `?`; the text is never sent). SessionEnd is not passed: it carries nothing
+Deckhand uses. The CLI **prints nothing** for these but UserPromptSubmit's comments: Codex would add
+SessionStart's output to the model's context and read Stop's or PermissionRequest's as a decision.
 
 Codex asks the user to review new or changed hooks ("Hooks need review"). Deckhand trusts exactly
 its own hooks for that run in the same `-c` layer, an inline table:
@@ -99,6 +106,40 @@ their own trust (checked: a user hook stays `trusted` or `untrusted` as it was).
 changes the recipe, Codex shows its review dialog and the hooks do not run until the user answers
 it: status still comes from OSC 7501, and after a turn with no hook for 20 s the bar says
 "Deckhand's hooks aren't running in this Codex tab …".
+
+## 2a. Comments
+
+The `codex-prompt-submit` hook does what Claude's `prompt-submit` does after its turn report: it
+asks `claude.comments` for the session's pending comments, prints them as
+`{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":…}}` (the only output
+any Codex hook prints; Codex adds it to the model's context with the user's message: verified in the
+phase 0 spike), and only then marks them delivered (`claude.attached`). The block, its 10,000-character
+budget and the crops (PNG copies in the shots folder, 0600) are Claude's; the image line says to look
+at each file rather than "the Read tool". Nothing pending: nothing printed. If the hook does not run
+(hooks untrusted after a Codex update), the comments stay pending.
+
+## 2b. Sessions found on disk
+
+`claude_disk_scan` (`src/core/claude_disk.odin`) lists Codex conversations beside Claude Code's for
+the selected project and Chats. **Read only, never written.**
+
+- **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), `YYYY/MM/DD/` folders
+  newest first: at most 60 day folders and 400 files (`CODEX_DISK_DAYS_MAX`, `CODEX_DISK_FILES_MAX`),
+  regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
+  (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set.
+- **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
+  through the Claude scan's cache, budget and worker (`found_info`). The payload's `id` must be
+  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source` a string (a
+  subagent's is an object: skipped). The cwd is only compared; no title is read (rows read
+  "Untitled Codex session" with the file's date); nothing from the file reaches a shell, the
+  terminal or the snapshot but the id (a UUID). The file's path is not kept.
+- **Which**: not one Deckhand's history has (its row is the history's), a pi session's id, or an
+  id Claude Code's transcript has (one id, one harness: Claude's wins, in the scan and again at
+  resume, `claude_conversation_seen`); at most `MAX_SESSIONS`. Not in Chats while chats are
+  read-only.
+- **A click** (`open_session` with its id; `codex_disk_resume`): a Codex-only session of the
+  project running `codex resume <id>` in the project's folder; the history keeps it from then on.
+  An agent's `open_session` finds only the rows listed for the selected project and Chats.
 
 ## 3. The token and the process check
 
@@ -136,6 +177,11 @@ skips only that last one). Enter during a turn would steer it, so a turn never t
 A later line starting with `/` or `!` is plain text: Codex reads a command only at the start of
 the composer. The held text's Enter goes only if nothing changed after its paste: a submission
 cancels it, and Codex working or blocked by then drops it.
+
+Comments' **Send now** (and **Send and close**) pastes only Deckhand's fixed line ("Here are my
+comments.") through `claude_paste_message`, under the same rule and the held prompts' readiness
+(Codex idle per OSC 7501 and its hooks, bracketed paste, nothing typed); its Enter is re-checked
+as a held text's. Changes' review ask is a held prompt (`claude_prompt`), so the rule applies.
 
 Everything else Deckhand puts into a Codex composer on its own goes through the same rule and only
 while Codex is not working or blocked (`codex_paste_refusal`): a file dropped on the tab (its path:

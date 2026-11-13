@@ -41,11 +41,10 @@ CODEX_HASH_PINNED :: "0.167.2" // the Codex whose hook-trust recipe codex_hook_h
 CODEX_INSTALL_COMMAND :: "npm install -g @openai/codex@latest"
 CODEX_MISSING :: "Codex is not installed: install it with `" + CODEX_INSTALL_COMMAND + "`, then use Refresh shell environment or restart Deckhand"
 CODEX_MISSING_NOTE :: " — Codex not installed"
-CODEX_HOOK_TIMEOUT :: 10 // seconds; the CLI gives up sooner (its hello and call timeouts)
+CODEX_HOOK_TIMEOUT :: 10 // seconds (part of the trust hash); the CLI gives up sooner: UserPromptSubmit's hello and three calls take at most 7.5 s (tools/deckhand-cli/hooks.odin CODEX_HOOK_CALL_MS), the others' one call 8 s
 CODEX_REMOTE :: "Codex tabs run on this Mac only for now: another machine's project can't start one"
 CODEX_NO_FLAGS :: "Codex tabs take no extra flags yet: your own Codex settings (~/.codex/config.toml) apply"
 CODEX_READONLY :: "Codex can't run read-only yet, and Start chats read-only is on: start Codex in a project, or turn read-only chats off"
-CODEX_NO_COMMENTS :: "Codex tabs don't take comments yet: send them to a pi or Claude tab, or copy them"
 
 // One hook Deckhand passes to a Codex tab: Codex's event name (the -c key), its snake_case name
 // (the trust key and the hash), and the CLI's `hook` argument.
@@ -552,7 +551,7 @@ codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
 // transcript of p's (by stat, claude_disk_find; no scan). A Codex tab never claims one.
 claude_conversation_seen :: proc(p: ^Project, id: string) -> bool {
 	if r, _ := claude_record(id); r != nil && !r.codex do return true
-	if claude_disk_of(id) != nil do return true
+	if f := claude_disk_of(id); f != nil && !f.codex do return true
 	_, ok := claude_disk_find(p, id)
 	return ok
 }

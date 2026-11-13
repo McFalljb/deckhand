@@ -19,7 +19,7 @@ import "core:sys/posix"
 MANUAL :: #load("manual.md", string)
 
 Ctx :: struct {
-	write_out:  proc(c: ^Ctx, s: string), // stdout (written at once: a hook's output goes before claude.attached)
+	write_out:  proc(c: ^Ctx, s: string) -> bool, // stdout (written at once: a hook's output goes before claude.attached); false: not all written
 	write_err:  proc(c: ^Ctx, s: string),
 	read_stdin: proc() -> string,
 	getenv:     proc(k: string) -> string,
@@ -33,7 +33,7 @@ Ctx :: struct {
 
 main :: proc() {
 	c := Ctx {
-		write_out  = proc(c: ^Ctx, s: string) {fd_write(1, s)},
+		write_out  = proc(c: ^Ctx, s: string) -> bool {return fd_write(1, s)},
 		write_err  = proc(c: ^Ctx, s: string) {fd_write(2, s)},
 		read_stdin = stdin_all,
 		getenv     = proc(k: string) -> string {return os.get_env(k, context.allocator)}, // env-read-ok: the CLI getenv wrapper: its callers are checked
@@ -44,14 +44,15 @@ main :: proc() {
 	os.exit(code)
 }
 
-fd_write :: proc(fd: posix.FD, s: string) {
+fd_write :: proc(fd: posix.FD, s: string) -> bool {
 	rest := transmute([]u8)s
 	for len(rest) > 0 {
 		n := posix.write(fd, raw_data(rest), len(rest))
 		if n < 0 && posix.errno() == .EINTR do continue
-		if n <= 0 do return
+		if n <= 0 do return false
 		rest = rest[n:]
 	}
+	return true
 }
 
 STDIN_MAX :: 4 << 20

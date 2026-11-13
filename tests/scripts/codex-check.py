@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Checks what the fake codex logged in the codex scene (tests/scripts/codex.sh): every start's
-argv as Codex reads it, every hook's stdout empty and its exit 0, no Deckhand text ever ran as a
-command or a mention. Usage: codex-check.py LOG"""
+argv as Codex reads it, every hook's stdout empty (UserPromptSubmit's: empty or the comments'
+additionalContext) and its exit 0, no Deckhand text ever ran as a command or a mention. Usage: codex-check.py LOG"""
 import json
 import sys
 
@@ -12,6 +12,16 @@ def bad(msg):
     global ok
     ok = False
     print("FAILED:", msg)
+
+
+def context_only(out):
+    """UserPromptSubmit's only output: the pending comments as additionalContext."""
+    try:
+        o = json.loads(out)
+    except ValueError:
+        return False
+    h = o.get("hookSpecificOutput") if isinstance(o, dict) else None
+    return list(o) == ["hookSpecificOutput"] and isinstance(h, dict) and sorted(h) == ["additionalContext", "hookEventName"] and h["hookEventName"] == "UserPromptSubmit"
 
 
 rows = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
@@ -35,7 +45,7 @@ for e in ("SessionStart", "UserPromptSubmit", "PermissionRequest", "Stop"):
 for h in hooks:
     if h.get("timeout"):
         bad(f"{h['hook']} timed out")
-    elif h.get("out"):
+    elif h.get("out") and not (h["hook"] == "UserPromptSubmit" and context_only(h["out"])):
         bad(f"{h['hook']} printed {h['out'][:80]!r} (Codex would read it)")
     elif h.get("exit") != 0:
         bad(f"{h['hook']} exited {h.get('exit')}: {h.get('err', '')[:200]}")

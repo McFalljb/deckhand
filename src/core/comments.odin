@@ -838,11 +838,14 @@ claude_send_refusal :: proc(tab: ^Tab) -> string {
 	ct := &tab.kind.(Claude_Tab)
 	ok, why := claude_ready(tab, ct)
 	if ok do return ""
+	if ct.codex && why == "sending" do return "Codex is working: wait for its turn to end"
 	switch why {
 	case "Claude is working", "sending":           return "Claude is working: wait for its turn to end"
 	case "Claude is waiting for you":               return "Claude is waiting for you: answer Claude first"
 	case "Claude is starting":                      return "Claude is starting: wait until it is ready"
-	case "you are typing a message":                return "you are typing a message in Claude: send or clear it first"
+	case "you are typing a message":                return ct.codex ? "you are typing a message in Codex: send or clear it first" : "you are typing a message in Claude: send or clear it first"
+	case "Codex is working":                        return "Codex is working: wait for its turn to end"
+	case "Codex is waiting for you":                return "Codex is waiting for you: answer Codex first"
 	}
 	return why
 }

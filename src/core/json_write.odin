@@ -1803,7 +1803,6 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_str(&st, "appearance", APPEARANCE_NAMES[s.settings.appearance])
 		kv_bool(&st, "light", s.settings.appearance == .System ? s.system_light : s.settings.appearance == .Light) // what shows now
 		kv_str(&st, "text_size", TEXT_SIZE_NAMES[s.settings.text_size])
-		kv_bool(&st, "chats_readonly", s.settings.chats_readonly)
 		kv_bool(&st, "claude_skip_permissions", s.settings.claude_skip_permissions)
 		kv_bool(&st, "codex_full_access", s.settings.codex_full_access)
 		// the pi integration's optional extensions, on or off for the pi tabs started from now on

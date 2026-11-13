@@ -1,21 +1,20 @@
 #!/bin/sh
-# Read-only pi chats without pi-kit: every start of a chat's pi while Chats: read-only is on gets
-# pi's own tool allowlist (PI_READONLY_ARGS: --tools read,grep,find,ls --exclude-tools 'mcp__*'
-# --no-mcp, last in argv)
-# and PI_KIT_READONLY=1. Every start also gets Deckhand's pi integration (-e per extension, first)
-# and DECKHAND_* bridge variables, never pi-kit's PI_DESK_* ones. Never a real pi: the fake (DECKHAND_CMD) logs its argv and environment,
-# then waits for "exit" typed into its tab.
-#   1. pi-chat-readonly-1.txt: read-only on; the user's new chat, a script's (an agent's) new
-#      chat, its restart after pi exited, a resumed chat (open_session); quit
-#   2. pi-chat-readonly-2.txt: the workspace restores (the chat on screen starts again); read-only
-#      off, another restored chat starts full (no allowlist)
-# Writes build/pi-chat-readonly/. Needs ./build.sh.
+# Every start of a chat's pi (new, an agent's new, restart, resume, restore) is full pi (no tool
+# allowlist, no PI_KIT_READONLY: what a chat may do is the chats folder's AGENTS.md) with Deckhand's
+# pi integration (-e per extension, first) and DECKHAND_* bridge variables, never pi-kit's
+# PI_DESK_* ones. Never a real pi: the fake (DECKHAND_CMD) logs its argv and environment, then
+# waits for "exit" typed into its tab.
+#   1. pi-chat-start-1.txt: the user's new chat, a script's (an agent's) new chat, its restart
+#      after pi exited, a resumed chat (open_session); quit
+#   2. pi-chat-start-2.txt: the workspace restores (the chat on screen starts again), another
+#      restored chat starts when shown
+# Writes build/pi-chat-start/. Needs ./build.sh.
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh
-W="$ROOT/build/pi-chat-readonly"
+W="$ROOT/build/pi-chat-start"
 rm -rf "$W"
 FAKE_HOME="$W/home"
 CHATS="$FAKE_HOME/Chats"
@@ -43,7 +42,7 @@ fail=0
 for n in 1 2; do
   RUN=$(mktemp -d "${TMPDIR:-/tmp}/pdcr.XXXXXX") # a short runtime dir: the socket path must fit sun_path
   env -u PI_KIT_READONLY HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh \
-    DECKHAND_SCRIPT=tests/scripts/pi-chat-readonly-$n.txt DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
+    DECKHAND_SCRIPT=tests/scripts/pi-chat-start-$n.txt DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
     DECKHAND_CMD="$CMD" build/deckhand > "$W/run$n.log" 2>&1 || true
   rm -rf "$RUN"
   grep -E "ASSERT FAILED|done:|TIMEOUT|unknown command|no element" "$W/run$n.log" | sed "s/^/run $n: /" || true
@@ -64,18 +63,12 @@ def check(cond, what):
     global ok
     print(("ok: " if cond else "FAILED: ") + what)
     ok = ok and cond
-RO = ["--tools", "read,grep,find,ls,desk_show", "--exclude-tools", "mcp__*", "--no-mcp"]
-names = ["the user's new chat", "a script's new chat", "its restart", "a resumed chat", "the restored chat", "a restored chat, read-only off"]
+names = ["the user's new chat", "a script's new chat", "its restart", "a resumed chat", "the restored chat", "another restored chat"]
 check(len(starts) == len(names), f"pi started {len(names)} times: {len(starts)}")
-for i, (name, st) in enumerate(zip(names, starts)):
-    a, ro = st["argv"], i < 5
-    if ro:
-        check(a[-len(RO):] == RO, f"{name}: the read-only allowlist last: {a}")
-        check(a.count("--tools") == 1, f"{name}: one --tools")
-        check(st["env"] == "1", f"{name}: PI_KIT_READONLY=1 too")
-    else:
-        check("--tools" not in a and "--exclude-tools" not in a and "--no-mcp" not in a, f"{name}: full pi, no allowlist: {a}")
-        check(st["env"] == "unset", f"{name}: no PI_KIT_READONLY")
+for name, st in zip(names, starts):
+    a = st["argv"]
+    check("--tools" not in a and "--exclude-tools" not in a and "--no-mcp" not in a, f"{name}: full pi, no allowlist: {a}")
+    check(st["env"] == "unset", f"{name}: no PI_KIT_READONLY")
 # Deckhand's pi integration on every start: -e per required extension, first, from the app's
 # Resources/pi (a separate core, the default: Deckhand Core.app's own copy); the bridge variables are DECKHAND_*,
 # never pi-kit's PI_DESK_* (it stays inert)
@@ -95,5 +88,5 @@ if len(starts) == len(names):
     check(any(x.endswith("_c0de0000-1111-4222-8333-444455556666.jsonl") for x in starts[3]["argv"]), "the resumed chat resumes its file")
 sys.exit(0 if ok else 1)
 PY
-if [ $fail = 1 ]; then echo "pi-chat-readonly scene failed (logs: $W)"; exit 1; fi
-echo "pi-chat-readonly scene ok"
+if [ $fail = 1 ]; then echo "pi-chat-start scene failed (logs: $W)"; exit 1; fi
+echo "pi-chat-start scene ok"

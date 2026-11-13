@@ -7,7 +7,7 @@ package deckhand_cli
 // (`deckhand hook …`). Deckhand enforces every rule; this tool only shapes calls and output.
 //
 // Exit status: 0 ok, 1 the command failed (or Deckhand could not be reached), 2 usage.
-// Hooks always exit 0, but for `hook readonly` (2 = the tool call is denied).
+// Hooks always exit 0.
 
 import "core:encoding/json"
 import "core:fmt"
@@ -109,15 +109,6 @@ run :: proc(c: ^Ctx, args: []string) -> int {
 	if args[0] == "--skill" {
 		c.write_out(c, MANUAL)
 		return 0
-	}
-	if args[0] == "hook" && len(args) > 1 && args[1] == "readonly-ack" {
-		// the read-only profile loaded (its SessionStart hook, readonly.odin): exit 0 whatever
-		hook_readonly_ack(c, len(args) > 2 ? args[2] : "")
-		return 0
-	}
-	if args[0] == "hook" && len(args) > 1 && args[1] == "readonly" {
-		// the read-only guard (readonly.odin): exit 2 denies; it never needs Deckhand's socket
-		return hook_readonly(c)
 	}
 	if args[0] == "hook" {
 		if c.clock != nil && c.started == 0 do c.started = c.clock() // the hook's start, before its stdin

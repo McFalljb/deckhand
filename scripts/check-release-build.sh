@@ -30,7 +30,7 @@ DECKHAND_HOLDER_HOOKS"
 #   what Deckhand gives its tabs and the CLIs read back as their transport, never read by the app
 #     to change itself: SOCKET, TOKEN, CONTROL_TOKEN (pi and control; `deckhand --ctl` reads
 #     SOCKET and TOKEN, as Settings › Copy a control token gives them), CLAUDE_TOKEN, CLAUDE_TAB,
-#     CLAUDE_READONLY, CLAUDE_ACCOUNT (read by the tab's own launch shell), CLI, SHOTS_DIR
+#     CLAUDE_ACCOUNT (read by the tab's own launch shell), CLI, SHOTS_DIR
 #     (deckhand-cli reads SOCKET, CLAUDE_TOKEN and SHOTS_DIR: docs/CLAUDE.md)
 #   set for an app tab (APP) and a job run (JOB, RUN, RUN_DIR, SCHEDULED_AT: docs/ATLAS.md)
 #   the user's documented workarounds, read by the app: GUI_LAUNCH (=0 turns off the login-shell
@@ -41,7 +41,7 @@ DECKHAND_HOLDER_HOOKS"
 #     steers nothing else); seen as DECKHAND_RESPONSIBLE now that DECKHAND_ names are scanned
 #   DECKHAND_SUCCESSOR_SECRET: the key of the ready handshake's entry that carries a handover's
 #     successor secret to a new core (src/holder/detach.odin); taken out, never an environment read
-ALLOWED_SUFFIXES="SOCKET TOKEN CONTROL_TOKEN CLAUDE_TOKEN CLAUDE_TAB CLAUDE_READONLY CLAUDE_ACCOUNT CLI SHOTS_DIR APP JOB RUN RUN_DIR SCHEDULED_AT GUI_LAUNCH CEF_SHARED_TEXTURE"
+ALLOWED_SUFFIXES="SOCKET TOKEN CONTROL_TOKEN CLAUDE_TOKEN CLAUDE_TAB CLAUDE_ACCOUNT CLI SHOTS_DIR APP JOB RUN RUN_DIR SCHEDULED_AT GUI_LAUNCH CEF_SHARED_TEXTURE"
 ALLOWED="DECKHAND_
 PI_DESK_
 DECKHAND_RESPONSIBLE

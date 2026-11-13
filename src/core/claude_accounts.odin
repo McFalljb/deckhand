@@ -352,9 +352,6 @@ claude_account_env :: proc(account: string) -> []string {
 	return out[:]
 }
 
-// The account's user settings folder for the read-only profile's --setting-sources user: the
-// same folder (CLAUDE_CONFIG_DIR is the process's), nothing to pass.
-
 // The saved accounts setting back (persist.odin's settings): folders absolute only.
 claude_accounts_restore :: proc(st: json.Object) {
 	heap := runtime.heap_allocator()

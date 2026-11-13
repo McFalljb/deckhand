@@ -17,7 +17,7 @@ Command_Who :: enum {
 	Own_Session, // anyone but apps; a pi or Claude tab only for its own session (the command checks: browser_*, app_*)
 	User_Control, // the user, control callers (the Home agent) and Deckhand itself: opens a Finder window
 	Claude, // a Claude tab's plugin for its own tab (caller panel + claude), scripts (tests), Deckhand; never a pi tab's bridge
-	User_Here, // as User, and never from a hub (another machine's core viewing this one), queued or not (caller_may): every machine_* command, and the settings that bound what other machines and agents may do here (set_machines_reachable, set_remote_machines, set_pi_extension, set_claude_default_flags, set_chats_readonly)
+	User_Here, // as User, and never from a hub (another machine's core viewing this one), queued or not (caller_may): every machine_* command, and the settings that bound what other machines and agents may do here (set_machines_reachable, set_remote_machines, set_pi_extension, set_claude_default_flags)
 }
 
 Command_Spec :: struct {
@@ -116,7 +116,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_home_dir", args = "path, create?", does = `the main folder (sessions/, jobs/, memory/, atlas/, chats/; missing ones made, empty; "" = unset); create: make it first. set_notes_dir is the old name`, who = .User},
 	{type = "set_folder", args = "kind, path", does = `a subfolder's override (kind: sessions|jobs|memory|atlas|chats; "" = <main>/<kind>); chats: where new chats run, the old folder becomes an ordinary project. set_chats_dir is the old name for chats`, who = .User},
 	{type = "setup_sheet", args = "open", does = "the first-run sheet: open, or close (done or skipped: it does not open by itself again)", who = .User},
-	{type = "set_chats_readonly", args = "on", does = "start chats read-only (pi: its read tools only, plus PI_KIT_READONLY=1; Claude: Deckhand's read-only profile) or full", who = .User_Here},
+	{type = "set_chats_readonly", args = "on", does = "removed (Start chats read-only): always refused; what a chat's agent may do is set by the chats folder's AGENTS.md / CLAUDE.md. Kept for the grow-only API", who = .User_Here},
 	{type = "set_pi_extension", args = "name, on", does = "turn one of the pi integration's optional extensions (guardrails, shell, notes; get_state settings.pi_extensions) on or off for the pi tabs started from now on; running tabs keep theirs until restarted (the restart bar offers it); the user's", who = .User_Here},
 	{type = "set_claude_default_flags", args = "skip_permissions, harness?, confirm?", does = "default Claude Code flags for each start of a Claude tab the user makes (new tab, session, chat, the user's resume, restore and restart; never an agent's, a panel's or an app's; a read-only chat leaves it out): skip_permissions adds --dangerously-skip-permissions (off by default; turning it on is confirmed), never saved into a tab's flags; with harness codex, Codex tabs' --dangerously-bypass-approvals-and-sandbox the same way (left out when the tab's flags set -s, -a, --approve-for-me or a -c of approval_policy, sandbox_mode or sandbox_workspace_write)", who = .User_Here},
 	{type = "set_confirm_policy", args = "caller, class, mode", does = "how a caller's destructive commands of a class are confirmed (ask, trusted, auto)", who = .User},
@@ -280,7 +280,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "claude_wait_tick", does = "Claude tabs' held texts and waits while frames are paused (a timer)", who = .Internal},
 	{type = "claude_held", args = "tab_id, op", does = "a Claude tab's held texts: op send (the first goes now, whatever is typed) or drop (all go); the user's", who = .User},
 	{type = "claude.session", args = "tab_id?, session_id, cwd?, source?, transcript_path?, model?", does = "a Claude tab's plugin reports its Claude session id (SessionStart hook), its transcript file (kept only under Claude's config dir's projects/) and model; data {title} when the user renamed it (the hook passes it to Claude Code as sessionTitle)", who = .Claude},
-	{type = "claude.readonly_ack", args = "tab_id?, nonce", does = "a read-only Claude tab's profile loaded: its SessionStart hook (Deckhand's --settings) with the start's nonce, once, before its first prompt; without it Deckhand stops the tab (docs/CLAUDE.md §1a)", who = .Claude},
+	{type = "claude.readonly_ack", args = "tab_id?, nonce", does = "removed with read-only chats: always refused. Kept for the grow-only API", who = .Claude},
 	{type = "claude.turn", args = "tab_id?, state, title?, question?, idle_prompt?", does = "a Claude tab's plugin reports its turn: submitted (UserPromptSubmit; title: the prompt's first line, for the history), idle (Stop; question: its last answer ends with a question), error (StopFailure) or waiting (a permission dialog)", who = .Claude},
 	{type = "claude.comments", args = "tab_id?, max?", does = "a Claude tab's plugin takes its session's pending comments for the user's message (UserPromptSubmit): data {count, attachment_id, text, images (PNG paths), more}; cleared by claude.attached", who = .Claude},
 	{type = "claude.model", args = "tab_id?, model", does = "a Claude tab's plugin reports its model (PostModelSwitch): shown in its tab's tooltip and its session info", who = .Claude},

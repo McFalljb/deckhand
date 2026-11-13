@@ -75,8 +75,7 @@ id and the old signature format, so the rename takes two releases:
   - Scrubs drop an explicit list of Deckhand's names, never every `DECKHAND_` variable, so your own
     `DECKHAND_SIGN_IDENTITY` reaches a shell tab.
   - The bundle keeps `Contents/MacOS/deckhand-cli` and a link `pi-desk-cli -> deckhand-cli`
-    (older and held Claude tabs run it by that path; a read-only tab's guard fails closed without
-    it), and the plugin keeps `bin/pi-desk`.
+    (older and held Claude tabs run it by that path), and the plugin keeps `bin/pi-desk`.
   - The data dir is `~/Library/Application Support/Deckhand` if it exists, else `…/pi-desk`, where
     every older install keeps its data. `.deckhand/apps.json` is read first, else
     `.pi-desk/apps.json`.

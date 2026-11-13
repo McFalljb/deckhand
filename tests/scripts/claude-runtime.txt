@@ -116,7 +116,7 @@ assert_drawn Skip permissions in new tabs
 clickid spi @claude_skip_permissions
 wait 300
 assert_state settings.claude_skip_permissions false
-assert_state pending_confirmations.0.summary Start the Claude tabs you start with --dangerously-skip-permissions? Claude will edit files and run commands without asking you first. Agents' tabs and read-only chats never get it.
+assert_state pending_confirmations.0.summary Start the Claude tabs you start with --dangerously-skip-permissions? Claude will edit files and run commands without asking you first. Agents' tabs never get it.
 shot claude-runtime/settings-skip-confirm
 clickid confirm_yes
 wait 300

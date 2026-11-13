@@ -208,7 +208,7 @@ show_file_paths_and_refusals :: proc(t: ^testing.T) {
 	}
 }
 
-// Who may send it: a session's own agents (pi, Claude, read-only Claude too: display only), the
+// Who may send it: a session's own agents (pi, Claude), the
 // user, scripts and control; never an app. An agent still has no command that edits an editor
 // tab: it may show a file, the user edits it.
 @(test)
@@ -218,17 +218,16 @@ show_file_callers_and_no_agent_edits :: proc(t: ^testing.T) {
 	defer sf_done(dir)
 	sa := core.find_session(a)
 	ro_id := core.new_id()
-	append(&sa.tabs, core.Tab{id = ro_id, kind = core.Claude_Tab{readonly = true}, title = "claude", status = .Running})
+	append(&sa.tabs, core.Tab{id = ro_id, kind = core.Claude_Tab{}, title = "claude", status = .Running})
 	ro := core.Caller{kind = .Panel, tab_id = ro_id, claude = true}
 	pi := core.Caller{kind = .Panel, tab_id = sf_tab(a, 0)}
 	for c in ([]core.Caller{pi, ro, {kind = .Panel, tab_id = sf_tab(a, 1), claude = true}, {kind = .UI}, {kind = .Script}, {kind = .Control}, {kind = .Internal}}) {
 		testing.expectf(t, core.caller_may(c, core.Show_File{}), "%v may send show_file", c)
 	}
 	testing.expect(t, !core.caller_may({kind = .App, tab_id = 5}, core.Show_File{}), "an app tab's program sends no commands")
-	// a read-only Claude chat shows files (display only)
-	testing.expect_value(t, core.claude_readonly_refuses(ro, core.Show_File{path = "notes.txt"}), "")
+	// a Claude tab shows files (display only)
 	r := core.run_command(core.Show_File{path = "notes.txt"}, ro)
-	testing.expectf(t, r.ok, "a read-only Claude tab shows a file: %s", r.error)
+	testing.expectf(t, r.ok, "a Claude tab shows a file: %s", r.error)
 	ed := r.created_id
 	testing.expect_value(t, sf_index(a, ed), sf_index(a, ro_id) + 1)
 	// ...and cannot edit it, nor can any agent: no command that changes an editor tab or a file

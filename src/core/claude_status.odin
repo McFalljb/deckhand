@@ -22,8 +22,7 @@ package core
 //     prompt came up (bracketed paste on, or its OSC 7501 other than blocked), a bar over the tab
 //     says so and names the causes. A startup dialog (folder trust, login) can also have
 //     bracketed paste on and hooks only run after it: the bar cannot tell those apart, so it waits
-//     the grace and says to answer such a dialog first. A read-only tab has its own, stricter
-//     check (it is stopped: claude_readonly_tick).
+//     the grace and says to answer such a dialog first.
 //   - A minimum-version hint. The version the tab started with (claude_reload.odin: where `claude`
 //     links to, by stat; never run). Below CLAUDE_MIN_VERSION a bar says what is missing and how
 //     to update; an unknown layout ("a new build") gets none.
@@ -39,7 +38,7 @@ import "core:strings"
 import "core:time"
 
 CLAUDE_HOOKS_GRACE :: 20 * time.Second
-CLAUDE_MIN_VERSION :: "2.1.295" // OSC 7501 program status and hooks' onFailure (read-only chats)
+CLAUDE_MIN_VERSION :: "2.1.295" // OSC 7501 program status
 CLAUDE_HINTS_FILE :: "claude-hints.json"
 
 @(private = "file")
@@ -169,8 +168,7 @@ claude_status_tick :: proc(now := time.Tick{}) {
 }
 
 // Whether a running Claude tab's hooks never reported in this run: no turn (SessionStart's
-// hook always reports one), CLAUDE_HOOKS_GRACE after its prompt came up. Read-only tabs have
-// their own check.
+// hook always reports one), CLAUDE_HOOKS_GRACE after its prompt came up.
 claude_hooks_silent :: proc(tab: ^Tab, now := time.Tick{}) -> bool {
 	if replica_process do return tab.live.claude_quiet // the core's (Tab_Live)
 	ct, is := &tab.kind.(Claude_Tab)
@@ -181,7 +179,7 @@ claude_hooks_silent :: proc(tab: ^Tab, now := time.Tick{}) -> bool {
 		now := now == {} ? time.tick_now() : now
 		return time.tick_diff(r.worked, now) >= CLAUDE_HOOKS_GRACE
 	}
-	if !is || tab.status != .Running || ct.readonly || ct.turn != .Unknown do return false
+	if !is || tab.status != .Running || ct.turn != .Unknown do return false
 	r, has := status_rt[tab.id]
 	if !has || r.start != claude_wait_run(tab.id) || r.up == {} do return false
 	now := now == {} ? time.tick_now() : now
@@ -276,7 +274,7 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if old != "" {
 		hints_load()
 		if version_dismissed == old do return ""
-		return fmt.tprintf("Claude Code %s is older than %s: status comes from Deckhand's hooks only and read-only chats can't start. %s", old, CLAUDE_MIN_VERSION, claude_update_how(claude_update_command_now()))
+		return fmt.tprintf("Claude Code %s is older than %s: status comes from Deckhand's hooks only. %s", old, CLAUDE_MIN_VERSION, claude_update_how(claude_update_command_now()))
 	}
 	return ""
 }

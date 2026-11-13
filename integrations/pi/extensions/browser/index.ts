@@ -31,8 +31,7 @@
  *   pays for them.
  *
  * - desk_show (lib/show.ts): shows the user a file in a tab of its own session (Deckhand show_file), a
- *   Markdown file rendered, others in an editor tab, next to the pi tab, behind the user's view; in
- *   read-only pi tabs too (display only).
+ *   Markdown file rendered, others in an editor tab, next to the pi tab, behind the user's view.
  *
  * Never throws into pi outside a tool call.
  */
@@ -382,35 +381,32 @@ export default function (pi: ExtensionAPI) {
 				return text([appTabsText(r.data ?? {}), ...(d.ok ? [declaredText(d.data ?? {})] : [])].join("\n"));
 			},
 		});
-		if (process.env.PI_KIT_READONLY !== "1") {
-			// a read-only pi reads apps but opens, restarts and closes none (Deckhand refuses too)
+		pi.registerTool({
+			name: "app_open",
+			label: "Open an app tab",
+			description: "Open an app your project declares in .deckhand/apps.json (app_tabs lists them), by name, in a new app tab of your session behind the user's view. Returns the tab id.",
+			promptSnippet: "Open a declared app in a Deckhand app tab",
+			parameters: Type.Object({ name: Type.String() }),
+			async execute(_id, p, signal) {
+				const r = await call({ type: "new_app_tab", name: p.name }, 10_000, signal);
+				if (!r.ok) throw new Error(`Deckhand: ${r.error ?? "not opened"}`);
+				const started = r.data?.started !== false;
+				return text(started ? `Opened app tab ${r.created_id} (${JSON.stringify(p.name)}) behind the user's view. app_call tab.describe lists its methods.` : `Opened app tab ${r.created_id}, but its program could not start: app_events ${r.created_id} log says why.`);
+			},
+		});
+		for (const [name, type, label, done] of [["app_restart", "app_restart", "Restart an app tab", "Restarted the program in"], ["app_close", "app_close", "Close an app tab", "Closed"]] as const) {
 			pi.registerTool({
-				name: "app_open",
-				label: "Open an app tab",
-				description: "Open an app your project declares in .deckhand/apps.json (app_tabs lists them), by name, in a new app tab of your session behind the user's view. Returns the tab id.",
-				promptSnippet: "Open a declared app in a Deckhand app tab",
-				parameters: Type.Object({ name: Type.String() }),
+				name,
+				label,
+				description: `${label} of your session.`,
+				promptSnippet: `${label} of your Deckhand session`,
+				parameters: Type.Object({ tab: appTab }),
 				async execute(_id, p, signal) {
-					const r = await call({ type: "new_app_tab", name: p.name }, 10_000, signal);
-					if (!r.ok) throw new Error(`Deckhand: ${r.error ?? "not opened"}`);
-					const started = r.data?.started !== false;
-					return text(started ? `Opened app tab ${r.created_id} (${JSON.stringify(p.name)}) behind the user's view. app_call tab.describe lists its methods.` : `Opened app tab ${r.created_id}, but its program could not start: app_events ${r.created_id} log says why.`);
+					const r = await call({ type, tab_id: p.tab }, 10_000, signal);
+					if (!r.ok) throw new Error(`Deckhand: ${r.error ?? "refused"}`);
+					return text(`${done} app tab ${p.tab}.`);
 				},
 			});
-			for (const [name, type, label, done] of [["app_restart", "app_restart", "Restart an app tab", "Restarted the program in"], ["app_close", "app_close", "Close an app tab", "Closed"]] as const) {
-				pi.registerTool({
-					name,
-					label,
-					description: `${label} of your session.`,
-					promptSnippet: `${label} of your Deckhand session`,
-					parameters: Type.Object({ tab: appTab }),
-					async execute(_id, p, signal) {
-						const r = await call({ type, tab_id: p.tab }, 10_000, signal);
-						if (!r.ok) throw new Error(`Deckhand: ${r.error ?? "refused"}`);
-						return text(`${done} app tab ${p.tab}.`);
-					},
-				});
-			}
 		}
 		pi.registerTool({
 			name: "app_call",

@@ -42,12 +42,6 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 
 ## What does not yet (phase 2 and later)
 
-- No read-only chats: a Codex tab in a chat while **Start chats read-only** is on is refused (Codex is
-  not offered there, and its conversations found on disk are not listed in Chats then). Codex's
-  `-s read-only -a never` stops the shell and file edits (an OS sandbox), but not what runs outside
-  it: the user's MCP servers and apps (Claude's read-only profile denies `mcp__*`), a trusted
-  folder's `.codex/` MCP servers and hooks, memories; and `/permissions` in the composer lifts it.
-  It does not match what Deckhand promises for a read-only Claude, so it is not offered.
 - No accounts: Codex runs with the user's own `~/.codex` (or their `CODEX_HOME`); Deckhand never
   sets `CODEX_HOME`.
 - No profiles per tab (`-p`, `-c profile…` are refused): where a profile layers against Deckhand's
@@ -174,8 +168,7 @@ the selected project and Chats. **Read only, never written.**
   terminal or the snapshot but the id (a UUID). The file's path is not kept.
 - **Which**: not one Deckhand's history has (its row is the history's), a pi session's id, or an
   id Claude Code's transcript has (one id, one harness: Claude's wins, in the scan and again at
-  resume, `claude_conversation_seen`); at most `MAX_SESSIONS`. Not in Chats while chats are
-  read-only.
+  resume, `claude_conversation_seen`); at most `MAX_SESSIONS`.
 - **A click** (`open_session` with its id; `codex_disk_resume`): a Codex-only session of the
   project running `codex resume <id>` in the project's folder; the history keeps it from then on.
   An agent's `open_session` finds only the rows listed for the selected project and Chats.

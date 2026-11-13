@@ -131,15 +131,6 @@ APP_BOX_LABEL_MAX :: 200 // bytes of a box's label (id: APP_METHOD_MAX)
 APP_TITLE_MAX :: 80
 // apps.json is read only up to this size.
 APP_JSON_MAX :: 256 * 1024
-// Whether the caller is a pi tab started read-only (chat_env: a chat under Chats: read-only);
-// what it was started with, not today's setting.
-pi_chat_readonly :: proc(caller: Caller) -> bool {
-	if caller.kind != .Panel || caller.claude do return false
-	_, tab, _ := find_tab(caller.tab_id)
-	if tab == nil do return false
-	pt, is := tab.kind.(Pi_Tab)
-	return is && pt.readonly
-}
 
 // Apps listed in the session's .deckhand/apps.json ({"apps":[{"name","argv","cwd"?}]}).
 App_Entry :: struct {

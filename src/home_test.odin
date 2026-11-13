@@ -865,7 +865,8 @@ atlas_fork_never_saves_mid_restore :: proc(t: ^testing.T) {
 	args := hf_args(t)
 	testing.expect(t, hf_forked(args, core.home_fork_id("old-1", f.main)), args)
 	testing.expect_value(t, hf_saved(), text) // right after the fork: as it was
-	testing.expect(t, slice_has(state.claude_readonly_ids[:], "ro-1"), "claude_readonly_ids restored")
+	testing.expect(t, slice_has(state.sidebar.pinned_projects[:], f.main), "the sidebar (after the drawer) restored")
+	testing.expect_value(t, len(state.claude_readonly_ids), 0) // an older file's list (read-only chats were removed): ignored
 }
 
 @(private = "file")

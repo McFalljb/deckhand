@@ -484,15 +484,14 @@ claude_disk_resume_row :: proc(t: ^testing.T) {
 	testing.expect(t, !core.run_command(core.Open_Session_Cmd{project_id = pid, pi_session_id = "00000000-0000-4000-8000-00000000dead"}, CA_CONTROL).ok)
 }
 
-// Claude conversations in the chats folder list in Chats; with Chats: read-only on, one resumed
-// from there runs read-only (and stays so).
+// Claude conversations in the chats folder list in Chats; one resumed from there runs as a full
+// agent.
 @(test)
-claude_disk_chats_readonly :: proc(t: ^testing.T) {
+claude_disk_chats :: proc(t: ^testing.T) {
 	env: Ca_Env
 	context.allocator = ca_reset(&env)
 	defer ca_done()
-	// a read-only tab never starts without deckhand-cli (its guard): a stand-in, not whatever a
-	// release build left next to the test binary
+	// a stand-in deckhand-cli, not whatever a release build left next to the test binary
 	cli := fmt.tprintf("%s/deckhand-cli", ca_dir("cli"))
 	_ = os.write_entire_file(cli, transmute([]u8)string("#!/bin/sh\nexit 0\n"))
 	core.claude_cli_override = cli
@@ -506,15 +505,13 @@ claude_disk_chats_readonly :: proc(t: ^testing.T) {
 	os.make_directory_all(chats.cwd)
 	id := "12121212-0000-4000-8000-000000000007"
 	ca_write(fmt.tprintf("%s/%s.jsonl", ca_transcripts(cfg, chats.cwd), id), strings.join({ca_user(chats.cwd, "a chat from the shell"), ""}, "\n", context.temp_allocator))
-	core.run_command(core.Set_Chats_Readonly{on = true}, CA_UI)
 	core.rescan_now()
 	core.claude_disk_wait()
 	testing.expect_value(t, ca_row_text(.Chats), "a chat from the shell(c)")
 	r := core.run_command(core.Open_Session_Cmd{project_id = core.chats_project().id, pi_session_id = id}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	argv := ca_wait_file(env.argf)
-	testing.expect(t, strings.contains(argv, "--permission-mode\nplan"), argv)
-	testing.expect(t, core.claude_readonly_known(id), "its conversation stays read-only")
+	testing.expect(t, strings.contains(argv, id) && !strings.contains(argv, "--permission-mode"), argv)
 }
 
 // Reading titles stays within its budget: the head and tail of a long transcript, never all of it.

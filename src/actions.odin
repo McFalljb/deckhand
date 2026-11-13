@@ -66,9 +66,6 @@ ACTIONS := [?]Action {
 		if !handoff_action_ok() do return nil, false
 		return core.Select_Project{state.selected_project}, true
 	}, ui = handoff_action_ui},
-	{id = "chats_readonly", make = proc() -> (core.Command, bool) {
-		return core.Set_Chats_Readonly{on = !state.settings.chats_readonly}, true
-	}, detail = proc() -> string {return state.settings.chats_readonly ? "on" : "off (full access)"}, done = proc() -> string {return state.settings.chats_readonly ? "Chats: full access" : "Chats read-only"}},
 	{id = "claude_skip_permissions", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
 	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "Claude Code · on: --dangerously-skip-permissions in the tabs you start" : "Claude Code · off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
@@ -109,13 +106,13 @@ ACTIONS := [?]Action {
 	// Claude Code (claude.odin): claude with Deckhand's plugin, in the session on screen's folder
 	{id = "new_claude_tab", label = "New Claude tab", keys = "⌥⌘T", title = proc() -> string {return core.claude_label("New Claude tab")}, make = proc() -> (core.Command, bool) {
 		cs := core.cur()
-		if cs == nil || cs.home || cs.missing do return nil, false // in chats too (read-only while chats are: claude.odin)
+		if cs == nil || cs.home || cs.missing do return nil, false // in chats too
 		return core.New_Claude_Tab{session = cs.id}, true
 	}},
-	// Codex (codex.odin): codex in the session on screen's folder; not in a chat while chats are read-only
+	// Codex (codex.odin): codex in the session on screen's folder
 	{id = "new_codex_tab", label = "New Codex tab", title = proc() -> string {return core.codex_label("New Codex tab")}, make = proc() -> (core.Command, bool) {
 		cs := core.cur()
-		if cs == nil || cs.home || cs.missing || core.codex_chat_refused(cs.id) do return nil, false
+		if cs == nil || cs.home || cs.missing do return nil, false
 		return core.New_Claude_Tab{session = cs.id, codex = true}, true
 	}},
 	{id = "claude_held_send", label = "Claude: send the waiting message now", make = proc() -> (core.Command, bool) {

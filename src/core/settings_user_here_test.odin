@@ -5,9 +5,9 @@ import "core:testing"
 
 // The settings that bound what agents and other machines may do here are this Mac's user's only
 // (User_Here): Allow other machines to connect, Machines over SSH, the pi extensions (guardrails),
-// Claude's skip-permissions default and read-only chats. A machine viewing this Mac (a hub's ui)
-// is refused as an agent, a script or a pi tab is; the user at this Mac still changes them, and
-// the two that ask first ask this Mac's user.
+// Claude's skip-permissions default (and the removed set_chats_readonly, kept on the wire). A machine
+// viewing this Mac (a hub's ui) is refused as an agent, a script or a pi tab is; the user at this
+// Mac still changes them, and the two that ask first ask this Mac's user.
 @(test)
 settings_user_here_only :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -32,11 +32,11 @@ settings_user_here_only :: proc(t: ^testing.T) {
 		testing.expectf(t, caller_may({kind = .Internal}, cmd), "%s: a saved choice coming back", name)
 	}
 	testing.expect(t, !state.settings.machines_reachable && !state.settings.remote_machines, "nothing changed")
-	testing.expect(t, !state.settings.claude_skip_permissions && !state.settings.chats_readonly, "nothing changed")
+	testing.expect(t, !state.settings.claude_skip_permissions, "nothing changed")
 	testing.expect_value(t, len(state.pending_confirmations), 0)
 	// the user at this Mac: the plain ones apply, the two that ask first ask here
 	testing.expect(t, run_command(Set_Remote_Machines{on = true}, {kind = .UI}).ok && state.settings.remote_machines)
-	testing.expect(t, run_command(Set_Chats_Readonly{on = true}, {kind = .UI}).ok && state.settings.chats_readonly)
+	testing.expect_value(t, run_command(Set_Chats_Readonly{on = true}, {kind = .UI}).error, CHATS_READONLY_REMOVED) // removed: always refused
 	for cmd in ([]Command{Set_Machines_Reachable{on = true}, Set_Claude_Default_Flags{skip_permissions = true}}) {
 		r := run_command(cmd, {kind = .UI})
 		testing.expectf(t, r.error == "needs_confirmation" && r.confirm_token != "", "%s asks this Mac's user: %v", command_type(cmd), r.error)

@@ -150,9 +150,8 @@ r2_agent_close_session :: proc(t: ^testing.T) {
 }
 
 // A saved chat with a Claude tab and a Claude-only chat come back (Claude in chats, claude.odin):
-// an agent's focus starts nothing; the user's starts the Claude chat read-only while chats are
-// (the profile is applied at the start, the saved tab had none; the pi chat here is gone, its
-// session file missing, so its tabs stay not started).
+// an agent's focus starts nothing; the user's starts the Claude chat (the pi chat here is gone,
+// its session file missing, so its tabs stay not started).
 @(test)
 r2_chat_claude_restored :: proc(t: ^testing.T) {
 	context.allocator = r2_reset()
@@ -173,7 +172,6 @@ r2_chat_claude_restored :: proc(t: ^testing.T) {
 	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
 	os.make_directory_all(c.cwd)
-	core.run_command(core.Set_Chats_Readonly{on = true}, R2_UI)
 	sid1 := "c3c3c3c3-0000-4000-8000-000000000001"
 	sid2 := "c3c3c3c3-0000-4000-8000-000000000002"
 	text := fmt.tprintf(`{{"v":1,"open_sessions":[{{"pi_session_id":"chat-pi-1","cwd":%q,"session_dir":"","project":%q,"chat":true,"tabs":[{{"kind":"pi"}},{{"kind":"claude","claude_session_id":%q,"cwd":%q,"args":["--dangerously-skip-permissions"]}}],"active_tab":1}},{{"agent":"claude","claude_session_id":%q,"pi_session_id":"","cwd":%q,"session_dir":"","project":%q,"chat":true,"tabs":[{{"kind":"claude","claude_session_id":%q,"cwd":%q}}],"active_tab":0}}],"current_session":0,
@@ -188,7 +186,7 @@ r2_chat_claude_restored :: proc(t: ^testing.T) {
 	for &s in state.open_sessions do core.run_command(core.Focus_Session{session = s.id}, R2_CONTROL)
 	time.sleep(100 * time.Millisecond)
 	testing.expect(t, !os.exists(log), "an agent never starts them")
-	// the user's: read-only, the saved bypass left out
+	// the user's: a full agent
 	for &s in state.open_sessions do core.run_command(core.Focus_Session{session = s.id, reopen = true}, R2_UI)
 	data := ""
 	for _ in 0 ..< 200 {
@@ -197,10 +195,7 @@ r2_chat_claude_restored :: proc(t: ^testing.T) {
 	}
 	lines := strings.split(strings.trim_space(data), "\n", context.temp_allocator)
 	testing.expect_value(t, len(lines), 1) // the Claude-only chat; the pi chat's session file is gone (missing: nothing of it starts)
-	for l in lines {
-		testing.expectf(t, strings.contains(l, "--permission-mode plan") && strings.contains(l, "--disallowedTools"), "read-only: %s", l)
-		testing.expectf(t, !strings.contains(l, "dangerously"), "no bypass: %s", l)
-	}
+	for l in lines do testing.expectf(t, !strings.contains(l, "--permission-mode plan") && !strings.contains(l, "--disallowedTools"), "full: %s", l)
 }
 
 // new_claude_tab with resume: an id whose tab is dead elsewhere starts that tab again in place

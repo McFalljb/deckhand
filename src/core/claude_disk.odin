@@ -594,26 +594,23 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 		n += 1
 		append(out, Claude_Disk{id = strings.clone(c.id), path = strings.clone(c.path), account = strings.clone(c.account), title = strings.clone(title), modified = c.modified, created = c.created, listed = true})
 	}
-	// Codex conversations that ran in p's folder (not in Chats while chats are read-only: Codex is
-	// not offered there). Deckhand's own are its history's rows; an id Claude's transcript has is
-	// Claude's (one id, one harness: codex.odin)
-	if !(chats && state.settings.chats_readonly) {
-		m := 0
-		// the cwd as Codex wrote it, byte for byte: the project's path or its real path (never a
-		// path from the file resolved: a planted one would cost a walk per file per rescan)
-		preal := fs_real(p.cwd)
-		for c in codex_disk_files() {
-			if m >= MAX_SESSIONS do break
-			if rec, _ := claude_record(c.id); rec != nil do continue
-			if session_listed(state.sessions[:], c.id) || session_listed(state.chats[:], c.id) do continue
-			dup := false
-			for f in out do if f.id == c.id do dup = true
-			if dup do continue
-			_, cwd, skip, known := found_info(c.path, c.size, c.modified, &budget)
-			if !known || skip || (cwd != p.cwd && cwd != preal) do continue
-			m += 1
-			append(out, Claude_Disk{id = strings.clone(c.id), modified = c.modified, created = c.created, listed = true, codex = true})
-		}
+	// Codex conversations that ran in p's folder. Deckhand's own are its history's rows; an id
+	// Claude's transcript has is Claude's (one id, one harness: codex.odin)
+	m := 0
+	// the cwd as Codex wrote it, byte for byte: the project's path or its real path (never a
+	// path from the file resolved: a planted one would cost a walk per file per rescan)
+	preal := fs_real(p.cwd)
+	for c in codex_disk_files() {
+		if m >= MAX_SESSIONS do break
+		if rec, _ := claude_record(c.id); rec != nil do continue
+		if session_listed(state.sessions[:], c.id) || session_listed(state.chats[:], c.id) do continue
+		dup := false
+		for f in out do if f.id == c.id do dup = true
+		if dup do continue
+		_, cwd, skip, known := found_info(c.path, c.size, c.modified, &budget)
+		if !known || skip || (cwd != p.cwd && cwd != preal) do continue
+		m += 1
+		append(out, Claude_Disk{id = strings.clone(c.id), modified = c.modified, created = c.created, listed = true, codex = true})
 	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
@@ -713,7 +710,6 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 			strings.write_string(b, `,"account":`)
 			json_quote(b, tag)
 		}
-		if p.group == .Chats && state.settings.chats_readonly do strings.write_string(b, `,"readonly":true`)
 		if f.codex do strings.write_string(b, `,"harness":"codex"`)
 		strings.write_string(b, `,"found":true,"open":false}`)
 	}

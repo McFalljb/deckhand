@@ -1156,7 +1156,7 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 // `--`, so it is never read as an option; pi still reads an argument
 // starting with "@" there as a file to attach, so such a prompt starts with
 // a newline. Read jobs get pi's built-in read tools only and no MCP tools
-// (PI_READONLY_ARGS, as read-only chats), on top of PI_KIT_READONLY.
+// (PI_READONLY_ARGS), on top of PI_KIT_READONLY.
 job_argv :: proc(pi, session_dir, session_id, model, atlas_prompt, preamble, prompt: string, access: Job_Access) -> []string {
 	argv := make([dynamic]string, context.temp_allocator)
 	append(&argv, pi, "--mode", "json", "--session-dir", session_dir, "--session-id", session_id)

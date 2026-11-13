@@ -150,7 +150,7 @@ HARNESS_MANIFEST := [?]Harness_Row {
 	},
 	{
 		harness = .Claude, id = "claude-plugin", name = "Deckhand's Claude Code plugin", kind = .Built_In, need = .Required, detect = .Integration,
-		why = "Session ids, comments, held messages, panels and the read-only guard in Claude tabs (loaded with --plugin-dir)",
+		why = "Session ids, comments, held messages and panels in Claude tabs (loaded with --plugin-dir)",
 		source = "integrations/claude-code (ships in Deckhand.app)",
 	},
 	{

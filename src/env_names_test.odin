@@ -20,19 +20,19 @@ rn_tmp :: proc(name: string) -> string {
 
 // Every name Deckhand sets for a Claude tab, an app tab or a job run that something outside reads
 // goes out under both names, the old right after the new, with the same value; nothing else gets a
-// twin (CLAUDE_TAB, CLAUDE_READONLY and CLAUDE_ACCOUNT are read by no one: review L1, an old
+// twin (CLAUDE_TAB and CLAUDE_ACCOUNT are read by no one: review L1, an old
 // account marker would reach claude's Bash).
 @(test)
 env_both_names_set :: proc(t: ^testing.T) {
 	in_env := []string {
 		"DECKHAND_SOCKET=/s", "DECKHAND_CLAUDE_TOKEN=abc", "DECKHAND_CLI=/A/MacOS/deckhand-cli", "DECKHAND_SHOTS_DIR=/d",
-		"DECKHAND_CLAUDE_TAB=7", "DECKHAND_CLAUDE_READONLY=1", "DECKHAND_CLAUDE_ACCOUNT=", "!CLAUDE_CONFIG_DIR",
+		"DECKHAND_CLAUDE_TAB=7", "DECKHAND_CLAUDE_ACCOUNT=", "!CLAUDE_CONFIG_DIR",
 		"DECKHAND_TOKEN=t", "DECKHAND_APP=1", "DECKHAND_JOB=j", "DECKHAND_RUN=r", "DECKHAND_RUN_DIR=/r", "DECKHAND_SCHEDULED_AT=2026",
 		"DECKHAND_CONTROL_TOKEN=c", "PI_KIT_NOTES_DIR=/n", "DECKHAND_SIGN_IDENTITY=x", "TERM=x",
 	}
 	out := core.env_with_legacy(in_env)
 	got := strings.join(out, " ", context.temp_allocator)
-	want := "DECKHAND_SOCKET=/s PI_DESK_SOCKET=/s DECKHAND_CLAUDE_TOKEN=abc PI_DESK_CLAUDE_TOKEN=abc DECKHAND_CLI=/A/MacOS/deckhand-cli PI_DESK_CLI=/A/MacOS/deckhand-cli DECKHAND_SHOTS_DIR=/d PI_DESK_SHOTS_DIR=/d DECKHAND_CLAUDE_TAB=7 DECKHAND_CLAUDE_READONLY=1 DECKHAND_CLAUDE_ACCOUNT= !CLAUDE_CONFIG_DIR DECKHAND_TOKEN=t PI_DESK_TOKEN=t DECKHAND_APP=1 PI_DESK_APP=1 DECKHAND_JOB=j PI_DESK_JOB=j DECKHAND_RUN=r PI_DESK_RUN=r DECKHAND_RUN_DIR=/r PI_DESK_RUN_DIR=/r DECKHAND_SCHEDULED_AT=2026 PI_DESK_SCHEDULED_AT=2026 DECKHAND_CONTROL_TOKEN=c PI_KIT_NOTES_DIR=/n DECKHAND_SIGN_IDENTITY=x TERM=x"
+	want := "DECKHAND_SOCKET=/s PI_DESK_SOCKET=/s DECKHAND_CLAUDE_TOKEN=abc PI_DESK_CLAUDE_TOKEN=abc DECKHAND_CLI=/A/MacOS/deckhand-cli PI_DESK_CLI=/A/MacOS/deckhand-cli DECKHAND_SHOTS_DIR=/d PI_DESK_SHOTS_DIR=/d DECKHAND_CLAUDE_TAB=7 DECKHAND_CLAUDE_ACCOUNT= !CLAUDE_CONFIG_DIR DECKHAND_TOKEN=t PI_DESK_TOKEN=t DECKHAND_APP=1 PI_DESK_APP=1 DECKHAND_JOB=j PI_DESK_JOB=j DECKHAND_RUN=r PI_DESK_RUN=r DECKHAND_RUN_DIR=/r PI_DESK_RUN_DIR=/r DECKHAND_SCHEDULED_AT=2026 PI_DESK_SCHEDULED_AT=2026 DECKHAND_CONTROL_TOKEN=c PI_KIT_NOTES_DIR=/n DECKHAND_SIGN_IDENTITY=x TERM=x"
 	testing.expect_value(t, got, want)
 	// every name a scrub drops is one Deckhand sets or reads, under both names
 	for s in core.DESK_SET_ENV {

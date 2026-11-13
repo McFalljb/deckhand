@@ -194,12 +194,12 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		for t, i in c.tabs {
 			args := make([]string, len(t.args), allocator)
 			for x, j in t.args do args[j] = s(x, allocator)
-			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, readonly = t.readonly, account = s(t.account, allocator), pane = t.pane, pane_active = t.pane_active, held = t.held}
+			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, account = s(t.account, allocator), pane = t.pane, pane_active = t.pane_active, held = t.held}
 		}
 		layout := c.layout
 		layout.nodes = make([]Restore_Node, len(c.layout.nodes), allocator)
 		copy(layout.nodes, c.layout.nodes)
-		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent, layout = layout, pi_pane = c.pi_pane, pi_active = c.pi_active, pi_held = c.pi_held, pi_readonly = c.pi_readonly}
+		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent, layout = layout, pi_pane = c.pi_pane, pi_active = c.pi_active, pi_held = c.pi_held}
 	case Set_Agent_Name:      return Set_Agent_Name{name = s(c.name, allocator)}
 	case Core_Handover:       return Core_Handover{to = s(c.to, allocator)}
 	case Set_Agent_Model:     return Set_Agent_Model{model = s(c.model, allocator)}

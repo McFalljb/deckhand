@@ -203,11 +203,12 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 	// another machine's project: what that machine has (its checklist), with its own account;
 	// never this Mac's harnesses, accounts or folders
 	if no := id_machine(p.id); no != 0 {
-		pi, claude := machine_harnesses(no)
+		pi, claude, codex := machine_harnesses(no)
 		for h in order {
 			if h == .Pi && pi do append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = New_Chat{project_id = p.id}})
 			if h == .Claude && claude && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = New_Claude_Session{project_id = p.id}})
-			// never Codex: Codex tabs run on this Mac only for now (codex.odin, CODEX_REMOTE)
+			// Codex: only where its core says it starts one (machine_codex; an older core would start Claude Code)
+			if h == .Codex && codex && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, codex = true}})
 		}
 		for &it, i in out do it.keys = fmt.tprint(i + 1)
 		return out[:]
@@ -251,18 +252,25 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 	return out[:]
 }
 
-// Which harnesses machine no has, as its checklist says (found, old or not). No checklist yet:
-// its default, pi, only.
-machine_harnesses :: proc(no: u64) -> (pi, claude: bool) {
+// Which harnesses machine no has, as its checklist says (found, old or not); Codex only while its
+// core also starts Codex tabs (machine_codex). No checklist yet: its default, pi, only.
+machine_harnesses :: proc(no: u64) -> (pi, claude, codex: bool) {
 	for m in state.machines do if m.no == no {
-		if len(m.checklist) == 0 do return true, false
+		if len(m.checklist) == 0 do return true, false, false
 		for c in m.checklist do if c.state == .Ok || c.state == .Too_Old || c.state == .Unchecked {
 			if c.id == "pi" do pi = true
 			if c.id == "claude" do claude = true
+			if c.id == "codex" do codex = m.codex
 		}
 		return
 	}
-	return true, false
+	return true, false, false
+}
+
+// Whether machine no's core starts Codex tabs for this Mac (its hello's features: codex_tabs).
+machine_codex :: proc(no: u64) -> bool {
+	for m in state.machines do if m.no == no do return m.codex
+	return false
 }
 
 

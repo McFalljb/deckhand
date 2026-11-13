@@ -240,7 +240,8 @@ claude_update_command_now :: proc() -> string {
 // and its OSC 7501 has not reported in this run (Codex reports none behind its login screen).
 codex_signed_out_due :: proc(tab: ^Tab) -> bool {
 	ct, is := tab.kind.(Claude_Tab)
-	if !is || !ct.codex || tab.status != .Running || codex_login_state() != .Signed_Out do return false
+	// another machine's tab: this Mac's sign-in says nothing of it (its own screen is in its terminal)
+	if !is || !ct.codex || tab.machine != 0 || tab.status != .Running || codex_login_state() != .Signed_Out do return false
 	r, has := status_rt[tab.id]
 	return !(has && r.start == claude_wait_run(tab.id) && r.osc)
 }

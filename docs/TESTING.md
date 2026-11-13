@@ -142,7 +142,7 @@ Typical times and tags are in `tests/scenes.txt`; each script's header says what
 | `polish`, `polish-beep`, `buttons` | palette, title bar, text input; no AppKit beep; every button |
 | `login-path`, `fish-shell`, `pi-login-lookup`, `harness-setup` | the GUI launch environment, non-POSIX shells, finding pi, the coding agents checklist |
 | `update`, `release-checks` | self-update from local fixtures; `release.sh`'s and `update-sign`'s refusals |
-| `remote-link`, `remote-sidebar`, `remote-terms`, `remote-page`, `remote-install`, `remote-atlas` | other machines, with a second core on this Mac reached through `--via` (no ssh or sshd: `DECKHAND_HUB_WITHOUT_SSHD=1`): the link, online and offline; its sessions in the sidebar; its terminals relayed; a machine's web page in a local tab; install and one-click update; Atlas and jobs across machines. Real `ssh` is not covered |
+| `remote-link`, `remote-sidebar`, `remote-terms`, `remote-page`, `remote-install`, `remote-atlas`, `remote-codex` | other machines, with a second core on this Mac reached through `--via` (no ssh or sshd: `DECKHAND_HUB_WITHOUT_SSHD=1`): the link, online and offline; its sessions in the sidebar; its terminals relayed; a machine's web page in a local tab; install and one-click update; Atlas and jobs across machines; a Codex tab started there (a stand-in codex: its argv, socket and token are that core's). Real `ssh` is not covered |
 
 ### Manual (tools, not tests: run by name)
 

@@ -291,7 +291,10 @@ menu_items :: proc() -> []core.Menu_Item {
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
 		// else a new one), once per account while there are several; only while it is installed
 		if p.group == .Projects && core.claude_installed() do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
-		if p.group == .Projects && core.codex_installed() do append(&items, core.Menu_Item{label = "New Codex tab", cmd = core.New_Claude_Tab{project_id = p.id, codex = true}}) // codex.odin
+		// another machine's project: where its core starts Codex tabs and has codex (harness.odin)
+		has_codex := core.codex_installed()
+		if no := core.id_machine(p.id); no != 0 do _, _, has_codex = core.machine_harnesses(no)
+		if p.group == .Projects && has_codex do append(&items, core.Menu_Item{label = "New Codex tab", cmd = core.New_Claude_Tab{project_id = p.id, codex = true}}) // codex.odin
 		if core.folder_of(.Jobs) != "" do append(&items, core.Menu_Item{label = "New job for this project…", cmd = core.Job_Sheet{open = true, for_project = core.path_tilde(p.cwd)}})
 		append(&items, core.Menu_Item{label = "Rename…", rename = true})
 		sep(&items)

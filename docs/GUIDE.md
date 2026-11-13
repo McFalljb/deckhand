@@ -286,7 +286,8 @@ as that machine has them. A machine with no projects yet says so: Deckhand can't
 another machine, so start pi or Claude Code in a folder there and the project shows here. The
 palette names the machine of its items that are on another one (*… · on nuc*). Click an open session to show it, or one of a project's sessions to open
 it there (**+ New session** under it starts one there, with what that machine has installed and its
-own Claude Code account), and work in its terminals as in a local tab.
+own Claude Code account; Codex once that machine runs a Deckhand that starts Codex tabs: an older
+one says to update Deckhand there), and work in its terminals as in a local tab.
 **New session on another machine.** The menu of one of this Mac's projects, sessions or open
 sessions (right click, or its **…**) has **New session on nuc in api** for each online machine with
 a project of the same folder name (`api`): the last part of its folder, exactly, upper and lower
@@ -1126,9 +1127,14 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
 - **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app
   tabs, as Claude can with the `deckhand` command (here Deckhand's MCP tools, for that run only).
   Codex asks you before a tool that changes something, if your approval settings say so.
+- **On another machine**: **+ New session** under one of its projects (or **New Codex tab** in its
+  menu) starts Codex there, with that machine's own Codex, settings and sign-in; its Codex rows
+  open there too. It needs Deckhand on that machine to be new enough (Deckhand says to update it
+  there otherwise) and Codex installed there. If Codex there is signed out, its own sign-in screen
+  shows in the tab.
 - **Not yet**: read-only chats (Codex is not offered in Chats while **Start chats read-only** is
   on: Codex's read-only sandbox does not cover your MCP servers, and you can lift it from its
-  composer), extra flags, and Codex on another machine. [CODEX.md](CODEX.md) has the details.
+  composer) and extra flags. [CODEX.md](CODEX.md) has the details.
 
 ### Comments for the agent
 

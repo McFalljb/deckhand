@@ -236,6 +236,31 @@ machines_ux_remote_new_session :: proc(t: ^testing.T) {
 	views[0].checklist = []Machine_Check{{id = "pi", state = .Too_Old}, {id = "claude", state = .Missing}}
 	items = new_session_choices(&p, "")
 	testing.expect(t, len(items) == 1 && items[0].label == "pi", "pi only")
+	// Codex: only while its core says it starts Codex tabs (its hello's codex_tabs), and has codex
+	views[0].checklist = []Machine_Check{{id = "codex", state = .Ok}}
+	items = new_session_choices(&p, "")
+	testing.expect_value(t, len(items), 0)
+	views[0].codex = true
+	items = new_session_choices(&p, "")
+	testing.expect_value(t, len(items), 1)
+	if len(items) == 1 {
+		c, is := items[0].cmd.(New_Claude_Session)
+		testing.expect(t, is && c.codex && c.project_id == p.id && c.cwd == "", "Codex there")
+	}
+	views[0].checklist = []Machine_Check{{id = "codex", state = .Missing}}
+	testing.expect_value(t, len(new_session_choices(&p, "")), 0)
+}
+
+// A hub reads codex_tabs from a core's hello features; an older core lists none.
+@(test)
+machines_hello_codex_feature :: proc(t: ^testing.T) {
+	testing.expect(t, hello_feature(`{"result":{"ok":true,"data":{"features":["challenge_hello","codex_tabs"]}}}`, FEATURE_CODEX_TABS))
+	testing.expect(t, !hello_feature(`{"result":{"ok":true,"data":{"features":["challenge_hello"]}}}`, FEATURE_CODEX_TABS))
+	testing.expect(t, !hello_feature(`{"result":{"ok":true,"data":{}}}`, FEATURE_CODEX_TABS))
+	testing.expect(t, !hello_feature(`{"result":{"ok":true,"data":{"features":"codex_tabs"}}}`, FEATURE_CODEX_TABS))
+	ok := false
+	for f in CORE_FEATURES do ok ||= f == FEATURE_CODEX_TABS
+	testing.expect(t, ok, "this core says it")
 }
 
 

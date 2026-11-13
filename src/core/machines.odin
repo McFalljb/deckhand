@@ -140,6 +140,7 @@ Machine_View :: struct {
 	linger:    Linger, // Linux: its hello's machine.linger (Unknown: not said)
 	checklist: []Machine_Check, // its coding agents, as its core's checklist says (read-only here)
 	core_run:  string, // its core's run id (its hello's `core`; "" = not known): a restart there changes it
+	codex:     bool, // its hello's features list codex_tabs: Codex tabs may be started there (machine_route.odin)
 }
 
 // One row of another machine's coding agents checklist (its core's live.checklist, cleaned).
@@ -639,7 +640,8 @@ Mach_Link :: struct {
 	skew:      cw.Skew, // its last hello's
 	installed: bool, // its last hello said its core runs from Deckhand's own folder (M6-E)
 	core_run:  string, // heap: its last hello's run id (`core`; "" = an older core's, none)
-	linger:    Linger, // its last hello's machine.linger (Linux), or what linger --enable said
+	codex:     bool, // its last hello's features list codex_tabs
+	linger:   Linger, // its last hello's machine.linger (Linux), or what linger --enable said
 	auto_install: bool, // added by the user: its first attempt's finding of no core starts an install (M6-E); any status but connecting clears it (mlink_set)
 	install_why: string, // heap: why that install could not start (its note while it has no core: machine_status_text); "" = none
 	drain_skew: cw.Skew, // Draining: the hello's
@@ -834,7 +836,7 @@ machines_publish :: proc() {
 	views := make([dynamic]Machine_View, 0, len(mach.links), a)
 	for l in mach.links {
 		job, note := machine_install_view(l.no)
-		v := Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a), job = job, job_note = strings.clone(note, a), linger = l.linger, core_run = strings.clone(l.core_run, a)}
+		v := Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a), job = job, job_note = strings.clone(note, a), linger = l.linger, core_run = strings.clone(l.core_run, a), codex = l.codex}
 		v.update = machine_update_offer(core_version(), l.version, l.status, l.skew, l.installed)
 		v.checklist = machine_checks_of(&l.replica, a)
 		append(&views, v)
@@ -1180,6 +1182,18 @@ mlink_probe_done :: proc(l: ^Mach_Link, now: time.Tick) {
 	} else do mlink_down(l, {exited = true, exit_code = l.exit_code, stderr = string(l.errbuf[:])})
 }
 
+// Whether a hello reply's result.data.features lists name (exactly; no list: no).
+hello_feature :: proc(line, name: string) -> bool {
+	v, err := jg.parse_string(line, .JSON, true, context.temp_allocator)
+	if err != nil do return false
+	r, _ := v.(json.Object)
+	res, _ := r["result"].(json.Object)
+	data, _ := res["data"].(json.Object)
+	list, _ := data["features"].(json.Array)
+	for f in list do if s, is := f.(json.String); is && s == name do return true
+	return false
+}
+
 // The hello reply line came: online (frames from here on) or a status.
 @(private = "file")
 mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
@@ -1197,10 +1211,11 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	run := json_path(line, "result.data.core")
 	if !hex64_ok(run) do run = "" // an older core's (none) or not an id
 	// what this hello says of its core, whatever its status: kept here, the one place
+	codex := hello_feature(line, FEATURE_CODEX_TABS) // an older core's: none
 	heap := runtime.heap_allocator()
-	if version != l.version || run != l.core_run {
+	if version != l.version || run != l.core_run || codex != l.codex {
 		delete(l.version, heap); delete(l.core_run, heap)
-		l.version, l.core_run = strings.clone(version, heap), strings.clone(run, heap)
+		l.version, l.core_run, l.codex = strings.clone(version, heap), strings.clone(run, heap), codex
 		machines_publish()
 	}
 	o.skew = cw.skew_check(cw.GENERATION, gen, core_version(), version)

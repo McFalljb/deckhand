@@ -366,22 +366,10 @@ holder_adopt_all :: proc() {
 		}
 		if !adopt_tab(&s, &tab, id, snaps, saved, known) do continue
 		start := Held_Start{kind = kind}
-		if pk, is_pi := tab.kind.(Pi_Tab); is_pi do start.pi_ro, start.extras = pk.readonly, tab.reload.extras
+		if _, is_pi := tab.kind.(Pi_Tab); is_pi do start.extras = tab.reload.extras
 		if !socket_tokens_adopt(id, tab.id, start) && kind != .Shell do untrusted += 1
-		ct, is_cl := &tab.kind.(Claude_Tab)
-		if is_cl {
+		if _, is_cl := tab.kind.(Claude_Tab); is_cl {
 			if t := term_of(tab.id); t != nil do socket_claude_pid(tab.id, t.pty.pid) // its hellos come from below it
-		}
-		// a read-only Claude without trusted ack state is stopped (docs/CLAUDE.md §1a); so is
-		// anything whose saved state says it needs the read-only guard, whatever its tab
-		ro, found := socket_tokens_ro_of(id)
-		if ((found && ro.need) || (is_cl && ct.readonly)) && !claude_adopt_ro_ok(id) {
-			if is_cl do claude_adopt_ro_stop(tab.id)
-			else if t := term_of(tab.id); t != nil {
-				socket_forget_tab(tab.id)
-				term_note(t, CLAUDE_GUARD_UNTRUSTED)
-				pty_kill_group(&t.pty, i32(posix.Signal.SIGKILL))
-			}
 		}
 	}
 	// entries for terminals the holder no longer lists: an id can come back for a new one
@@ -474,16 +462,12 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 	t.reader.eof = false
 	t.changed = true
 	tab.status = .Running
-	if pk, is_pi := tab.kind.(Pi_Tab); is_pi {
+	if _, is_pi := tab.kind.(Pi_Tab); is_pi {
 		if s.home {
 			// Atlas: the model it runs with is the one applied at its last start (its first
 			// status must not take another for it: Pi_Status_Update)
 			delete(agent_model_starting)
 			agent_model_starting = strings.clone(state.home_model)
-		} else {
-			// as a restart would start it, and never looser than it was started (tokens.json,
-			// MAC'd; workspace.json's flag can only add to it)
-			tab.kind = Pi_Tab{readonly = chat_readonly(s.project_id) || pk.readonly || (known && saved.pi_ro)}
 		}
 		// the optional extensions it runs with (unknown: as now, so no restart is offered for it)
 		tab.reload.extras = known ? saved.extras : pi_integration_extras()

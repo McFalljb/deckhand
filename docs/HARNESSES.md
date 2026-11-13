@@ -101,16 +101,11 @@ optional ones are for pi tabs, not jobs (the Settings rows say so). A pi known t
 1.4.0…", Copy update command, Dismiss) and so does the setup sheet. Without the integration in the
 build, pi starts without it.
 
-**Read-only.** Read-only chats pass `--tools read,grep,find,ls,desk_show --exclude-tools mcp__*
---no-mcp` and read-only jobs the same without `desk_show`, which keeps every other extension tool
-from the model. The bridge needs none: status, waits,
-comments and reload are event hooks and a command, so they keep working. `PI_KIT_READONLY=1` also
-keeps `browser` from registering `app_open`, `app_restart` and `app_close`, keeps `shell` from
-registering at all, and turns the optional `guardrails` read-only (blocks `edit`, `write` and
-mutating `bash`, plus secret redaction of what `read` returns). Its read-only `bash` guard is dead
-code in Deckhand: `--tools` already makes `bash` (and `edit`, `write`) uncallable in read-only
-chats. Guardrails follows its toggle in read-only chats too: the allowlist is the boundary there,
-not it.
+**Read-only.** Read-only jobs (`access: read`) pass `--tools read,grep,find,ls --exclude-tools
+mcp__* --no-mcp`, which keeps every extension tool from the model. `PI_KIT_READONLY=1` also keeps
+`shell` from registering at all, and turns the optional `guardrails` read-only (blocks `edit`,
+`write` and mutating `bash`, plus secret redaction of what `read` returns). Chats are full pi: what
+a chat's agent may do is the chats folder's `AGENTS.md`'s to say.
 
 ## 4. Overlap: how Deckhand steps back
 

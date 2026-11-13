@@ -1567,16 +1567,6 @@ test("desk-browser: a pi tab opens its project's declared app by name, in its ow
 	}
 });
 
-test("desk-browser: a read-only pi tab (PI_KIT_READONLY=1) gets no app_open, app_restart or app_close", async () => {
-	const h = await deskBrowserHarness(() => ({ ok: true }), { PI_KIT_READONLY: "1" });
-	try {
-		for (const name of ["app_open", "app_restart", "app_close"]) assert.ok(!h.tools.has(name), `no ${name}`);
-		for (const name of ["app_tabs", "app_call", "app_screenshot", "app_events"]) assert.ok(h.tools.has(name), `still ${name}`);
-	} finally {
-		h.restore();
-	}
-});
-
 test("desk-browser: app_open opens at once; Deckhand asks nothing (the agent's own authority)", async () => {
 	const h = await deskBrowserHarness((cmd) => (cmd.type === "new_app_tab" ? { ok: true, created_id: 12 } : { ok: false }));
 	try {
@@ -1624,25 +1614,6 @@ test("desk-browser: desk_show shows the user a file in its own session (a .md re
 		await assert.rejects(tool.execute("s7", { path: "a.txt", line: 0 }, undefined), /line/);
 		await assert.rejects(tool.execute("s8", { path: "a.md", line: 2, anchor: "x" }, undefined), /not both/);
 		assert.equal(h.sent.length, n, "nothing sent");
-	} finally {
-		h.restore();
-	}
-});
-
-test("desk-browser: a read-only pi chat keeps desk_show: Deckhand's real argv allowlist (PI_READONLY_CHAT_ARGS, src/core/commands.odin) applied to the tools a read-only pi tab registers", async () => {
-	const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), "../../../src/core/commands.odin"), "utf8");
-	const m = src.match(/^PI_READONLY_CHAT_ARGS :: \[\?\]string\{([^}]*)\}/m);
-	assert.ok(m, "PI_READONLY_CHAT_ARGS is a literal list in src/core/commands.odin");
-	const argv = [...m![1].matchAll(/"([^"]*)"/g)].map((x) => x[1]);
-	const i = argv.lastIndexOf("--tools");
-	assert.ok(i >= 0, "a --tools allowlist");
-	const allow = new Set(argv[i + 1].split(","));
-	const h = await deskBrowserHarness(() => ({ ok: true, created_id: 5, data: { kind: "editor", path: "/p/a.txt" } }), { PI_KIT_READONLY: "1" });
-	try {
-		// pi's rule: a plain-name --tools allowlist keeps only the tools it names
-		const active = [...h.tools.keys()].filter((n) => allow.has(n));
-		assert.deepEqual(active, ["desk_show"], "of the browser extension's tools, a read-only chat keeps desk_show only (display only)");
-		for (const n of ["browser_click", "browser_type", "app_input", "app_call"]) assert.ok(!allow.has(n), `never ${n}`);
 	} finally {
 		h.restore();
 	}

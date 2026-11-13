@@ -18,8 +18,7 @@ package core
 //   listing and changing files, which this does not do.
 // - What it shows: what the editor can (disk_read): binary files, files over 20 MB, folders,
 //   pipes and missing files are refused with a hint, and no tab opens.
-// - Read-only: a read-only chat may show files too. The tab is an ordinary editor tab for the
-//   user; no agent has a command that edits it (save_file, reload_file… are not for panel callers).
+// - The tab is an ordinary editor tab for the user; no agent has a command that edits it (save_file, reload_file… are not for panel callers).
 
 import "core:fmt"
 import "core:os"

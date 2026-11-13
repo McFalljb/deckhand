@@ -1169,15 +1169,7 @@ tab_label :: proc(cs: ^core.Open_Session, tab: core.Tab) -> (ic: core.Icon, labe
 		who := is_claude && ct.codex ? "Codex" : "Claude"
 		label = tag != "" ? fmt.tprintf("%s · %s · %s", who, tag, place) : fmt.tprintf("%s · %s", who, place)
 	}
-	if is_claude {
-		// what the process started with (ct.readonly); a tab not started yet: what it will start as
-		if tab.status == .Not_Started {
-			if core.claude_tab_readonly(cs, &ct) do extra = "read-only"
-		} else if ct.readonly do extra = "read-only"
-		else if core.claude_tab_readonly(cs, &ct) do extra = "read-only after restart"
-	}
 	if tab.status == .Exited do extra = "exited"
-	if is_claude && ct.guard_stopped do extra = "read-only guard not confirmed: stopped"
 	if tab.status == .Not_Started do extra = cs != nil && cs.missing ? "gone" : "not started"
 	if tc := tab; core.tab_held_away(&tc) != 0 do extra = "in the session holder" // not reachable: never started here
 	// a kind this window does not know: a newer core's (the replica decodes it as nil, state_read.odin)

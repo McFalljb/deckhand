@@ -56,7 +56,7 @@ not saved in the workspace.
   The **+** menu and the palette list those entries. The cwd must be inside the project.
 - A session's own agents (a pi tab, a Claude tab) open **by name only**, in their own session,
   behind the user's view. `app_restart` and `app_close` let them manage the ones in their
-  session. Read-only chats open, restart and close none.
+  session.
 - **apps.json's trust model.** Any agent that can write the project can write apps.json, so an
   entry runs with **the agent's own authority**: it could already run that program from its own
   shell, and Deckhand adds no question of its own. A Claude tab's `deckhand app open`, `restart`

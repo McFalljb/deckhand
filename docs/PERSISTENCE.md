@@ -60,11 +60,9 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   own session and load once shown (docs/BROWSER.md §2.4). A user name and password in the
   URL (`user:pw@`) are never saved (nor shown in State); the query string and fragment are kept as
   they are, and may hold sign-in tokens (an OAuth `code` or `access_token`). Unknown tab kinds are skipped on restore.
-  Claude tabs save `{"kind":"claude","claude_session_id"?,"cwd","args"?,"readonly"?,"account"?}` (docs/CLAUDE.md): Claude
+  Claude tabs save `{"kind":"claude","claude_session_id"?,"cwd","args"?,"account"?}` (docs/CLAUDE.md): Claude
   Code's session id once its SessionStart hook reported it, where it ran, the user's extra
-  flags, and `readonly: true` when it started with Deckhand's read-only profile (§1a: it starts
-  read-only again, whatever the setting; `claude_sessions` entries carry the same field), and
-  `account`: its account's config folder (§1b; it starts there again; absent: the default). A saved id that is not a session id, or flags Deckhand sets itself, drop the tab.
+  flags, and `account`: its account's config folder (§1b; it starts there again; absent: the default). A saved id that is not a session id, or flags Deckhand sets itself, drop the tab.
 - **Panes** (docs/GUIDE.md, split panes): a session split into panes also saves `panes`; a
   session with one pane has no `panes` key:
 
@@ -161,7 +159,9 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   An open chat is saved like any session plus `"chat": true` (`cwd` = the Chats folder, pi's
   normal store) and goes back into Chats while chats still run in that folder; a chat from an
   earlier Chats folder (the chats folder changed) goes back into that folder's project.
-  `settings.chats_readonly` is saved when set.
+  An older file's `settings.chats_readonly`, tabs' and `claude_sessions` entries' `readonly` and
+  top-level `claude_readonly_ids` (the removed Start chats read-only) are ignored: such a tab
+  starts as a full agent.
 - Claude Code accounts (`src/core/claude_accounts.odin`, docs/CLAUDE.md §1b): `settings.claude_accounts`
   (`[{dir, label?, added?, removed?}]`: only what the user changed: a name of their own, a folder
   they added, one they removed; absolute folders, at most 64), `settings.claude_account_default`
@@ -202,17 +202,15 @@ own; an orphan an upgrade's keeper adopts ends with an unknown exit code there).
 - **`<data dir>/tokens.json`**: the socket tokens of the tabs whose process runs in the holder, so
   those processes can reconnect to the next core (PROTOCOL.md §2). Keyed by holder terminal,
   sha256 hashes only, never a token. Per terminal it also says what was started there (`kind`:
-  shell, pi or claude; for pi `pi_ro` and its optional extensions `extras`): a restored tab of
-  another kind never adopts that terminal, and an adopted pi tab is never less read-only than it
-  started. A challenge-only reconnect token says `"hello":"challenge"`; its hash is the challenge
+  shell, pi or claude; for pi its optional extensions `extras`): a restored tab of another kind
+  never adopts that terminal. An older file's `pi_ro` and `ro` are ignored. A challenge-only reconnect token says `"hello":"challenge"`; its hash is the challenge
   hello's key (PROTOCOL.md §2). Written whenever a holder is attached, rewritten atomically on
   every mint and revoke, MAC'd with the holder's in-memory key (`src/core/macfile.odin`: a
   `deckhand-mac 1 tokens <hmac>` line, then the JSON). A file that does not verify is ignored
   whole. A new holder (no terminals) removes the old file; entries for terminals the holder no
   longer lists are dropped at start.
 - **`workspace.json`'s `held` ids.** A terminal tab (pi, shell, Claude, Home's pi) whose process
-  runs in the holder saves `"held": <terminal id>` (a pi tab started read-only also
-  `"readonly": true`), and the file has a top-level `"holder": <its instance id>`: held ids are
+  runs in the holder saves `"held": <terminal id>`, and the file has a top-level `"holder": <its instance id>`: held ids are
   adopted only from that same holder.
 - **`<data dir>/handover.json` and `<data dir>/handover/<id>.snap`**, written when the core stops
   and hands its sessions to the holder or to a new core (`src/core/holder_adopt.odin`,

@@ -1104,7 +1104,6 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 				if er.err != "" do return s, er.err
 			}
 		}
-		s.settings.chats_readonly = opt_bool(&sr, "chats_readonly").? or_else false
 		s.settings.claude_skip_permissions = opt_bool(&sr, "claude_skip_permissions").? or_else false
 		s.settings.codex_full_access = opt_bool(&sr, "codex_full_access").? or_else false
 		s.settings.agent_name = get_str(&sr, "agent_name", optional = true)

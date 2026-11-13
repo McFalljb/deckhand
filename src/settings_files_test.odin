@@ -732,7 +732,6 @@ settings_registry_actions :: proc(t: ^testing.T) {
 		for x in s.also do check(t, &s, x, false)
 	}
 	testing.expect_value(t, action_label(action_by_id("agent_notify")), "Atlas's notifications")
-	testing.expect_value(t, action_label(action_by_id("chats_readonly")), "Start chats read-only")
 }
 
 // Every file and row the Settings tab lists has a section and is found by searching its name, and

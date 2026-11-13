@@ -25,7 +25,7 @@ import "core:time"
 // a project is its cwd, a session is pi's session id + cwd (+ session dir).
 
 Pi_Tab :: struct {
-	readonly: bool, // started read-only (chat_env: a chat while Chats: read-only is on)
+	readonly: bool, // the removed read-only chats': kept on the grow-only wire (schema/released-v1.json), always false
 }
 Shell_Tab :: struct {}
 Tab_Kind :: union {
@@ -303,7 +303,7 @@ Settings :: struct {
 	reduce_motion: bool, // no fades, no pulse
 	dim_panes_off: bool, // split panes: the ones without the keyboard are not dimmed (default: dimmed; set_dim_panes)
 	text_size:     Text_Size, // the chrome's text (theme.odin); terminals keep their size
-	chats_readonly: bool, // chats' pi starts with its read tools only (chat_args) and PI_KIT_READONLY=1
+	chats_readonly: bool, // the removed Start chats read-only: kept on the grow-only wire, always false (a saved value is ignored)
 	claude_skip_permissions: bool, // the user's default flag for Claude tabs THEY start (claude_with_defaults); user-only, off by default
 	codex_full_access: bool, // the same for Codex tabs: --dangerously-bypass-approvals-and-sandbox (codex_with_defaults)
 	agent_name:    string, // the built-in agent's name ("" = AGENT_NAME_DEFAULT)
@@ -425,7 +425,7 @@ State :: struct {
 	comments_ask:          Comments_Ask, // the close prompt: a tab or session closed with comments not sent (comments.odin)
 	holder_ask:            Holder_Ask, // a session holder from another build runs: the window asks once whether to replace it (holder_client.odin)
 	claude_history:        [dynamic]Claude_Record, // Claude Code sessions Deckhand ran, most recent first (claude.odin; saved)
-	claude_readonly_ids:   [dynamic]string, // Claude sessions that ran read-only, outside the history's cap (claude.odin §1a; saved)
+	claude_readonly_ids:   [dynamic]string, // the removed read-only chats': kept on the grow-only wire, always empty
 	claude_disk:          [dynamic]Claude_Disk, // the selected project's Claude transcripts found on disk (claude_disk.odin; not saved)
 	claude_disk_chats:    [dynamic]Claude_Disk, // the chats folder's
 	live:                  Core_Live, // the core's runtime a window in another process shows (core_live.odin; not saved)

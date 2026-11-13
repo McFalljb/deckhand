@@ -17,15 +17,16 @@ LEGACY_ENV_PREFIX :: "PI_DESK_"
 // DECKHAND_SIGN_IDENTITY, DECKHAND_RELEASE and the like reach a shell tab.
 DESK_SET_ENV := [?]string {
 	"SOCKET", "TOKEN", "CONTROL_TOKEN", "SHOTS_DIR", // every tab kind's transport
-	"CLAUDE_TOKEN", "CLAUDE_TAB", "CLAUDE_READONLY", "CLAUDE_ACCOUNT", "CLI", // Claude tabs
+	"CLAUDE_TOKEN", "CLAUDE_TAB", "CLAUDE_ACCOUNT", "CLI", // Claude tabs
+	"CLAUDE_READONLY", // no longer set (read-only chats are gone); still dropped, so a tab never inherits an old one
 	"APP", // app tabs
 	"JOB", "RUN", "RUN_DIR", "SCHEDULED_AT", // job runs
 }
 
 // The PI_DESK_ twins set beside the new names: the ones something outside Deckhand's own code
 // may read (the CLI and bin/deckhand of a tab started before 0.2.0, forge, a job's own scripts,
-// a control token's user). Not CONTROL_TOKEN (only pi's Atlas gets one), nor CLAUDE_TAB,
-// CLAUDE_READONLY and CLAUDE_ACCOUNT: nothing reads those, and an old account marker would reach
+// a control token's user). Not CONTROL_TOKEN (only pi's Atlas gets one), nor CLAUDE_TAB and
+// CLAUDE_ACCOUNT: nothing reads those, and an old account marker would reach
 // claude and its Bash (CLAUDE_ACCOUNT_SH unsets only the new one).
 DESK_LEGACY_SET := [?]string{"SOCKET", "TOKEN", "CLAUDE_TOKEN", "CLI", "SHOTS_DIR", "APP", "JOB", "RUN", "RUN_DIR", "SCHEDULED_AT"}
 

@@ -25,12 +25,10 @@ package core
 //     go with the user's next message to Claude as the hook's additionalContext, then are
 //     cleared, as pi.attach / pi.attached do for pi (comments.odin, comments_claude_take).
 
-import "core:crypto"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
-import "core:sys/posix"
 import "core:time"
 
 Claude_Turn :: enum u8 {
@@ -56,8 +54,10 @@ Claude_Held :: struct {
 Claude_Tab :: struct {
 	session_id: string, // Claude Code's session id (claude.session); "" until its SessionStart hook ran
 	args:       []string, // the user's extra flags; kept, and passed again on resume and restore
-	readonly:   bool, // started with Deckhand's read-only profile (§1a): kept, saved, never dropped
-	guard_stopped: bool, // Deckhand stopped it: its profile never confirmed it loaded (claude_readonly_tick; not saved)
+	// readonly, guard_stopped: from the removed read-only chats, kept on the grow-only wire
+	// (schema/released-v1.json); always false
+	readonly:   bool,
+	guard_stopped: bool,
 	turn:       Claude_Turn,
 	held:       [dynamic]Claude_Held, // claude_prompt texts waiting for an idle, empty prompt; at most CLAUDE_HELD_MAX
 	model:      string, // Claude's model (SessionStart's model, PostModelSwitch; claude_rows.odin); "" = not reported
@@ -78,7 +78,7 @@ Claude_Record :: struct {
 	named:   bool, // title is the user's rename (Claude_Rename): pushed to Claude Code as its session title
 	transcript: string, // Claude Code's transcript file (SessionStart's transcript_path), only under its config dir's projects/ (claude_rows.odin)
 	model:   string, // the model it last reported
-	readonly: bool, // it ran read-only: every resume of it is read-only too (§1a)
+	readonly: bool, // the removed read-only chats': kept on the grow-only wire, always false
 	account: string, // its account's config folder (claude_accounts.odin); "" = the default (older entries)
 	codex:   bool, // a Codex conversation (codex.odin): resumed with `codex resume <id>`
 }
@@ -158,11 +158,10 @@ Claude_Deliver :: struct {
 	force:  bool,
 }
 Claude_Restore_History :: struct {
-	records:      []Claude_Record,
-	readonly_ids: []string, // conversations that ran read-only (claude_readonly_ids; outside the history's cap)
+	records: []Claude_Record,
 }
-// The read-only profile loaded: its SessionStart hook (Deckhand's --settings) with this start's
-// nonce (§1a). A Claude tab's own, once per start, before its first prompt.
+// The removed read-only chats' profile ack: kept on the grow-only wire (schema/released-v1.json),
+// always refused.
 Claude_Readonly_Ack :: struct {
 	tab_id: u64,
 	nonce:  string,
@@ -174,12 +173,6 @@ Claude_Readonly_Ack :: struct {
 Claude_Rt :: struct {
 	typed:     bool, // the user typed into the tab since its last submitted prompt
 	enter_due: time.Tick, // a held text was pasted: Enter goes then
-	// a read-only start (§1a): its profile must ack (Claude_Readonly_Ack) before the deadlines
-	ro_need:   bool,
-	ro_acked:  bool,
-	ro_nonce:  [32]u8, // hex
-	ro_due:    time.Tick, // its session report + CLAUDE_ACK_AFTER_SESSION ({} = none yet)
-	ro_hard:   time.Tick, // its prompt up + CLAUDE_ACK_MAX ({} = not up yet: a startup dialog may be open)
 }
 @(private = "file")
 claude_rt: map[u64]Claude_Rt
@@ -231,7 +224,6 @@ claude_ready :: proc(tab: ^Tab, ct: ^Claude_Tab) -> (ok: bool, why: string) {
 Claude_Wait :: enum u8 {
 	None,
 	Not_Running,
-	Ro_Guard,
 	Sending,
 	Starting,
 	Working,
@@ -243,7 +235,6 @@ Claude_Wait :: enum u8 {
 CLAUDE_WAIT_WHY := [Claude_Wait]string {
 	.None        = "",
 	.Not_Running = "Claude is not running in this tab",
-	.Ro_Guard    = "Claude is starting (its read-only guard has not confirmed yet)",
 	.Sending     = "sending",
 	.Starting    = "Claude is starting",
 	.Working     = "Claude is working",
@@ -255,7 +246,6 @@ CLAUDE_WAIT_WHY := [Claude_Wait]string {
 CODEX_WAIT_WHY := [Claude_Wait]string {
 	.None        = "",
 	.Not_Running = "Codex is not running in this tab",
-	.Ro_Guard    = "",
 	.Sending     = "sending",
 	.Starting    = "Codex is starting (or a dialog of its own is open)",
 	.Working     = "Codex is working",
@@ -268,8 +258,6 @@ CODEX_WAIT_WHY := [Claude_Wait]string {
 claude_wait_of :: proc(tab: ^Tab, ct: ^Claude_Tab) -> Claude_Wait {
 	if tab.status != .Running do return .Not_Running
 	rt := claude_rt[tab.id]
-	// a read-only start: nothing goes in before its profile acked (a prompt before it stops the tab)
-	if rt.ro_need && !rt.ro_acked do return .Ro_Guard
 	if rt.enter_due != {} do return .Sending
 	if ct.codex {
 		// Codex (codex.odin) starts its session, and so its hooks, at the first prompt: before that
@@ -368,7 +356,7 @@ claude_paste_message :: proc(tab: ^Tab, text: string, slash := false) -> string 
 
 // Frame upkeep: a held text that can go is delivered (Claude_Deliver), its Enter follows the paste.
 claude_tick :: proc() {
-	claude_readonly_tick() // read-only starts whose profile never acked (§1a)
+
 	for &s in state.open_sessions {
 		for &tab in s.tabs {
 			ct, is := &tab.kind.(Claude_Tab)
@@ -455,36 +443,16 @@ claude_tab_cmd :: proc() -> string {
 // socket, the tab's Claude token, the CLI's path and where screenshots go. DECKHAND_CLAUDE_CMD
 // replaces claude (tests: a fake claude); it sees the same arguments as "$@". False if it could
 // not start (the terminal says why). s: the tab's session (the tab may not be in it yet).
-// Read-only (claude_tab_readonly; every start, whoever starts it): the user's flags only from
-// the allowlist, Deckhand's profile last, DECKHAND_CLAUDE_READONLY=1; never without the guard.
 // defaults: a start the user makes (a new tab, session or chat, the user's resume, restore and
-// restart): the user's default flags as the setting is now (claude_with_defaults), never saved;
-// a read-only start leaves them out and says so.
+// restart): the user's default flags as the setting is now (claude_with_defaults), never saved.
 claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
-	if ct.codex do return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule; no plugin, account or read-only profile
+	if ct.codex do return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule; no plugin or account
 	plugin := claude_plugin_dir()
 	if plugin == "" {
 		term_note(t, "Deckhand's Claude Code plugin is missing from this build (integrations/claude-code): rebuild Deckhand.")
 		return false
 	}
-	ro := claude_tab_readonly(s, ct)
 	cli := claude_cli_path()
-	nonce: string
-	if ro {
-		raw: [16]u8
-		crypto.rand_bytes(raw[:])
-		hx := "0123456789abcdef"
-		b := make([]u8, 32, context.temp_allocator)
-		for x, i in raw {
-			b[2 * i] = hx[x >> 4]
-			b[2 * i + 1] = hx[x & 15]
-		}
-		nonce = string(b)
-	}
-	if ro && cli == "" {
-		term_note(t, "Deckhand's command (deckhand-cli) is missing from this build, and a read-only Claude tab never starts without its guard: rebuild Deckhand.")
-		return false
-	}
 	// its account (claude_accounts.odin): only a configured one starts
 	if ct.account != "" && !claude_account_known(ct.account) {
 		term_note(t, fmt.tprintf("This Claude tab's account (%s) is no longer in Settings → Claude accounts: add it again, then Restart.", path_tilde(ct.account)))
@@ -501,23 +469,11 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		else do append(&argv, "--resume", ct.session_id)
 	}
 	args := flags ? ct.args : nil // the user's; an agent's restart starts without them (§3)
-	if defaults {
-		with := claude_with_defaults(args)
-		if !ro do args = with
-		else if len(with) > len(args) do window_toast(fmt.tprintf("Read-only chat: %s (your default Claude Code flags) left out", strings.join(with[len(args):], " ", context.temp_allocator)))
-	}
-	if ro do args, _ = claude_readonly_args(args) // only the allowlist (saved from before it was read-only)
+	if defaults do args = claude_with_defaults(args)
 	append(&argv, ..args)
-	if ro {
-		ct.readonly = true // the tab's from now on (saved; kept by every later start)
-		if r, _ := claude_record(ct.session_id); r != nil do r.readonly = true // and its conversation's (a resume from its row)
-		claude_readonly_mark(ct.session_id)
-		append(&argv, ..claude_readonly_profile(cli, nonce)) // last: nothing after it can loosen it
-	}
 	env := make([dynamic]string, context.temp_allocator)
 	append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli))) // + PI_KIT_NOTES_DIR, as pi tabs get it (folders.odin)
 	append(&env, ..claude_account_env(ct.account)) // its account: CLAUDE_CONFIG_DIR (none for the default)
-	if ro do append(&env, "DECKHAND_CLAUDE_READONLY=1")
 	claude_shots_tidy()
 	// every DECKHAND_ name with its PI_DESK_ twin (env_names.odin)
 	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Claude}) {
@@ -525,14 +481,6 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		return false
 	}
 	claude_run_started(tab_id, t, ct)
-	if ro {
-		// it must prove the profile loaded (its SessionStart hook acks this nonce)
-		rt := claude_rt[tab_id]
-		rt.ro_need = true
-		copy(rt.ro_nonce[:], nonce)
-		claude_rt[tab_id] = rt
-		socket_tokens_ro(tab_id, true, false, nonce) // tokens.json: unconfirmed (an adopted copy is stopped)
-	}
 	return true
 }
 
@@ -546,7 +494,6 @@ claude_run_started :: proc(tab_id: u64, t: ^Term, ct: ^Claude_Tab) {
 	window_state_changed() // a restart from a reload tick says nothing
 	claude_rt[tab_id] = {}
 	claude_work_reset(tab_id) // a new process: its todos and subagents start empty (claude_panels.odin)
-	ct.guard_stopped = false
 }
 
 // Comment crops copied for Claude (comments_claude_take) that are over a day old go.
@@ -560,238 +507,6 @@ claude_shots_tidy :: proc() {
 		if !strings.has_prefix(f.name, "comment-") || !strings.has_suffix(f.name, ".png") do continue
 		if time.diff(f.modification_time, now) > 24 * time.Hour do os.remove(f.fullpath)
 	}
-}
-
-// ---- read-only Claude (docs/CLAUDE.md §1a) ----
-
-// The tools a read-only tab never gets (bare names: Claude Code takes them out of Claude's
-// context, and no mode, allow rule or later flag can give them back). Bash stays, behind plan
-// mode, the scoped deny rules below and the guard (`deckhand hook readonly`).
-CLAUDE_READONLY_DENY := [?]string {
-	"Edit", "Write", "NotebookEdit", "MultiEdit", "PowerShell", "Monitor", "Agent", "Task", "Workflow",
-	"CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger", "EnterWorktree", "ExitWorktree",
-	"Artifact", "mcp__*", "ListMcpResourcesTool", "ReadMcpResourceTool", "ExitPlanMode",
-}
-// Scoped Bash deny rules for pi-kit's MUTATING programs (Claude Code applies a deny rule to every
-// subcommand: a layer that holds if the guard does not run). Each as `Bash(x)` and `Bash(x *)`.
-CLAUDE_READONLY_BASH_DENY := [?]string {
-	"rm", "mv", "cp", "chmod", "chown", "touch", "mkdir", "tee", "sed -i", "git commit", "git push",
-	"git merge", "git rebase", "git reset", "git checkout", "git switch", "git stash", "git apply",
-	"git am", "git cherry-pick", "git revert", "git tag", "git worktree add", "git worktree remove",
-	// Deckhand's own additions (the guard's m_deckhand)
-	// (not git config: `Bash(git config *)` would block --get; the guard blocks its writes)
-	"git clean", "git restore", "git pull", "git add", "git init", "git update-ref",
-	"rmdir", "unlink", "ln", "truncate", "wget", "perl -i", "perl -pi",
-}
-CLAUDE_ACK_AFTER_SESSION :: 10 * time.Second // the ack after the session report (hooks run in parallel)
-CLAUDE_ACK_MAX :: 120 * time.Second // the ack after Claude's prompt came up, whatever runs (no hook at all)
-CLAUDE_READONLY_IDS_MAX :: 10_000 // least recently used first (claude_readonly_mark)
-CLAUDE_GUARD_STOPPED :: "read-only guard not confirmed: stopped. A startup dialog may have been left open, or this Claude Code ignores Deckhand's settings (update it). Then Restart."
-
-// The user's flags a read-only tab keeps (an allowlist: a list of the flags that would undo
-// read-only would always miss one); each of these takes a value but --verbose.
-CLAUDE_READONLY_KEEP := [?]string{"--model", "--effort", "--fallback-model"}
-CLAUDE_READONLY_KEEP_BARE := [?]string{"--verbose"}
-
-// A Claude tab in this session starts read-only: a chat while chats are read-only.
-claude_chat_readonly :: proc(s: ^Open_Session) -> bool {
-	return state.settings.chats_readonly && s != nil && open_session_is_chat(s)
-}
-
-// Whether a Claude tab starts read-only: it did before (the tab's, saved), its session is a chat
-// while chats are read-only, or the conversation it resumes ran read-only.
-claude_tab_readonly :: proc(s: ^Open_Session, ct: ^Claude_Tab) -> bool {
-	if ct.readonly || claude_chat_readonly(s) do return true
-	return claude_readonly_known(ct.session_id)
-}
-
-// Conversations that ran read-only, kept outside the history's cap (saved): a resume of one is
-// read-only whatever else is known about it.
-claude_readonly_known :: proc(id: string) -> bool {
-	if id == "" do return false
-	for x in state.claude_readonly_ids do if x == id do return true
-	if r, _ := claude_record(id); r != nil && r.readonly do return true
-	return false
-}
-
-// Marks a conversation read-only, as the most recently used (marked again: moved to the back);
-// at the cap the least recently used goes.
-claude_readonly_mark :: proc(id: string) {
-	if id == "" || !claude_id_ok(id) do return
-	if r, _ := claude_record(id); r != nil do r.readonly = true
-	for x, i in state.claude_readonly_ids do if x == id {
-		ordered_remove(&state.claude_readonly_ids, i)
-		append(&state.claude_readonly_ids, x)
-		return
-	}
-	append(&state.claude_readonly_ids, strings.clone(id))
-	for len(state.claude_readonly_ids) > CLAUDE_READONLY_IDS_MAX do delete(pop_front(&state.claude_readonly_ids))
-}
-
-@(private = "file")
-claude_readonly_listed :: proc(id: string) -> bool {
-	for x in state.claude_readonly_ids do if x == id do return true
-	return false
-}
-
-// A read-only start whose profile never acked: stopped (its process group killed, its token
-// revoked). Not before: Claude cannot run a tool before its first prompt, and a prompt before the
-// ack stops it at once (Claude_Turn_Report).
-claude_readonly_tick :: proc(now := time.Tick{}) {
-	n := now == {} ? time.tick_now() : now
-	for &s in state.open_sessions {
-		for &tab in s.tabs {
-			ct, is := &tab.kind.(Claude_Tab)
-			if !is || tab.status != .Running || ct.guard_stopped do continue
-			rt := claude_rt[tab.id]
-			if !rt.ro_need || rt.ro_acked do continue
-			if rt.ro_hard == {} {
-				// the clock starts once Claude's prompt is up (not while a trust, login or onboarding
-				// dialog waits): bracketed paste on, or its OSC 7501 reporting other than blocked
-				t := term_of(tab.id)
-				up := t != nil && t.running && mode_on(t, 2004)
-				if v := tab_status_view(tab); v.source == .Osc7501 && v.state != .Blocked do up = true
-				if up {
-					rt.ro_hard = time.tick_add(n, CLAUDE_ACK_MAX)
-					claude_rt[tab.id] = rt
-				}
-			}
-			late := (rt.ro_hard != {} && time.tick_diff(rt.ro_hard, n) > 0) || (rt.ro_due != {} && time.tick_diff(rt.ro_due, n) > 0)
-			if late do claude_readonly_stop(&tab, ct)
-		}
-	}
-}
-
-// Whether a read-only Claude kept by the session holder (holder terminal `term`) may keep running
-// in its adopted tab: its ack state came from a tokens.json that verified (or from this run) and
-// says its profile acked. Anything else (no file, a bad MAC, no entry, not acked yet) is false:
-// the integrator then stops it (claude_adopt_ro_stop), failing closed (§1a). Call it for every
-// adopted Claude tab that is read-only (Claude_Tab.readonly) or whose saved state says so
-// (socket_tokens_ro_of: need).
-claude_adopt_ro_ok :: proc(term: u32) -> bool {
-	ro, found := socket_tokens_ro_of(term)
-	return found && ro.need && ro.acked
-}
-
-CLAUDE_GUARD_UNTRUSTED :: "read-only guard not confirmed after Deckhand reopened: stopped. Restart this tab."
-
-// An adopted read-only Claude whose ack state is not trusted (claude_adopt_ro_ok false): stopped
-// as an unconfirmed start is (its process group killed, its token revoked, the tab says why).
-claude_adopt_ro_stop :: proc(tab_id: u64) {
-	_, tab, ct := claude_tab_of(tab_id)
-	if ct == nil || ct.guard_stopped do return
-	claude_readonly_stop(tab, ct, CLAUDE_GUARD_UNTRUSTED, "A read-only Claude was stopped: Deckhand could not confirm its guard after reopening (restart the tab)")
-}
-
-// Whether Deckhand stopped this tab for an unconfirmed profile (tests, the label).
-claude_readonly_stopped :: proc(tab_id: u64) -> bool {
-	_, _, ct := claude_tab_of(tab_id)
-	return ct != nil && ct.guard_stopped
-}
-
-@(private = "file")
-claude_readonly_stop :: proc(tab: ^Tab, ct: ^Claude_Tab, note := CLAUDE_GUARD_STOPPED, toast := "A read-only Claude was stopped: its guard was not confirmed (a startup dialog left open, or an old Claude Code)") {
-	ct.guard_stopped = true
-	held_clear(ct)
-	socket_forget_tab(tab.id) // nothing more from its token
-	if t := term_of(tab.id); t != nil {
-		term_note(t, note)
-		pty_kill_group(&t.pty, i32(posix.Signal.SIGKILL)) // claude and what it runs (in the holder: SIGNAL{pgroup})
-	}
-	window_toast(toast, err = true)
-	window_state_changed()
-}
-
-// The user's flags a read-only tab keeps (temp), and the first one it does not ("" = none).
-claude_readonly_args :: proc(args: []string) -> (kept: []string, refused: string) {
-	out := make([dynamic]string, 0, len(args), context.temp_allocator)
-	for i := 0; i < len(args); i += 1 {
-		a := args[i]
-		name := a
-		if j := strings.index_byte(a, '='); j > 0 do name = a[:j]
-		bare := false
-		for k in CLAUDE_READONLY_KEEP_BARE do if a == k do bare = true
-		valued := false
-		for k in CLAUDE_READONLY_KEEP do if name == k do valued = true
-		switch {
-		case bare, valued && name != a:
-			append(&out, a)
-		case valued && i + 1 < len(args) && !strings.has_prefix(args[i + 1], "-"):
-			append(&out, a, args[i + 1])
-			i += 1
-		case:
-			if refused == "" do refused = name // the flag's name only: its value may be anything (a JSON of settings)
-		}
-	}
-	return out[:], refused
-}
-
-// Why these flags cannot go to a read-only tab ("" = they can).
-claude_readonly_refusal :: proc(args: []string) -> string {
-	if _, bad := claude_readonly_args(args); bad != "" do return fmt.tprintf("%s cannot go into a read-only chat (only --model, --effort, --fallback-model and --verbose go along; Start chats read-only is on)", bad)
-	return ""
-}
-
-// s in single quotes for sh (temp).
-claude_sh_quote :: proc(s: string) -> string {
-	q, _ := strings.replace_all(s, "'", `'\''`, context.temp_allocator)
-	return strings.concatenate({"'", q, "'"}, context.temp_allocator)
-}
-
-// The guard's command line: the CLI by its absolute path (nothing from the environment); any
-// failure of it (missing, crashed, exit 1) becomes exit 2, which blocks the call.
-claude_readonly_hook_command :: proc(cli: string) -> string {
-	return strings.concatenate({claude_sh_quote(cli), " hook readonly || exit 2"}, context.temp_allocator)
-}
-
-// The settings Deckhand passes with --settings (above the user's and the project's; not kept by
-// --resume, so passed at every start): plan mode, the deny rules, no bypass or auto mode, hooks
-// on (a project's disableAllHooks cannot turn the guard off), no shell in skills, and the guard
-// for every tool call, blocking when it fails or times out.
-claude_readonly_settings :: proc(cli, nonce: string) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	strings.write_string(&b, `{"permissions":{"defaultMode":"plan","disableBypassPermissionsMode":"disable","disableAutoMode":"disable","deny":[`)
-	n := 0
-	rule :: proc(b: ^strings.Builder, n: ^int, r: string) {
-		if n^ > 0 do strings.write_byte(b, ',')
-		json_quote(b, r)
-		n^ += 1
-	}
-	for d in CLAUDE_READONLY_DENY do rule(&b, &n, d)
-	for d in CLAUDE_READONLY_BASH_DENY {
-		rule(&b, &n, fmt.tprintf("Bash(%s)", d))
-		rule(&b, &n, fmt.tprintf("Bash(%s *)", d))
-	}
-	strings.write_string(&b, `]},"disableAllHooks":false,"disableSkillShellExecution":true,"hooks":{"PreToolUse":[{"matcher":"*","hooks":[{"type":"command","command":`)
-	json_quote(&b, claude_readonly_hook_command(cli))
-	strings.write_string(&b, `,"timeout":30,"onFailure":"block"}]}],"SessionStart":[{"hooks":[{"type":"command","command":`)
-	json_quote(&b, strings.concatenate({claude_sh_quote(cli), " hook readonly-ack ", nonce}, context.temp_allocator))
-	strings.write_string(&b, `,"timeout":30}]}]}}`)
-	return strings.to_string(b)
-}
-
-// Deckhand's read-only profile, last in argv (temp): plan mode, the user's settings files only (a
-// project's settings, hooks and .mcp.json in the chats folder are not loaded), Deckhand's settings,
-// and the denied tools.
-claude_readonly_profile :: proc(cli, nonce: string) -> []string {
-	out := make([dynamic]string, context.temp_allocator)
-	append(&out, "--permission-mode", "plan", "--setting-sources", "user", "--settings", claude_readonly_settings(cli, nonce), "--disallowedTools")
-	append(&out, ..CLAUDE_READONLY_DENY[:])
-	return out[:]
-}
-
-// What a read-only tab's token may not send (Deckhand's own check, whatever the guard let
-// through): acting on a page or an app. Reading, screenshots and navigation stay, as for pi.
-claude_readonly_refuses :: proc(caller: Caller, cmd: Command) -> string {
-	if caller.kind != .Panel || !caller.claude do return ""
-	#partial switch _ in cmd {
-	case Browser_Click, Browser_Type, Browser_Press, Browser_Select, Browser_Upload, Browser_Hover, App_Input, App_Call, New_App_Tab, App_Restart, App_Close: // hover too: it can fire a page's scripts
-	case:
-		return ""
-	}
-	_, _, ct := claude_tab_of(caller.tab_id)
-	if ct == nil || !ct.readonly do return ""
-	return "a read-only chat's Claude may read pages and apps, not act on them (Start chats read-only is on)"
 }
 
 // ---- is Claude Code installed? ----
@@ -895,7 +610,7 @@ claude_default_args :: proc() -> []string {
 }
 
 // What turning skip-permissions on asks the user (Set_Claude_Default_Flags).
-CLAUDE_SKIP_CONFIRM :: "Start the Claude tabs you start with --dangerously-skip-permissions? Claude will edit files and run commands without asking you first. Agents' tabs and read-only chats never get it."
+CLAUDE_SKIP_CONFIRM :: "Start the Claude tabs you start with --dangerously-skip-permissions? Claude will edit files and run commands without asking you first. Agents' tabs never get it."
 
 // args with the user's default flags as the setting is NOW, after them (claude_start, for a
 // start the user makes: never saved into a tab's or a record's flags, so turning the setting off
@@ -975,10 +690,10 @@ clone_strings :: proc(list: []string) -> []string {
 
 // The session id (and where it ran) goes to the front of the history; its title and flags stay.
 @(private = "file")
-history_touch :: proc(id, cwd, project: string, args: []string, readonly: bool, account: string, codex := false) {
+history_touch :: proc(id, cwd, project: string, args: []string, account: string, codex := false) {
 	// every entry records its account's folder (the default's when the tab has none); a Codex
 	// conversation has none (codex.odin)
-	rec := Claude_Record{id = strings.clone(id), cwd = strings.clone(cwd), project = strings.clone(project), used = time.now()._nsec / 1e9, args = clone_strings(args), readonly = readonly, account = codex ? "" : strings.clone(claude_account_dir(account)), codex = codex}
+	rec := Claude_Record{id = strings.clone(id), cwd = strings.clone(cwd), project = strings.clone(project), used = time.now()._nsec / 1e9, args = clone_strings(args), account = codex ? "" : strings.clone(claude_account_dir(account)), codex = codex}
 	if old, i := claude_record(id); old != nil {
 		// its account stays (its transcript is in that folder)
 		if old.account != "" {
@@ -986,7 +701,7 @@ history_touch :: proc(id, cwd, project: string, args: []string, readonly: bool, 
 			rec.account = strings.clone(old.account)
 		}
 		rec.title = strings.clone(old.title)
-		rec.readonly ||= old.readonly // once read-only, its resumes are read-only too
+
 		rec.named = old.named
 		rec.transcript = strings.clone(old.transcript)
 		rec.model = strings.clone(old.model)
@@ -1091,7 +806,7 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 	}
 	if resume != "" {
 		p := find_project(s.project_id)
-		history_touch(resume, cwd, p != nil ? p.cwd : s.cwd, args, ct.readonly, account, codex)
+		history_touch(resume, cwd, p != nil ? p.cwd : s.cwd, args, account, codex)
 	}
 	// the next new session's default (claude_account_pick); the user's own choice
 	if caller.kind == .UI && !codex && account != "" && account != state.settings.claude_account_last {
@@ -1160,7 +875,7 @@ claude_resume_cwd :: proc(rec: ^Claude_Record, p: ^Project, s: ^Open_Session = n
 claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool) {
 	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || claude_args_check(c.tabs[0].args) != "" do return fail("a Claude session's first tab is its Claude tab"), false
 	if !(c.tabs[0].codex ? codex_id_ok(c.pi_session_id) : claude_id_ok(c.pi_session_id)) do return fail("not a Claude session id"), false
-	if c.tabs[0].codex && (len(c.tabs[0].args) > 0 || c.tabs[0].readonly) do return fail("a Codex tab has no flags and no read-only mode"), false // restore_tab drops it: never a session without its main tab
+	if c.tabs[0].codex && len(c.tabs[0].args) > 0 do return fail("a Codex tab has no flags"), false // restore_tab drops it: never a session without its main tab
 	if claude_open_tab(c.pi_session_id) != 0 do return fail("this session is already open"), false
 	s := Open_Session{agent = .Claude, pi_session_id = strings.clone(c.pi_session_id), project_id = p.id, cwd = strings.clone(p.cwd), restored = true, missing = !os.is_dir(p.cwd)}
 	restore_tabs(&s, c.tabs, c.layout) // its main tab is c.tabs[0], with its own saved pane
@@ -1247,16 +962,11 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if s.home do return fail("Home has only its pi tab"), false
 		if s.missing do return fail("this session is gone"), false
 		if c.codex {
-			// Codex (codex.odin): its own flags' rule, no account, never read-only
+			// Codex (codex.odin): its own flags' rule, no account
 			if c.account != "" do return fail("a Codex tab has no Claude Code account"), false
-			if claude_chat_readonly(s) do return fail(CODEX_READONLY), false
 		}
 		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
 		if e := c.codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
-		// read-only (a chat while chats are, or a conversation that ran read-only): the allowlist
-		ro := claude_chat_readonly(s)
-		if claude_readonly_known(c.resume) do ro = true
-		if ro do if e := claude_readonly_refusal(c.args); e != "" do return fail(e), false
 		if c.resume != "" {
 			if c.codex && !codex_id_ok(c.resume) do return fail("resume must be a Codex session id"), false
 			if !c.codex && !claude_id_ok(c.resume) do return fail("resume must be a Claude session id"), false
@@ -1297,21 +1007,20 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 	case New_Claude_Session:
 		p := find_project(c.project_id)
 		if p == nil do return fail("no such project"), false
-		// in Chats too: a Claude chat (read-only while chats are: claude_chat_readonly); the chats
-		// folder is made at the first chat, as for pi's (open_new_session)
+		// in Chats too: a Claude chat; the chats folder is made at the first chat, as for pi's
+		// (open_new_session)
 		if p.group == .Chats && !p.missing && !os.exists(p.cwd) {
 			os.make_directory_all(p.cwd)
 			chats_instructions_ensure(date_stamp())
 		}
 		if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
 		if c.codex {
-			// Codex (codex.odin): its own flags' rule, no account, never read-only
+			// Codex (codex.odin): its own flags' rule, no account
 			if c.account != "" do return fail("a Codex session has no Claude Code account"), false
-			if p.group == .Chats && state.settings.chats_readonly do return fail(CODEX_READONLY), false
 		}
 		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
 		if e := c.codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
-		if p.group == .Chats && state.settings.chats_readonly do if e := claude_readonly_refusal(c.args); e != "" do return fail(e), false
+
 		cwd := p.cwd
 		if c.cwd != "" {
 			at, _, err := fs_check(c.cwd, caller, allow_root = true)
@@ -1413,12 +1122,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			s.pi_session_id = strings.clone(c.session_id)
 		}
 		cwd := tab.cwd != "" ? tab.cwd : s.cwd
-		history_touch(c.session_id, cwd, project, ct.args, ct.readonly, ct.account, ct.codex)
-		if ct.readonly do claude_readonly_mark(c.session_id) // a new conversation of a read-only tab (/clear) too
-		if rt := claude_rt[tab.id]; rt.ro_need && !rt.ro_acked && rt.ro_due == {} {
-			rt.ro_due = time.tick_add(time.tick_now(), CLAUDE_ACK_AFTER_SESSION)
-			claude_rt[tab.id] = rt
-		}
+		history_touch(c.session_id, cwd, project, ct.args, ct.account, ct.codex)
 		claude_work_session(tab, c.source) // a new conversation: its todos and subagents start empty
 		return {ok = true, data = claude_rows_session(ct, c)}, true // transcript, model; the user's title back (claude_rows.odin)
 	case Claude_Turn_Report:
@@ -1430,11 +1134,6 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		ended := claude_rows_turn(ct, c.state, c.question, c.idle_prompt) // the question and error dots (claude_rows.odin)
 		switch c.state {
 		case "submitted":
-			// a prompt before the read-only profile acked: it never loaded (§1a): stopped now
-			if rt := claude_rt[tab.id]; rt.ro_need && !rt.ro_acked && !ct.guard_stopped {
-				claude_readonly_stop(tab, ct)
-				return {ok = true}, true
-			}
 			ct.turn = .Working
 			rt := claude_rt[tab.id]
 			rt.typed = false // the prompt the user typed went: the input is empty again
@@ -1519,7 +1218,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		_, tab, ct := claude_tab_of(c.tab_id)
 		if ct == nil || len(ct.held) == 0 do return {ok = true}, false
 		if ok, why := claude_ready(tab, ct); !ok && !c.force do return fail(why), false
-		if rt := claude_rt[tab.id]; rt.ro_need && !rt.ro_acked do return fail("Claude is starting (its read-only guard has not confirmed yet)"), false // even Send now
+
 		if why := claude_paste_refused(tab); why != "" do return fail(why), false
 		t := term_of(tab.id)
 		if t == nil || !t.running do return fail("Claude is not running in this tab"), false
@@ -1543,29 +1242,13 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		claude_rt[tab.id] = rt
 		return {ok = true}, true
 	case Claude_Readonly_Ack:
-		_, tab, ct := claude_tab_of(c.tab_id)
-		if ct == nil do return fail("no such Claude tab"), false
-		rt := claude_rt[tab.id]
-		if tab.status != .Running || !ct.readonly || !rt.ro_need || ct.guard_stopped do return fail("this tab waits for no read-only ack"), false
-		if rt.ro_acked do return fail("already acknowledged"), false
-		if len(c.nonce) != len(rt.ro_nonce) || c.nonce != string(rt.ro_nonce[:]) do return fail("not this start's ack"), false
-		rt.ro_acked = true
-		claude_rt[tab.id] = rt
-		socket_tokens_ro(tab.id, true, true, c.nonce) // tokens.json: confirmed (survives a relaunch)
-		return {ok = true}, true
+		return fail("this tab waits for no read-only ack"), false // read-only chats were removed
 	case Claude_Restore_History:
-		// the saved list first (least recently used first), then the history's read-only records
-		// it does not have (even ones dropped below) while there is room: never past the cap
-		for id in c.readonly_ids do claude_readonly_mark(id)
-		for r in c.records do if r.readonly && claude_id_ok(r.id) && !claude_readonly_listed(r.id) {
-			if len(state.claude_readonly_ids) >= CLAUDE_READONLY_IDS_MAX do break
-			append(&state.claude_readonly_ids, strings.clone(r.id))
-		}
 		for r in c.records {
 			// as a report would be: an id that can go into argv, no flags Deckhand sets, an absolute
 			// project, a one-line title of at most CLAUDE_TITLE_MAX
 			if !(r.codex ? codex_id_ok(r.id) : claude_id_ok(r.id)) || len(state.claude_history) >= CLAUDE_HISTORY_MAX do continue
-			if r.codex && (len(r.args) > 0 || r.readonly) do continue // a Codex conversation has neither
+			if r.codex && len(r.args) > 0 do continue // a Codex conversation has none
 			if claude_args_check(r.args) != "" || !strings.has_prefix(r.project, "/") do continue
 			if old, _ := claude_record(r.id); old != nil do continue
 			title := cut_utf8(strings.trim_space(one_line(r.title, context.temp_allocator)), CLAUDE_TITLE_MAX)
@@ -1574,7 +1257,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			// resolved when it is used, never a folder stamped at load (from inside a Claude session
 			// whose login shell did not answer, the environment's would be the parent session's)
 			acct := filepath.is_abs(r.account) && !r.codex ? r.account : ""
-			append(&state.claude_history, Claude_Record{id = strings.clone(r.id), cwd = strings.clone(r.cwd), project = strings.clone(r.project), title = strings.clone(title), used = r.used, args = clone_strings(r.args), named = r.named && title != "", transcript = strings.clone(claude_transcript_ok(r.transcript)), model = strings.clone(claude_model_clean(r.model)), readonly = r.readonly, account = strings.clone(acct), codex = r.codex})
+			append(&state.claude_history, Claude_Record{id = strings.clone(r.id), cwd = strings.clone(r.cwd), project = strings.clone(r.project), title = strings.clone(title), used = r.used, args = clone_strings(r.args), named = r.named && title != "", transcript = strings.clone(claude_transcript_ok(r.transcript)), model = strings.clone(claude_model_clean(r.model)), account = strings.clone(acct), codex = r.codex})
 		}
 		return {ok = true}, true
 	}
@@ -1715,8 +1398,8 @@ claude_command_clone :: proc(cmd: Command, allocator := context.allocator) -> Co
 	case Claude_Held_Op:        return Claude_Held_Op{tab_id = c.tab_id, op = s(c.op, allocator)}
 	case Claude_Restore_History:
 		out := make([]Claude_Record, len(c.records), allocator)
-		for r, i in c.records do out[i] = {id = s(r.id, allocator), cwd = s(r.cwd, allocator), project = s(r.project, allocator), title = s(r.title, allocator), used = r.used, args = ss(r.args, allocator), named = r.named, transcript = s(r.transcript, allocator), model = s(r.model, allocator), readonly = r.readonly, account = s(r.account, allocator), codex = r.codex}
-		return Claude_Restore_History{records = out, readonly_ids = ss(c.readonly_ids, allocator)}
+		for r, i in c.records do out[i] = {id = s(r.id, allocator), cwd = s(r.cwd, allocator), project = s(r.project, allocator), title = s(r.title, allocator), used = r.used, args = ss(r.args, allocator), named = r.named, transcript = s(r.transcript, allocator), model = s(r.model, allocator), account = s(r.account, allocator), codex = r.codex}
+		return Claude_Restore_History{records = out}
 	case Claude_Readonly_Ack: return Claude_Readonly_Ack{tab_id = c.tab_id, nonce = s(c.nonce, allocator)}
 	}
 	return cmd
@@ -1764,7 +1447,6 @@ claude_command_free :: proc(cmd: Command, allocator := context.allocator) {
 			delete(r.model, allocator)
 			delete(r.account, allocator)
 		}
-		ss(c.readonly_ids, allocator)
 		delete(c.records, allocator)
 	}
 }
@@ -1777,7 +1459,6 @@ claude_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 	strings.write_string(b, `,"claude_session_id":`)
 	json_quote(b, ct.session_id)
 	fmt.sbprintf(b, `,"turn":"%s","held":%d,"typed":%v,"argc":%d`, CLAUDE_TURN_NAMES[ct.turn], len(ct.held), claude_typed(tab.id), len(ct.args))
-	if ct.readonly do strings.write_string(b, `,"readonly":true`)
 	if ct.codex do strings.write_string(b, `,"harness":"codex"`)
 	if tag := claude_account_tag(ct.account); tag != "" {
 		strings.write_string(b, `,"account":`)
@@ -1811,7 +1492,6 @@ claude_history_json :: proc(b: ^strings.Builder, list: []Claude_Record, found, f
 			json_quote(b, r.model)
 		}
 		fmt.sbprintf(b, `,"used":%d,"open":%v`, r.used, claude_open_tab(r.id) != 0)
-		if r.readonly do strings.write_string(b, `,"readonly":true`)
 		if r.codex do strings.write_string(b, `,"harness":"codex"`)
 		if tag := claude_account_tag(r.account); tag != "" {
 			strings.write_string(b, `,"account":`)

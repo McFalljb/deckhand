@@ -11,11 +11,6 @@ fi
 if [ -z "${DECKHAND_CLI:-}" ] && [ -n "${PI_DESK_CLI:-}" ] && [ -x "$PI_DESK_CLI" ]; then
   exec "$PI_DESK_CLI" "$@"
 fi
-if [ "${1:-}" = hook ] && [ "${2:-}" = readonly ]; then
-  # the read-only guard never passes a call it could not check (Deckhand runs it by its own path)
-  echo "deckhand: the read-only guard is not available here: denied" >&2
-  exit 2
-fi
 if [ "${1:-}" = hook ]; then
   exit 0
 fi

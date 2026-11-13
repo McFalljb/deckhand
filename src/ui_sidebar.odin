@@ -324,8 +324,8 @@ menu_items :: proc() -> []core.Menu_Item {
 			append(&items, core.Menu_Item{label = at >= 0 ? "Unpin" : "Pin", cmd = core.Set_Pinned{pi_session_id = t.pi_session_id, pinned = at < 0}})
 			pin_moves(&items, at, len(state.sidebar.pinned_sessions), 0, t.pi_session_id)
 		}
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin; read-only in a chat while chats are
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_installed() && !core.codex_chat_refused(id) do append(&items, core.Menu_Item{label = "New Codex tab here", cmd = core.New_Claude_Tab{session = id, codex = true}}) // codex.odin
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_installed() do append(&items, core.Menu_Item{label = "New Codex tab here", cmd = core.New_Claude_Tab{session = id, codex = true}}) // codex.odin
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
 		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)

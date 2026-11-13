@@ -10,7 +10,7 @@ is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PR
 
 **Where it runs.** A Claude tab's process is a child of the session holder, like every terminal
 tab. The core runs everything else: tokens and the socket, the hooks' reports, held prompts and
-waits, the read-only ack, the panels. The window only draws the tab. So a Claude tab keeps
+waits, the panels. The window only draws the tab. So a Claude tab keeps
 running when the window closes (⌘Q), when the core restarts, and through an update
 ([GUIDE.md](GUIDE.md#how-deckhand-runs)); the hooks and the `deckhand` CLI reach the core on
 `core.sock` with or without a window.
@@ -50,8 +50,8 @@ running when the window closes (⌘Q), when the core restarts, and through an up
     prompt; the main tab reads "Claude · <project>".
   - **Claude chats.** `new_claude_session` with the Chats `project_id` (**New chat**'s picker:
     **+ New chat**, ⌘N, the **⌄** menu, File, the palette) starts one in the chats folder; its row
-    is in Chats, marked Claude. A Claude tab may open in a pi chat too (**New Claude tab**). With
-    **Start chats read-only** on, they start read-only (§1a).
+    is in Chats, marked Claude. A Claude tab may open in a pi chat too (**New Claude tab**). They
+    start as full agents (§1a).
   - **Who.** `new_claude_session` is `Anyone` (the user, Atlas, scripts; never a pi or Claude
     tab). An agent's opens behind the user's view and cannot pass flags.
 - **Default flags** (`set_claude_default_flags`, user-only, off by default: Settings' "Claude Code
@@ -61,7 +61,6 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   restored tab shown, the user's restart). It is never saved into a tab's or a record's flags, so
   turning it off takes it from every later start. Not when the flags name it or set
   `--permission-mode`, nor past `CLAUDE_ARGS_MAX`. Agents, scripts, panels and apps never get it.
-  A read-only start leaves it out, and a toast says so.
 - **Claude Code not installed.** `claude_installed()` looks for an executable `claude` (stat and
   `access(X_OK)`, never run) on the PATH new tabs get and in `~/.local/bin` and `~/.claude/local`.
   Cached; looked up again after **Refresh shell environment**, after a Claude tab exits 127, and at
@@ -85,127 +84,14 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   for pi) and gets the same arguments as `"$@"`. `tests/scripts/fake-claude.py` is a fake claude
   that runs the plugin's hooks with Claude Code's JSON and logs what it got.
 
-## 1a. Read-only Claude (chats while Start chats read-only is on)
+## 1a. Chats
 
-**When.** A Claude tab starts read-only (`claude_tab_readonly`) when it started read-only before
-(`Claude_Tab.readonly`, saved with the tab), its session is a chat while
-`Settings.chats_readonly` is on (`claude_chat_readonly`), or the conversation it resumes ran
-read-only (`Claude_Record.readonly`, saved in the history). It is decided in `claude_start`
-itself, at **every** start: new, resume (a row, `claude_resume`, `new_claude_tab resume`),
-restore, Restart (`claude_restart`, the dead tab's bar, a hung process's wait), whoever starts it.
-It is the tab's, not the user's flags: an agent's resume or restart, which drops the user's
-flags (§3), still gets it. Once read-only, a tab and its conversation stay read-only (turning the
-setting off later does not loosen them; a new chat starts full); `--settings` is not kept by
-`--resume`, so it is passed again each time.
-
-**The profile** (`claude_readonly_profile`, last in argv, after the user's flags):
-
-- `--permission-mode plan` (Claude Code: reads and read-only shell commands; anything else asks).
-- `--setting-sources user`: the chats folder's project settings, hooks and `.mcp.json` are not
-  loaded (a full chat could have planted them).
-- `--settings <json>` (Deckhand's, inline; it outranks user and project settings; only managed
-  settings outrank it): `permissions.defaultMode` plan, `disableBypassPermissionsMode` and
-  `disableAutoMode` `"disable"` (no bypass, no auto-mode classifier approvals),
-  `permissions.deny` (the tools below, and `Bash(x)`/`Bash(x *)` for pi-kit's mutating programs
-  and git verbs: Claude Code applies a deny rule to every subcommand, a layer that holds if the
-  guard does not run), `disableAllHooks: false` (a project setting cannot turn the guard off),
-  `disableSkillShellExecution: true` (skills' `` !`cmd` `` never runs: it bypasses PreToolUse; Claude Code's bundled and managed skills are exempt), and
-  the guard: a sync PreToolUse hook, matcher `*`, `'<deckhand-cli>' hook readonly || exit 2`,
-  `timeout` 30, `onFailure: "block"`; and the **ack**: a SessionStart hook
-  `'<deckhand-cli>' hook readonly-ack <nonce>` (below).
-- `--disallowedTools Edit Write NotebookEdit MultiEdit PowerShell Monitor Agent Task Workflow
-  CronCreate CronDelete ScheduleWakeup RemoteTrigger EnterWorktree ExitWorktree Artifact mcp__*
-  ListMcpResourcesTool ReadMcpResourceTool ExitPlanMode` (`CLAUDE_READONLY_DENY`). A bare tool
-  name in a deny rule takes the tool out of Claude's context; no mode (Shift+Tab), allow rule,
-  `--allowedTools` or settings level below managed can give it back
-  ([permissions](https://code.claude.com/docs/en/permissions): "If a tool is denied at any level,
-  no other level can allow it").
-- Environment: `DECKHAND_CLAUDE_READONLY=1` (for Claude's commands and the user's own hooks to see;
-  the guard does not need it). Never inherited by other children (`term.odin` `child_env`).
-
-**The user's flags** in a read-only tab: only `--model`, `--effort`, `--fallback-model` (with a
-value) and `--verbose` (`CLAUDE_READONLY_KEEP`, an allowlist: a denylist would miss the next flag
-that loosens it, e.g. `--dangerously-skip-permissions`, `--permission-mode`, `--settings`,
-`--setting-sources`, `--allowedTools`, `--tools`, `--mcp-config`, `--add-dir`, `--agents`,
-`--plugin-dir`, `--disallowedTools`). Others are refused when given (`new_claude_session`,
-`new_claude_tab`: "… cannot go into a read-only chat …") and left out of a start when saved (from
-before the tab was read-only); the tab and history keep them.
-
-**The guard** (`tools/deckhand-cli/readonly.odin`, `deckhand hook readonly`): reads PreToolUse's
-JSON; Bash: denies pi-kit's MUTATING (ported by hand: Odin's regex has no lookahead; the same
-cases as pi-kit in `tests/readonly-vectors.json`), background commands (`run_in_background`, as
-pi's read-only `bash_bg`), and `deckhand`/`deckhand-cli` act verbs; other tools: allowed only from
-`READONLY_TOOLS` (Read, Glob, Grep, WebFetch, WebSearch, todos and tasks, AskUserQuestion,
-EnterPlanMode, ToolSearch, LSP, Skill), so a tool a newer Claude Code adds is denied until
-listed. Deckhand adds checks pi-kit's list does not have yet (`m_deckhand`; the vectors'
-`deny_deckhand`): `git clean|restore|pull|add|init|update-ref`, `git
-config` unless it only reads (`--get…`, `--list`; any set or unset is blocked), `rmdir`,
-`unlink`, `ln`, `truncate`, `wget`, `dd of=`, `find -delete`, `perl -i` (the switch, not
-`-MList::Util`), `curl` writing a file (`-o`, `-O`, `--output`, `--remote-name`, `-c`, `-D`),
-`tar` extracting or creating. These match only as the command word of a segment (after
-assignments, keywords and wrappers such as `sudo`, `xargs`, `env`, `command`, `timeout`; by
-basename, so `/bin/ln`; also inside `$(…)` and a shell's `-c` string) or as git's subcommand
-after its global options (`git -C . add`), so `cat ln.txt`, `grep -rn unlink src` and `git log --
-add.md` run. `git config` has no scoped deny rule (it would block `--get`); the guard decides.
-**ExitPlanMode** is denied: Claude cannot ask to leave plan mode (the user still can with
-Shift+Tab). Plan mode is a permission mode, not the tool: per the permission-modes docs Claude
-"reads files, runs shell commands to explore" and proposes; ExitPlanMode only presents a plan
-for approval and leaves the mode, so without it Claude answers in the conversation. A denial exits 2 with the reason on stderr and the deny JSON on stdout; an allowed call
-exits 0 with no output (never an `allow` decision: plan mode and Claude Code's own checks still
-apply). Input it cannot read is denied. It needs no socket and nothing from the environment.
-
-**Why Bash is allowed, and why the guard fails closed.** Read-only Claude keeps read-only Bash
-(pi's read-only chats have no bash at all: pi's `--tools` allowlist). Claude Code treats a hook that cannot start, crashes, exits other than 0 or 2, or
-times out as a *non-blocking* error unless the hook sets `onFailure: "block"` (v2.1.295+; hooks
-docs, "Block the action when a hook fails"); exit 2 always blocks a PreToolUse call. So:
-the CLI is named by its absolute path in Deckhand's own `--settings` (no PATH, no environment);
-`|| exit 2` turns a missing or crashing CLI into a block even where `onFailure` is unknown;
-`onFailure: "block"` covers a timeout; a read-only tab never starts without the CLI
-(`claude_start`). If the guard still did not run, plan mode and the scoped deny rules remain.
-
-**The ack: the profile must prove it loaded.** A Claude Code that rejects or ignores a key of
-Deckhand's `--settings` (older than `onFailure`'s v2.1.295, or a different build) could lose the
-guard and the deny rules silently. So the same `--settings` holds a SessionStart hook,
-`'<deckhand-cli>' hook readonly-ack <nonce>`: a fresh 128-bit nonce per start, sent with the tab's
-token as `claude.readonly_ack` (the tab's own, once). Deckhand **stops** the tab (kills its process
-group, revokes its token, the terminal says why, the label reads "read-only guard not confirmed:
-stopped") when no ack came within 10 s of its session report or 120 s after Claude's prompt came
-up (bracketed paste on, or its OSC 7501 reporting other than blocked: not while a trust, login or
-onboarding dialog sits open; the chats folder is not pre-trusted), or when a prompt is submitted
-before the ack. The terminal's note names both causes (a startup dialog left open, or a Claude
-Code that ignores Deckhand's settings). Why the ack can only come from that hook: Claude runs no tool
-before the first prompt, and a prompt before the ack stops the tab, so nothing Claude runs can
-send it; the nonce is new at each start (an old one is refused) and the token is the tab's own.
-What can still send it: same-user code below the tab before the first prompt (the user's own
-SessionStart hooks, a login profile): the user's trust, as §3. Restart tries again.
-
-**Across a core restart** (a crash, an update's handover, the in-process opt-out's relaunch: the
-session holder keeps the tab's process). The ack state (needed, acked, a hash of the nonce) is
-saved per holder terminal in the MAC'd `tokens.json` (PROTOCOL.md §2). A core that adopts a
-read-only tab keeps it running only if that file verified and says it acked
-(`claude_adopt_ro_ok`); otherwise (no file, a bad MAC, no entry, not acked yet) it is stopped as
-above (`claude_adopt_ro_stop`; the terminal says "read-only guard not confirmed after Deckhand
-reopened: stopped. Restart this tab.").
-
-**Deckhand's own check.** A read-only tab's token may not send `browser_click`, `browser_type`,
-`browser_press`, `browser_select`, `browser_upload`, `browser_hover` (it can fire page scripts),
-`app_input`, `app_call`
-(`claude_readonly_refuses`, before the command runs): reading, screenshots and navigation stay, as
-for pi. pi's read-only chats have none of the bridge's tools (pi's `--tools` allowlist).
-
-**State.** A read-only Claude tab says `"readonly": true` in the snapshot, and so does its history
-entry. Read-only conversation ids are also kept apart (`claude_readonly_ids`, saved: the 10,000
-most recently used, an id marked again moves to the back; a load puts the saved list first, then
-read-only history entries it lacks while there is room), so a resume stays read-only after its history entry is gone (the 100 cap, or dropped on
-load). The tab's label says what its process started with: "read-only" (`Claude_Tab.readonly`);
-a full tab still running in a chat after the setting went on: "read-only after restart"; a tab not
-started yet: what it will start as.
-
-**With restarts (§4, §4a).** Restart with model… pastes `/model` into a read-only tab too: it only
-changes the model, which a read-only tab may (`--model` is on its allowlist). Every restart
-(the dead tab's bar, `claude_restart_changed`, the hung-process wait) goes through `claude_start`,
-which applies the profile and a new ack. The settings-file watch is unaffected: the profile's
-settings are inline, never a file.
+A Claude tab in a chat (a Claude chat, or a Claude tab in a pi chat) starts like a project's: a
+full agent with the user's flags and defaults. What it may do is the chats folder's own
+`CLAUDE.md`'s to say (the user's file; pi and Codex read its `AGENTS.md`). The former **Start chats
+read-only** setting and its read-only profile are gone: an older saved tab, history entry or
+`claude_readonly_ids` marked read-only loads as a normal one, and `set_chats_readonly` and
+`claude.readonly_ack` stay on the wire (grow-only API) but are always refused.
 
 ## 1b. Accounts
 
@@ -226,7 +112,7 @@ inherits the login environment. Deckhand stores folders and names, never a secre
   account…** and **Scan again**), and starts set no account.
 - **Starting.** A tab and a history entry keep their account's folder, written at a start (an
   entry without one uses the default as resolved then). Every start (new, resume, restore,
-  restart, the read-only profile) sets it: nothing for the default; else
+  restart) sets it: nothing for the default; else
   `CLAUDE_CONFIG_DIR=<folder>` in the tab's environment and again in its shell after the login
   profile ran (`CLAUDE_ACCOUNT_SH`), so a profile that exports `CLAUDE_CONFIG_DIR` cannot move a tab
   to another account; `~/.claude` while the default is another: `CLAUDE_CONFIG_DIR` unset. A tab
@@ -254,7 +140,7 @@ inherits the login environment. Deckhand stores folders and names, never a secre
 |---|---|
 | `.claude-plugin/plugin.json` | name `deckhand` |
 | `.claude-plugin/marketplace.json` | lets the folder be added as a marketplace; **not published** (Deckhand passes `--plugin-dir`, nothing is installed) |
-| `bin/deckhand` (and `bin/pi-desk`, an alias kept for pi-kit and older sessions) | on Claude's Bash PATH: `exec "$DECKHAND_CLI" "$@"`. Outside a Deckhand Claude tab: `hook readonly` exits 2 (denied), other `hook …` exit 0 silently, anything else prints an error JSON (exit 2) |
+| `bin/deckhand` (and `bin/pi-desk`, an alias kept for pi-kit and older sessions) | on Claude's Bash PATH: `exec "$DECKHAND_CLI" "$@"`. Outside a Deckhand Claude tab: `hook …` exit 0 silently, anything else prints an error JSON (exit 2) |
 | `hooks/hooks.json` | SessionStart → `deckhand hook session-start`; UserPromptSubmit → `prompt-submit`; Stop → `stop`; StopFailure → `stop-failure`; Notification → `notification`; async (§6a): PostModelSwitch → `model`, PostToolUse `TodoWrite` → `todos`, PostToolUse `TaskUpdate` → `task-update`, PostToolUse `Bash` → `bash-bg`, TaskCreated → `task-created`, TaskCompleted → `task-completed`, PreToolUse `Agent\|Task` → `agent-launch`, PreToolUse `*` → `agent-tool`, SubagentStart → `subagent-start`, SubagentStop → `subagent-stop` |
 | `skills/deckhand/SKILL.md` | a short stub: what the command is for; `deckhand --skill` prints the manual (`tools/deckhand-cli/manual.md`, embedded in the CLI) |
 
@@ -264,7 +150,7 @@ inherits the login environment. Deckhand stores folders and names, never a secre
 `console`, `network`, `comments`, `state`, `app call|screenshot|input|events`,
 `app open|close|restart|list-declared`, and `show PATH [--line N | --anchor HEADING]`
 (`show_file`, pi's `desk_show`: show the user a file in a tab of its own session, behind the
-user's view; display only, so a read-only tab may use it). `deckhand --help` lists them. It prints one
+user's view; display only). `deckhand --help` lists them. It prints one
 JSON object per call. Page and app text is never a top-level field: it goes in `content`, after
 the same untrusted-data note as the pi integration's browser tools and inside a fence longer than
 any run of backticks in it. Screenshots are PNG files Deckhand writes in `DECKHAND_SHOTS_DIR`; the CLI checks the path
@@ -272,9 +158,7 @@ is directly in that folder, named `<tab>-<n>.png`, a PNG and at most 8 MB, then 
 opens it with Read). Refusals keep Deckhand's `code` and add the same `hint` as the pi integration.
 
 **The hooks** (`deckhand hook <event>`, reading Claude Code's hook JSON on stdin; never fail
-Claude: errors exit 0 with nothing printed; the one exception is `hook readonly`, the read-only
-guard, which is not in `hooks.json` but in Deckhand's `--settings` for read-only tabs and exits 2
-to deny, §1a):
+Claude: errors exit 0 with nothing printed):
 
 - `session-start` → `claude.session {session_id, cwd, source, transcript_path, model}` (the
   transcript's path only, never its content), and `claude.turn idle` for the sources `startup`,
@@ -319,8 +203,7 @@ log or the workspace file.
   `src/core/commands.odin`, the command table's `who`, and each command's own session checks:
   `browser_*` and `app_call`/`app_screenshot`/`app_input`/`app_events`/`app_restart`/`app_close`
   only on its own session's tabs; `new_app_tab` only by an `apps.json` name, in its own session,
-  behind the user's view (`deckhand app open NAME`; refused in a read-only chat, as `app call` and
-  `app input` are; Deckhand asks nothing: the plugin's skill does not pre-approve `app open`,
+  behind the user's view (`deckhand app open NAME`; Deckhand asks nothing: the plugin's skill does not pre-approve `app open`,
   `app restart` or `app close`, so Claude Code's permission mode decides, docs/ENGINE-BRIDGE.md
   trust model); `show_file` (`deckhand show`) in its own session, behind the user's view;
   `get_state` filtered to its own session; the self-reference rule; confirmation policy of
@@ -374,12 +257,6 @@ core that adopts the tab after a restart or handover still knows them (PROTOCOL.
 | An agent's resume replaying the user's flags (a permission bypass, `--settings`, `--allowedTools`, `--mcp-config`, …) | only the user's own resume or restart (caller `ui`) replays a session's saved flags; anyone else's `claude_resume` or `claude_restart` (Atlas, control, scripts) starts claude with only `--plugin-dir` and `--resume <id>` (the history and the tab keep the flags for the user); an agent that opens or focuses a restored session, or brings it to the front any other way (a new tab in it, a file opened in it, closing the one before it), never starts its Claude tabs (they keep the user's flags and wait, `not_started`, for the user to show them) | by design, a restored tab (§4) starts with its own saved flags whoever shows its session first |
 | A Claude tab claiming another session's id (a prompt-injected Claude reporting its pi session's id, so that the pi row resumes Claude with the user's flags; or a `/resume` to a conversation open elsewhere) | `claude.session` refuses an id that is a pi session's (listed, its file in the project, or an open session's) or that another tab runs (`"that id is another session's"`); `open_session` looks for the pi session's file before the Claude history; a history entry with a pi session's id (older data) is not a second row | — |
 | pid reuse: the tab's process exits and its pid is reused by another program | the token is revoked when the process exits, before the pid is recorded again | the window between exit and Deckhand reaping it (milliseconds) |
-| The user resuming a read-only conversation by hand (`/resume` inside a full Claude tab, or `claude --resume` in a shell) | Deckhand's own resumes keep the profile (the history entry is read-only) | Claude Code's own `/resume` inside a tab runs with that tab's flags: the user's choice |
-| A Claude tab in a read-only chat writing files, running mutating commands or scheduling work (§1a) | plan mode; bare-name deny rules for the tools that write, run in the background, spawn agents, schedule, publish or reach MCP (no mode, allow rule or flag gives them back); scoped Bash deny rules and the guard's MUTATING check (pi-kit's list, shared vectors), failing closed (`onFailure: "block"`, `\|\| exit 2`, absolute CLI path, never started without it); `--setting-sources user`; no bypass or auto mode; the user's flags from an allowlist; the profile is the tab's and applies at every start by anyone (restore, an agent's resume or restart) | Bash that writes without a listed word (`python -c`, `node -e`, `npm run`, `make`, `curl -X POST`, `git -c alias…`, a script file, `dd`, `install`, `ln`, a `$(…)`-built word) runs if plan mode lets it (it asks for anything it does not see as read-only; the user can approve), and runs **without asking** when the user's own allow rules in `~/.claude/settings.json` approve it (e.g. `Bash(npm run *)`): those rules skip plan mode's prompt for any command the guard does not recognise; the network (WebFetch, `curl` without writing a file) stays |
-| An older or different Claude Code ignoring Deckhand's `--settings` (no guard, no deny rules) | the profile's SessionStart ack with a per-start nonce; no ack within 10 s of the session report or 120 s after its prompt came up, or a prompt before it: Deckhand stops the tab and revokes its token | same-user code that runs before the first prompt could send the ack (the user's own SessionStart hooks): the user's trust |
-| The user's own Claude Code hooks, MCP servers and settings in a read-only chat | `--setting-sources user` drops the chats folder's project settings; MCP tools denied (`mcp__*`) | the user's own hooks (`~/.claude/settings.json`) and managed settings still run with the user's trust (Deckhand cannot and does not edit them); a user MCP server still starts (its tools are denied); managed `disableAllHooks` would turn the guard off (plan mode and the deny rules remain) |
-| Leaving plan mode in a read-only chat | ExitPlanMode is denied (Claude cannot ask); the denied tools stay denied in every mode; bypass and auto mode are disabled; the guard runs in every mode | the user's own Shift+Tab: in default or acceptEdits mode Claude Code may run more Bash without asking (acceptEdits: some file commands) — the guard and the scoped deny rules still block Deckhand's list |
-| A read-only tab acting on pages or apps through `deckhand` | Deckhand refuses the act commands from its token (`claude_readonly_refuses`); the guard denies the CLI's act verbs | none (pi's read-only chats have no such tools at all) |
 | A user's own `deckhand` or `pi-desk` executable earlier on PATH shadows the plugin's `bin/deckhand` or `bin/pi-desk` | none (Claude Code appends plugin `bin/` to PATH) | it would get the token from the environment like any child; document, do not ship such a tool |
 | The comment crops Claude reads | copies in `DECKHAND_SHOTS_DIR` (the user's data dir), created 0600, removed after a day | — |
 | Same-user code that can read Claude's memory or ptrace it | none: out of scope (as for pi tabs) | — |
@@ -408,8 +285,7 @@ is valid; it learns nothing it can use from outside the tab.
   the front by any path (`focus_session`, `focus_tab`, `open_session`, `claude_resume`, a new tab
   or file in it, closing the session before it: `focus_session` always takes the caller) leaves
   it `not_started`, so the user's flags never start for an agent. Claude-only sessions (saved with
-  `"agent": "claude"`) and Claude chats restore the same way; a read-only one keeps its profile
-  (§1a). Without Claude Code installed, the tab does not start (§1). A tab the session holder
+  `"agent": "claude"`) and Claude chats restore the same way. Without Claude Code installed, the tab does not start (§1). A tab the session holder
   kept running is adopted as it is, not restored (PERSISTENCE.md "Restore").
 - **A dead tab.** When claude exits, the tab keeps its output under a bar, "Claude exited (code
   N) — its last output is below", with **Restart** (`claude_restart`): claude again in the same
@@ -559,7 +435,7 @@ work only from Deckhand's own record, so a found row gives them nothing).
   `ai-title` or `summary`; read from the first and last 64 KB only, within a per-frame budget
   (the rest on a worker, cached by size and date), so scanning never blocks a frame. Sorted by the
   file's date; created from the file. Merged by id with Deckhand's record (one row each), under
-  the MAX_SESSIONS cap. Chats' rows follow the read-only rules (§1a). A line goes to the JSON
+  the MAX_SESSIONS cap. A line goes to the JSON
   parser only when it is at most 64 KB and nested at most 64 deep (the parser recurses). The
   title cache drops its oldest entries when full.
 - **Projects where only Claude ran** read each folder's newest transcripts' first 8 KB for the
@@ -639,8 +515,7 @@ terminal tab. Until then (an older Claude Code, §5a) they come from the hooks' 
   due. A startup dialog (folder trust, login) may have bracketed paste on too, and hooks run only
   after it: Deckhand cannot tell the two apart from outside, so the bar waits the grace and also
   says to answer such a dialog first. The snapshot says `"hooks":"silent"`.
-  `strictPluginOnlyCustomization` does not stop plugin hooks (settings-reference). A read-only
-  tab is stopped instead (§1a).
+  `strictPluginOnlyCustomization` does not stop plugin hooks (settings-reference).
 - **Minimum version.** The version the tab started with (§4a, where `claude` links to; never
   run). Below `CLAUDE_MIN_VERSION` (2.1.295: OSC 7501 and `onFailure`), a bar says what is
   missing, with **Copy update command** (`claude update`; `brew upgrade --cask claude-code` for a
@@ -765,19 +640,16 @@ snapshot` before the turn's idle, and a background Bash's launch at once (`bash-
   and restore), `src/claude_extras_test.odin` (the dead tab, 127, flags only for the user, the
   panels, Send now), `src/claude_sessions_test.odin` (Claude-only sessions and rows),
   `src/core/claude_review_test.odin` (ids a tab may not claim, agents and restored tabs),
-  `src/claude_chats_test.odin` (§1a: the profile, the guard failing closed, the ack),
+  `src/claude_chats_test.odin` (§1a: chats start as full agents; an older read-only file loads),
   `src/claude_rows_test.odin` (§4b), `src/claude_feeds_test.odin` (§5a, §6a, §6b),
   `src/reload_test.odin` `claude_*` (§4a), `src/settings_files_test.odin`
   `settings_files_claude_*`, `src/dead_tab_test.odin` `claude_restart_with_model`,
   `src/socket_test.odin` `socket_claude_token_scope` (the process check, scope, revocation), and
-  `tools/deckhand-cli/cli_test.odin` (the CLI, its hooks and the read-only guard against
-  `tests/readonly-vectors.json`, the cases shared with pi-kit's guardrails; `node
-  tests/scripts/readonly-vectors-pikit.mjs <pi-kit>/extensions/guardrails/core.ts
-  tests/readonly-vectors.json` checks them against pi-kit's regexes).
+  `tools/deckhand-cli/cli_test.odin` (the CLI and its hooks).
 - **Scenes** (with the fake claude, `tests/scripts/fake-claude.py`, and a stand-in `claude` in the
   fake HOME's `~/.local/bin`, never run): `claude.sh` (tab, hooks, CLI, held prompts, comments,
   panels, resume, Restart, restore), `claude-runtime.sh` (§4a bars), `claude-sessions.sh`,
-  `claude-readonly.sh`, `claude-feeds.sh`.
+  `claude-feeds.sh`.
 - Never a real `claude`, and never the user's `~/.claude`: the test binary drops an inherited
   `CLAUDE_CONFIG_DIR` before any test, and the scene scripts unset it.
 

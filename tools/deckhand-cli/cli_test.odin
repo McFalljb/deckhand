@@ -841,140 +841,6 @@ hook_seq_at_start :: proc(t: ^testing.T) {
 	testing.expect_value(t, f.sent[0], `{"type":"claude.subagent","event":"start","agent_id":"a1","agent_type":"x","seq":1}`)
 }
 
-// ---- the read-only guard (readonly.odin) ----
-
-READONLY_VECTORS :: #load("../../tests/readonly-vectors.json", string)
-
-// The shared vectors (pi-kit's MUTATING cases and edges): deny ones are mutating, allow ones not.
-@(test)
-readonly_vectors :: proc(t: ^testing.T) {
-	o, ok := parse_obj(READONLY_VECTORS)
-	testing.expect(t, ok, "vectors JSON")
-	deny := get_arr(o, "deny")
-	allow := get_arr(o, "allow")
-	testing.expect(t, len(deny) > 20 && len(allow) > 20)
-	for v in deny {
-		cmd := string(v.(json.String))
-		testing.expectf(t, mutating(cmd), "should be blocked: %q", cmd)
-	}
-	for v in allow {
-		cmd := string(v.(json.String))
-		testing.expectf(t, !mutating(cmd), "should run: %q", cmd)
-	}
-	// pi-desk only for now (not in pi-kit's MUTATING yet): the port's extra checks
-	deny_pd := get_arr(o, "deny_deckhand")
-	allow_pd := get_arr(o, "allow_deckhand")
-	testing.expect(t, len(deny_pd) > 20 && len(allow_pd) > 5)
-	for v in deny_pd {
-		cmd := string(v.(json.String))
-		testing.expectf(t, mutating(cmd), "should be blocked (Deckhand): %q", cmd)
-	}
-	for v in allow_pd {
-		cmd := string(v.(json.String))
-		testing.expectf(t, !mutating(cmd), "should run (Deckhand): %q", cmd)
-	}
-}
-
-@(private = "file")
-ro_hook :: proc(stdin: string, env: map[string]string = nil) -> (code: int, out: string, err: string) {
-	f: Fake
-	e := env
-	if e == nil do e = make(map[string]string) // none of Deckhand's: the guard needs nothing from it
-	c := test_ctx(&f, stdin = stdin, env = e)
-	code = run(&c, {"hook", "readonly"})
-	testing_sent_none := len(f.sent) == 0
-	assert(testing_sent_none) // never calls Deckhand
-	return code, strings.to_string(c.out), strings.to_string(c.err)
-}
-
-@(private = "file")
-ro_bash :: proc(cmd: string, bg := false) -> string {
-	return fmt.aprintf(`{{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{{"command":%s,"run_in_background":%v}}}}`, quoted(cmd), bg)
-}
-
-@(private = "file")
-ro_denied :: proc(t: ^testing.T, stdin: string, loc := #caller_location) {
-	code, out, err := ro_hook(stdin)
-	testing.expectf(t, code == 2, "exit 2 (blocks): %d for %s", code, stdin, loc = loc)
-	o, _ := parse_obj(strings.trim_space(out))
-	h := get_obj(o, "hookSpecificOutput")
-	testing.expect_value(t, get_text(h, "hookEventName"), "PreToolUse", loc = loc)
-	testing.expect_value(t, get_text(h, "permissionDecision"), "deny", loc = loc)
-	testing.expectf(t, strings.has_prefix(get_text(h, "permissionDecisionReason"), READONLY_DENY_PREFIX), "reason: %s", out, loc = loc)
-	testing.expectf(t, strings.has_prefix(err, READONLY_DENY_PREFIX), "stderr reason: %s", err, loc = loc)
-}
-
-@(private = "file")
-ro_allowed :: proc(t: ^testing.T, stdin: string, loc := #caller_location) {
-	code, out, _ := ro_hook(stdin)
-	testing.expectf(t, code == 0 && out == "", "allowed silently (never an allow decision): %d %q for %s", code, out, stdin, loc = loc)
-}
-
-@(test)
-hook_readonly_bash :: proc(t: ^testing.T) {
-	for c in ([]string{"git commit -m x", "echo x > file", "sed -i s/a/b/ f", "cd x && rm -rf y", "pi-desk click 3 --selector '#buy'", "pi-desk type 3 hello", "pi-desk app call 4 save", "ls; pi-desk-cli upload 3 '#f' /etc/passwd", "pi-desk app open game", "pi-desk app close 4", "pi-desk app restart 4", "deckhand click 3 e1", "deckhand app call 4 save", "x=1 /opt/bin/deckhand type 3 hi", "deckhand --timeout 5 press 3 Enter", "Deckhand click 3 e1", "PI-DESK click 3 e1", "Pi-Desk-Cli upload 3 '#f' /etc/passwd", "deckhand-cli upload 3 '#f' /etc/passwd", "/Applications/Deckhand.app/Contents/MacOS/deckhand-cli click 3 e1", "Deckhand-Cli type 3 hi", "x=1 deckhand-cli app call 4 save", "/Applications/Deckhand.app/Contents/MacOS/../../Resources/claude-code/bin/DECKHAND type 3 hi", "DeckHand app call 4 save"}) do ro_denied(t, ro_bash(c))
-	for c in ([]string{"echo x >/dev/null", "make 2>&1 | tail", "git status", "ls -la", "pi-desk read 3", "pi-desk screenshot 3", "pi-desk tabs", "pi-desk app list-declared", "pi-desk app screenshot 4", "deckhand read 3", "deckhand tabs", "deckhand app list-declared", "deckhand show README.md", "deckhand show notes.txt --line 3", "pi-desk show a.md", "mydeckhand click 3", "deckhands click 3", "deckhand-tool click 3", "deckhand-cli read 3", "deckhand-clix click 3", "deckhand-cli-old click 3", "Deckhand read 3", "PI-DESK tabs", "MyDeckhand click 3"}) do ro_allowed(t, ro_bash(c))
-	ro_denied(t, ro_bash("ls", bg = true)) // background commands, as pi's read-only bash_bg
-}
-
-@(test)
-hook_readonly_tools :: proc(t: ^testing.T) {
-	tool :: proc(name: string) -> string {return fmt.aprintf(`{{"hook_event_name":"PreToolUse","tool_name":%s,"tool_input":{{}}}}`, quoted(name))}
-	for n in ([]string{"Edit", "Write", "NotebookEdit", "MultiEdit", "Agent", "Task", "ExitPlanMode", "Workflow", "CronCreate", "ScheduleWakeup", "RemoteTrigger", "EnterWorktree", "PowerShell", "Monitor", "Artifact", "mcp__github__create_issue", "SomeNewTool"}) do ro_denied(t, tool(n))
-	for n in ([]string{"Read", "Grep", "Glob", "WebFetch", "WebSearch", "TodoWrite", "AskUserQuestion", "EnterPlanMode", "Skill"}) do ro_allowed(t, tool(n))
-	// what it cannot read is denied
-	for s in ([]string{"", "not json", "[]", `{"tool_name":"Bash"}`, `{"tool_name":"Bash","tool_input":{"command":7}}`, `{"tool_input":{}}`}) do ro_denied(t, s)
-}
-
-// Hostile tool input (an agent writes it): core:encoding/json overflows the stack on deep
-// nesting and overruns on invalid UTF-8. A crashed hook does not block in Claude Code, so the
-// guard must deny it instead. Each input runs in a forked child: a crash fails the test.
-@(private = "file")
-ro_hostile: string
-
-@(test)
-hook_readonly_denies_hostile_json :: proc(t: ^testing.T) {
-	deep := strings.repeat("[", 100_000)
-	bad := strings.repeat("\xff\xfe", 512)
-	for s in ([]string{
-		strings.concatenate({`{"tool_name":"Bash","tool_input":`, deep}),
-		strings.concatenate({`{"tool_name":"Read","tool_input":{"file_path":"`, bad, `"}}`}),
-	}) {
-		ro_hostile = s
-		pid := posix.fork()
-		if pid == 0 {
-			for sig in ([]posix.Signal{.SIGSEGV, .SIGBUS, .SIGILL, .SIGTRAP, .SIGABRT}) do posix.signal(sig, auto_cast posix.SIG_DFL)
-			code, _, _ := ro_hook(ro_hostile)
-			posix._exit(code == 2 ? 0 : 3)
-		}
-		status: i32
-		posix.waitpid(pid, &status, {})
-		testing.expectf(t, posix.WIFEXITED(status) && posix.WEXITSTATUS(status) == 0, "hostile input of %d bytes: %s", len(s), posix.WIFSIGNALED(status) ? fmt.tprintf("killed by signal %d", posix.WTERMSIG(status)) : "not denied")
-	}
-}
-
-// The read-only ack (SessionStart, from Deckhand's --settings): the start's nonce to pi-desk with
-// the tab's token; it prints nothing (SessionStart output would go into Claude's context) and
-// never fails Claude (exit 0); without pi-desk it does nothing.
-@(test)
-hook_readonly_ack_sends :: proc(t: ^testing.T) {
-	f: Fake
-	c := test_ctx(&f, stdin = `{"session_id":"s","hook_event_name":"SessionStart","source":"startup"}`)
-	testing.expect_value(t, run(&c, {"hook", "readonly-ack", "0123456789abcdef0123456789abcdef"}), 0)
-	testing.expect_value(t, len(f.sent), 1)
-	if len(f.sent) == 1 {
-		o, _ := parse_obj(f.sent[0])
-		testing.expect_value(t, get_text(o, "type"), "claude.readonly_ack")
-		testing.expect_value(t, get_text(o, "nonce"), "0123456789abcdef0123456789abcdef")
-	}
-	testing.expect_value(t, strings.to_string(c.out), "")
-	// no nonce: nothing sent
-	f2: Fake
-	c2 := test_ctx(&f2, stdin = "{}")
-	testing.expect_value(t, run(&c2, {"hook", "readonly-ack"}), 0)
-	testing.expect_value(t, len(f2.sent), 0)
-}
-
 // ---- the plugin's skill: what Claude Code runs without asking ----
 
 @(private = "file")
@@ -1042,7 +908,7 @@ skill_leaves_app_open_to_claude :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, n_new > 0 && n_new == n_old, "as many deckhand rules as pi-desk ones")
 	// Claude Code matches rules by exact text: only the lower-case names are pre-approved (macOS runs
-	// `Deckhand click` too: the read-only guard catches every case form, the skill approves none)
+	// `Deckhand click` too: the skill approves no other case form)
 	for cmd in ([]string{"Deckhand tabs", "DECKHAND read 3", "Pi-Desk state", "PI-DESK click 3 e1", "Deckhand app open fake"}) {
 		testing.expectf(t, !skill_allows(cmd), "pre-approved in another case: %s", cmd)
 	}

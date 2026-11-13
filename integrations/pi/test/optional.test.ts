@@ -144,7 +144,7 @@ function kitLike(): string {
 	return path.join(dir, "index.ts");
 }
 
-test("guardrails: PI_KIT_READONLY=1 (Deckhand's read-only chats) blocks edits, writes and mutating bash; without it they run", async () => {
+test("guardrails: PI_KIT_READONLY=1 (Deckhand's read-only jobs) blocks edits, writes and mutating bash; without it they run", async () => {
 	for (const [ro, blocked] of [["1", true], [undefined, false]] as const) {
 		const f = fakePi();
 		await withEnv({ PI_KIT_READONLY: ro, PI_CODING_AGENT_DIR: askConfig() }, async () => {

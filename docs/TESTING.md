@@ -83,7 +83,7 @@ All of these run in `./build.sh test`.
 | `scripts/check-core-boundary.sh` and its test | the core and holder link no window code | <1 s |
 | `src/*_test.odin`, `src/core/*_test.odin` (`tests/unit.py`) | the command layer: every command, callers, confirmations, persistence, the socket, the replica, quit routes, idle exit, Claude and pi launches, jobs, the editor, the layout audit, the docs listing every action and command; other machines (`machines*_test`, `machine_install_test`, `machine_page_test`, `machine_route_test`, `machine_mirror_test`, `remote_view_test`, `machine_rows_test`, `machine_header_test`); what needs you and the views over it (`needing_you_test`, `attention_view_test`, `fleet_test`, `deck_view_test`, `deck_modal_test`, `peek_test`, `status_marks_test`, `flash_test`); `keyboard_pack_test`, `pane_motion_test`, `border_draw_test`, `handoff_test` | ~30–40 s on 6 processes |
 | `tests/scenes_test.py`, `scripts/check-env-reads.py` | the `--changed` selection; every environment read names a known variable | <1 s |
-| `tools/deckhand-cli` tests | the `deckhand` CLI: arguments, the read-only guard (`tests/readonly-vectors.json`) | <1 s |
+| `tools/deckhand-cli` tests | the `deckhand` CLI: arguments, hooks, the MCP server | <1 s |
 | the fake app (`tests/fake-app`) | builds the app-tab stand-in the scenes need | ~5 s |
 
 The unit tests share the global `State`, so each process runs one thread. `tests/unit.py` runs one
@@ -133,10 +133,10 @@ Typical times and tags are in `tests/scenes.txt`; each script's header says what
 | `browser-netpolicy` (`noci`) | which hosts Chromium's own services try: Safe Browsing only |
 | `app-tab`, `app-calls`, `app-open` | app tabs: frames, input, resize, crash, restart; `app_call` under load; an agent opens only its project's declared app |
 | `comments` | pending comments from a page and the fake app reaching the agent |
-| `claude`, `claude-accounts`, `claude-feeds`, `claude-readonly`, `claude-runtime`, `claude-sessions`, `claude-wait` | Claude Code tabs with a fake claude running the plugin's hooks and CLI ([CLAUDE.md](CLAUDE.md)) |
+| `claude`, `claude-accounts`, `claude-feeds`, `claude-runtime`, `claude-sessions`, `claude-wait` | Claude Code tabs with a fake claude running the plugin's hooks and CLI ([CLAUDE.md](CLAUDE.md)) |
 | `codex` | Codex tabs with a fake codex that checks Deckhand's command line (`--no-daemon`, the hooks' TOML and trust hashes) and runs its hooks at the first prompt; signed out, too old ([CODEX.md](CODEX.md)) |
 | `agent`, `run-home`, `agent-show`, `agent-status`, `panels`, `bell` | Atlas's drawer, show a file, OSC 7501 status, right-column panels, the bell |
-| `pi-chat-readonly` (smoke) | read-only pi chats; every pi start gets the bundled integration and `DECKHAND_*` |
+| `pi-chat-start` (smoke) | every start of a chat's pi is full pi with the bundled integration and `DECKHAND_*` |
 | `reload`, `dead-tab` | pi hot reload; a pi tab that exited |
 | `changes`, `files`, `files-nested`, `worktrees`, `editor`, `sidebar` | the Changes tab, the Files tab, worktrees, the editor, the left column |
 | `polish`, `polish-beep`, `buttons` | palette, title bar, text input; no AppKit beep; every button |
@@ -284,4 +284,4 @@ times) is left to the runner's **FLAKY** report.
    not bundled.
 3. `app-calls`' default-scale check repeats `test_scale_test.odin` (harmless, a few seconds).
 4. Stale pi-kit wording in test comments (`fake-bridge.sh`, `home_test.odin`, `reload_test.odin`,
-   `buttons_test.odin`, `chat_readonly_test.odin`).
+   `buttons_test.odin`).

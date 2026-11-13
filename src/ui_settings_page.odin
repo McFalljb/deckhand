@@ -853,7 +853,6 @@ sp_switch_on :: proc(s: ^core.Setting) -> bool {
 	case "keep_sessions":           return st.keep_sessions
 	case "separate_core":           return st.separate_core
 	case "tidy_projects":           return !st.tidy_off
-	case "chats_readonly":          return st.chats_readonly
 	case "update_checks":           return !core.update_view().checks_off
 	}
 	if s.ext != "" do return core.pi_extension_on(s.ext)

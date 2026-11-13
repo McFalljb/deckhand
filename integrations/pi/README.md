@@ -62,12 +62,10 @@ keeps pi-kit's extension API usage. The differences:
   installs at startup) may still have inherited them.
   Deckhand sets them only for a pi that loads this integration.
 
-Read-only chats run pi with `--tools read,grep,find,ls,desk_show --exclude-tools mcp__* --no-mcp`,
-which keeps every tool here but `desk_show` (display only) away from the model. Read-only jobs get
-the same without `desk_show`. The bridge needs no tools: its status, waits and comments are hooks.
-With `PI_KIT_READONLY=1`, `browser` also leaves out `app_open`, `app_restart` and `app_close` (it
-keeps `desk_show`), `shell` registers nothing, and `guardrails` (when on) blocks edits, writes and
-mutating bash.
+Read-only jobs (`access: read`) run pi with `--tools read,grep,find,ls --exclude-tools mcp__* --no-mcp`,
+which keeps every tool here away from the model. The bridge needs no tools: its status, waits and
+comments are hooks. With `PI_KIT_READONLY=1`, `shell` registers nothing and `guardrails` (when on)
+blocks edits, writes and mutating bash.
 
 ## Tests
 

@@ -36,9 +36,8 @@ hooks.json) with realistic JSON on stdin, and the plugin's `deckhand` command, a
   stdout is logged as {"session_start_out": …} (Deckhand's sessionTitle).
 - FAKE_CLAUDE_PROJECTS: a FAKE Claude config dir's projects/ folder (never the real one): the
   transcript path is <it>/-fake/<session>.jsonl and the file is created there (empty).
-- `--settings JSON` (Deckhand's read-only profile): its hooks run too, after the plugin's (matcher
-  "*" = every tool; SessionStart: the read-only ack). FAKE_CLAUDE_IGNORE_SETTINGS=1: they do not
-  (an older Claude Code that ignores them). `!bash CMD`: PreToolUse for the Bash tool with that command; `!tool NAME`:
+- `--settings JSON`: its hooks run too, after the plugin's (matcher "*" = every tool).
+  FAKE_CLAUDE_IGNORE_SETTINGS=1: they do not (an older Claude Code that ignores them). `!bash CMD`: PreToolUse for the Bash tool with that command; `!tool NAME`:
   PreToolUse for that tool; each hook's exit and stdout are logged with the tool's input
   ({"hook", "tool", "input", "exit", "out", "err"}) and printed as `TOOL <name> -> exit N`.
 - `!bg`: PostToolUse on a background Bash (`npm run dev`, its backgroundTaskId); from then on every
@@ -128,7 +127,7 @@ class Fake:
         with open(os.path.join(self.dir, "hooks", "hooks.json")) as f:
             self.hooks = json.load(f).get("hooks", {})
         # the --settings hooks join the plugin's (Claude Code merges hooks from every source)
-        # FAKE_CLAUDE_IGNORE_SETTINGS=1: a Claude Code that ignores them (Deckhand must notice: no ack)
+        # FAKE_CLAUDE_IGNORE_SETTINGS=1: a Claude Code that ignores them
         settings = {} if os.environ.get("FAKE_CLAUDE_IGNORE_SETTINGS") == "1" else (SETTINGS or {})
         for event, groups in (settings.get("hooks") or {}).items():
             self.hooks.setdefault(event, []).extend(groups)

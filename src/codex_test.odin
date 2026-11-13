@@ -793,10 +793,6 @@ codex_too_old_and_missing :: proc(t: ^testing.T) {
 	r = core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_SCRIPT)
 	testing.expect_value(t, r.error, core.CODEX_MISSING)
 	testing.expect_value(t, core.codex_label("New Codex tab"), "New Codex tab — Codex not installed")
-	// Chats while chats are read-only: no read-only Codex yet
-	state.settings.chats_readonly = true
-	ch := core.chats_project()
-	if ch != nil do testing.expect_value(t, core.run_command(core.New_Claude_Session{project_id = ch.id, codex = true}, CX_UI).error, core.CODEX_READONLY)
 }
 
 // The version from where codex links to (never run).
@@ -914,14 +910,12 @@ codex_wire_and_persist :: proc(t: ^testing.T) {
 	// a saved Codex tab with flags or a non-UUID id is not restored
 	r := core.run_command(core.Restore_Session{project_id = pid, pi_session_id = "abc-1", agent = .Claude, tabs = {{kind = .Claude, claude_id = "abc-1", codex = true}}}, core.Caller{kind = .Internal})
 	testing.expect(t, !r.ok, "not a Codex session id")
-	// a saved Codex main tab with flags or read-only (a Codex tab has neither) is skipped cleanly:
+	// a saved Codex main tab with flags (a Codex tab has none) is skipped cleanly:
 	// refused before anything is restored, never a session without its main tab
 	n := len(state.open_sessions)
 	bid := "01a1d0d6-5353-7ff3-9308-ff91070ad5ff"
 	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, args = {"-m", "o3"}}, {kind = .Shell}}}, core.Caller{kind = .Internal})
 	testing.expect(t, !r.ok, "flags")
-	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, readonly = true}}}, core.Caller{kind = .Internal})
-	testing.expect(t, !r.ok, "read-only")
 	testing.expect_value(t, len(state.open_sessions), n)
 }
 

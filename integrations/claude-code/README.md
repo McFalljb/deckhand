@@ -23,9 +23,6 @@ definitions in Claude's context):
   be resumed and restored), UserPromptSubmit / Stop / Notification tell it when a turn starts,
   ends or waits for the user (Deckhand types into the tab only when Claude is idle and nothing is
   typed), and UserPromptSubmit hands Claude the user's pending comments with the message.
-- **Read-only chats** are not this folder's: for a chat while Deckhand's **Chats: read-only** is
-  on, Deckhand adds plan mode, deny rules and its own PreToolUse guard (`deckhand-cli hook
-  readonly`, by absolute path, failing closed) with `--settings` ([docs/CLAUDE.md](../../docs/CLAUDE.md) §1a).
 
 All rules (own session only, no JavaScript, refused password/card/one-time-code fields, the
 user's Allow for uploads and downloads, Take over, Stop) are enforced by Deckhand, not here. See

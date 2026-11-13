@@ -517,7 +517,7 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		return {ok = true}, true
 	case App_Close:
 		// close_tab's close (its confirmation rule, comments, tab.quit then SIGTERM), app tabs only
-		if r, bad := app_target(caller, c.tab_id, readonly_check = true); bad do return r, false
+		if r, bad := app_target(caller, c.tab_id); bad do return r, false
 		return close_tab_apply(Close_Tab{tab_id = c.tab_id, confirm = c.confirm, comments = c.comments}, caller, request_id)
 	case App_Events:
 		if r, bad := app_target(caller, c.tab_id); bad do return r, false
@@ -606,7 +606,7 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if bad do return r, false
 		return routed(x, caller, request_id, new_id())
 	case App_Restart:
-		if r, bad := app_target(caller, c.tab_id, readonly_check = true); bad do return r, false
+		if r, bad := app_target(caller, c.tab_id); bad do return r, false
 		return routed(cmd, caller, request_id)
 	case App_Input:
 		if r, bad := app_target(caller, c.tab_id); bad do return r, false
@@ -1022,15 +1022,15 @@ app_tab_of :: proc(id: u64) -> (^Open_Session, ^Tab, ^App_Tab) {
 }
 
 // An app tab a caller may reach: a pi or Claude tab (panel) only its own session's, as its browser
-// tabs; a read-only chat's pi reads apps but runs none (readonly_check: restart, close).
+// tabs.
 @(private = "file")
-app_target :: proc(caller: Caller, tab_id: u64, readonly_check := false) -> (Result, bool) {
+app_target :: proc(caller: Caller, tab_id: u64) -> (Result, bool) {
 	ts, tab, _ := app_tab_of(tab_id)
 	if tab == nil do return fail("no such app tab"), true
 	if caller.kind == .Panel {
 		own := caller_session(caller)
 		if own == nil || ts != own do return fail("a pi or Claude tab reaches only its own session's app tabs"), true
-		if readonly_check && !caller.claude && pi_chat_readonly(caller) do return fail("a read-only chat's pi may read apps, not open, restart or close them (it was started under Chats: read-only)"), true
+
 	}
 	return {}, false
 }
@@ -1043,7 +1043,7 @@ app_new_resolve :: proc(c: New_App_Tab, caller: Caller) -> (x: New_App_Tab, r: R
 	if s == nil do return {}, fail(serr), true
 	if s.home do return {}, fail("Home has only its pi tab"), true
 	agent := caller.kind == .Panel
-	if agent && !caller.claude && pi_chat_readonly(caller) do return {}, fail("a read-only chat's pi may read apps, not open, restart or close them (it was started under Chats: read-only)"), true
+
 	argv: []string
 	cwd_arg, title := c.cwd, c.title
 	if c.name != "" {

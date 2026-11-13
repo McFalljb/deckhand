@@ -156,7 +156,7 @@ and act on pages ([BROWSER.md](BROWSER.md)).
 
 ### Claude Code tabs ✅
 
-Claude tabs and Claude-only sessions, Claude chats (read-only with chats), several accounts,
+Claude tabs and Claude-only sessions, Claude chats, several accounts,
 sessions found on disk, comments, status, Atlas driving Claude tabs, the settings and update bars,
 rows at parity with pi's ([CLAUDE.md](CLAUDE.md)).
 
@@ -233,9 +233,9 @@ Decisions that still shape the code. Superseded ones are gone; their history is 
 | 2026-11-01 | Browser engine = CEF, off-screen into the tab texture, pinned and downloaded at build time ([BROWSER.md](BROWSER.md)) | Chrome inside the tab with full agent control and overlays; ~250 MB accepted. |
 | 2026-11-01 | Jobs need no approval step; controls are the per-job toggle, pause and limits ([ATLAS.md](ATLAS.md)) | Keychain prompts after every rebuild cost more than they protected. |
 | 2026-11-03 | Claude Code tabs: the user's own `claude` with a bundled plugin; a per-tab token accepted only from the tab's own processes | Nothing installed in the user's Claude config; a leaked token is useless outside the tab. |
-| 2026-11-03 | Read-only Claude chats: Deckhand's profile last in argv (plan mode, deny rules, a fail-closed command guard) | Parity with read-only pi chats; no flag or mode can undo a deny rule. |
+| 2026-11-03 | Read-only Claude chats: Deckhand's profile last in argv (plan mode, deny rules, a fail-closed command guard) | Parity with read-only pi chats; no flag or mode can undo a deny rule. (Removed 2026-11-12.) |
 | 2026-11-04 | Deckhand ships its own pi integration, loaded with `pi -e`; pi 1.4.0 minimum | No feature needs pi-kit; nothing is written to `~/.pi`. |
-| 2026-11-04 | Read-only pi chats are enforced by pi's own `--tools` allowlist, at every start | pi-kit is optional; the model gets read tools only. |
+| 2026-11-04 | Read-only pi chats are enforced by pi's own `--tools` allowlist, at every start | pi-kit is optional; the model gets read tools only. (Removed 2026-11-12; read-only jobs keep the allowlist.) |
 | 2026-11-04 | Atlas works in the main folder, never in `~` | macOS counts Atlas's file access as Deckhand's; `~` walks into privacy-protected folders. |
 | 2026-11-02 | Minimum macOS 14, checked for every linked object (`scripts/check-minos.sh`) | Keeps the stated floor real. |
 | 2026-11-07 | Split panes: free splits, a tab strip per pane, saved per session; agent tabs stay in their pane in v1 | The user's answers in [plans/split-panes.md](plans/split-panes.md) §8. |
@@ -243,6 +243,7 @@ Decisions that still shape the code. Superseded ones are gone; their history is 
 | 2026-11-08 | Every core is fully featured (sessions, jobs, Atlas), with or without a window; remotes are cores too | Nothing local-only that remote machines must undo. |
 | 2026-11-08 | Builds are signed with "Deckhand Self-Signed" until a Developer ID; the trust checks pick their mode from the process's own signature | The split didn't wait for a Developer ID; switching later is one line. |
 | 2026-11-11 | Atlas on another machine's ids acts as `control` there, and only this machine's own user and Atlas are forwarded; a confirmation that machine wants for Atlas is refused, not asked here | No machine drives a third through this one; a remote token never reaches an agent. |
+| 2026-11-12 | **Start chats read-only** removed: chats start as full agents; what a chat's agent may do is the chats folder's `AGENTS.md` / `CLAUDE.md` | Its limits got in the way; the user's own instructions file is the simpler control. `set_chats_readonly` and `claude.readonly_ack` stay on the grow-only wire, always refused. |
 
 ## 7. Open questions
 

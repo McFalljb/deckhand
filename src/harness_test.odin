@@ -695,7 +695,6 @@ wording_names_installed_harness :: proc(t: ^testing.T) {
 	testing.expect(t, !has_pi_rows(), "no pi groups without pi")
 	h_both()
 	// details that named pi for everyone
-	if a := action_by_id("chats_readonly"); a != nil && a.detail != nil do testing.expect(t, !strings.contains(a.detail(), "pi"), a.detail())
 	testing.expect(t, !strings.contains(RIGHT_EMPTY_HINT, "pi"), RIGHT_EMPTY_HINT)
 	// the gear's Reload all pi tabs: only while a pi tab runs, as Restart all Claude tabs
 	testing.expect(t, !pop_item_shown(.Reload_Pi), "no pi tab: no reload row")

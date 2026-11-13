@@ -510,7 +510,7 @@ Atlas-to-Atlas channel. That gate is about direct forwarding only: a machine thi
 (*Allow other machines to connect*) acts as the user here, so it can prompt this Atlas, and through
 it, or a shell here, reach the machines this one reaches. It can't change the settings that bound
 it and the agents here (`User_Here`: *Allow other machines to connect*, Machines over SSH, the pi
-extensions, Claude's skip-permissions default, read-only chats); only the user at this machine
+extensions, Claude's skip-permissions default); only the user at this machine
 does. Let only machines you trust as yourself connect.
 
 **Their jobs and bells reach the user here**, because a remote core can't notify: this core

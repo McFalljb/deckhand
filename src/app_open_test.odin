@@ -167,25 +167,6 @@ app_restart_close_own_session :: proc(t: ^testing.T) {
 	testing.expect(t, tab != nil, "still open until the user confirms")
 }
 
-// A read-only Claude chat reads apps but opens, restarts and closes none.
-@(test)
-app_open_refused_read_only_claude :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	a, _, _, dir := ao_reset(t)
-	defer ao_done(dir)
-	sa := core.find_session(a)
-	cl_id := core.new_id()
-	append(&sa.tabs, core.Tab{id = cl_id, kind = core.Claude_Tab{readonly = true}, title = "claude", status = .Running})
-	ro := core.Caller{kind = .Panel, tab_id = cl_id, claude = true}
-	mine := core.run_command(core.New_App_Tab{name = "fake"}, {kind = .UI}).created_id
-	for cmd in ([]core.Command{core.New_App_Tab{name = "fake"}, core.App_Restart{tab_id = mine}, core.App_Close{tab_id = mine}}) {
-		r := core.run_command(cmd, ro)
-		testing.expectf(t, !r.ok && strings.contains(r.error, "read-only"), "%s refused: %s", core.command_type(cmd), r.error)
-	}
-	r := core.run_command(core.App_Declared{}, ro)
-	testing.expectf(t, r.ok, "it may still list them: %s", r.error)
-}
-
 // Home (control) is unchanged: argv or a command line, the session it names (none: the one on
 // screen), the tab in front.
 @(test)
@@ -232,27 +213,6 @@ app_declared_bad_file :: proc(t: ^testing.T) {
 @(private = "file")
 ao_write_apps :: proc(session: u64, text: string) {
 	_ = os.write_entire_file(strings.concatenate({core.find_session(session).cwd, "/.deckhand/apps.json"}, context.temp_allocator), transmute([]u8)text)
-}
-
-// A read-only chat's pi (started under Chats: read-only) opens, restarts and closes no apps.
-@(test)
-app_open_refused_read_only_chat :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	a, _, _, dir := ao_reset(t)
-	defer ao_done(dir)
-	p := core.Project{id = core.new_id(), cwd = core.find_session(a).cwd, group = .Chats}
-	append(&state.projects, p)
-	core.find_session(a).project_id = p.id
-	pi := core.Caller{kind = .Panel, tab_id = ao_first(a)}
-	mine := core.run_command(core.New_App_Tab{name = "fake"}, pi).created_id
-	testing.expect(t, mine != 0, "chats full: it opens")
-	core.find_session(a).tabs[0].kind = core.Pi_Tab{readonly = true} // started read-only (chat_env)
-	for cmd in ([]core.Command{core.New_App_Tab{name = "fake"}, core.App_Restart{tab_id = mine}, core.App_Close{tab_id = mine}}) {
-		r := core.run_command(cmd, pi)
-		testing.expectf(t, !r.ok && strings.contains(r.error, "read-only"), "%s refused: %s", core.command_type(cmd), r.error)
-	}
-	r := core.run_command(core.App_Declared{}, pi)
-	testing.expectf(t, r.ok, "listing is reading: %s", r.error)
 }
 
 // At most APP_AGENT_MAX app tabs an agent opened run per session, counting those still closing.
@@ -387,29 +347,6 @@ app_restart_capped :: proc(t: ^testing.T) {
 	r := core.run_command(core.App_Restart{tab_id = exited}, pi)
 	testing.expectf(t, !r.ok && strings.contains(r.error, fmt.tprintf("%d", APP_AGENT_MAX)), "restart past the cap: %v", r)
 	for id in ids do if p := app_of(id); p != nil do p.pid = 0
-}
-
-// Round 2. Read-only is what the pi tab was started with (chat_env), not today's setting.
-@(test)
-app_open_read_only_as_started :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	a, _, _, dir := ao_reset(t)
-	defer ao_done(dir)
-	p := core.Project{id = core.new_id(), cwd = core.find_session(a).cwd, group = .Chats}
-	append(&state.projects, p)
-	core.find_session(a).project_id = p.id
-	pi := core.Caller{kind = .Panel, tab_id = ao_first(a)}
-	// started read-only, the setting turned off since: still refused
-	core.find_session(a).tabs[0].kind = core.Pi_Tab{readonly = true}
-	state.settings.chats_readonly = false
-	r := core.run_command(core.New_App_Tab{name = "fake"}, pi)
-	testing.expectf(t, !r.ok && strings.contains(r.error, "read-only"), "%v", r)
-	// started full, the setting turned on since: pi runs full, so it may
-	core.find_session(a).tabs[0].kind = core.Pi_Tab{}
-	state.settings.chats_readonly = true
-	r = core.run_command(core.New_App_Tab{name = "fake"}, pi)
-	testing.expectf(t, r.ok, "%s", r.error)
-	testing.expect(t, core.chat_readonly(p.id), "a chat starts read-only now")
 }
 
 // Deckhand asks nothing: an agent's open of a declared entry runs at once, with the agent's own

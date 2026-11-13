@@ -179,7 +179,7 @@ pty_close :: proc(p: ^Pty) {
 	p^ = Pty{fd = -1}
 }
 
-// Signals the child's process group (a read-only Claude stopped: claude.odin).
+// Signals the child's process group.
 pty_kill_group :: proc(p: ^Pty, sig: i32) {
 	if p.pid <= 0 do return
 	if p.held != 0 do holder_signal_group(p.held, sig)

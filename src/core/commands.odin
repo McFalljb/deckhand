@@ -213,7 +213,7 @@ Copy_Path :: struct {
 	pi_session_id: string,
 }
 
-// Chats settings (user-only): read-only or full pi (where they run: Set_Folder, folders.odin).
+// Removed (Start chats read-only): kept on the grow-only wire (schema/released-v1.json), always refused.
 Set_Chats_Readonly :: struct {
 	on: bool,
 }
@@ -454,7 +454,6 @@ Restore_Tab :: struct {
 	active: bool, // the session's active tab (none: the pi tab)
 	claude_id: string, // Claude tabs: the Claude session to resume ("" = a new one)
 	args:  []string, // Claude tabs: the user's extra flags
-	readonly: bool, // Claude tabs: started with Deckhand's read-only profile (kept: claude.odin)
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
 	codex: bool, // Claude tabs: a Codex tab (codex.odin; saved as kind "codex")
 	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
@@ -487,7 +486,6 @@ Restore_Session :: struct {
 	pi_pane:       Maybe(int), // with a layout: the pi tab's saved pane (nil, unset = not known: the focused pane); a Claude-only session's main tab is tabs[0]
 	pi_active:     bool, // with a layout: the pi tab was its pane's shown tab
 	pi_held:       u32, // the pi tab's (Home's) session holder terminal (Restore_Tab.held)
-	pi_readonly:   bool, // that pi was started read-only (an adopted one keeps it)
 }
 Bridge_Done :: struct { 	// a bridge answered (or dropped) a Pi_Prompt/Pi_Reload/Pi_Wait_Idle
 	request_id: u64,
@@ -854,8 +852,6 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	}
 	if !caller_may(caller, cmd) {
 		r = fail("not allowed for this caller")
-	} else if why := claude_readonly_refuses(caller, cmd); why != "" {
-		r = fail(why) // a read-only Claude tab acting on a page or an app (claude.odin)
 	} else if mr, routed := machine_route(cmd, caller, request_id); routed {
 		r = mr // another machine's session, tab or project: run there, or refused (machine_route.odin)
 	} else {
@@ -1499,9 +1495,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		}
 		return {ok = true}, true
 	case Set_Chats_Readonly:
-		if state.settings.chats_readonly == c.on do return {ok = true}, false
-		state.settings.chats_readonly = c.on
-		return {ok = true}, true
+		return fail(CHATS_READONLY_REMOVED), false
 	case Set_Claude_Default_Flags:
 		on := c.codex ? &state.settings.codex_full_access : &state.settings.claude_skip_permissions
 		if on^ == c.skip_permissions do return {ok = true}, false
@@ -1943,7 +1937,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			missing       = path == "" || !os.exists(cwd),
 			restored      = true,
 		}
-		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{readonly = c.pi_readonly}, title = "pi", status = .Not_Started, held = c.pi_held})
+		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Not_Started, held = c.pi_held})
 		s.id = new_id()
 		restore_tabs(&s, c.tabs, c.layout, c.pi_pane, c.pi_active)
 		if s.active_tab == 0 do session_show_tab(&s, s.tabs[0].id)
@@ -1992,12 +1986,12 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 	}
 	if rt.kind == .Claude {
 		if rt.claude_id != "" && !(rt.codex ? codex_id_ok(rt.claude_id) : claude_id_ok(rt.claude_id)) do return 0
-		if claude_args_check(rt.args) != "" || (rt.codex && (len(rt.args) > 0 || rt.readonly)) do return 0
+		if claude_args_check(rt.args) != "" || (rt.codex && len(rt.args) > 0) do return 0
 		args := make([]string, len(rt.args))
 		for a, i in rt.args do args[i] = strings.clone(a)
 		// its account: an absolute folder; checked again at its start (claude_start: configured only)
 		acct := filepath.is_abs(rt.account) && !rt.codex ? rt.account : ""
-		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, readonly = rt.readonly, account = strings.clone(acct), codex = rt.codex}, title = strings.clone(rt.codex ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
+		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, account = strings.clone(acct), codex = rt.codex}, title = strings.clone(rt.codex ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 	}
 	if rt.kind != .Shell do return 0
 	title := rt.title != "" ? strings.clone(rt.title) : fmt.aprintf("shell %d", len(s.tabs))
@@ -2374,7 +2368,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 		if tab.status != .Not_Started do continue
 		if tab_held_away(&tab) != 0 do continue // it runs on in the session holder (holder_client.odin)
 		window_state_changed() // statuses change here, also from ticks (hot reload) that say nothing
-		if _, is_cl := tab.kind.(Claude_Tab); is_cl && !claude do continue // an agent's: never (§3); in a chat read-only while chats are (claude_start)
+		if _, is_cl := tab.kind.(Claude_Tab); is_cl && !claude do continue // an agent's: never (§3)
 		if et, is_ed := tab.kind.(Editor_Tab); is_ed {
 			// no process: the file opens again (a gone file says so in its tab)
 			window_view_open(tab.id, et)
@@ -2412,15 +2406,8 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 					agent_model_starting = strings.clone(state.settings.agent_model)
 					agent_started = time.tick_now()
 				}
-			} else if chat_readonly(s.project_id) && pi_readonly_too_old() {
-				// never a chat that says read-only on a pi whose flags would not hold
-				term_note(t, PI_READONLY_CHAT_TOO_OLD)
-				tab.status, tab.exit = .Exited, {known = true, code = 1}
-				continue
 			} else {
-				env := chat_env(s.project_id, socket_pi_env({kind = .Panel, tab_id = tab.id}))
-				tab.kind = Pi_Tab{readonly = chat_readonly(s.project_id)} // as started (app_tab.odin)
-				ok = start_pi(t, &tab, s.pi_session_id, s.session_file, s.session_dir, s.cwd, env, chat_args(s.project_id))
+				ok = start_pi(t, &tab, s.pi_session_id, s.session_file, s.session_dir, s.cwd, socket_pi_env({kind = .Panel, tab_id = tab.id}))
 			}
 			if !ok do socket_forget_tab(tab.id)
 		case Shell_Tab:
@@ -2489,17 +2476,16 @@ find_session_file :: proc(p: Project, pi_session_id: string, session_dir := "") 
 // path = "" starts a new chat with `pi --session-id <id>`, so Deckhand knows
 // which file it will be; otherwise resumes the file.
 open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "") -> (Result, bool) {
-	if chat_readonly(p.id) && pi_readonly_too_old() do return fail(PI_READONLY_CHAT_TOO_OLD), false
-	tab := Tab{id = new_id(), kind = Pi_Tab{readonly = chat_readonly(p.id)}, title = "pi"}
+	tab := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi"}
 	// the bridge in this pi finds Deckhand with these (token = this tab, panel)
-	env := chat_env(p.id, socket_pi_env({kind = .Panel, tab_id = tab.id}))
+	env := socket_pi_env({kind = .Panel, tab_id = tab.id})
 	// session_dir "": pi's own store, also for chats (`cd ~/Chats && pi --resume`)
 	at := cwd != "" ? cwd : p.cwd // cwd: a worktree of the project
 	if p.group == .Chats && !os.is_dir(p.cwd) {
 		os.make_directory_all(p.cwd) // made on the first chat, with its instructions (folders.odin)
 		chats_instructions_ensure(date_stamp())
 	}
-	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env, chat_args(p.id)) {
+	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env) {
 		socket_forget_tab(tab.id)
 		drop_term(tab.id)
 		return fail("could not start pi"), false
@@ -2520,17 +2506,11 @@ open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd :=
 	return {ok = true, created_id = s.id}, true
 }
 
-// A chat's pi is read-only when the user set Settings.chats_readonly; full pi
-// by default. pi limits the tools the model may call (chat_args); PI_KIT_READONLY
-// (chat_env) makes the guardrails read-only (the integration's optional one when
-// on, or pi-kit's), keeps the integration's shell unregistered, and its
-// app_open, app_restart and app_close.
-chat_readonly :: proc(project_id: u64) -> bool {
-	p := find_project(project_id)
-	return p != nil && p.group == .Chats && state.settings.chats_readonly
-}
+// What a chat's agent may do is the chats folder's AGENTS.md / CLAUDE.md's to say (the user's):
+// chats start as full agents. The setting that started them read-only is gone.
+CHATS_READONLY_REMOVED :: "Start chats read-only was removed: what a chat's agent may do is set by the chats folder's AGENTS.md / CLAUDE.md"
 
-// pi's flags for a read-only run, chats and read-only jobs alike. What they
+// pi's flags for a read-only job (a job's `access: read`). What they
 // limit is the model's tools: `--tools` with plain names allowlists built-in,
 // extension and custom tools by name (one it does not name is never
 // registered, so neither an extension's setActiveTools nor a transcript turns
@@ -2540,18 +2520,12 @@ chat_readonly :: proc(project_id: u64) -> bool {
 // extensions still load and run their own code (hooks such as agent_end,
 // slash commands), and an extension tool named read, grep, find or ls replaces
 // the built-in one. pi keeps the last `--tools`, so these go last in argv
-// (start_pi's extra). Needs pi PI_READONLY_MIN_PI (pi_readonly_too_old).
+// (job_argv). Needs pi PI_READONLY_MIN_PI (pi_readonly_too_old).
 PI_READONLY_ARGS :: [?]string{"--tools", "read,grep,find,ls", "--exclude-tools", "mcp__*", "--no-mcp"}
-// A read-only chat's: the same, plus desk_show (display only: it shows the user a file in a tab
-// and gives the model nothing of it). In a chat's TUI Deckhand's bundled browser extension, loaded
-// first (-e), owns that name; a job (pi --mode json) loads it inert, so jobs keep PI_READONLY_ARGS
-// and another extension's desk_show is never allowed there.
-PI_READONLY_CHAT_ARGS :: [?]string{"--tools", "read,grep,find,ls,desk_show", "--exclude-tools", "mcp__*", "--no-mcp"}
 
 // The oldest pi whose flags mean the above: `--no-mcp` and `*` patterns came in
 // 1.0.4 (and `--tools` allowlists extension tools since 0.68.0).
 PI_READONLY_MIN_PI :: "1.0.4"
-PI_READONLY_CHAT_TOO_OLD :: "Read-only chats need pi " + PI_READONLY_MIN_PI + " or newer; update pi or turn off read-only chats"
 PI_READONLY_JOB_TOO_OLD :: "Read-only jobs need pi " + PI_READONLY_MIN_PI + " or newer; update pi or give the job full access"
 
 // pi's version on disk (hot reload's look at its package.json) is known and
@@ -2561,25 +2535,6 @@ pi_readonly_too_old :: proc() -> bool {
 	if !ok do return false
 	min, _ := semver_parse(PI_READONLY_MIN_PI)
 	return semver_less(v, min)
-}
-
-// The extra flags a chat's pi starts with (every start: new, resume, restore,
-// restart, reload): PI_READONLY_CHAT_ARGS while chats are read-only, else none.
-chat_args :: proc(project_id: u64) -> []string {
-	if !chat_readonly(project_id) do return nil
-	ro := PI_READONLY_CHAT_ARGS
-	out := make([]string, len(ro), context.temp_allocator)
-	copy(out, ro[:])
-	return out
-}
-
-@(private = "file")
-chat_env :: proc(project_id: u64, env: []string) -> []string {
-	if !chat_readonly(project_id) do return env
-	out := make([]string, len(env) + 1, context.temp_allocator)
-	copy(out, env)
-	out[len(env)] = "PI_KIT_READONLY=1"
-	return out
 }
 
 // A new shell tab of s in pane `pane` (0: the focused one), started in cwd, not shown yet: its id,
@@ -2703,9 +2658,8 @@ start_pi :: proc(t: ^Term, tab: ^Tab, pi_session_id, path, session_dir, cwd: str
 	if fork != "" do append(&argv, "--fork", fork) // Atlas only (home_session_start): copied into session pi_session_id, here
 	if path != "" do append(&argv, "--session", path)
 	else do append(&argv, "--session-id", pi_session_id)
-	append(&argv, ..extra) // last: a chat's read-only flags (chat_args)
-	pk, _ := tab.kind.(Pi_Tab)
-	return term_start(t, argv[:], cwd, pi_extra_env(env), {kind = .Pi, pi_ro = pk.readonly, extras = tab.reload.extras}) // + PI_KIT_NOTES_DIR (folders.odin)
+	append(&argv, ..extra) // last: Atlas's (agent_extra_args)
+	return term_start(t, argv[:], cwd, pi_extra_env(env), {kind = .Pi, extras = tab.reload.extras}) // + PI_KIT_NOTES_DIR (folders.odin)
 }
 
 // Runtime upkeep, not state changes: read every terminal (background tabs

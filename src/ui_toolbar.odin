@@ -228,7 +228,6 @@ Pop_Item :: enum {
 	Bell_Jobs,
 	Bell_OS,
 	Agent_Model, // the agent's model: pi's selector in its terminal
-	Chats_Readonly,
 	Chats_Folder,
 	Chats_Folder_Default, // only while another folder is set
 	Rescan,
@@ -305,7 +304,6 @@ POP_ACTIONS := [Pop_Item]string {
 	.Sound_Errors      = "bell_sound_errors",
 	.Sound_Jobs        = "bell_sound_jobs",
 	.Agent_Model       = "agent_model_pop",
-	.Chats_Readonly    = "chats_readonly",
 	.Chats_Folder      = "chats_dir",
 	.Chats_Folder_Default = "chats_dir_default",
 	.Rescan            = "rescan",

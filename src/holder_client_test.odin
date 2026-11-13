@@ -147,7 +147,7 @@ held_ids_persist :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(s.tabs), 4)
 	if len(s.tabs) != 4 do return
 	testing.expect_value(t, s.tabs[0].held, u32(7))
-	testing.expect(t, s.tabs[0].kind.(core.Pi_Tab).readonly) // as it was started
+	testing.expect(t, !s.tabs[0].kind.(core.Pi_Tab).readonly) // an older file's read-only mark: ignored (read-only chats were removed)
 	testing.expect_value(t, s.tabs[1].held, u32(8))
 	testing.expect_value(t, s.tabs[2].held, u32(0)) // past u32: refused
 	testing.expect_value(t, s.tabs[3].held, u32(0))
@@ -269,7 +269,7 @@ holder_stale_socket_removed :: proc(t: ^testing.T) {
 
 // A holder started mid-run (keep_sessions turned on, then the first new tab) writes tokens.json
 // from then on, as one attached at launch does: else a quit and relaunch finds no tokens for
-// the tabs it spawned (pi "can't reach Deckhand", every read-only Claude stopped).
+// the tabs it spawned (pi "can't reach Deckhand").
 @(test)
 holder_midrun_writes_tokens :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -376,9 +376,8 @@ adopt_proj :: proc() -> string {
 	return proj
 }
 
-// What a terminal was started as comes from the MAC'd tokens.json: a pi tab is read-only if it
-// was started so (whatever workspace.json says), keeps the extensions it started with (no false
-// restart offer), Atlas keeps its applied model; a terminal mapped to another kind of tab (a
+// What a terminal was started as comes from the MAC'd tokens.json: a pi tab keeps the extensions
+// it started with (no false restart offer), Atlas keeps its applied model; a terminal mapped to another kind of tab (a
 // Claude into a shell tab) is not adopted; entries for terminals the holder no longer lists go.
 @(test)
 holder_adopt_checks_start :: proc(t: ^testing.T) {
@@ -389,7 +388,7 @@ holder_adopt_checks_start :: proc(t: ^testing.T) {
 	proj := adopt_proj()
 	defer os.remove(proj)
 	binds := make(map[u32]core.Held_Start, context.temp_allocator)
-	binds[3] = {kind = .Pi, pi_ro = true, extras = 9}
+	binds[3] = {kind = .Pi, extras = 9}
 	binds[4] = {kind = .Claude}
 	binds[5] = {kind = .Pi}
 	binds[6] = {kind = .Shell} // gone from the holder
@@ -402,7 +401,6 @@ holder_adopt_checks_start :: proc(t: ^testing.T) {
 	testing.expect(t, s != nil && len(s.tabs) == 2, "restored")
 	if s == nil || len(s.tabs) != 2 do return
 	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Running)
-	testing.expect(t, s.tabs[0].kind.(core.Pi_Tab).readonly, "read-only as started (tokens.json)")
 	testing.expect_value(t, s.tabs[0].reload.extras, u64(9))
 	testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Not_Started) // a Claude is not a shell tab
 	testing.expect(t, core.term_of(s.tabs[1].id) == nil, "not adopted")

@@ -474,10 +474,6 @@ claude_hooks_silent_bar :: proc(t: ^testing.T) {
 	core.claude_status_tick(now)
 	core.claude_status_tick(later)
 	testing.expect(t, core.claude_hooks_silent(tab3, later), "restored, hooks silent")
-	// a read-only tab has its own check (it is stopped without its ack): no bar
-	ct2 := &tab2.kind.(core.Claude_Tab)
-	ct2.readonly = true
-	testing.expect(t, !core.claude_hooks_silent(tab2, later))
 }
 
 // ---- #13: a minimum-version hint (the version from where `claude` links to; never run) ----

@@ -16,7 +16,7 @@ import "core:time"
 
 // Left column groups. Projects come from pi's session dirs plus the ones
 // added by hand. Chats is one project-like entry (group .Chats) for
-// project-less sessions: full pi (read-only if Settings.chats_readonly) run
+// project-less sessions: full pi run (what it may do: the chats folder's AGENTS.md)
 // in a visible folder, <main folder>/chats or ~/Chats by default (folder_of(.Chats), folders.odin), with pi's
 // normal store, so `cd ~/Chats && pi --resume` finds them. That folder is
 // never also a project; its sessions are listed in state.chats.

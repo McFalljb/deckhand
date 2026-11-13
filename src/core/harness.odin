@@ -239,11 +239,10 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 				}
 			}
 		case .Codex:
-			// a project or a checkout of it; Chats only while chats are not read-only (Codex has no
-			// read-only mode yet: codex.odin)
+			// a project or a checkout of it, or Chats
 			if !codex_installed() do continue
 			if p.group == .Chats {
-				if cwd != "" || state.settings.chats_readonly do continue
+				if cwd != "" do continue
 			} else if p.group != .Projects do continue
 			append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, cwd = cwd, codex = true}})
 		}

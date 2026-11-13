@@ -1,8 +1,6 @@
-# Read-only pi chats, run 1 (tests/scripts/pi-chat-readonly.sh): Chats: read-only on; the user's
-# new chat, a script's new chat (as an agent's), its restart once pi exited, a resumed chat.
+# pi chats, run 1 (tests/scripts/pi-chat-start.sh): the user's new chat, a script's new chat (as
+# an agent's), its restart once pi exited, a resumed chat.
 wait 1500
-ui_command {"type":"set_chats_readonly","on":true}
-assert_result ok true
 ui_command {"type":"new_chat","project_id":$chats}
 assert_result ok true
 waitfor FAKE PI ARGS: 10000

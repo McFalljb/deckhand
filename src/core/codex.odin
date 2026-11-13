@@ -45,7 +45,6 @@ CODEX_MISSING :: "Codex is not installed: install it with `" + CODEX_INSTALL_COM
 CODEX_MISSING_NOTE :: " — Codex not installed"
 CODEX_HOOK_TIMEOUT :: 10 // seconds (part of the trust hash); the CLI gives up sooner: UserPromptSubmit's hello and three calls take at most 7.5 s (tools/deckhand-cli/hooks.odin CODEX_HOOK_CALL_MS), the others' one call 8 s
 CODEX_REMOTE :: "its Deckhand is too old to start Codex tabs: update Deckhand there (Update in its row's menu in the sidebar), then try again" // after "on <machine>: " (machine_route.odin)
-CODEX_READONLY :: "Codex can't run read-only yet, and Start chats read-only is on: start Codex in a project, or turn read-only chats off"
 
 // One hook Deckhand passes to a Codex tab: Codex's event name (the -c key), its snake_case name
 // (the trust key and the hash), and the CLI's `hook` argument.
@@ -419,13 +418,8 @@ codex_with_defaults :: proc(args: []string) -> []string {
 // Starts codex in the tab's terminal (claude_start for a Codex tab): the login shell, CODEX_TAB_CMD
 // and codex_args; the environment of a Claude tab (the socket, the tab's token, the CLI's path).
 // flags: the tab's own flags (an agent's restart starts without them); defaults: a start the user
-// makes, with the default flags as set now (codex_with_defaults). Never read-only (refused: a chat
-// while chats are read-only), never with an account.
+// makes, with the default flags as set now (codex_with_defaults). Never with an account.
 codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
-	if claude_tab_readonly(s, ct) {
-		term_note(t, CODEX_READONLY)
-		return false
-	}
 	if v := codex_version(); claude_version_below(v, CODEX_MIN_VERSION) {
 		term_note(t, codex_old_text(v))
 		return false
@@ -699,11 +693,6 @@ claude_harness_missing :: proc(codex: bool, caller: Caller) -> (r: Result, missi
 	return claude_missing(caller)
 }
 
-// Whether a Codex tab in open session id would be refused for read-only (a chat while chats are).
-codex_chat_refused :: proc(id: u64) -> bool {
-	s := find_session(id)
-	return s != nil && claude_chat_readonly(s)
-}
 
 // Why text Deckhand puts into a Codex tab's composer on its own initiative (a dropped file's path,
 // anyone's send_text but the user's own) cannot go now ("" = it can; not a Codex tab: ""): the

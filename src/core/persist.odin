@@ -340,7 +340,6 @@ workspace_json :: proc() -> string {
 			else do ks(&w, "kind", TAB_KIND_NAMES[tab_kind_id(tab.kind)])
 			if held := tab_held(tab.id); held != 0 {
 				ki(&w, "held", int(held)) // its process runs on in the session holder
-				if pt, is_pi := tab.kind.(Pi_Tab); is_pi && pt.readonly do kb(&w, "readonly", true) // as it was started (adopted: kept)
 			}
 			if _, is_shell := tab.kind.(Shell_Tab); is_shell {
 				ks(&w, "title", tab.title)
@@ -352,7 +351,7 @@ workspace_json :: proc() -> string {
 				// Claude Code (claude.odin): its session (resumed on restore), folder and the user's flags
 				if ct.session_id != "" do ks(&w, "claude_session_id", ct.session_id)
 				ks(&w, "cwd", tab.cwd != "" ? tab.cwd : s.cwd)
-				if ct.readonly do kb(&w, "readonly", true) // Deckhand's read-only profile: kept at every start
+
 				if ct.account != "" do ks(&w, "account", ct.account) // its Claude Code account's folder (claude_accounts.odin)
 				if len(ct.args) > 0 {
 					k(&w, "args")
@@ -446,13 +445,6 @@ workspace_json :: proc() -> string {
 		close_obj(&w)
 	}
 
-	// Claude sessions that ran read-only (claude.odin §1a): kept apart from the history's cap
-	if len(state.claude_readonly_ids) > 0 {
-		strings.write_string(&w.b, ",\n")
-		w.first = true
-		k(&w, "claude_readonly_ids")
-		write_strings(&w.b, state.claude_readonly_ids[:])
-	}
 
 	// Claude Code sessions Deckhand ran (claude.odin): Resume in a project's menu
 	if len(state.claude_history) > 0 {
@@ -468,7 +460,6 @@ workspace_json :: proc() -> string {
 			ks(&w, "project", r.project)
 			if r.title != "" do ks(&w, "title", r.title)
 			ki(&w, "used", int(r.used))
-			if r.readonly do kb(&w, "readonly", true)
 			if r.named do kb(&w, "named", true)
 			if r.transcript != "" do ks(&w, "transcript", r.transcript)
 			if r.model != "" do ks(&w, "model", r.model)
@@ -559,7 +550,7 @@ workspace_json :: proc() -> string {
 	if st.term_text_pt != 0 do ki(&w, "terminal_text_size", st.term_text_pt)
 	if st.appearance != .System do ks(&w, "appearance", APPEARANCE_NAMES[st.appearance])
 	if st.text_size != .Default do ks(&w, "text_size", TEXT_SIZE_NAMES[st.text_size])
-	if st.chats_readonly do kb(&w, "chats_readonly", true)
+
 	if st.claude_skip_permissions do kb(&w, "claude_skip_permissions", true)
 	if st.codex_full_access do kb(&w, "codex_full_access", true)
 	if len(st.pi_extensions) > 0 {
@@ -726,7 +717,7 @@ workspace_restore :: proc(text: string) -> string {
 		if pt, pok := num_of(st, "terminal_text_size"); pok do run(Set_Terminal_Text_Size{pt = int(pt)})
 		if ap, aok := enum_of(st, "appearance", APPEARANCE_NAMES); aok do run(Set_Appearance{mode = ap})
 		if ts, tok := enum_of(st, "text_size", TEXT_SIZE_NAMES); tok do run(Set_Text_Size{size = ts})
-		if ro, rok := st["chats_readonly"].(json.Boolean); rok do run(Set_Chats_Readonly{on = bool(ro)})
+		// chats_readonly (the removed Start chats read-only) in an older file: ignored
 		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp)})
 		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), codex = true})
 		if pe, pok := st["pi_extensions"].(json.Object); pok {
@@ -851,15 +842,12 @@ workspace_restore :: proc(text: string) -> string {
 		pi_pane: Maybe(int)
 		pi_active := false
 		pi_held: u32
-		pi_readonly := false
 		for tv, j in saved_tabs {
 			to, _ := tv.(json.Object)
 			kind, _ := to["kind"].(json.String)
 			held := held_of(to)
 			if j == 0 && kind == "pi" {
 				pi_pane, pi_active, pi_held = known(tab_pane[0]), pane_active[0], held
-				pro, _ := to["readonly"].(json.Boolean)
-				pi_readonly = bool(pro)
 			}
 			if kind == "editor" {
 				// a file tab: reopens when its session starts (unsaved edits are not kept)
@@ -883,9 +871,8 @@ workspace_restore :: proc(text: string) -> string {
 				cwd, _ := to["cwd"].(json.String)
 				args := make([dynamic]string, context.temp_allocator)
 				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
-				ro, _ := to["readonly"].(json.Boolean)
-				acct, _ := to["account"].(json.String)
-				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), codex = kind == "codex", active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
+				acct, _ := to["account"].(json.String) // an older file's "readonly" is ignored: a full agent from its next start
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], account = string(acct), codex = kind == "codex", active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 				continue
 			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
@@ -894,7 +881,7 @@ workspace_restore :: proc(text: string) -> string {
 			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 		}
 		scwd, _ := so["cwd"].(json.String) // a worktree of the project (Restore_Session checks it)
-		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active, pi_held = pi_held, pi_readonly = pi_readonly})
+		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active, pi_held = pi_held})
 		if r.ok && has_current && i64(i) == i64(current) {
 			if s := find_session(r.created_id); s != nil do persist.focus_tab = s.active_tab
 		}
@@ -955,10 +942,9 @@ workspace_restore :: proc(text: string) -> string {
 		}
 	}
 
-	// Claude Code sessions Deckhand ran, and the conversations that ran read-only (one command:
-	// the saved id list goes first, then the history's read-only records while there is room)
+	// Claude Code sessions Deckhand ran (an older file's "readonly" marks and claude_readonly_ids
+	// are ignored)
 	recs := make([dynamic]Claude_Record, context.temp_allocator)
-	ro_ids := make([dynamic]string, context.temp_allocator)
 	if list, is := root["claude_sessions"].(json.Array); is {
 		for v in list {
 			o, ok := v.(json.Object)
@@ -968,7 +954,6 @@ workspace_restore :: proc(text: string) -> string {
 			project, _ := o["project"].(json.String)
 			title, _ := o["title"].(json.String)
 			used, _ := o["used"].(json.Integer)
-			ro, _ := o["readonly"].(json.Boolean)
 			named, _ := o["named"].(json.Boolean)
 			transcript, _ := o["transcript"].(json.String)
 			model, _ := o["model"].(json.String)
@@ -977,13 +962,10 @@ workspace_restore :: proc(text: string) -> string {
 			args := make([dynamic]string, context.temp_allocator)
 			if a, aok := o["args"].(json.Array); aok do for x in a do if xs, xok := x.(json.String); xok do append(&args, string(xs))
 			if id == "" || !strings.has_prefix(project, "/") || claude_args_check(args[:]) != "" do continue
-			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), readonly = bool(ro), account = string(acct), codex = bool(codex)})
+			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), account = string(acct), codex = bool(codex)})
 		}
 	}
-	if list, is := root["claude_readonly_ids"].(json.Array); is {
-		for v in list do if x, ok := v.(json.String); ok do append(&ro_ids, string(x))
-	}
-	if len(recs) > 0 || len(ro_ids) > 0 do run(Claude_Restore_History{records = recs[:], readonly_ids = ro_ids[:]})
+	if len(recs) > 0 do run(Claude_Restore_History{records = recs[:]})
 
 	// the left column: pins and hidden items by identity, sort, folds
 	if sb, is := root["sidebar"].(json.Object); is {

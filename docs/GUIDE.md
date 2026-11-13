@@ -644,23 +644,10 @@ is waiting for you).
 
 In Settings › Sessions & chats, and the palette.
 
+Chats start as full agents (pi, Claude Code or Codex), as in a project. What a chat's agent may
+do is up to the chats folder's own instructions, which you write: its `AGENTS.md` (pi and Codex;
+**Edit chat instructions**) and a `CLAUDE.md` there for Claude Code.
 
-- **Start chats read-only** starts chats as read-only. Off by default.
-  - **pi** gets only its read tools (read, grep, find, ls) and `desk_show` (`--tools
-    read,grep,find,ls,desk_show --exclude-tools 'mcp__*' --no-mcp`), plus pi-kit's read-only
-    guardrails (`PI_KIT_READONLY=1`) when pi-kit is installed. The model cannot edit, write or run
-    shell commands, and has no MCP or extension tools (Deckhand's browser and app tools included;
-    status, waits and comments still work). Not covered: your extensions' own code (their hooks
-    and slash commands) still runs, an extension tool named like a read tool replaces it, your own
-    `!` commands run, and a `pi` wrapper that adds its own `--tools` could widen the list. It
-    needs pi 1.0.4 or newer, and applies at every start of a chat's pi.
-  - **Claude** in chats starts read-only too, with Claude Code's own controls: plan mode, the
-    tools that edit files, spawn agents, schedule work or use MCP denied, and Deckhand's guard on
-    mutating commands; it can't click or type in your pages and apps either. The tab reads
-    "read-only". Of your extra flags only `--model`, `--effort`, `--fallback-model` and
-    `--verbose` go along. A tab that started read-only stays read-only (start a new chat for a
-    full one). If Deckhand can't confirm that Claude Code took its read-only settings (an older
-    Claude Code), it stops the tab and says so.
 - **Chats folder…** picks another folder for new chats; chats already in the old folder stay
   there, and that folder becomes an ordinary project. **Chats folder: back to the default**
   undoes it (the main folder's `chats/`, or `~/Chats` without a main folder). The same as
@@ -821,7 +808,7 @@ own tab; Atlas names the session. The tab opens behind the one you are looking a
 already open is not opened twice. It is display only: the agent cannot edit the tab, and nothing
 of it goes back to the agent. Agents are refused credentials and secret files (`.env`, keys,
 `~/.ssh`…), binary files, files over 20 MB, network and iCloud-only files, and more than 20 such
-tabs per session. Read-only chats can show files too.
+tabs per session.
 
 ### Browser tabs
 
@@ -929,7 +916,7 @@ Deckhand's own shortcuts come first even then: ⌘T opens a shell tab, ⌘W clos
   that program from its own shell. A Claude tab's open, restart and close go through Claude
   Code's own permission mode (it asks unless you run it with permissions bypassed). The tab opens
   behind the one you are looking at and closes like any tab; pi can also restart and close its
-  session's app tabs (not in read-only chats), and keeps at most 8 running per session.
+  session's app tabs, and keeps at most 8 running per session.
 
 ### Claude Code tabs
 
@@ -969,8 +956,8 @@ and **Dismiss**.
 installed (see [Everyday tasks](#everyday-tasks)); with only Claude Code installed it starts Claude
 Code at once. It runs on its own in the project's folder: a session whose main tab is Claude,
 with no pi tab. You can open shell, browser and other tabs beside it as in any session. Its main
-tab closes with the session (the **×** on its row). **New chat** does the same in Chats
-(read-only while **Start chats read-only** is on: see [Chats settings](#chats-settings)).
+tab closes with the session (the **×** on its row). **New chat** does the same in Chats (see
+[Chats settings](#chats-settings)).
 
 Every Claude conversation Deckhand ran in a project is a row of that project's session list,
 beside the pi sessions, marked **Claude**: its title is your first message (or the name you gave
@@ -1028,7 +1015,7 @@ also has its own settings files. Agents may start Claude
 under an account you configured, never a folder of their own.
 
 **New Claude tab** opens a Claude tab in the session on screen instead (a pi session's, or a
-Claude session's, or a chat's: read-only while chats are); the project's **…** menu has it too (in the project's open session, or a new
+Claude session's, or a chat's); the project's **…** menu has it too (in the project's open session, or a new
 pi session when none is open). When you quit with Claude sessions or tabs open, they come back on
 the next start like other sessions and tabs, resuming their conversation with the same extra
 flags. They start when you show them: if Atlas opens such a session first, its Claude tabs
@@ -1042,7 +1029,7 @@ trust what you run it on; Deckhand asks you to confirm when you turn it on. It a
 you start Claude yourself: a new Claude tab, session or chat, your own resume, a restored tab when
 you show it, and your Restart. It is never stored with a tab, so once you turn it off, none of
 those get it any more. Tabs and sessions that Atlas, a pi tab, a Claude tab or an app opens or
-restarts never get it. A read-only chat leaves it out and tells you so.
+restarts never get it.
 
 **Without Claude Code.** Deckhand works the same without it: **New session** and **New chat**
 start pi at once (no picker), and the Claude-only menu rows (**New Claude tab**) are not shown.
@@ -1145,9 +1132,7 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   there. If Codex there is signed out, its own sign-in screen shows in the tab. **Full access in
   new Codex tabs** is each machine's own setting: the switch on this Mac does not apply to Codex
   tabs started on another machine.
-- **Not yet**: read-only chats (Codex is not offered in Chats while **Start chats read-only** is
-  on: Codex's read-only sandbox does not cover your MCP servers, and you can lift it from its
-  composer) and accounts. [CODEX.md](CODEX.md) has the details.
+- **Not yet**: accounts. [CODEX.md](CODEX.md) has the details.
 
 ### Comments for the agent
 
@@ -1378,7 +1363,7 @@ buttons), with a search box on top.
 - **Only you, at this Mac**: a row with this badge can be changed only by you, at this Mac: not by
   Atlas or another agent, not by a script, not by another machine viewing this one. Among them:
   **Allow other machines to connect**, **Machines over SSH**, the pi extensions, Claude Code's
-  skip-permissions default and read-only chats. **Next start** and **Next launch** badges say
+  skip-permissions default. **Next start** and **Next launch** badges say
   when a change takes effect.
 - **Deckhand writes only its own settings.** pi's, Claude Code's and Codex's config are files:
   under a card, **Advanced: open the file** lists them. Click one to open it in an ordinary
@@ -1443,7 +1428,7 @@ the restart bar ("pi extensions changed — Restart N idle tabs"). Updating Deck
 
 - **Guardrails** (`guardrails`, on by default): your ask/block rules on shell commands (pi-kit's
   config files: `~/.pi/agent/extensions/guardrails/config.json`, a project's
-  `.pi/guardrails.json`; with no rules nothing asks), read-only chats enforced, secret-looking
+  `.pi/guardrails.json`; with no rules nothing asks), read-only jobs enforced, secret-looking
   strings redacted from tool output, file reads included: the agent sees `[REDACTED]` where a key
   or token is. So that a file it read is never saved with the marker in place of the real value,
   a write or edit carrying `[REDACTED]` is refused once something was redacted in that session.
@@ -1494,8 +1479,8 @@ over `ssh` as you (Remote Login on, your keys) can see and drive this Mac's sess
 other machine can. A machine you allow acts as you on this Mac: it can type into its shells and
 prompt its sessions and its Atlas, and so reach the machines this Mac reaches. It can't change the
 settings that bound it and your agents here: **Allow other machines to connect**, **Machines over
-SSH**, the pi extensions (guardrails among them), Claude Code's skip-permissions default and
-read-only chats; only you, at this Mac, change those (as with your notifications and your machines
+SSH**, the pi extensions (guardrails among them) and Claude Code's skip-permissions default;
+only you, at this Mac, change those (as with your notifications and your machines
 list). Allow only machines you trust as yourself.
 
 A Linux machine (x86_64) runs its core as your systemd user service `deckhand-core`, started when
@@ -1534,7 +1519,7 @@ on that machine and paste it.
   on by default): see [How Deckhand runs](#how-deckhand-runs).
 - **Tidy project list** (on by default): hide temp and missing folders, nest subfolders and group
   sibling folders (see [A tidy project list](#a-tidy-project-list)).
-- **Chats**: **Start chats read-only** and **Chats folder…** (see
+- **Chats**: **Chats folder…** (see
   [Chats settings](#chats-settings)), and the chats folder's instructions,
   **Chat instructions (AGENTS.md)** (with **Create** when missing).
 - **Fix-ups**: **Rescan sessions**, **Refresh shell environment** (see
@@ -1914,8 +1899,10 @@ you.
 ### What a job may do
 
 `access: read` runs pi with its read-only tools (read, grep, find, ls; no bash, MCP or extension
-tools), as a read-only chat does (with the same limits: see [Chats settings](#chats-settings)),
-and pi-kit's read-only mode where pi-kit is installed. It needs pi 1.0.4 or newer: on an older pi
+tools: `--tools read,grep,find,ls --exclude-tools 'mcp__*' --no-mcp`) and pi-kit's read-only mode
+(`PI_KIT_READONLY=1`) where pi-kit is installed. Not covered: your extensions' own code (their
+hooks) still runs, an extension tool named like a read tool replaces it, and a `pi` wrapper that
+adds its own `--tools` could widen the list. It needs pi 1.0.4 or newer: on an older pi
 a read job fails with that message instead of starting. `access: full` runs pi with its normal tools and guardrails: an action the guardrails
 would ask you about is blocked instead, and the run reports it under "Needs you". A job never
 gets Deckhand's control socket, so it cannot create jobs through Deckhand (its prompt also tells
@@ -2462,7 +2449,6 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New chat | ⌘N | a new chat in the Chats folder |
 | New session | ⇧⌘N | a new session in the selected project (pi or Claude Code: a picker when both are installed) |
 | New session on another machine… |  | a fresh session in the project of the same folder name on an online machine ([Other machines](#projects-sessions-and-chats)) |
-| Start chats read-only |  | start chats read-only or as full pi |
 | Chats folder… |  | pick the folder chats run in |
 | Chats folder: back to the default |  | undo the above |
 | New shell tab | ⌘T | a shell in the session's folder |

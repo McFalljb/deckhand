@@ -122,12 +122,6 @@ eventually
 assert_state settings.notify true
 clickid spi @Sessions
 wait 200
-clickid spi @chats_readonly
-eventually
-assert_state settings.chats_readonly true
-clickid spi @chats_readonly
-eventually
-assert_state settings.chats_readonly false
 pick_folder $homedir/Chats-elsewhere
 clickid spi @chats_dir
 eventually

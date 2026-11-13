@@ -150,12 +150,6 @@ waitfor ARGS: --session-id 15000
 assert_rows open Untitled chat,Untitled session,Fix the flaky test
 assert_state open_sessions.2.session_dir 
 assert_state open_sessions.2.cwd $homedir/Chats
-# the Chats settings are the user's: a script is refused, the user may
-command {"type":"set_chats_readonly","on":true}
-assert_result error not allowed for this caller
-ui_command {"type":"set_chats_readonly","on":true}
-assert_state settings.chats_readonly true
-ui_command {"type":"set_chats_readonly","on":false}
 # ⌘N is a new chat (Chats), ⇧⌘N a new session in the selected project; "+ New chat" under Chats
 key n cmd
 eventually

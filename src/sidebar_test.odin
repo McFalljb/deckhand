@@ -182,8 +182,7 @@ chats_section :: proc(t: ^testing.T) {
 	testing.expect(t, !r.ok || r.created_id != 0 && by_cwd(chats) == nil, r.error)
 }
 
-// Chats settings: where new chats run (and are stored by pi), read-only or
-// not. User-only; saved.
+// Chats settings: where new chats run (and are stored by pi). User-only; saved.
 @(test)
 chats_settings :: proc(t: ^testing.T) {
 	data := sb_dir("data")
@@ -195,13 +194,11 @@ chats_settings :: proc(t: ^testing.T) {
 	core.rescan_now()
 	ui := core.Caller{kind = .UI}
 	// agents cannot change them
-	testing.expect_value(t, core.run_command(core.Set_Chats_Readonly{on = true}, {kind = .Control}).error, "not allowed for this caller")
 	testing.expect_value(t, core.run_command(core.Set_Folder{kind = .Chats, path = "/tmp"}, {kind = .Script}).error, "not allowed for this caller")
-	// read-only chats
-	testing.expect(t, core.run_command(core.Set_Chats_Readonly{on = true}, ui).ok)
+	// a chat's pi is full pi (what it may do: the chats folder's AGENTS.md)
 	args := fake_pi("ro")
 	r := core.run_command(core.New_Chat{project_id = core.chats_project().id}, ui)
-	testing.expect(t, strings.contains(read_args(args), " RO=1 "), read_args(args))
+	testing.expect(t, strings.contains(read_args(args), " RO= ") && !strings.contains(read_args(args), "--tools"), read_args(args))
 	core.run_command(core.Close_Session{session = r.created_id}, {kind = .Internal})
 	// another folder: new chats go there; the old folder's chats stay where they are (a project now)
 	elsewhere := sb_dir("talks")
@@ -221,7 +218,6 @@ chats_settings :: proc(t: ^testing.T) {
 	core.rescan_now()
 	testing.expect_value(t, core.workspace_restore(text), "")
 	testing.expect_value(t, state.settings.folders[.Chats], elsewhere)
-	testing.expect(t, state.settings.chats_readonly)
 	testing.expect_value(t, core.chats_project().cwd, elsewhere)
 	testing.expect(t, by_cwd(old) != nil)
 	// "" = back to ~/Chats

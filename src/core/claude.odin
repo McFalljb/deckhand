@@ -786,7 +786,6 @@ claude_host :: proc(p: ^Project) -> ^Open_Session {
 // open behind (an agent never changes what the user sees).
 @(private = "file")
 claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "", codex := false) -> (Result, bool) {
-	if codex && caller.hub do return fail(CODEX_REMOTE), false // every new Codex tab (a row's resume too): never a hub's (machine_route.odin)
 	focus := caller.kind == .UI || caller.kind == .Script
 	tab := Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(resume), args = clone_strings(args), account = strings.clone(account), resume_path = strings.clone(resume_path), codex = codex}, title = strings.clone(codex ? "Codex" : "Claude"), status = .Running}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)

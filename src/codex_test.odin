@@ -456,29 +456,60 @@ codex_claude_ids_not_claimed :: proc(t: ^testing.T) {
 	testing.expect(t, f == nil || !f.gone, "a Codex row is not greyed as gone")
 }
 
-// A hub (another machine's Deckhand) never starts a Codex tab here, even with this machine's own
-// ids (Codex tabs run on the Mac the user works at only, for now): refused before anything runs.
+// A hub (another machine's Deckhand, as the user: machine_route.odin) starts and resumes Codex tabs
+// here as this machine's user would: codex runs with this machine's own hooks and tools (the CLI's
+// path here, the trust hashes computed from it), nothing of them from the hub; its row opens; flags
+// and an account stay refused.
 @(test)
-codex_hub_refused :: proc(t: ^testing.T) {
+codex_hub_starts :: proc(t: ^testing.T) {
 	context.allocator = cx_reset()
 	defer cx_done()
-	_, sess, _ := cx_codex_session(t, "hub")
-	pid := core.find_session(sess).project_id
-	n := len(state.open_sessions)
+	dir := cx_dir("hub")
+	argf := fmt.tprintf("%s/argv", dir)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, argf))
+	read_argv :: proc(path: string) -> string {
+		for _ in 0 ..< 50 {
+			data, _ := os.read_entire_file(path, context.temp_allocator)
+			if strings.contains(string(data), "mcp_servers.deckhand") do return string(data)
+			time.sleep(20 * time.Millisecond)
+		}
+		return ""
+	}
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
 	hub := core.Caller{kind = .UI, hub = true}
-	testing.expect_value(t, core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, hub).error, core.CODEX_REMOTE)
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, codex = true}, hub).error, core.CODEX_REMOTE)
-	testing.expect_value(t, len(state.open_sessions), n)
-	testing.expect_value(t, len(core.find_session(sess).tabs), 1)
-	// nor from a Codex row (its resume makes a new Codex tab)
-	main_tab := core.find_session(sess).tabs[0].id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, hub)
+	testing.expect(t, r.ok, r.error)
+	s := core.find_session(r.created_id)
+	if s == nil do testing.fail_now(t, "no session")
+	sess, tab := s.id, s.tabs[0].id
+	testing.expect(t, core.claude_tab_is_codex(s.tabs[0]), "a Codex tab")
+	got := read_argv(argf)
+	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("--no-daemon\n-C\n%s\n", dir)), "%q", got)
+	hook := core.codex_hook_command(CX_CLI, "codex-stop")
+	testing.expectf(t, strings.contains(got, core.codex_hook_hash("stop", hook, core.CODEX_HOOK_TIMEOUT)), "this machine's CLI, trusted here: %q", got)
+	// another tab in it, as the user's: this machine's own Full access default (never the hub's);
+	// flags under this machine's rule, an account refused
+	state.settings.codex_full_access = true
+	os.remove(argf)
+	testing.expect(t, core.run_command(core.New_Claude_Tab{session = sess, codex = true}, hub).ok)
+	state.settings.codex_full_access = false
+	got = read_argv(argf)
+	testing.expectf(t, strings.has_prefix(got, "--dangerously-bypass-approvals-and-sandbox\n--no-daemon\n"), "this machine's default: %q", got)
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, codex = true, args = {"--no-daemon"}}, hub).ok, "Codex's flag rule")
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, codex = true, account = "/x"}, hub).ok)
+	// its row (open_session with its id, as a hub's click sends it): resumed in Codex
 	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad5aa"
-	core.run_command(core.Claude_Session_Report{tab_id = main_tab, session_id = sid}, CX_SCRIPT)
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid}, CX_SCRIPT)
 	core.run_command(core.Close_Session{session = sess}, core.Caller{kind = .Internal})
-	testing.expect_value(t, core.run_command(core.Claude_Resume{claude_session_id = sid}, hub).error, core.CODEX_REMOTE)
-	testing.expect_value(t, len(state.open_sessions), n - 1)
-	// this machine's own callers still can
-	testing.expect(t, core.run_command(core.Claude_Resume{claude_session_id = sid}, CX_UI).ok)
+	os.remove(argf)
+	r = core.run_command(core.Open_Session_Cmd{project_id = pid, pi_session_id = sid}, hub)
+	testing.expect(t, r.ok, r.error)
+	if tid := core.claude_tab_of_session(sid); tid != 0 {
+		_, tb, _ := core.find_tab(tid)
+		testing.expect(t, tb != nil && core.claude_tab_is_codex(tb^), "resumed in Codex")
+	} else do testing.fail_now(t, "no tab resumed it")
+	got = read_argv(argf)
+	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n--no-daemon\n", sid)), "%q", got)
 }
 
 // Text Deckhand puts into a Codex composer on its own initiative goes through the one rule

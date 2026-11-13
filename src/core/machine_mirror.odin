@@ -331,7 +331,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 	m.selected, _ = id_pack(no, r.selected_project)
 	for x in r.sessions {
 		if len(m.sessions) >= MIRROR_LIST_MAX do break
-		append(&m.sessions, Session{id = fmt.aprintf("m%d:%s", no, text_clean(x.id, MIRROR_TEXT_MAX), allocator = a), path = mirror_text(x.path, MIRROR_PATH_MAX, a), when_ = remote_text(x.when_, 32, a), title = remote_text(x.title, MIRROR_TEXT_MAX, a), untitled = remote_text(x.untitled, MIRROR_TEXT_MAX, a), modified = x.modified, claude = x.claude})
+		append(&m.sessions, Session{id = fmt.aprintf("m%d:%s", no, text_clean(x.id, MIRROR_TEXT_MAX), allocator = a), path = mirror_text(x.path, MIRROR_PATH_MAX, a), when_ = remote_text(x.when_, 32, a), title = remote_text(x.title, MIRROR_TEXT_MAX, a), untitled = remote_text(x.untitled, MIRROR_TEXT_MAX, a), modified = x.modified, claude = x.claude, codex = x.claude && x.codex}) // codex: its row's icon and words only
 	}
 	mirror_sessions_show(no, m)
 

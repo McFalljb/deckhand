@@ -39,6 +39,8 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   tools of a per-run stdio server (§7).
 - **The user's flags** (§1a): extra flags on a tab, from the user only, checked against Codex's
   own; and **Full access in new Codex tabs**, a default for the tabs the user starts.
+- **On another machine** (phase 2d, §8): New session's picker in that machine's project, its
+  rows, the palette in one of its sessions; Codex runs there, on that machine's own core.
 
 ## What does not yet (phase 2 and later)
 
@@ -50,8 +52,6 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 - **Rename** changes Deckhand's title only, not Codex's own.
 - Conversation ids are one space across harnesses: when a Codex record and Claude Code's own
   transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
-- Not on another machine: `"Codex tabs run on this Mac only for now …"` (refused before it is sent:
-  an older core there would start Claude Code instead); the picker never lists it for one.
 - No hot-reload bars (Claude Code's file watching does not apply), no todos, subagents or
   background panels.
 
@@ -191,7 +191,8 @@ what a live process is.
 an id Deckhand knows as Claude Code's (its history, the disk index, a transcript of the project's
 by stat), for its report or a `resume`; and a Codex claim on an id that Claude Code's own
 transcript has never keeps Claude from it (the Claude tab's report, or opening the transcript's
-row, drops the claim). A hub never makes a Codex tab here, even with this machine's own ids.
+row, drops the claim). A hub (another machine's Deckhand, §8) starts Codex tabs here under the
+same rules as the user here, with this machine's own token, hooks and process check.
 
 ## 4. Text Deckhand types into Codex's composer
 
@@ -279,3 +280,40 @@ server of the user's own named `deckhand` for that run, never merges with it):
   with only `env_vars`' variables, and checks a call with the tab's token and one refused with a
   wrong token. Not checked without a real Codex turn: that Codex shows the model the
   `instructions`, and how "Always allow" for a tool persists.
+
+## 8. On another machine
+
+Every machine runs its own core; this Mac's core (the hub) forwards the user's commands on another
+machine's ids to that machine's core ([PROTOCOL.md](PROTOCOL.md), "Other machines"). A Codex start
+there is the same `new_claude_session` / `new_claude_tab` with `"harness": "codex"`, or
+`open_session` on one of its Codex rows (a record, or a conversation found on its disk), forwarded
+as the user's (or Atlas's). That core runs it as its own: its `codex` (the PATH its tabs get), its
+CLI's path in the hooks and the MCP server, the trust hashes computed from that path, its socket and
+a token of its own in the tab's environment, and its own defaults: a start forwarded as the user's
+is the user's there, so that machine's **Full access in new Codex tabs** applies (never this Mac's),
+added by that core when codex starts (§1a); Atlas's gets none. The hub adds nothing to the command:
+it names a project, a session or a row, and the only flags in it are ones the user typed for that
+tab, which that core checks under its own flag rule (§1a), as it would its own user's.
+
+- **Only to a core that says it can.** A core's framed hello lists `codex_tabs` in `features`. The
+  hub offers Codex (the picker, New Codex tab in the project's menu) only for a machine whose last
+  hello listed it and whose checklist finds `codex` (found, old or unchecked), and forwards a Codex
+  start only to such a core; to any other it is refused before anything is sent: `"on <machine>:
+  its Deckhand is too old to start Codex tabs: update Deckhand there …"` (a 0.3.0 core does not
+  know `harness` and would start Claude Code). A Codex row is listed only by a core that has
+  Codex tabs, so its click is forwarded as any row's.
+- **What that machine says** comes back as for its Claude tabs: not installed (`"on <machine>:
+  Codex is not installed …"`), too old (`"on <machine>: could not start Codex"`), signed out as
+  Codex's own sign-in screen in the tab's relayed terminal; its checklist on the machine's row.
+  The bars over a tab (signed out, hooks not running) are that machine's core's and are not
+  mirrored, as for its Claude tabs; this Mac's own sign-in never puts one over it.
+  Status marks and the bell come through the mirror (the tab's `codex` flag, its hooks' turn
+  enums and its OSC 7501 summary, cleaned), as for a Claude tab there.
+- **The rules stay where the tab is.** Text into its composer (a held prompt, a hub's
+  `send_text`, a dropped path) is checked by that core under the composer rule (§4); one id, one
+  harness, by that core's own records and disk. The hub never runs a command, picks a path or
+  starts a Codex of its own for another machine's tab or row: their ids never start anything here
+  (term_start refuses them), and a remote row's `codex` flag only chooses its icon and words.
+- Not checked without a real second machine: a Linux core's `codex` (npm's global bin on its login
+  PATH) and Codex's own hook trust there. The `remote-codex` scene runs both cores on one Mac with
+  a stand-in codex.

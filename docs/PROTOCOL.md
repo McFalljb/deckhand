@@ -505,8 +505,10 @@ agent's opens behind). A Codex start runs `codex --no-daemon -C <cwd>` with Deck
 that run (`codex resume <id> …` for `resume`, a `claude_resume` of its row, a restore); it is refused
 while Codex is not installed (`codex_installed: false`; `"Codex is not installed: install it with
 …"`), with `args` Codex's flag rule refuses (CODEX.md §1a: e.g. `"--no-daemon is refused: …"`,
-`"\"exec\" is not a flag: …"`; only the user's, as Claude's) or `account`, for another machine's project (`"Codex tabs run on
-this Mac only for now …"`), and for a `resume` id that is not a UUID or is another harness's
+`"\"exec\" is not a flag: …"`; only the user's, as Claude's) or `account`, for another machine
+whose core's hello does not list `codex_tabs` (refused here, before it is sent: `"on <machine>: its
+Deckhand is too old to start Codex tabs: update Deckhand there …"`; a core that lists it runs the
+start as its own, below, "Working on another machine"), and for a `resume` id that is not a UUID or is another harness's
 conversation (`"that id is another harness's conversation"`). A Codex older than 0.163.0 never
 starts (`"could not start Codex"`; the tab says why). Its hooks report with the same commands as
 the plugin's (`claude.session`: its `session_id` must be a UUID; `claude.turn`), and its
@@ -1258,7 +1260,8 @@ answers `no_window` at once. A window that detaches ends every wait with `no_win
 **The framed hello.** A hello (plain or challenge) with `"framed": true` asks for framed mode.
 The reply is the connection's last line. Beside the usual fields it carries `framed: true`,
 `generation` (the wire's, `1`), `version` (the core's release version, `""` in a development
-build), `features` (`["challenge_hello"]`), `methods` (the commands this caller may send),
+build), `features` (`["challenge_hello", "codex_tabs"]`; `codex_tabs`: a hub may start and resume
+Codex tabs here, [CODEX.md](CODEX.md) §8; a hub reads it from each machine's hello), `methods` (the commands this caller may send),
 `core` (this run's id: 64 hex; a hub tells an install's new core from the old one by it), `machine` (`{os, arch, installed}`; `installed`: the core runs from its data dir's `core/`, which another machine's Update requires; a Linux core adds `linger`, `false` when its jobs stop at logout, and leaves it out when logind gave no answer), `holder_wire` and `snapshot` (the formats it decodes, best first:
 `["ghostsnp/1", "vt"]`). From the next byte on, the connection carries frames
 ([background-core.md](plans/background-core.md) §5.1; `src/corewire/transport_sock.odin`): channel 0
@@ -1341,7 +1344,10 @@ own: a command that came over a hub link (another machine viewing this one) is r
 machine drives a third through this one. Any other caller's is refused. The hub sends it on that
 machine's link as `{"type":"command","id":"h<n>","now":true,"on_behalf":{"kind":"ui"|"control"},
 "command":{…}}` (the caller's own kind), its ids unpacked and a `pi_session_id`'s `m<no>:` taken
-off, and answers `pending`. Not forwarded: `terminal_link` (the user's click opens on this Mac, in
+off, and answers `pending`. A Codex start (`new_claude_session` or `new_claude_tab` with `"harness":
+"codex"`) goes only to a core whose last hello listed `codex_tabs` (an older one would start Claude
+Code for it): to any other it is refused here, nothing sent; that core runs it with its own `codex`,
+hooks, MCP server, socket and token ([CODEX.md](CODEX.md) §8). Not forwarded: `terminal_link` (the user's click opens on this Mac, in
 the default browser, after the same checks as a local terminal's link; anyone else's is refused).
 The user's `mark_all_read` at this Mac goes to every online machine at once (its row in §3). That core's `result` (and its `finished`, for one it answered pending)
 ends the request here: `created_id` packed (a session the user opened or made is shown here too),

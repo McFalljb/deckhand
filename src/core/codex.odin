@@ -44,8 +44,7 @@ CODEX_INSTALL_COMMAND :: "npm install -g @openai/codex@latest"
 CODEX_MISSING :: "Codex is not installed: install it with `" + CODEX_INSTALL_COMMAND + "`, then use Refresh shell environment or restart Deckhand"
 CODEX_MISSING_NOTE :: " — Codex not installed"
 CODEX_HOOK_TIMEOUT :: 10 // seconds (part of the trust hash); the CLI gives up sooner: UserPromptSubmit's hello and three calls take at most 7.5 s (tools/deckhand-cli/hooks.odin CODEX_HOOK_CALL_MS), the others' one call 8 s
-CODEX_REMOTE :: "Codex tabs run on this Mac only for now: another machine's project can't start one"
-
+CODEX_REMOTE :: "its Deckhand is too old to start Codex tabs: update Deckhand there (Update in its row's menu in the sidebar), then try again" // after "on <machine>: " (machine_route.odin)
 
 // One hook Deckhand passes to a Codex tab: Codex's event name (the -c key), its snake_case name
 // (the trust key and the hash), and the CLI's `hook` argument.

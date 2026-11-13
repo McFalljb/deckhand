@@ -197,6 +197,40 @@ route_by_id :: proc(t: ^testing.T) {
 	testing.expect(t, len(machine_test_links.texts) == n + 1 && json_path(rt_last_text(), "command.session") == "9", "and there")
 }
 
+// A Codex tab on another machine: refused here, nothing sent, while its core does not say it starts
+// one (an older core would start Claude Code); forwarded as the user's once it does.
+@(test)
+route_codex :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sid, _ := rt_begin()
+	defer rt_end_test()
+	pid, _ := id_pack(3, 5)
+	for cmd in ([]Command{New_Claude_Session{project_id = pid, codex = true}, New_Claude_Tab{session = sid, codex = true}}) {
+		r := run_command(cmd, {kind = .UI}, 1)
+		testing.expect(t, !r.ok && !r.pending && strings.contains(r.error, "update Deckhand there"), r.error)
+	}
+	testing.expect_value(t, len(machine_test_links.texts), 0)
+	state.machines[0].codex = true
+	r := run_command(New_Claude_Session{project_id = pid, codex = true}, {kind = .UI}, 2)
+	testing.expect(t, r.ok && r.pending, r.error)
+	sent := rt_last_text()
+	testing.expect_value(t, json_path(sent, "command.harness"), "codex")
+	testing.expect_value(t, json_path(sent, "command.project_id"), "5")
+	testing.expect(t, strings.contains(sent, `"on_behalf":{"kind":"ui"}`), sent)
+	// still only the user's and Atlas's: never a hub's (no third machine)
+	r = run_command(New_Claude_Tab{session = sid, codex = true}, {kind = .UI, hub = true}, 3)
+	testing.expect(t, !r.ok && !r.pending, "a hub's")
+	// this Mac's Codex sign-in never puts a bar over that machine's Codex tab
+	codex_login_set(.Signed_Out)
+	defer codex_login_set(.Unknown)
+	tb := Tab{id = sid + 1, machine = 3, kind = Claude_Tab{codex = true}, status = .Running, pane = sid, prog = {state = .Idle, progress = -1}}
+	testing.expect(t, !codex_signed_out_due(&tb), "not this Mac's sign-in")
+	// nor does its composer reporting (its OSC 7501, mirrored) clear this Mac's signed-out answer
+	append(&find_session(sid).tabs, tb)
+	claude_status_tick()
+	testing.expect_value(t, codex_login_state(), Codex_Login.Signed_Out)
+}
+
 // Atlas (control, M6-F) works in another machine's sessions: forwarded as control there (its core
 // applies control's rules again: route_on_behalf_lowers); a confirmation that machine wants is
 // refused here, not asked in the bar; of its data only a known code comes back; a wait waits its

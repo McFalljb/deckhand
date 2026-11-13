@@ -217,13 +217,6 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		}
 		return {}, false
 	}
-	// a hub's Codex tab, even with this machine's own ids: never (codex.odin, CODEX_REMOTE)
-	if caller.hub {
-		#partial switch c in cmd {
-		case New_Claude_Session: if c.codex do return fail(CODEX_REMOTE), true
-		case New_Claude_Tab:     if c.codex do return fail(CODEX_REMOTE), true
-		}
-	}
 	no, mixed := command_machine(cmd)
 	if mixed do return fail("this names ids on two machines"), true
 	if su, is := cmd.(Set_Unread); is && su.tab_id == 0 do no = unread_session_machine(su.pi_session_id)
@@ -236,10 +229,12 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		// a browser tab): never sent there, and nobody else's (a hub's, Atlas's) opens anything here
 		if caller.kind == .UI && !caller_from_hub(caller) do return {}, false
 		return fail("a link in another machine's terminal opens only from your click in this window"), true
+	// a Codex tab there: only to a core whose hello says it starts one (an older core would start
+	// Claude Code for it, or refuse it); refused here, before anything is sent
 	case New_Claude_Session:
-		if c.codex do return fail(CODEX_REMOTE), true // codex.odin: this Mac only (an older core there would start claude)
+		if c.codex && !machine_codex(no) do return codex_remote_old(no), true
 	case New_Claude_Tab:
-		if c.codex do return fail(CODEX_REMOTE), true
+		if c.codex && !machine_codex(no) do return codex_remote_old(no), true
 	case Focus_Session:
 		// this Mac's view; the user's goes there too, so its restored tabs start
 		if caller.kind == .UI && !caller.hub do machine_link_send_text(no, hub_command_json(Focus_Session{session = id_local(c.session), reopen = c.reopen}, "", .UI))
@@ -250,6 +245,12 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	r = forward_send(cmd, no, caller.kind, request_id)
 	if !r.ok && caller.kind == .UI do route_toast(cmd, r)
 	return r, true
+}
+
+// A Codex start for machine no, whose core does not say it starts Codex tabs.
+@(private = "file")
+codex_remote_old :: proc(no: u64) -> Result {
+	return fail(fmt.tprintf("on %s: %s", machine_name(no), CODEX_REMOTE))
 }
 
 // cmd (ids packed) sent to machine no's core as kind's: pending, or why it could not go.

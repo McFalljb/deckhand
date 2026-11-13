@@ -197,7 +197,7 @@ codex_argv :: proc(t: ^testing.T) {
 codex_user_flags :: proc(t: ^testing.T) {
 	ok := [][]string{
 		{"-m", "o3"}, {"-mo3"}, {"--model=o3"}, {"-s", "danger-full-access", "-a", "never"}, {"--dangerously-bypass-approvals-and-sandbox"},
-		{"-c", `model="o3"`}, {"--config=mcp_servers.mine.command=\"x\""}, {"--enable", "web_search"}, {"--disable", "apps"}, {"-p", "work", "--search", "--oss"},
+		{"-c", `model="o3"`}, {"--config=mcp_servers.mine.command=\"x\""}, {"--search", "--oss"},
 	}
 	for a in ok do testing.expectf(t, core.codex_args_check(a) == "", "%v: %s", a, core.codex_args_check(a))
 	refused := [][2]string{
@@ -212,8 +212,14 @@ codex_user_flags :: proc(t: ^testing.T) {
 		{"-cmcp_servers.deckhand.command=\"/bin/sh\"", "-c mcp_servers.deckhand is Deckhand's own MCP server"},
 		{"--config= hooks.Stop =[]", "-c hooks… would change Deckhand's hooks or their trust"},
 		{`-c"hooks".state={}`, "-c hooks… would change Deckhand's hooks or their trust"},
-		{"-cfeatures.hooks=false", "-c features.hooks would turn Deckhand's hooks off"},
-		{"--disable=hooks", "--disable hooks would turn Deckhand's hooks off"},
+		{"-cfeatures.codex_hooks=false", "-c features… is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"-c features.daemon_auto_start=true", "-c features… is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"--disable=codex_hooks", "--disable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"--enable", "--enable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
+		{"-p", "-p is refused: profiles are not supported per tab yet"},
+		{"--profile=work", "--profile is refused: profiles are not supported per tab yet"},
+		{"-cprofile=\"work\"", "-c profile… is refused: profiles are not supported per tab yet"},
+		{"-c profiles.work.model=\"o3\"", "-c profile… is refused: profiles are not supported per tab yet"},
 		{"--frobnicate", "--frobnicate is not a Codex flag Deckhand passes on"},
 		{"-m", "--model needs a value"},
 		{"--search=yes", "--search takes no value"},
@@ -271,6 +277,10 @@ codex_full_access_default :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.has_prefix(got, "--no-daemon\n") && !strings.contains(got, "bypass"), "a script's: %q", got)
 	got = argv_of(t, pid, {"-a", "never"}, CX_UI)
 	testing.expectf(t, strings.has_prefix(got, "-a\nnever\n--no-daemon\n") && !strings.contains(got, "bypass"), "its own -a: %q", got)
+	for own in ([]string{`-capproval_policy="on-request"`, `--config=sandbox_mode="read-only"`, `-c sandbox_workspace_write.network_access=false`}) {
+		got = argv_of(t, pid, {own}, CX_UI)
+		testing.expectf(t, strings.has_prefix(got, fmt.tprintf("%s\n--no-daemon\n", own)) && !strings.contains(got, "bypass"), "its own %s: %q", own, got)
+	}
 }
 
 // ---- text into Codex's composer ----

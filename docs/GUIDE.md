@@ -1134,8 +1134,9 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   Restart), never to a tab Atlas, a script or an app starts, and not to a tab whose own flags pick
   a sandbox or approval mode.
 - **Extra flags** on a tab (yours only, as for Claude) are checked against Codex's own: flags that
-  would change Deckhand's hooks or tools, the tab's folder, or run a Codex command instead of the
-  composer (`exec`, `login` …) are refused, with why.
+  would change Deckhand's hooks or tools, the tab's folder, Codex features or profiles (set those in
+  your `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …)
+  are refused, with why.
 - **Not yet**: read-only chats (Codex is not offered in Chats while **Start chats read-only** is
   on: Codex's read-only sandbox does not cover your MCP servers, and you can lift it from its
   composer), accounts, and Codex on another machine. [CODEX.md](CODEX.md) has the details.

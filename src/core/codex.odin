@@ -269,13 +269,10 @@ Codex_Flag :: struct {
 @(private = "file")
 CODEX_FLAGS_OK := [?]Codex_Flag {
 	{"--model", 'm', true},
-	{"--profile", 'p', true},
 	{"--sandbox", 's', true},
 	{"--ask-for-approval", 'a', true},
 	{"--config", 'c', true}, // its key is checked (codex_config_refused)
 	{"--add-dir", 0, true},
-	{"--enable", 0, true},
-	{"--disable", 0, true}, // not `hooks`
 	{"--local-provider", 0, true},
 	{"--oss", 0, false},
 	{"--search", 0, false},
@@ -302,14 +299,21 @@ CODEX_FLAGS_REFUSED := [?]struct {
 	{"--all", 0, "Deckhand picks the conversation"},
 	{"--include-non-interactive", 0, "Deckhand picks the conversation"},
 	{"--image", 'i', "a Codex tab starts without a prompt"},
+	{"--enable", 0, CODEX_FEATURES_WHY},
+	{"--disable", 0, CODEX_FEATURES_WHY},
+	{"--profile", 'p', CODEX_PROFILES_WHY},
 	{"--help", 'h', "it prints and exits"},
 	{"--version", 'V', "it prints and exits"},
 }
 
+CODEX_FEATURES_WHY :: "Codex features are set in your ~/.codex/config.toml, not per tab"
+CODEX_PROFILES_WHY :: "profiles are not supported per tab yet"
+
 // Why a -c key=value cannot go ("" = it can): nothing under `hooks` (Deckhand's hooks and their
 // trust), `mcp_servers.deckhand` or the whole `mcp_servers` table (Deckhand's tools), `features`
-// as a table or `features.hooks` (turns hooks off). The key as Codex reads it: before the first
-// `=`, a dotted path (quotes and spaces around a part ignored).
+// (any: some turn hooks off or change the daemon or MCP; Codex adds and renames them), `profile`
+// or `profiles` (a profile's place against Deckhand's -c is unchecked). The key as Codex reads it:
+// before the first `=`, a dotted path (quotes and spaces around a part ignored).
 @(private = "file")
 codex_config_refused :: proc(kv: string) -> string {
 	key, eq, _ := strings.partition(kv, "=")
@@ -320,7 +324,8 @@ codex_config_refused :: proc(kv: string) -> string {
 	second := len(parts) > 1 ? parts[1] : ""
 	if first == "hooks" do return "-c hooks… would change Deckhand's hooks or their trust"
 	if first == "mcp_servers" && (len(parts) == 1 || second == "deckhand") do return "-c mcp_servers.deckhand is Deckhand's own MCP server"
-	if first == "features" && (len(parts) == 1 || second == "hooks") do return "-c features.hooks would turn Deckhand's hooks off"
+	if first == "features" do return "-c features… is refused: " + CODEX_FEATURES_WHY
+	if first == "profile" || first == "profiles" do return "-c profile… is refused: " + CODEX_PROFILES_WHY
 	return ""
 }
 
@@ -361,21 +366,38 @@ codex_args_check :: proc(args: []string) -> string {
 			val = args[i]
 		}
 		if f.long == "--config" do if e := codex_config_refused(val); e != "" do return e
-		if f.long == "--disable" && strings.trim_space(val) == "hooks" do return "--disable hooks would turn Deckhand's hooks off"
 	}
 	return ""
 }
 
-// The long name of a flag element of args that passed codex_args_check ("" = a value).
+// Whether args (passed codex_args_check) choose how Codex asks or sandboxes: -s, -a,
+// --approve-for-me, full access itself, or a -c of approval_policy, sandbox_mode or
+// sandbox_workspace_write.
 @(private = "file")
-codex_flag_long :: proc(a: string) -> string {
-	if len(a) < 2 || a[0] != '-' do return ""
-	if a[1] == '-' {
-		n, _, _ := strings.partition(a, "=")
-		return n
+codex_args_choose_access :: proc(args: []string) -> bool {
+	for a, i in args {
+		if len(a) < 2 || a[0] != '-' do continue
+		kv := ""
+		if a[1] == '-' {
+			n, _, v := strings.partition(a, "=")
+			switch n {
+			case "--sandbox", "--ask-for-approval", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox": return true
+			case "--config": kv = v != "" ? v : (i + 1 < len(args) ? args[i + 1] : "")
+			}
+		} else {
+			switch a[1] {
+			case 's', 'a': return true
+			case 'c': kv = len(a) > 2 ? strings.trim_prefix(a[2:], "=") : (i + 1 < len(args) ? args[i + 1] : "")
+			}
+		}
+		if kv == "" do continue
+		key, _, _ := strings.partition(kv, "=")
+		first, _, _ := strings.partition(strings.trim_space(key), ".")
+		switch strings.trim(strings.trim_space(first), `"'`) {
+		case "approval_policy", "sandbox_mode", "sandbox_workspace_write": return true
+		}
 	}
-	for f in CODEX_FLAGS_OK do if f.short == a[1] do return f.long
-	return ""
+	return false
 }
 
 // What turning full access on asks the user (Set_Claude_Default_Flags with harness codex).
@@ -384,15 +406,10 @@ CODEX_FULL_ACCESS_CONFIRM :: "Start the Codex tabs you start with --dangerously-
 // args with the user's default Codex flags as the setting is NOW, after them (codex_start, for a
 // start the user makes; never saved into a tab's or a record's flags): full access
 // (--dangerously-bypass-approvals-and-sandbox), left out when the tab's flags already choose how
-// Codex asks or sandboxes (-s, -a, --approve-for-me, or it: Codex refuses the pair), or past
-// CLAUDE_ARGS_MAX. Temp.
+// Codex asks or sandboxes (codex_args_choose_access; Codex refuses it beside -a or
+// --approve-for-me), or past CLAUDE_ARGS_MAX. Temp.
 codex_with_defaults :: proc(args: []string) -> []string {
-	if !state.settings.codex_full_access || len(args) + 1 > CLAUDE_ARGS_MAX do return args
-	for a in args {
-		switch codex_flag_long(a) {
-		case "--sandbox", "--ask-for-approval", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox": return args
-		}
-	}
+	if !state.settings.codex_full_access || len(args) + 1 > CLAUDE_ARGS_MAX || codex_args_choose_access(args) do return args
 	list := make([dynamic]string, 0, len(args) + 1, context.temp_allocator)
 	append(&list, ..args)
 	append(&list, "--dangerously-bypass-approvals-and-sandbox")

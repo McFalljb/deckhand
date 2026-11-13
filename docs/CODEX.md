@@ -50,6 +50,9 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   It does not match what Deckhand promises for a read-only Claude, so it is not offered.
 - No accounts: Codex runs with the user's own `~/.codex` (or their `CODEX_HOME`); Deckhand never
   sets `CODEX_HOME`.
+- No profiles per tab (`-p`, `-c profile…` are refused): where a profile layers against Deckhand's
+  trailing `-c` overrides is unchecked, and a profile may carry `features.hooks`, `hooks.*` or
+  `mcp_servers.deckhand`. Revisit after a real-run check.
 - **Rename** changes Deckhand's title only, not Codex's own.
 - Conversation ids are one space across harnesses: when a Codex record and Claude Code's own
   transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
@@ -91,9 +94,8 @@ $SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> <user flags> --no-daemon -C <cw
   history entry and passed again on the user's resume, restore and restart (an agent's resume or
   restart starts without them). Checked by `codex_args_check` when given and again at every start
   (a saved tab whose flags fail does not start; the tab says why).
-- **An allowlist** (Codex 0.167.2's `--help`): `-m`/`--model`, `-p`/`--profile`, `-s`/`--sandbox`,
-  `-a`/`--ask-for-approval`, `-c`/`--config`, `--add-dir`, `--enable`, `--disable`,
-  `--local-provider`, `--oss`, `--search`, `--no-alt-screen`, `--strict-config`,
+- **An allowlist** (Codex 0.167.2's `--help`): `-m`/`--model`, `-s`/`--sandbox`,
+  `-a`/`--ask-for-approval`, `-c`/`--config`, `--add-dir`, `--local-provider`, `--oss`, `--search`, `--no-alt-screen`, `--strict-config`,
   `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`; a value as `-m o3`, `-mo3` or
   `--model=o3` (a separate value never starts with `-`: it would take Deckhand's next flag). Refused,
   each with its reason: anything else, so a newer Codex's new flag waits until it is looked at; a
@@ -101,17 +103,22 @@ $SHELL -l -c '<CODEX_TAB_CMD>' codex resume <id> <user flags> --no-daemon -C <cw
   prompt); `--no-daemon`, `-C`/`--cd`, `--worktree` (another folder), `--remote` and
   `--remote-auth-token-env` (another Codex: the hooks and the token check need the tab's own),
   `--dangerously-bypass-hook-trust`, `--last`, `--all`, `--include-non-interactive`, `-i`/`--image`,
-  `-h`, `-V`; a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
-  `hooks`, is `mcp_servers` or under `mcp_servers.deckhand`, is `features` or `features.hooks`;
-  `--disable hooks`.
+  `-h`, `-V`; `--enable`, `--disable` and a `-c` under `features` (Codex features are set in the
+  user's `config.toml`, not per tab: some turn hooks off, `codex_hooks` is an alias of `hooks`, and
+  others bear on the daemon and MCP); `-p`/`--profile` and a `-c` of `profile` or `profiles` (not
+  per tab yet); a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
+  `hooks`, is `mcp_servers` or under `mcp_servers.deckhand`.
 - **Full access in new Codex tabs** (`set_claude_default_flags` with `"harness": "codex"`,
   `User_Here`, off by default; Settings › Coding agents › Codex and the palette): turning it on is
   confirmed (`CODEX_FULL_ACCESS_CONFIRM`). It adds `--dangerously-bypass-approvals-and-sandbox` after
   the tab's flags at each start the user makes (as Claude's skip-permissions: new tab or session,
   the user's resume, a restored tab shown, the user's restart), never saved into a tab's flags.
-  Left out when the tab's flags set `-s`, `-a` or `--approve-for-me` (Codex refuses the flag beside
-  `-a` or `--approve-for-me`) or name it, and past 16 flags. Agents', scripts', panels' and apps'
-  starts never get it.
+  Left out when the tab's flags set `-s`, `-a`, `--approve-for-me` (Codex refuses the flag beside
+  `-a` or `--approve-for-me`) or a `-c` of `approval_policy`, `sandbox_mode` or
+  `sandbox_workspace_write`, or name it, and past 16 flags. Agents', scripts', panels' and apps'
+  starts never get it. A restart or resume of a Codex tab forwarded by a machine allowed to connect
+  counts as the user's (its saved flags and this default apply), as for Claude tabs: such a machine
+  acts as the user here.
 
 ## 2. The hooks and their trust
 

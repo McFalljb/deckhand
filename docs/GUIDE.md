@@ -1532,6 +1532,36 @@ under that project and ⌘T, as above).
   and its row offers **Keep running…**: a click asks that machine's login manager to turn it on
   for you (no password, no `sudo`). If it refuses, run `loginctl enable-linger` there yourself.
 
+#### Removing Deckhand's core from a machine
+
+Removing a machine here (**×**) leaves its core installed and its sessions running. To take
+Deckhand off that machine, remove it here first, then run these there. Stopping the session
+holder ends every session Deckhand runs on that machine.
+
+- **Linux.** The install wrote the systemd user unit `~/.config/systemd/user/deckhand-core.service`
+  and Deckhand's folders `~/.local/share/deckhand` (the core, its data) and `~/.local/state/deckhand`
+  (its sockets); the session holder runs in a scope `deckhand-holder-….scope`, and a core started
+  without the unit in `deckhand-core-….scope`:
+
+  ```sh
+  systemctl --user stop 'deckhand-holder-*.scope'
+  systemctl --user stop deckhand-core.service 'deckhand-core-*.scope'
+  rm -f ~/.config/systemd/user/deckhand-core.service
+  systemctl --user daemon-reload
+  rm -rf ~/.local/share/deckhand ~/.local/state/deckhand
+  ```
+
+  If you turned linger on only for Deckhand, `loginctl disable-linger` turns it off again.
+- **Mac.** The install put Deckhand Core.app in `~/Library/Application Support/Deckhand/core`,
+  and the core keeps its data and sockets in that folder too; nothing goes in
+  `~/Library/LaunchAgents`. If you also use Deckhand on that Mac, it is that Deckhand's own core
+  and folder: leave them. Otherwise:
+
+  ```sh
+  pkill -x deckhand-core; pkill -x deckhand-core-serve
+  rm -rf ~/Library/Application\ Support/Deckhand
+  ```
+
 ### Sessions & chats
 
 - **Keep sessions running when Deckhand quits** and **Run sessions in a background core** (both
@@ -2257,7 +2287,9 @@ shell (`$SHELL -i -l`, at most 4 s) for its environment and merges it in: your s
 reach your tabs), and `PATH` becomes the shell's, followed by any folders only the original `PATH`
 had. If the shell fails or takes over 4 s, `PATH` gets `~/.pi/agent/bin`, `/opt/homebrew/bin`,
 `/usr/local/bin`, `~/.local/bin`, `~/.npm-global/bin`, `~/.volta/bin` and `~/.bun/bin` where they
-exist. Values are never logged.
+exist. Values are never logged. Another machine's core does the same when it starts (a Linux
+core, run by systemd, and a Mac's core started over ssh have no window or terminal to take an
+environment from), so a `codex` or `claude` in `~/.local/bin` is found there.
 
 **You changed your shell profile.** Use the gear's **Refresh shell environment** (or ⌘K): new tabs
 (pi, Claude, shell, apps) and jobs without a saved `PATH` use the result. Tabs already open keep

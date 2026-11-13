@@ -453,12 +453,14 @@ login_env_fix :: proc(gui: bool, shell: string, dirs: []string, timeout: time.Du
 	if gui do env, result, _ = login_env_shell_merge(env, login_env_from_claude(inherited), shell, timeout, probe, dirs)
 	for e in inherited {
 		k, _, _ := strings.partition(e, "=")
-		if _, keep := env_lookup(env, k); !keep do os.unset_env(k) // env-read-ok: merging by key
+		if _, keep := env_lookup(env, k); !keep do posix.unsetenv(strings.clone_to_cstring(k, context.temp_allocator)) // env-read-ok: merging by key
 	}
 	for e in env {
 		k, _, v := strings.partition(e, "=")
 		if cur, have := env_lookup(inherited, k); have && cur == v do continue // env-read-ok: merging by key
-		os.set_env(k, v)
+		// libc's setenv: os.set_env, reached from deckhand-core-serve (login_env_adopt), crashes
+		// Odin's LLVM backend at -o:speed ("Unknown handled type: i32 -> i32"; dev-2026-09)
+		posix.setenv(strings.clone_to_cstring(k, context.temp_allocator), strings.clone_to_cstring(v, context.temp_allocator), true)
 	}
 	return result
 }
@@ -473,12 +475,15 @@ login_env: struct {
 	running:  bool,
 }
 
-// main's call: the user's shell, the usual folders.
-login_env_startup :: proc() {
+// main's call: the user's shell, the usual folders. no_window: a process no terminal started
+// either (`connect`, run by another machine's ssh: login_env_adopt), taken as launchd's child.
+login_env_startup :: proc(no_window := false) {
 	path := os.get_env("PATH", context.temp_allocator)
 	test_mode := hook_env(.Script) != ""
 	env, _ := os.environ(context.temp_allocator)
-	gui := login_env_gui_launch(int(posix.getppid()), path, login_env_gui_switch(), test_mode, login_env_from_claude(env))
+	ppid := int(posix.getppid())
+	if no_window do ppid = 1
+	gui := login_env_gui_launch(ppid, path, login_env_gui_switch(), test_mode, login_env_from_claude(env))
 	login_env.gui = gui
 	login_env.from_claude = login_env_from_claude(env)
 	if gui do login_env.launch = env_clone(login_env_strip_claude(env, false)) // a refresh asks with it (markers out)
@@ -499,11 +504,27 @@ core_launch_env :: proc(env: []string, from_tab := false) -> []string {
 // window's launch, so it asks the shell only for a refresh: when that window was a GUI launch (it
 // says so with DECKHAND_GUI_LAUNCH=1: core_launch), or when its own launch passes the same test
 // (launchd starts it, as it starts a Dock launch). Its tabs never get that name (env_tab_dropped).
-login_env_adopt :: proc() {
+//
+// no_window: a core that never has a window to inherit from (Linux: systemd's environment, or
+// connect's over ssh; #135) is taken as launchd's child, and so asks the login shell at its
+// start too, exactly as a window's launch does (login_env_fix: the same merge, skip list and
+// timeout), unless it inherited a core's environment already merged (inherited: a handover's
+// successor) or DECKHAND_GUI_LAUNCH=0 or test mode says no. Call before any thread starts.
+login_env_adopt :: proc(no_window := false, inherited := false, probe: Login_Env_Probe = login_env_ask) {
 	env, _ := os.environ(context.temp_allocator)
 	login_env.from_claude = login_env_from_claude(env)
-	login_env.gui = login_env_gui_launch(int(posix.getppid()), os.get_env("PATH", context.temp_allocator), login_env_gui_switch(), hook_env(.Script) != "", login_env.from_claude)
+	ppid := int(posix.getppid())
+	if no_window do ppid = 1 // as launchd's child: never a terminal's
+	login_env.gui = login_env_gui_launch(ppid, os.get_env("PATH", context.temp_allocator), login_env_gui_switch(), hook_env(.Script) != "", login_env.from_claude)
 	if login_env.gui do login_env.launch = env_clone(login_env_strip_claude(env, false)) // a refresh asks with it
+	if login_env_adopt_asks(no_window, inherited, login_env.gui) {
+		_ = login_env_fix(true, login_shell(), login_env_dirs(os.get_env("HOME", context.temp_allocator)), LOGIN_ENV_TIMEOUT, probe)
+	}
+}
+
+// Whether a separate core asks the login shell at its start (login_env_adopt).
+login_env_adopt_asks :: proc(no_window, inherited, gui: bool) -> bool {
+	return no_window && !inherited && gui
 }
 
 // The environment new child processes start from: the refreshed one, else

@@ -221,6 +221,48 @@ login_env_shell_wins :: proc(t: ^testing.T) {
 	testing.expect_value(t, got, "SSH_AUTH_SOCK=/1p/agent.sock|LE_SAME=v|LE_ONLY_INHERITED=i|PWD=/inh|PATH=/opt/homebrew/bin:/usr/bin:/bin")
 }
 
+// #135: a core with no window to inherit from (Linux: systemd's PATH, which is not launchd's bare
+// one) asks the login shell at its start, through the same merge (Deckhand's own names never come
+// from it); a core with a window, or a handover's successor, does not.
+@(test)
+login_env_windowless_core_asks :: proc(t: ^testing.T) {
+	SYSTEMD_PATH :: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+	testing.expect(t, login_env_adopt_asks(true, false, true))
+	testing.expect(t, !login_env_adopt_asks(false, false, true), "a window's core: its window asked")
+	testing.expect(t, !login_env_adopt_asks(true, true, true), "a successor: its predecessor's environment")
+	testing.expect(t, !login_env_adopt_asks(true, false, false), "turned off, or test mode")
+	old_path := strings.clone(os.get_env("PATH", context.temp_allocator), context.temp_allocator)
+	old_gui, had_gui := os.lookup_env("DECKHAND_GUI_LAUNCH", context.temp_allocator)
+	saved := login_env
+	defer {
+		os.set_env("PATH", old_path)
+		if had_gui do os.set_env("DECKHAND_GUI_LAUNCH", old_gui)
+		else do os.unset_env("DECKHAND_GUI_LAUNCH")
+		os.unset_env("LE_PROFILE_VAR")
+		login_env = saved
+	}
+	os.unset_env("DECKHAND_GUI_LAUNCH")
+	os.unset_env("DECKHAND_JOB")
+	os.set_env("PATH", SYSTEMD_PATH)
+	le_stub_answer = {"PATH=/home/le/.local/bin:/usr/bin:/bin", "LE_PROFILE_VAR=1", "DECKHAND_JOB=from-rc"}
+	le_stub_ok = true
+	le_stub_calls = 0
+	login_env_adopt(no_window = false, probe = le_stub_probe)
+	testing.expect_value(t, le_stub_calls, 0) // the test runner is its parent and PATH is not bare: a terminal
+	login_env_adopt(no_window = true, inherited = true, probe = le_stub_probe)
+	testing.expect_value(t, le_stub_calls, 0)
+	testing.expect(t, login_env.gui, "a successor can still refresh")
+	login_env_adopt(no_window = true, probe = le_stub_probe)
+	testing.expect_value(t, le_stub_calls, 1)
+	testing.expect_value(t, os.get_env("PATH", context.temp_allocator), "/home/le/.local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin")
+	testing.expect_value(t, os.get_env("LE_PROFILE_VAR", context.temp_allocator), "1")
+	_, job := os.lookup_env("DECKHAND_JOB", context.temp_allocator)
+	testing.expect(t, !job, "Deckhand's own names never come from the shell")
+	os.set_env("DECKHAND_GUI_LAUNCH", "0")
+	login_env_adopt(no_window = true, probe = le_stub_probe)
+	testing.expect_value(t, le_stub_calls, 1) // turned off
+}
+
 // GUI or terminal: launchd as the parent, a bare PATH, or the switch.
 @(test)
 login_env_gui_detection :: proc(t: ^testing.T) {

@@ -52,6 +52,7 @@ import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
+import "core:thread"
 import "core:time"
 
 import cw "../corewire"
@@ -1566,6 +1567,9 @@ machine_remove_apply :: proc(c: Machine_Remove, caller: Caller) -> (Result, bool
 	page_forwards_drop(l.no) // its web pages' ssh children end
 	machine_install_drop(l.no, removed = true) // its install ends (and its remote cleanup runs)
 	mlink_close(l, wait = true)
+	// its ssh master (ControlPersist=600) ends now, not 10 minutes later (#135); kept while its
+	// install's remote cleanup still rides it
+	if !machine_install_busy(l.no) do machine_master_exit(l.m)
 	ordered_remove(&mach.links, i)
 	if w := machines_save(); w != "" {
 		inject_at(&mach.links, i, l)
@@ -1642,6 +1646,41 @@ machine_login_argv :: proc(m: Machine, run: string) -> (argv: []string, why: str
 	out := make([]string, 6, context.temp_allocator)
 	out[0], out[1], out[2], out[3], out[4], out[5] = "/bin/sh", "-c", `exec ssh -S "$1" -M -o ControlPersist=600 -- "$2"`, "deckhand-login", ctl, m.target
 	return out, ""
+}
+
+// `ssh -S <ctl> -O exit -- <target>`: asks the master on the machine's control socket to end
+// (argv only, BatchMode: never a prompt). A test build's via machine has none (why set).
+machine_master_exit_argv :: proc(m: Machine, run: string) -> (argv: []string, why: string) {
+	if m.via != "" do return nil, "a test build's via machine has no ssh master"
+	if w := machine_target_error(m.target); w != "" do return nil, w
+	ctl := machine_ctl_path(run, m.no)
+	if len(ctl) > MACHINE_CTL_MAX do return nil, fmt.tprintf("ssh's control socket %s is longer than %d bytes", ctl, MACHINE_CTL_MAX)
+	out := make([]string, 9, context.temp_allocator)
+	out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7], out[8] = "ssh", "-S", ctl, "-o", "BatchMode=yes", "-O", "exit", "--", m.target
+	return out, ""
+}
+
+// The machine's master ends, best effort: only when its control socket is there, on a worker (5 s
+// at most: run_group), its answer unread. Never blocks the core's loop.
+machine_master_exit :: proc(m: Machine) {
+	run, rwhy := sock_runtime_dir_why(context.temp_allocator)
+	if rwhy != "" do return
+	argv, why := machine_master_exit_argv(m, run)
+	if why != "" || path_kind(argv[2]) == .Missing do return
+	heap := runtime.heap_allocator()
+	own := make([]string, len(argv), heap)
+	for a, i in argv do own[i] = strings.clone(a, heap)
+	forget :: proc(argv: []string) {
+		heap := runtime.heap_allocator()
+		for a in argv do delete(a, heap)
+		delete(argv, heap)
+	}
+	worker :: proc(argv: []string) {
+		run_group(argv, 5 * time.Second)
+		free_all(context.temp_allocator)
+		forget(argv)
+	}
+	if thread.create_and_start_with_poly_data(own, worker, self_cleanup = true) == nil do forget(own)
 }
 
 MACHINE_LOGIN_NO_SESSION :: "Open a chat or session on this Mac, then click Log in… again: the login runs in a tab there"

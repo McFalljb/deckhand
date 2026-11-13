@@ -330,6 +330,7 @@ tarball_verify :: proc(path, sig_text, version: string, want_size: i64, key: str
 	if !sok do return "its signature file is not one Deckhand reads"
 	manifest := usig.manifest(version, name, size, sum, cd, context.temp_allocator, format)
 	if !usig.verify(key, transmute([]byte)manifest, sig_b64) do return "the download's signature does not match, so nothing was installed: try again later, or update Deckhand on this Mac first"
+	log_fln("Deckhand: install: %s verified, sha256 %s", name, sum) // what was installed, for the record (#135)
 	return ""
 }
 
@@ -970,6 +971,12 @@ machine_install_drop :: proc(no: u64, removed := false) {
 			job_free(j)
 		}
 	}
+}
+
+// A job of machine no's is still there (a removed machine's: its remote cleanup).
+machine_install_busy :: proc(no: u64) -> bool {
+	for j in inst.jobs do if j.no == no do return true
+	return false
 }
 
 // The core's loop: children read and reaped, workers' answers taken, deadlines.

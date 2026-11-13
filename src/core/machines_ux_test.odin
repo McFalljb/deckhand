@@ -265,6 +265,31 @@ machines_hello_codex_feature :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "this core says it")
 }
 
+// #135: get_state's machines[] carries each machine's codex (its hello's codex_tabs), and is [] with none.
+@(test)
+machines_get_state_codex_and_empty :: proc(t: ^testing.T) {
+	saved := state.machines
+	defer state.machines = saved
+	state.machines = nil
+	testing.expect(t, strings.contains(state_json(), `"machines":[]`), "no machine: []")
+	views := []Machine_View{{no = 3, name = "nuc", status = .Online, codex = true}, {no = 4, name = "mini", status = .Online}}
+	state.machines = views
+	gs := state_json()
+	testing.expect(t, strings.contains(gs, `"name":"nuc","status":"online"`) && strings.contains(gs, `"codex":true`), "nuc: codex")
+	testing.expect(t, strings.contains(gs, `"codex":false`), "mini: no codex")
+}
+
+// #135: a removed machine's ssh master ends: `ssh -S <its ctl> -O exit -- <target>`, never a prompt.
+@(test)
+machines_master_exit_argv :: proc(t: ^testing.T) {
+	argv, why := machine_master_exit_argv({no = 7, target = "me@nuc"}, "/tmp/dk-run")
+	testing.expect_value(t, why, "")
+	testing.expect_value(t, strings.join(argv, " ", context.temp_allocator), "ssh -S /tmp/dk-run/ssh-7.ctl -o BatchMode=yes -O exit -- me@nuc")
+	_, why = machine_master_exit_argv({no = 7, target = "-oProxyCommand=x"}, "/tmp/dk-run")
+	testing.expect(t, why != "", "a target that is an option is refused")
+	_, why = machine_master_exit_argv({no = 7, target = "nuc", via = "deckhand-core-serve connect"}, "/tmp/dk-run")
+	testing.expect(t, why != "", "a via machine has no master")
+}
 
 // Allow other machines to connect: turning it on asks first, with the warning; off does not.
 @(test)

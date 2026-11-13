@@ -1629,7 +1629,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	fmt.sbprintf(b, `,"claude_installed":%v`, claude_installed()) // Claude Code found (claude.odin): new_claude_session would start
 	fmt.sbprintf(b, `,"codex_installed":%v`, codex_installed()) // Codex found (codex.odin): new_claude_session harness codex would start
 	if !writing_tab_view do claude_accounts_json(b) // the Claude Code accounts (claude_accounts.odin): labels and folders; the full snapshot only
-	if !writing_tab_view && len(s.machines) > 0 { // other machines over SSH (machines.odin): never their ssh target
+	if !writing_tab_view { // other machines over SSH (machines.odin): never their ssh target; [] for none
 		strings.write_string(b, `,"machines":[`)
 		for m, i in s.machines {
 			if i > 0 do strings.write_byte(b, ',')
@@ -1646,7 +1646,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			// its install or update, Update's offer, linger, its coding agents (machine_install.odin)
 			fmt.sbprintf(b, `,"job":"%s","job_note":`, strings.to_lower(fmt.tprint(m.job), context.temp_allocator))
 			json_quote(b, m.job_note)
-			fmt.sbprintf(b, `,"update":"%s","linger":"%s","checklist":[`, strings.to_lower(fmt.tprint(m.update), context.temp_allocator), strings.to_lower(fmt.tprint(m.linger), context.temp_allocator))
+			fmt.sbprintf(b, `,"update":"%s","linger":"%s","codex":%v,"checklist":[`, strings.to_lower(fmt.tprint(m.update), context.temp_allocator), strings.to_lower(fmt.tprint(m.linger), context.temp_allocator), m.codex) // codex: Codex tabs may start there (its hello's codex_tabs)
 			for c, k in m.checklist {
 				if k > 0 do strings.write_byte(b, ',')
 				strings.write_string(b, `{"id":`)

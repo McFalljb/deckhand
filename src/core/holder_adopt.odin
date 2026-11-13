@@ -176,6 +176,19 @@ handover_clear :: proc() {
 
 // ---- quit ----
 
+// A separate core's clean stop (SIGTERM, Quit, the idle exit: serve_stop, after close_all) that
+// handed nothing over (no held tab, or Keep sessions off: holder_handover said false) still says
+// GOODBYE (a handover with no terminals): the holder logs a clean stop, not a crash, and its
+// supervisor does not relaunch a core that was stopped on purpose (#135). No-op once a GOODBYE
+// went (a handover, a shutdown) or with no holder, and at an update's quit (core_handover_due):
+// there the old crash-style end stays, so the supervisor relaunches a core if the successor
+// never comes (a GOODBYE without a successor would end its watch).
+holder_stop_clean :: proc() {
+	if !hc.on || hc.handed || sync.atomic_load(&hc.lost) || core_handover_due() do return
+	handover_clear() // an older run's handover.json never pairs with this goodbye
+	holder_goodbye("handover")
+}
+
 // At quit with keep_sessions on: true once the holder keeps the sessions; the tabs are then
 // left running (close_all sends no RELEASE). False: nothing is kept (no holder, the setting
 // off, no held tab), so quit as without a holder. When the data dir can't be written (§7.7

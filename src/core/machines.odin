@@ -1184,13 +1184,9 @@ mlink_probe_done :: proc(l: ^Mach_Link, now: time.Tick) {
 
 // Whether a hello reply's result.data.features lists name (exactly; no list: no).
 hello_feature :: proc(line, name: string) -> bool {
-	v, err := jg.parse_string(line, .JSON, true, context.temp_allocator)
-	if err != nil do return false
-	r, _ := v.(json.Object)
-	res, _ := r["result"].(json.Object)
-	data, _ := res["data"].(json.Object)
-	list, _ := data["features"].(json.Array)
-	for f in list do if s, is := f.(json.String); is && s == name do return true
+	n, ok := strconv.parse_int(json_path(line, "result.data.features.#")) // a list (json_path's guarded parse)
+	if !ok do return false
+	for i in 0 ..< min(n, 32) do if json_path(line, fmt.tprintf("result.data.features.%d", i)) == name do return true
 	return false
 }
 

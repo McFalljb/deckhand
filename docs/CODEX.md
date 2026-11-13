@@ -296,8 +296,11 @@ there is the same `new_claude_session` / `new_claude_tab` with `"harness": "code
 `open_session` on one of its Codex rows (a record, or a conversation found on its disk), forwarded
 as the user's (or Atlas's). That core runs it as its own: its `codex` (the PATH its tabs get), its
 CLI's path in the hooks and the MCP server, the trust hashes computed from that path, its socket and
-a token of its own in the tab's environment. Nothing of the command line comes from the hub: the
-forwarded command names a project, a session or a row, never a path, a flag or a hash.
+a token of its own in the tab's environment, and its own defaults: a start forwarded as the user's
+is the user's there, so that machine's **Full access in new Codex tabs** applies (never this Mac's),
+added by that core when codex starts (§1a); Atlas's gets none. The hub adds nothing to the command:
+it names a project, a session or a row, and the only flags in it are ones the user typed for that
+tab, which that core checks under its own flag rule (§1a), as it would its own user's.
 
 - **Only to a core that says it can.** A core's framed hello lists `codex_tabs` in `features`. The
   hub offers Codex (the picker, New Codex tab in the project's menu) only for a machine whose last

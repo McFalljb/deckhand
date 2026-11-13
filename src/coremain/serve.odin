@@ -95,9 +95,6 @@ serve_main :: proc(args: []string) -> int {
 	core.core_separate = true
 	core.app_context = context
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
-	// a refresh of the login shell's environment (login_env.odin); a Linux core has no window to
-	// inherit it from, so it asks at its start (a successor inherited its predecessor's)
-	core.login_env_adopt(no_window = ODIN_OS == .Linux, inherited = secret_stdin)
 	if !serve_platform() do return 1
 	if !serve_platform_prepare(run) do return 1
 	core.home_root = strings.clone(data)
@@ -107,6 +104,11 @@ serve_main :: proc(args: []string) -> int {
 		core.core_refused_write(run, why) // its window says why (client_core_dial)
 		return 3
 	}
+	// a refresh of the login shell's environment (login_env.odin); a Linux core has no window to
+	// inherit it from, so it asks at its start (a successor inherited its predecessor's). After the
+	// instance lock (a surplus core never runs the login shell), before any thread starts; what
+	// runs before it uses the inherited environment (serve_platform_prepare's loginctl: its PATH)
+	core.login_env_adopt(no_window = ODIN_OS == .Linux, inherited = secret_stdin)
 	core.log_fln("deckhand-core serve: pid %d, data %s, run %s", posix.getpid(), data, run)
 	core.event_log_open(core.home_root)
 	{

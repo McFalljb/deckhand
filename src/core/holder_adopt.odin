@@ -180,9 +180,11 @@ handover_clear :: proc() {
 // handed nothing over (no held tab, or Keep sessions off: holder_handover said false) still says
 // GOODBYE (a handover with no terminals): the holder logs a clean stop, not a crash, and its
 // supervisor does not relaunch a core that was stopped on purpose (#135). No-op once a GOODBYE
-// went (a handover, a shutdown) or with no holder.
+// went (a handover, a shutdown) or with no holder, and at an update's quit (core_handover_due):
+// there the old crash-style end stays, so the supervisor relaunches a core if the successor
+// never comes (a GOODBYE without a successor would end its watch).
 holder_stop_clean :: proc() {
-	if !hc.on || hc.handed || sync.atomic_load(&hc.lost) do return
+	if !hc.on || hc.handed || sync.atomic_load(&hc.lost) || core_handover_due() do return
 	handover_clear() // an older run's handover.json never pairs with this goodbye
 	holder_goodbye("handover")
 }

@@ -47,6 +47,11 @@ when ODIN_TEST {
 	}
 }
 
+when TEST_HOOKS {
+	// Tests: the core is quitting for a handover (core_handover_due), or not.
+	core_handover_quit_set :: proc(on: bool) {handover.quit = on}
+}
+
 // This process is a separate core (deckhand-core-serve: coremain sets it).
 core_separate: bool
 

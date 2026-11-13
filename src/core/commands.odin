@@ -1039,7 +1039,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		}
 		p.by_hand = true // a top-level row (project_tidy.odin)
 		list_remove(&state.sidebar.hidden_projects, p.cwd) // adding it again shows it
-		select_project(p^)
+		if !caller.hub do select_project(p^) // a hub's: its window selects its mirror; this machine's own window keeps its selection
 		return {ok = true, created_id = p.id}, true
 	case Select_Project:
 		p := find_project(c.project_id)

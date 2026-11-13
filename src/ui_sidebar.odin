@@ -1850,7 +1850,7 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 		if core.sidebar_filtering() do list_note("No matches", 0, text_w_max)
 		else if live { 	// nothing there: a folder of it added from here (its core checks it)
 			wrapped_note(MACHINE_EMPTY_HINT, text_w_max)
-			action_row(clay.ID("machfolder", u32(m.no)), Hit_Machine_Add_Folder(m.no), .Plus, machine_add_folder_label(m.name), 0, text_w_max)
+			if m.hub_add_project do action_row(clay.ID("machfolder", u32(m.no)), Hit_Machine_Add_Folder(m.no), .Plus, machine_add_folder_label(m.name), 0, text_w_max)
 		}
 	}
 	gap(GAP_SECTION)
@@ -2008,7 +2008,9 @@ machine_menu_items :: proc(no: u64, items: ^[dynamic]core.Menu_Item) {
 		case .Refused, .Unsupported: append(items, core.Menu_Item{label = "Try again", cmd = core.Machine_Connect{no = no}}) // after the fix on that machine
 		}
 		if m.status == .Online {
-			append(items, core.Menu_Item{label = machine_add_folder_label(m.name)}) // menu_run: the palette asks for the path
+			// only while this window's core says that machine's core takes one (an older core of
+			// either never says so: it would add the path on this Mac, or take it relative there)
+			if m.hub_add_project do append(items, core.Menu_Item{label = machine_add_folder_label(m.name)}) // menu_run: the palette asks for the path
 			append(items, core.Menu_Item{label = "Open web page…"}) // menu_run: the palette asks for the port
 		}
 		if len(items) > 0 do append(items, core.Menu_Item{sep = true})

@@ -1360,7 +1360,9 @@ path against its own working directory, or a folder that is not there), else it 
 nothing sent ("on <machine>: its Deckhand is too old to add a folder from here: update Deckhand
 there…"); a `cwd` that is not `/…`, `~` or `~/…` is refused here too. It is sent as
 `{"type":"add_project","cwd":…}` (`machine` dropped); that core checks the folder (it exists there
-and is a folder) and keeps the project as its own. Its `created_id`, packed, is selected here once
+and is a folder) and keeps the project as its own (not selected there: that machine's own window keeps its
+selection). The window offers it only for a machine whose `machines[].hub_add_project` (this
+core's reading of that hello, in the window's state stream) is true. Its `created_id`, packed, is selected here once
 the mirror has it; nothing is added on this Mac. A refusal from there is a toast for the user's
 (*Add folder: on <machine>: no such folder: …*). Not forwarded: `terminal_link` (the user's click opens on this Mac, in
 the default browser, after the same checks as a local terminal's link; anyone else's is refused).

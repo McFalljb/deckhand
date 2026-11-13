@@ -378,7 +378,7 @@ folder_palette_results :: proc(query: string) -> []Palette_Item {
 	out := make([dynamic]Palette_Item, context.temp_allocator)
 	q := strings.trim_space(query)
 	if !core.hub_folder_form(q) do return out[:]
-	for m in state.machines do if m.no == palette.folder_for {
+	for m in state.machines do if m.no == palette.folder_for && m.hub_add_project {
 		append(&out, Palette_Item{kind = .Folder, key = fmt.tprintf("folder:%d", m.no), title = fmt.tprintf("Add %s on %s", q, m.name), path = strings.clone(q, context.temp_allocator), id = m.no})
 	}
 	return out[:]

@@ -287,8 +287,8 @@ and the folders you add from here: **Add folder on nuc…** (its **…** menu, a
 with no projects yet) asks for the folder's path on that machine in the palette (`~/code/app` or
 `/srv/app`; there is no file browser of another machine). That machine's Deckhand checks it is a
 folder there and keeps the project, as if you had added it at its own window; a path that is not
-there is refused with its words. A machine whose Deckhand is too old for this says to update
-Deckhand there. The
+there is refused with its words. It is offered only while both this Mac's Deckhand and that
+machine's are new enough for it (update Deckhand there if it is missing). The
 palette names the machine of its items that are on another one (*… · on nuc*). Click an open session to show it, or one of a project's sessions to open
 it there (**+ New session** under it starts one there, with what that machine has installed and its
 own Claude Code account; Codex once that machine runs a Deckhand that starts Codex tabs: an older

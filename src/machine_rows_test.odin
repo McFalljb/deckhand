@@ -72,6 +72,11 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	// their menus: Settings' Machines group from both; this Mac's adds a machine
 	menu_open(Menu_Machine(0), {})
 	testing.expect_value(t, menu_labels(), "Add a machine…|Machines settings…")
+	// Add folder on nuc…: only while this window's core says that machine's core takes one (an
+	// older core of either never says so: it would add the path here, or take it relative there)
+	menu_open(Menu_Machine(3), {})
+	testing.expect_value(t, menu_labels(), "Open web page…|-|Rename…|Remove…|-|Machines settings…")
+	state.machines[0].hub_add_project = true
 	menu_open(Menu_Machine(3), {})
 	testing.expect_value(t, menu_labels(), "Add folder on nuc…|Open web page…|-|Rename…|Remove…|-|Machines settings…")
 	// its open session's menu (#114; right-click on its row, online): only what acts there, Peek
@@ -143,7 +148,15 @@ machine_rows_remote :: proc(t: ^testing.T) {
 
 	// an online machine with nothing: what makes a project appear there
 	testing.expect(t, strings.contains(drawn_text(), "No projects there yet"), "the empty machine's hint")
-	// ...and a folder of it added from here: the palette asks for a path there (#135)
+	// ...and a folder of it added from here, once its core says it takes one: the palette asks for
+	// a path there (#135)
+	got = drawn_text()
+	testing.expectf(t, !strings.contains(got, "Add folder on box") && !clay_found("machfolder", 4), "an older core's: no row: %q", got)
+	palette_open_folders(4)
+	tf_set(&palette.field, "~/code/app")
+	testing.expect_value(t, len(palette_results()), 0) // nor a palette row
+	palette_reset()
+	state.machines[1].hub_add_project = true
 	got = drawn_text()
 	testing.expectf(t, strings.contains(got, "No projects there yet\nAdd folder on box…\n") && clay_found("machfolder", 4), "its Add folder row: %q", got)
 	palette_open_folders(4)

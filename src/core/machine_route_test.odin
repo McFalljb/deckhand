@@ -809,10 +809,49 @@ hub_add_project_checks :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.projects), 0)
 	r := run_command(Add_Project{cwd = fmt.tprintf("%s/sub/", dir)}, hub)
 	testing.expect(t, r.ok && r.created_id != 0, r.error)
+	testing.expect_value(t, state.selected_project, 0) // this machine's own window keeps its selection (the hub selects its mirror)
 	if testing.expect_value(t, len(state.projects), 1) do testing.expect_value(t, state.projects[0].cwd, real_path(fmt.tprintf("%s/sub", dir)))
 	// ~/… is under this machine's HOME
 	at, why := hub_folder("~")
 	testing.expect(t, why == "" && at == home, why)
+}
+
+// The window offers Add folder on <machine>… only on what its core says (#135 review): the
+// machine's hub_add_project is in the window's state stream; an older core's stream has no such
+// field, which the window reads as no.
+@(test)
+hub_add_project_reaches_window :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := State{}
+	s.machines = make([]Machine_View, 1)
+	defer delete(s.machines)
+	s.machines[0] = {no = 3, name = "nuc", status = .Online, hub_add_project = true}
+	text := state_full_json(&s)
+	r: State
+	testing.expect_value(t, replica_apply(&r, text, context.allocator), "")
+	if testing.expect_value(t, len(r.machines), 1) do testing.expect(t, r.machines[0].hub_add_project, "carried")
+	replica_free(&r, context.allocator)
+	old, _ := strings.replace_all(text, `,"hub_add_project":true`, "", context.temp_allocator)
+	testing.expect(t, old != text, "the field is in the stream")
+	o: State
+	testing.expect_value(t, replica_apply(&o, old, context.allocator), "")
+	if testing.expect_value(t, len(o.machines), 1) do testing.expect(t, !o.machines[0].hub_add_project, "an older core's: not offered")
+	replica_free(&o, context.allocator)
+}
+
+// New session on another machine with no harness to offer (new_session_ui): what its toast says.
+// Codex there, its core too old to start Codex tabs from here: never "no coding agent".
+@(test)
+remote_no_harness_text :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	state = State{}
+	defer state = State{}
+	state.machines = make([]Machine_View, 1)
+	checks := []Machine_Check{{id = "pi", state = .Missing}, {id = "claude", state = .Missing}, {id = "codex", state = .Ok}}
+	state.machines[0] = {no = 3, name = "nuc", status = .Online, checklist = checks}
+	testing.expect(t, strings.contains(machine_no_harness_note(3), "too old to start Codex tabs"), machine_no_harness_note(3))
+	checks[2].state = .Missing
+	testing.expect(t, strings.contains(machine_no_harness_note(3), "No coding agent is installed"), machine_no_harness_note(3))
 }
 
 } // when TEST_HOOKS

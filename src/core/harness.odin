@@ -285,3 +285,15 @@ machine_codex :: proc(no: u64) -> bool {
 }
 
 
+
+// New session on machine no offers nothing (new_session_choices): it opens a session there anyway
+// (new_session_ui), and this says why. Codex there but its core too old to start Codex tabs from
+// here: that, not "no coding agent".
+machine_no_harness_note :: proc(no: u64) -> string {
+	for m in state.machines do if m.no == no && !m.codex {
+		for c in m.checklist do if c.id == "codex" && (c.state == .Ok || c.state == .Too_Old || c.state == .Unchecked) {
+			return fmt.tprintf("On %s: %s; its pi tab says how to install pi, and ⌘T opens a terminal there", m.name, CODEX_REMOTE)
+		}
+	}
+	return "No coding agent is installed on that machine yet: its pi tab says how to install one, and ⌘T opens a terminal there"
+}

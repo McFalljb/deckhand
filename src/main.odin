@@ -185,7 +185,7 @@ init :: proc "c" () {
 	if core.setup_due() && (!core.autotest_active || core.hook_env(.First_Run) == "1") do core.run_command(core.Setup_Sheet{open = true})
 	// `deckhand DIR` adds/selects DIR and starts a new chat there.
 	if dir != "" {
-		r := core.run_command(core.Add_Project{dir})
+		r := core.run_command(core.Add_Project{cwd = dir})
 		// only in DIR's own project: a failed add starts nothing (never the one selected before)
 		app.launch_project = launch_project(r)
 		if app.launch_project != 0 do app.pending_start = true
@@ -246,7 +246,7 @@ init_separate :: proc(note := "") -> bool {
 	if note != "" do toast_show(note)
 	// `deckhand DIR`: DIR's project, and a new chat there once the pane has a size
 	if app_args.dir != "" {
-		r, _ := client_call_wait(core.Add_Project{app_args.dir}, 5 * time.Second)
+		r, _ := client_call_wait(core.Add_Project{cwd = app_args.dir}, 5 * time.Second)
 		app.launch_project = launch_project(r)
 		if app.launch_project != 0 do app.pending_start = true
 		else do fmt.eprintfln("Deckhand: %s: %s", app_args.dir, r.error)
@@ -954,7 +954,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
 		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
 		case Hit_Close_Session: ui_do(core.Close_Session{session = u64(hit)})
-		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine, Hit_Machine_Head, Hit_Machine_More, Hit_Machine_Add, Hit_Attention:
+		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine, Hit_Machine_Head, Hit_Machine_More, Hit_Machine_Add, Hit_Machine_Add_Folder, Hit_Attention:
 			sidebar_click(hit, app.pointer)
 		case Hit_Agent:     drawer_click(hit)
 		case Hit_Files: // files_event took it

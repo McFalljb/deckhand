@@ -141,6 +141,7 @@ Machine_View :: struct {
 	checklist: []Machine_Check, // its coding agents, as its core's checklist says (read-only here)
 	core_run:  string, // its core's run id (its hello's `core`; "" = not known): a restart there changes it
 	codex:     bool, // its hello's features list codex_tabs: Codex tabs may be started there (machine_route.odin)
+	hub_add_project: bool, // its hello's features list hub_add_project: a folder may be added there (machine_route.odin)
 }
 
 // One row of another machine's coding agents checklist (its core's live.checklist, cleaned).
@@ -641,6 +642,7 @@ Mach_Link :: struct {
 	installed: bool, // its last hello said its core runs from Deckhand's own folder (M6-E)
 	core_run:  string, // heap: its last hello's run id (`core`; "" = an older core's, none)
 	codex:     bool, // its last hello's features list codex_tabs
+	hub_add_project: bool, // its last hello's features list hub_add_project
 	linger:   Linger, // its last hello's machine.linger (Linux), or what linger --enable said
 	auto_install: bool, // added by the user: its first attempt's finding of no core starts an install (M6-E); any status but connecting clears it (mlink_set)
 	install_why: string, // heap: why that install could not start (its note while it has no core: machine_status_text); "" = none
@@ -836,7 +838,7 @@ machines_publish :: proc() {
 	views := make([dynamic]Machine_View, 0, len(mach.links), a)
 	for l in mach.links {
 		job, note := machine_install_view(l.no)
-		v := Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a), job = job, job_note = strings.clone(note, a), linger = l.linger, core_run = strings.clone(l.core_run, a), codex = l.codex}
+		v := Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a), job = job, job_note = strings.clone(note, a), linger = l.linger, core_run = strings.clone(l.core_run, a), codex = l.codex, hub_add_project = l.hub_add_project}
 		v.update = machine_update_offer(core_version(), l.version, l.status, l.skew, l.installed)
 		v.checklist = machine_checks_of(&l.replica, a)
 		append(&views, v)
@@ -1208,10 +1210,11 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	if !hex64_ok(run) do run = "" // an older core's (none) or not an id
 	// what this hello says of its core, whatever its status: kept here, the one place
 	codex := hello_feature(line, FEATURE_CODEX_TABS) // an older core's: none
+	add := hello_feature(line, FEATURE_HUB_ADD_PROJECT)
 	heap := runtime.heap_allocator()
-	if version != l.version || run != l.core_run || codex != l.codex {
+	if version != l.version || run != l.core_run || codex != l.codex || add != l.hub_add_project {
 		delete(l.version, heap); delete(l.core_run, heap)
-		l.version, l.core_run, l.codex = strings.clone(version, heap), strings.clone(run, heap), codex
+		l.version, l.core_run, l.codex, l.hub_add_project = strings.clone(version, heap), strings.clone(run, heap), codex, add
 		machines_publish()
 	}
 	o.skew = cw.skew_check(cw.GENERATION, gen, core_version(), version)

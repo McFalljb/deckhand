@@ -870,6 +870,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return act("add_project")
 	case Hit_Machine_Add:
 		return MACHINE_ADD_TIP, ""
+	case Hit_Machine_Add_Folder:
+		return "A folder that is on that machine becomes one of its projects: type its path (/… or ~/…)", ""
 	case Hit_Machine: // its button: what it does
 		for m in state.machines do if m.no == u64(x) do return machine_action_tip(m), ""
 	case Hit_Machine_More:

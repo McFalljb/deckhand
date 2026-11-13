@@ -123,7 +123,7 @@ result_free :: proc(r: Result) {
 command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	s :: proc(v: string, a: runtime.Allocator) -> string {return strings.clone(v, a)}
 	switch c in cmd {
-	case Add_Project:         return Add_Project{cwd = s(c.cwd, allocator)}
+	case Add_Project:         return Add_Project{cwd = s(c.cwd, allocator), machine = c.machine}
 	case Machine_Add:         return Machine_Add{name = s(c.name, allocator), target = s(c.target, allocator), via = s(c.via, allocator)}
 	case Machine_Remove:      return Machine_Remove{no = c.no, confirm = s(c.confirm, allocator)}
 	case Set_Machines_Reachable: return Set_Machines_Reachable{on = c.on, confirm = s(c.confirm, allocator)}

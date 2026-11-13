@@ -384,6 +384,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	switch c in cmd {
 	case Add_Project:
 		kv_str(&w, "cwd", c.cwd)
+		if c.machine != 0 do kv_u64(&w, "machine", c.machine)
 	case Select_Project:
 		kv_u64(&w, "project_id", c.project_id)
 	case Rename_Project:

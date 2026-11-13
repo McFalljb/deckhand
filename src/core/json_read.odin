@@ -615,7 +615,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	r := Rd{obj = obj, a = allocator, ui = ui}
 	t, _ := obj["type"].(json.String)
 	switch t {
-	case "add_project":         cmd = Add_Project{cwd = get_str(&r, "cwd")}
+	case "add_project":         cmd = Add_Project{cwd = get_str(&r, "cwd"), machine = opt_u64(&r, "machine")}
 	case "select_project":      cmd = Select_Project{project_id = get_u64(&r, "project_id")}
 	case "rename_project":      cmd = Rename_Project{project_id = get_u64(&r, "project_id"), name = get_str(&r, "name")}
 	case "open_session":        cmd = Open_Session_Cmd{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id")}

@@ -479,6 +479,9 @@ menu_run :: proc(i: int) {
 	} else if mm, ok := target.(Menu_Machine); ok && it.label == "Open web page…" {
 		palette_open_pages(u64(mm)) // the palette asks for the port
 		ui_do(core.Set_Focus{"palette"})
+	} else if mm, ok := target.(Menu_Machine); ok && strings.has_prefix(it.label, "Add folder on ") {
+		palette_open_folders(u64(mm)) // the palette asks for the path
+		ui_do(core.Set_Focus{"palette"})
 	}
 	menu_close()
 }
@@ -1466,6 +1469,7 @@ sidebar_hit :: proc() -> Hit {
 		if clay.PointerOver(clay.ID("machmore", u32(m.no))) do return Hit_Machine_More(m.no)
 		if clay.PointerOver(clay.ID("machhead", u32(m.no))) do return Hit_Machine_Head(m.no)
 	}
+	for m in state.machines do if clay.PointerOver(clay.ID("machfolder", u32(m.no))) do return Hit_Machine_Add_Folder(m.no)
 	if clay.PointerOver(clay.ID("machadd")) do return Hit_Machine_Add{}
 	for id, i in drawn.proj {
 		if clay.PointerOver(clay.ID("projkids", u32(i))) do return Hit_Kids(id)
@@ -1521,6 +1525,9 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 		menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Machine_Add:
 		machine_add_open()
+	case Hit_Machine_Add_Folder:
+		palette_open_folders(u64(h))
+		ui_do(core.Set_Focus{"palette"})
 	case Hit_Attention:
 		switch int(h) {
 		case ATTN_HIT_IDLE:
@@ -1841,8 +1848,10 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 		}
 		if len(opens) + len(projects) > 0 do continue
 		if core.sidebar_filtering() do list_note("No matches", 0, text_w_max)
-		// nothing there: what makes a project appear (this Mac can't add one there)
-		else if live do wrapped_note(MACHINE_EMPTY_HINT, text_w_max)
+		else if live { 	// nothing there: a folder of it added from here (its core checks it)
+			wrapped_note(MACHINE_EMPTY_HINT, text_w_max)
+			if m.hub_add_project do action_row(clay.ID("machfolder", u32(m.no)), Hit_Machine_Add_Folder(m.no), .Plus, machine_add_folder_label(m.name), 0, text_w_max)
+		}
 	}
 	gap(GAP_SECTION)
 	action_row(clay.ID("machadd"), Hit_Machine_Add{}, .Plus, "Add a machine…", 0, text_w_max)
@@ -1853,7 +1862,10 @@ filter_clear_hint :: proc() -> string {
 	return state.sidebar.filter != "" ? "Esc in the filter clears it" : "Click the chip again to show all"
 }
 
-MACHINE_EMPTY_HINT :: "No projects there yet: start pi or Claude Code in a folder on it"
+MACHINE_EMPTY_HINT :: "No projects there yet"
+
+// Its menu's and its empty list's row: the palette asks for a path there (palette_open_folders).
+machine_add_folder_label :: proc(name: string) -> string {return fmt.tprintf("Add folder on %s…", name)}
 
 // The machines whose header is folded (not saved; this Mac's is the saved .This_Mac fold).
 machines_folded: [dynamic]u64
@@ -1995,7 +2007,12 @@ machine_menu_items :: proc(no: u64, items: ^[dynamic]core.Menu_Item) {
 		case .Offline:     append(items, core.Menu_Item{label = "Connect", cmd = core.Machine_Connect{no = no}})
 		case .Refused, .Unsupported: append(items, core.Menu_Item{label = "Try again", cmd = core.Machine_Connect{no = no}}) // after the fix on that machine
 		}
-		if m.status == .Online do append(items, core.Menu_Item{label = "Open web page…"}) // menu_run: the palette asks for the port
+		if m.status == .Online {
+			// only while this window's core says that machine's core takes one (an older core of
+			// either never says so: it would add the path on this Mac, or take it relative there)
+			if m.hub_add_project do append(items, core.Menu_Item{label = machine_add_folder_label(m.name)}) // menu_run: the palette asks for the path
+			append(items, core.Menu_Item{label = "Open web page…"}) // menu_run: the palette asks for the port
+		}
 		if len(items) > 0 do append(items, core.Menu_Item{sep = true})
 		append(items, core.Menu_Item{label = "Rename…", rename = true})
 		append(items, core.Menu_Item{label = "Remove…", cmd = core.Machine_Remove{no = no}})

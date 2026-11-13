@@ -208,7 +208,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 
 | type | fields | effect / `created_id` |
 |---|---|---|
-| `add_project` | `cwd` | adds (top) or finds the project, selects it, shows it again if hidden → project id. A relative `cwd` is made absolute, trailing slashes are dropped and symlinks resolved (pi runs in the real folder, so its store uses that path) |
+| `add_project` | `cwd`, `machine`? | adds (top) or finds the project, selects it, shows it again if hidden → project id. A relative `cwd` is made absolute, trailing slashes are dropped and symlinks resolved (pi runs in the real folder, so its store uses that path). `machine`: another machine's number (`machines[].no`): the folder is added there, as that machine's project (§5a "Working on another machine"); `cwd` must be `/…`, `~` or `~/…` (that machine's home). From a hub (another machine viewing this core), `cwd` must be that and a folder that exists here: `~` is this machine's `HOME`, nothing is relative to this core's working directory |
 | `select_project` | `project_id` | lists its sessions; never changes the current session. Refused for Chats |
 | `rename_project` | `project_id`, `name` (`""` = path label) | refused for Chats |
 | `open_session` | `project_id`, `pi_session_id` | resumes it; if already open, focuses it (and starts its pi again in the same tab if it exited, as `pi_restart`; a Claude-only session's main Claude tab, as `claude_restart`) → open session id (Chats: its project id). An agent's never starts a restored Claude tab (it would run with the user's saved flags): it stays `not_started` until the user shows it; the same for `focus_session` and `focus_tab`. A pi session's file is looked for first; a Claude session id of the project's (`claude_sessions`; its row in the left column) resumes it as `claude_resume` does (in a Claude-only session; the saved flags only for the user) → the open session id |
@@ -1265,8 +1265,9 @@ answers `no_window` at once. A window that detaches ends every wait with `no_win
 **The framed hello.** A hello (plain or challenge) with `"framed": true` asks for framed mode.
 The reply is the connection's last line. Beside the usual fields it carries `framed: true`,
 `generation` (the wire's, `1`), `version` (the core's release version, `""` in a development
-build), `features` (`["challenge_hello", "codex_tabs"]`; `codex_tabs`: a hub may start and resume
-Codex tabs here, [CODEX.md](CODEX.md) §8; a hub reads it from each machine's hello), `methods` (the commands this caller may send),
+build), `features` (`["challenge_hello", "codex_tabs", "hub_add_project"]`; `codex_tabs`: a hub may start and resume
+Codex tabs here, [CODEX.md](CODEX.md) §8; `hub_add_project`: a hub may add a folder here as a project, §5a
+"Working on another machine"; a hub reads them from each machine's hello), `methods` (the commands this caller may send),
 `core` (this run's id: 64 hex; a hub tells an install's new core from the old one by it), `machine` (`{os, arch, installed}`; `installed`: the core runs from its data dir's `core/`, which another machine's Update requires; a Linux core adds `linger`, `false` when its jobs stop at logout, and leaves it out when logind gave no answer), `holder_wire` and `snapshot` (the formats it decodes, best first:
 `["ghostsnp/1", "vt"]`). From the next byte on, the connection carries frames
 ([background-core.md](plans/background-core.md) §5.1; `src/corewire/transport_sock.odin`): channel 0
@@ -1353,7 +1354,18 @@ machine's link as `{"type":"command","id":"h<n>","now":true,"on_behalf":{"kind":
 off, and answers `pending`. A Codex start (`new_claude_session` or `new_claude_tab` with `"harness":
 "codex"`) goes only to a core whose last hello listed `codex_tabs` (an older one would start Claude
 Code for it): to any other it is refused here, nothing sent; that core runs it with its own `codex`,
-hooks, MCP server, socket and token ([CODEX.md](CODEX.md) §8). Not forwarded: `terminal_link` (the user's click opens on this Mac, in
+hooks, MCP server, socket and token ([CODEX.md](CODEX.md) §8). An `add_project` with `machine`
+(the user's **Add folder on <machine>…**) names that machine by its number, not by an id: it goes
+only to a core whose last hello listed `hub_add_project` (an older one would take a `~` or relative
+path against its own working directory, or a folder that is not there), else it is refused here,
+nothing sent ("on <machine>: its Deckhand is too old to add a folder from here: update Deckhand
+there…"); a `cwd` that is not `/…`, `~` or `~/…` is refused here too. It is sent as
+`{"type":"add_project","cwd":…}` (`machine` dropped); that core checks the folder (it exists there
+and is a folder) and keeps the project as its own (not selected there: that machine's own window keeps its
+selection). The window offers it only for a machine whose `machines[].hub_add_project` (this
+core's reading of that hello, in the window's state stream) is true. Its `created_id`, packed, is selected here once
+the mirror has it; nothing is added on this Mac. A refusal from there is a toast for the user's
+(*Add folder: on <machine>: no such folder: …*). Not forwarded: `terminal_link` (the user's click opens on this Mac, in
 the default browser, after the same checks as a local terminal's link; anyone else's is refused).
 The user's `mark_all_read` at this Mac goes to every online machine at once (its row in §3). That core's `result` (and its `finished`, for one it answered pending)
 ends the request here: `created_id` packed (a session the user opened or made is shown here too),

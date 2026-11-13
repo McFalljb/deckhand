@@ -17,7 +17,9 @@ package core
 // the result finishes the request here (route_result): its created_id packed, its error this
 // core's words for a known code (ROUTE_CODES) or "on <machine>: " and its text cleaned and cut
 // short, its data only {code?, id? (a claude_prompt's held text), count? (a mark_all_read's)}, and Result.remote set (the
-// reply's top-level "machine", which only this sets). A link
+// reply's top-level "machine", which only this sets). An add_project names its machine by number
+// (Add folder on <machine>…, #135): sent as add_project {cwd} only to a core that checks a hub's
+// folder (route_add_project), that core's project selected here once it answers. A link
 // that is down answers machine_offline. Its view stays this Mac's: focusing one of its sessions and
 // selecting one of its projects run here (Focus_Session also goes there, so its restored tabs
 // start), and Copy_Selection copies the window's own copy here (the user's ⌘C).
@@ -45,6 +47,8 @@ import "base:runtime"
 import "core:encoding/endian"
 import "core:encoding/json"
 import "core:fmt"
+import "core:os"
+import "core:path/filepath"
 import "core:reflect"
 import "core:strconv"
 import "core:strings"
@@ -169,6 +173,7 @@ command_machine :: proc(cmd: Command) -> (no: u64, mixed: bool) {
 @(private = "file")
 command_for_machine :: proc(cmd: Command, no: u64) -> Command {
 	out := cmd
+	if ap, is := &out.(Add_Project); is do ap.machine = 0 // that machine's own folder (machine names this core's number for it)
 	v := reflect.get_union_variant(out)
 	if v.data == nil do return out
 	st, ok := runtime.type_info_base(type_info_of(v.id)).variant.(runtime.Type_Info_Struct)
@@ -220,6 +225,7 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	no, mixed := command_machine(cmd)
 	if mixed do return fail("this names ids on two machines"), true
 	if su, is := cmd.(Set_Unread); is && su.tab_id == 0 do no = unread_session_machine(su.pi_session_id)
+	if ap, is := cmd.(Add_Project); is do no = ap.machine // a folder on that machine (it names no id)
 	if no == 0 do return {}, false
 	#partial switch c in cmd {
 	case Select_Project, Copy_Selection:
@@ -242,9 +248,53 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	}
 	// the user's and Atlas's, from this machine only: never a hub's (no reaching a third machine)
 	if (caller.kind != .UI && caller.kind != .Control) || caller.hub do return fail("this is on another machine: only you and Atlas on this machine can work in it from here"), true
+	if ap, is := cmd.(Add_Project); is {
+		if ar, refused := route_add_project(ap); refused {
+			if caller.kind == .UI do route_toast(cmd, ar)
+			return ar, true
+		}
+	}
 	r = forward_send(cmd, no, caller.kind, request_id)
 	if !r.ok && caller.kind == .UI do route_toast(cmd, r)
 	return r, true
+}
+
+// Add a folder on another machine (add_project with machine): only to a core whose hello says it
+// checks one sent by a hub (FEATURE_HUB_ADD_PROJECT: an older core would take a relative or ~ path
+// against its own working directory, or a folder that is not there); a path that is not absolute
+// or ~/… is refused here. Sent as add_project {cwd} (machine cleared), its project is that core's
+// and comes back through the mirror.
+@(private = "file")
+route_add_project :: proc(c: Add_Project) -> (r: Result, refused: bool) {
+	m: ^Machine_View
+	for &x in state.machines do if x.no == c.machine do m = &x
+	if m == nil do return fail("no such machine"), true
+	if !hub_folder_form(strings.trim_space(c.cwd)) do return fail(fmt.tprintf("on %s: give the folder's full path (/… or ~/…)", m.name)), true
+	if !m.hub_add_project do return fail(fmt.tprintf("on %s: %s", m.name, HUB_ADD_PROJECT_OLD)), true
+	return {}, false
+}
+
+HUB_ADD_PROJECT_OLD :: "its Deckhand is too old to add a folder from here: update Deckhand there (Update in its row's menu in the sidebar), then try again"
+
+// A folder path another machine's window may send: absolute, ~ or ~/….
+hub_folder_form :: proc(p: string) -> bool {
+	return strings.has_prefix(p, "/") || p == "~" || strings.has_prefix(p, "~/")
+}
+
+// A folder of this machine named by a hub's add_project (cwd: as typed at that window): absolute,
+// or ~/… under this machine's HOME, cleaned, and a folder that exists here. why: what is wrong.
+hub_folder :: proc(cwd: string) -> (at: string, why: string) {
+	p := strings.trim_space(cwd)
+	if !hub_folder_form(p) do return "", "give the folder's full path (/… or ~/…)"
+	if p == "~" || strings.has_prefix(p, "~/") {
+		home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
+		if !filepath.is_abs(home) do return "", "this machine's HOME is not set: give the folder's full path"
+		p = strings.concatenate({home, p[1:]}, context.temp_allocator)
+	}
+	p, _ = filepath.clean(p, context.temp_allocator)
+	if !os.exists(p) do return "", fmt.tprintf("no such folder: %s", text_clean(p, ROUTE_TEXT_MAX))
+	if !os.is_dir(p) do return "", fmt.tprintf("not a folder: %s", text_clean(p, ROUTE_TEXT_MAX))
+	return p, ""
 }
 
 // A Codex start for machine no, whose core does not say it starts Codex tabs.
@@ -289,6 +339,8 @@ route_toast :: proc(cmd: Command, r: Result) {
 	#partial switch c in cmd {
 	case Set_Unread:
 		window_toast(fmt.tprintf("%s: %s", c.unread ? "Mark as unread" : "Mark as read", r.error != "" ? r.error : "it did not work"), err = true)
+	case Add_Project:
+		window_toast(fmt.tprintf("Add folder: %s", r.error != "" ? r.error : "it did not work"), err = true)
 	}
 }
 
@@ -402,6 +454,11 @@ forward_finish :: proc(i: int, r: Result) {
 		// it opened or made one of its sessions: shown here, as a local one would be
 		if s := find_session(r.created_id); s != nil && s.machine == f.machine && state.current_session != s.id {
 			run_command(Focus_Session{session = s.id}, {kind = .Internal})
+		}
+		// a folder it added: selected here, as a local add selects its project (only its own,
+		// mirrored: an id that is not that machine's project selects nothing)
+		if _, added := f.cmd.(Add_Project); added {
+			if p := find_project(r.created_id); p != nil && p.machine == f.machine do run_command(Select_Project{project_id = p.id}, {kind = .Internal})
 		}
 	}
 	emit_event(Finished_Event{request_id = f.request_id, result = r})

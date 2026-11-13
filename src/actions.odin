@@ -116,6 +116,7 @@ ACTIONS := [?]Action {
 	{id = "new_codex_tab", label = "New Codex tab", title = proc() -> string {return core.codex_label("New Codex tab")}, make = proc() -> (core.Command, bool) {
 		cs := core.cur()
 		if cs == nil || cs.home || cs.missing || core.codex_chat_refused(cs.id) do return nil, false
+		if cs.machine != 0 && !core.codex_offered(cs.id) do return nil, false // another machine's: its Codex (harness.odin)
 		return core.New_Claude_Tab{session = cs.id, codex = true}, true
 	}},
 	{id = "claude_held_send", label = "Claude: send the waiting message now", make = proc() -> (core.Command, bool) {

@@ -223,8 +223,12 @@ route_codex :: proc(t: ^testing.T) {
 	// this Mac's Codex sign-in never puts a bar over that machine's Codex tab
 	codex_login_set(.Signed_Out)
 	defer codex_login_set(.Unknown)
-	tb := Tab{id = sid + 1, machine = 3, kind = Claude_Tab{codex = true}, status = .Running}
+	tb := Tab{id = sid + 1, machine = 3, kind = Claude_Tab{codex = true}, status = .Running, pane = sid, prog = {state = .Idle, progress = -1}}
 	testing.expect(t, !codex_signed_out_due(&tb), "not this Mac's sign-in")
+	// nor does its composer reporting (its OSC 7501, mirrored) clear this Mac's signed-out answer
+	append(&find_session(sid).tabs, tb)
+	claude_status_tick()
+	testing.expect_value(t, codex_login_state(), Codex_Login.Signed_Out)
 }
 
 // Atlas (control, M6-F) works in another machine's sessions: forwarded as control there (its core

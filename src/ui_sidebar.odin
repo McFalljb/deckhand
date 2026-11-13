@@ -291,10 +291,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
 		// else a new one), once per account while there are several; only while it is installed
 		if p.group == .Projects && core.claude_installed() do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
-		// another machine's project: where its core starts Codex tabs and has codex (harness.odin)
-		has_codex := core.codex_installed()
-		if no := core.id_machine(p.id); no != 0 do _, _, has_codex = core.machine_harnesses(no)
-		if p.group == .Projects && has_codex do append(&items, core.Menu_Item{label = "New Codex tab", cmd = core.New_Claude_Tab{project_id = p.id, codex = true}}) // codex.odin
+		if p.group == .Projects && core.codex_offered(p.id) do append(&items, core.Menu_Item{label = "New Codex tab", cmd = core.New_Claude_Tab{project_id = p.id, codex = true}}) // codex.odin
 		if core.folder_of(.Jobs) != "" do append(&items, core.Menu_Item{label = "New job for this project…", cmd = core.Job_Sheet{open = true, for_project = core.path_tilde(p.cwd)}})
 		append(&items, core.Menu_Item{label = "Rename…", rename = true})
 		sep(&items)
@@ -328,7 +325,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			pin_moves(&items, at, len(state.sidebar.pinned_sessions), 0, t.pi_session_id)
 		}
 		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin; read-only in a chat while chats are
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_installed() && !core.codex_chat_refused(id) do append(&items, core.Menu_Item{label = "New Codex tab here", cmd = core.New_Claude_Tab{session = id, codex = true}}) // codex.odin
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_offered(id) && !core.codex_chat_refused(id) do append(&items, core.Menu_Item{label = "New Codex tab here", cmd = core.New_Claude_Tab{session = id, codex = true}}) // codex.odin
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
 		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)

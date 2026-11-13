@@ -1142,7 +1142,9 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   menu) starts Codex there, with that machine's own Codex, settings and sign-in (its own **Full
   access in new Codex tabs**, never this Mac's); its Codex rows open there too. It needs Deckhand
   on that machine to be new enough (Deckhand says to update it there otherwise) and Codex installed
-  there. If Codex there is signed out, its own sign-in screen shows in the tab.
+  there. If Codex there is signed out, its own sign-in screen shows in the tab. **Full access in
+  new Codex tabs** is each machine's own setting: the switch on this Mac does not apply to Codex
+  tabs started on another machine.
 - **Not yet**: read-only chats (Codex is not offered in Chats while **Start chats read-only** is
   on: Codex's read-only sandbox does not cover your MCP servers, and you can lift it from its
   composer) and accounts. [CODEX.md](CODEX.md) has the details.

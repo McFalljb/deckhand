@@ -247,8 +247,10 @@ machines_ux_remote_new_session :: proc(t: ^testing.T) {
 		c, is := items[0].cmd.(New_Claude_Session)
 		testing.expect(t, is && c.codex && c.project_id == p.id && c.cwd == "", "Codex there")
 	}
+	testing.expect(t, codex_offered(p.id), "New Codex tab there")
 	views[0].checklist = []Machine_Check{{id = "codex", state = .Missing}}
 	testing.expect_value(t, len(new_session_choices(&p, "")), 0)
+	testing.expect(t, !codex_offered(p.id), "not without codex there")
 }
 
 // A hub reads codex_tabs from a core's hello features; an older core lists none.

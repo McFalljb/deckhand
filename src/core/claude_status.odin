@@ -141,7 +141,7 @@ claude_status_tick :: proc(now := time.Tick{}) {
 			if v := tab_status_view(tab); v.source == .Osc7501 && v.state != .Blocked do up = true
 			if up do r.up = now
 		}
-		if ct.codex {
+		if ct.codex && tab.machine == 0 { // another machine's: its OSC 7501 says nothing of this Mac's sign-in
 			if v := tab_status_view(tab); v.source == .Osc7501 {
 				if !r.osc {
 					r.osc = true

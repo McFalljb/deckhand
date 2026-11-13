@@ -267,6 +267,16 @@ machine_harnesses :: proc(no: u64) -> (pi, claude, codex: bool) {
 	return true, false, false
 }
 
+// Whether New Codex tab is offered for id (a project's or an open session's): this Mac's, while
+// codex is installed here; another machine's, while machine_harnesses says it has Codex.
+codex_offered :: proc(id: u64) -> bool {
+	if no := id_machine(id); no != 0 {
+		_, _, codex := machine_harnesses(no)
+		return codex
+	}
+	return codex_installed()
+}
+
 // Whether machine no's core starts Codex tabs for this Mac (its hello's features: codex_tabs).
 machine_codex :: proc(no: u64) -> bool {
 	for m in state.machines do if m.no == no do return m.codex

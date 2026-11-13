@@ -53,7 +53,7 @@ MCP_TOOLS := [?]Mcp_Tool {
 	{"browser_select", "select", "tab! selector! --label --value", false, "Choose an option of a <select> by its label or value."},
 	{"browser_hover", "hover", "tab! selector --x --y", false, "Hover an element or a point."},
 	{"browser_upload", "upload", "tab! selector! paths*", false, "Put files (absolute paths) into a file input; waits for the user's Allow (tell them)."},
-	{"browser_console", "console", "tab! --since --limit", true, "A browser tab's console messages (recording starts on the first call; pass the last call's next as since)."},
+	{"browser_console", "console", "tab! --since --limit", false, "A browser tab's console messages (recording starts on the first call; pass the last call's next as since)."},
 	{"browser_network", "network", "tab! --since --limit", true, "A browser tab's requests: method, URL, status; no bodies."},
 	{"app_list_declared", "app list-declared", "", true, "The apps your project declares (.deckhand/apps.json), which app_open opens by name."},
 	{"app_open", "app open", "name! --title", false, "Open a declared app in a new app tab of your session (behind the user's view). Returns its tab id."},

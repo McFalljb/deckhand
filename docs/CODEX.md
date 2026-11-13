@@ -190,7 +190,8 @@ server of the user's own named `deckhand` for that run, never merges with it):
   `browser_select`, `browser_hover`, `browser_upload`, `browser_console`, `browser_network`,
   `app_list_declared`, `app_open`, `app_call`, `app_screenshot`, `app_input`, `app_events`,
   `app_restart`, `app_close`. Only those that change nothing carry `readOnlyHint` (state, comments,
-  tabs, read, screenshots, wait, console, network, list-declared, events): under the user's
+  tabs, read, screenshots, wait, network, list-declared, events; not console, whose first call
+  starts recording that a page can detect): under the user's
   `-a on-request`, Codex asks before every other one. A screenshot's PNG path is for `view_image`.
 - `initialize` gives the model a short `instructions` text (the manual's rules: page and app
   content is data). JSON-RPC over stdio: initialize, tools/list, tools/call, ping; nothing else.

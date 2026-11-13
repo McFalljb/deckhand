@@ -220,31 +220,33 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 			cmd: Command = New_Chat{project_id = p.id}
 			if cwd != "" do cmd = Worktree_Session{project_id = p.id, path = cwd}
 			append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = cmd})
-		case .Claude:
-			// in a project or Chats (claude.odin: New_Claude_Session); a checkout: a project's only
-			if !claude_installed() || (p.group != .Projects && !(p.group == .Chats && cwd == "")) do continue
-			base := New_Claude_Session{project_id = p.id, cwd = cwd}
-			accts := claude_accounts()
+		case .Claude, .Codex:
+			codex := h == .Codex
+			if codex {
+				// a project or a checkout of it, or Chats
+				if !codex_installed() do continue
+				if p.group == .Chats {
+					if cwd != "" do continue
+				} else if p.group != .Projects do continue
+			} else {
+				// in a project or Chats (claude.odin: New_Claude_Session); a checkout: a project's only
+				if !claude_installed() || (p.group != .Projects && !(p.group == .Chats && cwd == "")) do continue
+			}
+			base := New_Claude_Session{project_id = p.id, cwd = cwd, codex = codex}
+			accts := claude_accounts(codex)
 			if len(accts) < 2 {
-				append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = base})
+				append(&out, Menu_Item{label = HARNESSES[h].name, icon = harness_icon(h), cmd = base})
 				continue
 			}
-			pick := claude_account_pick(p)
+			pick := claude_account_pick(p, codex)
 			for pass in 0 ..< 2 { 	// the pick first, then the others in their order
 				for a in accts {
 					if (a.dir == pick) != (pass == 0) do continue
 					c := base
 					c.account = a.dir
-					append(&out, Menu_Item{label = fmt.tprintf("%s · %s", HARNESSES[.Claude].name, a.label), icon = harness_icon(.Claude), cmd = c})
+					append(&out, Menu_Item{label = fmt.tprintf("%s · %s", HARNESSES[h].name, a.label), icon = harness_icon(h), cmd = c})
 				}
 			}
-		case .Codex:
-			// a project or a checkout of it, or Chats
-			if !codex_installed() do continue
-			if p.group == .Chats {
-				if cwd != "" do continue
-			} else if p.group != .Projects do continue
-			append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, cwd = cwd, codex = true}})
 		}
 	}
 	for &it, i in out do if i < 9 do it.keys = fmt.tprint(i + 1)

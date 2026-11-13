@@ -290,9 +290,10 @@ child_env :: proc(extra: []string = nil) -> []string {
 	out := make([dynamic]string, context.temp_allocator)
 	drop := [?]string{"TERM=", "TERM_PROGRAM", "COLORTERM=", "KITTY_", "GHOSTTY_", "ITERM_", "WEZTERM_", "TMUX", "STY=", "VTE_", "LC_TERMINAL", "PI_KIT_READONLY="} // a read-only job sets its own PI_KIT_READONLY; what Deckhand sets its tabs (env_desk_set, both names) goes below
 	// a Claude tab's account (claude_accounts.odin): its CLAUDE_CONFIG_DIR replaces the inherited
-	// one; "!CLAUDE_CONFIG_DIR" drops it
-	own_config := false
+	// one; "!CLAUDE_CONFIG_DIR" drops it (a Codex tab's: CODEX_HOME the same way)
+	own_config, own_codex := false, false
 	for x in extra do if strings.has_prefix(x, "CLAUDE_CONFIG_DIR=") || x == "!CLAUDE_CONFIG_DIR" do own_config = true
+	for x in extra do if strings.has_prefix(x, "CODEX_HOME=") || x == "!CODEX_HOME" do own_codex = true
 	outer: for e in env {
 		for d in drop do if strings.has_prefix(e, d) do continue outer
 		// Deckhand's own names (tokens, the CLI, a Claude tab's account), new and old: an explicit list, so the user's DECKHAND_SIGN_IDENTITY
@@ -302,6 +303,7 @@ child_env :: proc(extra: []string = nil) -> []string {
 		when TEST_HOOKS do if strings.has_prefix(e, HOOK_ENV[.Data_Dir]) && strings.has_prefix(e[len(HOOK_ENV[.Data_Dir]):], "=") do continue outer
 		when TEST_HOOKS do if strings.has_prefix(e, "PI_DESK_DATA_DIR=") do continue outer // its old name (test_hooks.odin hook_lookup)
 		if own_config && strings.has_prefix(e, "CLAUDE_CONFIG_DIR=") do continue
+		if own_codex && strings.has_prefix(e, "CODEX_HOME=") do continue
 		append(&out, e)
 	}
 	append(&out, "TERM=xterm-256color", "COLORTERM=truecolor", "TERM_PROGRAM=Deckhand")

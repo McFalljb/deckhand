@@ -376,34 +376,43 @@ codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
 	return string(c), false
 }
 
-// A rollout found on disk: its id (from its name), path and dates. Temp.
+// A rollout found on disk: its id (from its name), path, dates and the Codex home it is in. Temp.
 @(private = "file")
 Codex_File :: struct {
-	id, path:          string,
+	id, path, account: string,
 	size:              i64,
 	modified, created: time.Time,
 }
 
-// Codex's sessions folder ("" = none; in tests and test mode only a CODEX_HOME they set, never the
-// developer's own ~/.codex).
+// A Codex home's sessions folder ("" = none; in tests and test mode never the developer's own
+// ~/.codex: the default only when they set CODEX_HOME, ~/.codex of the real home never).
 @(private = "file")
-codex_sessions_dir :: proc() -> string {
+codex_sessions_dir :: proc(home: string) -> string {
 	when TEST_HOOKS {
 		if ODIN_TEST || test_mode() {
-			if _, ok := env_lookup(child_base_env(), "CODEX_HOME"); !ok do return ""
+			if _, ok := env_lookup(child_base_env(), "CODEX_HOME"); !ok && home == codex_home() do return ""
+			if real := account_home(); real != "" && home == strings.concatenate({strings.trim_right(real, "/"), "/.codex"}, context.temp_allocator) do return ""
 		}
 	}
-	h := codex_home()
-	return h == "" ? "" : strings.concatenate({h, "/sessions"}, context.temp_allocator)
+	return home == "" ? "" : strings.concatenate({home, "/sessions"}, context.temp_allocator)
 }
 
-// The newest rollouts, by their folders' and names' dates (sessions/YYYY/MM/DD/rollout-<time>-<uuid>.jsonl):
-// at most CODEX_DISK_DAYS_MAX day folders and CODEX_DISK_FILES_MAX files; regular files only. Temp.
+// The newest rollouts of each Codex account's home, by their folders' and names' dates
+// (sessions/YYYY/MM/DD/rollout-<time>-<uuid>.jsonl): at most CODEX_DISK_DAYS_MAX day folders and
+// CODEX_DISK_FILES_MAX files a home; regular files only. Temp.
 @(private = "file")
 codex_disk_files :: proc() -> []Codex_File {
 	out := make([dynamic]Codex_File, context.temp_allocator)
-	root := codex_sessions_dir()
-	if root == "" do return nil
+	for a in claude_accounts(codex = true) do codex_disk_files_of(&out, a.dir)
+	return out[:]
+}
+
+@(private = "file")
+codex_disk_files_of :: proc(all: ^[dynamic]Codex_File, home: string) {
+	out := make([dynamic]Codex_File, context.temp_allocator)
+	defer append(all, ..out[:])
+	root := codex_sessions_dir(home)
+	if root == "" do return
 	// the numbered folders under dir, newest (largest) first
 	numbered :: proc(dir: string) -> []os.File_Info {
 		entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
@@ -422,7 +431,7 @@ codex_disk_files :: proc() -> []Codex_File {
 	for y in numbered(root) {
 		for m in numbered(y.fullpath) {
 			for d in numbered(m.fullpath) {
-				if days >= CODEX_DISK_DAYS_MAX || len(out) >= CODEX_DISK_FILES_MAX do return out[:]
+				if days >= CODEX_DISK_DAYS_MAX || len(out) >= CODEX_DISK_FILES_MAX do return
 				days += 1
 				entries, err := os.read_all_directory_by_path(d.fullpath, context.temp_allocator)
 				if err != nil do continue
@@ -435,12 +444,11 @@ codex_disk_files :: proc() -> []Codex_File {
 					id := name[len(name) - 36:]
 					if !codex_id_ok(id) do continue
 					created := e.creation_time != {} ? e.creation_time : e.modification_time
-					append(&out, Codex_File{id = id, path = e.fullpath, size = e.size, modified = e.modification_time, created = created})
+					append(&out, Codex_File{id = id, path = e.fullpath, account = home, size = e.size, modified = e.modification_time, created = created})
 				}
 			}
 		}
 	}
-	return out[:]
 }
 
 // ---- where a project's transcripts are ----
@@ -610,7 +618,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 		_, cwd, skip, known := found_info(c.path, c.size, c.modified, &budget)
 		if !known || skip || (cwd != p.cwd && cwd != preal) do continue
 		m += 1
-		append(out, Claude_Disk{id = strings.clone(c.id), modified = c.modified, created = c.created, listed = true, codex = true})
+		append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), modified = c.modified, created = c.created, listed = true, codex = true})
 	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
@@ -706,7 +714,7 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 		strings.write_i64(b, time.to_unix_seconds(f.modified))
 		strings.write_string(b, `,"created":`)
 		strings.write_i64(b, time.to_unix_seconds(f.created))
-		if tag := claude_account_tag(f.account); tag != "" {
+		if tag := claude_account_tag(f.account, f.codex); tag != "" {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, tag)
 		}

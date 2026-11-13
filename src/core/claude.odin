@@ -62,7 +62,7 @@ Claude_Tab :: struct {
 	held:       [dynamic]Claude_Held, // claude_prompt texts waiting for an idle, empty prompt; at most CLAUDE_HELD_MAX
 	model:      string, // Claude's model (SessionStart's model, PostModelSwitch; claude_rows.odin); "" = not reported
 	ended:      Claude_Ended, // how its last turn ended (Stop, StopFailure): a question or error dot (claude_rows.odin)
-	account:    string, // its Claude Code account's config folder (claude_accounts.odin; "" = the default); saved
+	account:    string, // its Claude Code account's config folder (a Codex tab's: its Codex home; claude_accounts.odin; "" = the default); saved
 	resume_path: string, // a transcript found on disk: --resume takes its absolute path (claude_disk.odin); "" = by id
 	codex:      bool, // a Codex CLI tab (codex.odin): codex instead of claude; saved
 }
@@ -100,7 +100,7 @@ New_Claude_Tab :: struct {
 	resume:     string, // a Claude session id to resume ("" = a new conversation)
 	args:       []string, // extra flags; the user's (and scripts') only
 	account:    string, // a configured account's label or folder ("" = the resumed entry's, else the last used)
-	codex:      bool, // a Codex tab instead (codex.odin; wire: harness "codex"): no flags, no account
+	codex:      bool, // a Codex tab instead (codex.odin; wire: harness "codex"): account is a Codex account
 }
 // A Claude-only session in a project (its main tab a Claude tab, no pi tab).
 New_Claude_Session :: struct {
@@ -108,7 +108,7 @@ New_Claude_Session :: struct {
 	cwd:        string,
 	args:       []string,
 	account:    string, // a configured account's label or folder ("" = the project's last used, else the last used)
-	codex:      bool, // a Codex-only session instead (codex.odin; wire: harness "codex"): no flags, no account
+	codex:      bool, // a Codex-only session instead (codex.odin; wire: harness "codex"): account is a Codex account
 }
 // A Deckhand title for a Claude session of the history (the user's; "" = none).
 Claude_Rename :: struct {
@@ -446,7 +446,7 @@ claude_tab_cmd :: proc() -> string {
 // defaults: a start the user makes (a new tab, session or chat, the user's resume, restore and
 // restart): the user's default flags as the setting is now (claude_with_defaults), never saved.
 claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
-	if ct.codex do return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule; no plugin or account
+	if ct.codex do return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule and account; no plugin
 	plugin := claude_plugin_dir()
 	if plugin == "" {
 		term_note(t, "Deckhand's Claude Code plugin is missing from this build (integrations/claude-code): rebuild Deckhand.")
@@ -692,8 +692,8 @@ clone_strings :: proc(list: []string) -> []string {
 @(private = "file")
 history_touch :: proc(id, cwd, project: string, args: []string, account: string, codex := false) {
 	// every entry records its account's folder (the default's when the tab has none); a Codex
-	// conversation has none (codex.odin)
-	rec := Claude_Record{id = strings.clone(id), cwd = strings.clone(cwd), project = strings.clone(project), used = time.now()._nsec / 1e9, args = clone_strings(args), account = codex ? "" : strings.clone(claude_account_dir(account)), codex = codex}
+	// conversation its Codex home
+	rec := Claude_Record{id = strings.clone(id), cwd = strings.clone(cwd), project = strings.clone(project), used = time.now()._nsec / 1e9, args = clone_strings(args), account = strings.clone(claude_account_dir(account, codex)), codex = codex}
 	if old, i := claude_record(id); old != nil {
 		// its account stays (its transcript is in that folder)
 		if old.account != "" {
@@ -808,9 +808,10 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 		history_touch(resume, cwd, p != nil ? p.cwd : s.cwd, args, account, codex)
 	}
 	// the next new session's default (claude_account_pick); the user's own choice
-	if caller.kind == .UI && !codex && account != "" && account != state.settings.claude_account_last {
-		delete(state.settings.claude_account_last)
-		state.settings.claude_account_last = strings.clone(account)
+	last := codex ? &state.settings.codex_account_last : &state.settings.claude_account_last
+	if caller.kind == .UI && account != "" && account != last^ {
+		delete(last^)
+		last^ = strings.clone(account)
 	}
 	return {ok = true, created_id = tab.id}, true
 }
@@ -853,7 +854,9 @@ codex_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Resul
 	if mr, missing := codex_missing(caller); missing do return mr, false
 	if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
 	if claude_open_tab(f.id) != 0 || claude_tab_of_session(f.id) != 0 do return fail("that conversation is open in a tab"), false
-	return claude_open_session(p, p.cwd, f.id, nil, caller, "", codex = true)
+	// under the account whose home it was found in, while that is configured
+	if !claude_account_known(f.account, codex = true) do return fail("its Codex account is no longer in Settings → Codex accounts"), false
+	return claude_open_session(p, p.cwd, f.id, nil, caller, claude_account_dir(f.account, codex = true), codex = true)
 }
 
 // Where a Claude session of the history runs again: the folder it ran in while that is still
@@ -960,10 +963,6 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		} else do return fail("session or project_id is needed"), false
 		if s.home do return fail("Home has only its pi tab"), false
 		if s.missing do return fail("this session is gone"), false
-		if c.codex {
-			// Codex (codex.odin): its own flags' rule, no account
-			if c.account != "" do return fail("a Codex tab has no Claude Code account"), false
-		}
 		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
 		if e := c.codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
 		if c.resume != "" {
@@ -990,19 +989,20 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			if !within(p, fs_real(s.cwd)) && (pr == nil || !within(p, fs_real(pr.cwd))) do return fail("cwd must be inside the session's project"), false
 			cwd = p
 		}
-		if c.codex do return claude_open(s, cwd, c.resume, c.args, caller, "", codex = true)
-		// its account: the one named (configured only), else the resumed entry's, else the default pick
-		account, aerr := claude_account_resolve(c.account)
+		// its account: the one named (configured only), else the resumed entry's, else the default
+		// pick (a Codex tab: a Codex account, the same way)
+		which := c.codex ? "Codex" : "Claude"
+		account, aerr := claude_account_resolve(c.account, c.codex)
 		if aerr != "" do return fail(aerr), false
 		// a recorded session stays in its account: its transcript is there
 		if rec, _ := claude_record(c.resume); rec != nil && c.resume != "" {
-			ra := claude_account_dir(rec.account)
-			if !claude_account_known(ra) do return fail("its Claude account is no longer in Settings → Claude accounts"), false
-			if account != "" && account != ra && fs_real(account) != fs_real(ra) do return fail(fmt.tprintf("that Claude session belongs to the account %s", claude_account_label_now(ra) != "" ? claude_account_label_now(ra) : path_tilde(ra))), false
+			ra := claude_account_dir(rec.account, c.codex)
+			if !claude_account_known(ra, c.codex) do return fail(fmt.tprintf("its %s account is no longer in Settings → %s accounts", which, which)), false
+			if account != "" && account != ra && fs_real(account) != fs_real(ra) do return fail(fmt.tprintf("that %s session belongs to the account %s", which, claude_account_label_now(ra, c.codex) != "" ? claude_account_label_now(ra, c.codex) : path_tilde(ra))), false
 			account = ra
 		}
-		if account == "" do account = claude_account_pick(find_project(s.project_id))
-		return claude_open(s, cwd, c.resume, c.args, caller, account)
+		if account == "" do account = claude_account_pick(find_project(s.project_id), c.codex)
+		return claude_open(s, cwd, c.resume, c.args, caller, account, codex = c.codex)
 	case New_Claude_Session:
 		p := find_project(c.project_id)
 		if p == nil do return fail("no such project"), false
@@ -1013,10 +1013,6 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			chats_instructions_ensure(date_stamp())
 		}
 		if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
-		if c.codex {
-			// Codex (codex.odin): its own flags' rule, no account
-			if c.account != "" do return fail("a Codex session has no Claude Code account"), false
-		}
 		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
 		if e := c.codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
 
@@ -1030,15 +1026,11 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			if !within(at, fs_real(p.cwd)) && wt_checkout_err(p.cwd, at, listed = true) != "" do return fail("cwd must be inside the project or one of its repository's checkouts"), false
 			cwd = at
 		}
-		if c.codex {
-			if mr, missing := codex_missing(caller); missing do return mr, false
-			return claude_open_session(p, cwd, "", c.args, caller, "", codex = true)
-		}
-		if mr, missing := claude_missing(caller); missing do return mr, false
-		account, aerr := claude_account_resolve(c.account)
+		if mr, missing := claude_harness_missing(c.codex, caller); missing do return mr, false
+		account, aerr := claude_account_resolve(c.account, c.codex)
 		if aerr != "" do return fail(aerr), false
-		if account == "" do account = claude_account_pick(p)
-		return claude_open_session(p, cwd, "", c.args, caller, account)
+		if account == "" do account = claude_account_pick(p, c.codex)
+		return claude_open_session(p, cwd, "", c.args, caller, account, codex = c.codex)
 	case Claude_Rename:
 		rec, _ := claude_record(c.claude_session_id)
 		if rec == nil do return fail("no such Claude session in Deckhand's history"), false
@@ -1070,16 +1062,19 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		}
 		if rec.codex {
 			// a Codex conversation (codex.odin): `codex resume <id>`, the user's saved flags on the
-			// user's own resume only (as Claude's below), no account
+			// user's own resume only (as Claude's below), under the account it ran in while that
+			// is configured
 			if !codex_id_ok(rec.id) do return fail("not a Codex session id"), false
 			if mr, missing := codex_missing(caller); missing do return mr, false
+			if !claude_account_known(rec.account, codex = true) do return fail(fmt.tprintf("its Codex account (%s) is no longer in Settings → Codex accounts", path_tilde(claude_account_dir(rec.account, codex = true)))), false
+			account := claude_account_dir(rec.account, codex = true)
 			id := strings.clone(rec.id, context.temp_allocator)
 			args: []string
 			if caller.kind == .UI {
 				args = make([]string, len(rec.args), context.temp_allocator)
 				for x, i in rec.args do args[i] = strings.clone(x, context.temp_allocator)
 			}
-			r, ch := claude_open_session(p, claude_resume_cwd(rec, p), id, args, caller, "", codex = true)
+			r, ch := claude_open_session(p, claude_resume_cwd(rec, p), id, args, caller, account, codex = true)
 			if !r.ok do return r, ch
 			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
 		}
@@ -1255,7 +1250,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			// its account: an absolute folder, else "" (an older entry's): the default account as
 			// resolved when it is used, never a folder stamped at load (from inside a Claude session
 			// whose login shell did not answer, the environment's would be the parent session's)
-			acct := filepath.is_abs(r.account) && !r.codex ? r.account : ""
+			acct := filepath.is_abs(r.account) ? r.account : ""
 			append(&state.claude_history, Claude_Record{id = strings.clone(r.id), cwd = strings.clone(r.cwd), project = strings.clone(r.project), title = strings.clone(title), used = r.used, args = clone_strings(r.args), named = r.named && title != "", transcript = strings.clone(claude_transcript_ok(r.transcript)), model = strings.clone(claude_model_clean(r.model)), account = strings.clone(acct), codex = r.codex})
 		}
 		return {ok = true}, true
@@ -1459,7 +1454,7 @@ claude_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 	json_quote(b, ct.session_id)
 	fmt.sbprintf(b, `,"turn":"%s","held":%d,"typed":%v,"argc":%d`, CLAUDE_TURN_NAMES[ct.turn], len(ct.held), claude_typed(tab.id), len(ct.args))
 	if ct.codex do strings.write_string(b, `,"harness":"codex"`)
-	if tag := claude_account_tag(ct.account); tag != "" {
+	if tag := claude_account_tag(ct.account, ct.codex); tag != "" {
 		strings.write_string(b, `,"account":`)
 		json_quote(b, tag)
 	}
@@ -1492,7 +1487,7 @@ claude_history_json :: proc(b: ^strings.Builder, list: []Claude_Record, found, f
 		}
 		fmt.sbprintf(b, `,"used":%d,"open":%v`, r.used, claude_open_tab(r.id) != 0)
 		if r.codex do strings.write_string(b, `,"harness":"codex"`)
-		if tag := claude_account_tag(r.account); tag != "" {
+		if tag := claude_account_tag(r.account, r.codex); tag != "" {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, tag)
 		}

@@ -114,6 +114,7 @@ SETTINGS := [?]Setting {
 	{id = "claude_accounts", section = .Agents, card = "Claude Code", label = "Add Claude account…", hint = "Another Claude Code config folder (CLAUDE_CONFIG_DIR)", keywords = "accounts config folder default rename remove scan", kind = .List, action = "claude_account_add", command = "add_claude_account", row = "deckhand:claude-account"},
 	{id = "claude_skip_permissions", section = .Agents, card = "Claude Code", label = "Skip permissions in new tabs", hint = "Claude acts without asking. Tabs you start only, never an agent's.", keywords = "claude dangerously flags default permissions", kind = .Switch, action = "claude_skip_permissions", command = "set_claude_default_flags", row = CLAUDE_FLAGS_ROW},
 	{id = "codex_status", section = .Agents, card = "Codex", label = "Codex", hint = "Its version", keywords = "codex openai install update version checklist", kind = .Status, command = "setup_sheet", row = HARNESS_SETTINGS_ROW},
+	{id = "codex_accounts", section = .Agents, card = "Codex", label = "Add Codex account…", hint = "Another Codex home (CODEX_HOME); sign in on Codex's screen in its first tab", keywords = "accounts codex home default rename remove login sign in", kind = .List, action = "codex_account_add", command = "add_claude_account", row = "deckhand:codex-account"},
 	{id = "codex_full_access", section = .Agents, card = "Codex", label = "Full access in new Codex tabs", hint = "Codex acts without asking, outside its sandbox. Tabs you start only, never an agent's.", keywords = "codex dangerously bypass approvals sandbox flags default permissions", kind = .Switch, action = "codex_full_access", command = "set_claude_default_flags"},
 	// ---- Machines: other machines' sessions over the user's own ssh ----
 	{id = "remote_machines", section = .Machines, label = "Machines over SSH", hint = "Off: no link to any machine; your list is kept", keywords = "machines remote ssh links", kind = .Switch, action = "remote_machines", command = "set_remote_machines", row = MACHINE_SSH_ROW},
@@ -158,6 +159,7 @@ SETTINGS_FILE_GROUPS := [?]Setting_File_Group {
 	{"claude", .Agents, "Claude Code"},
 	{"claude:", .Agents, "Claude Code"}, // one per account once there are several
 	{"claude-accounts", .Agents, "Claude Code"},
+	{"codex-accounts", .Agents, "Codex"},
 	{"agents", .Agents, ""},
 	{"project", .Project, "pi"},
 	{"claude-project", .Project, "Claude Code"},

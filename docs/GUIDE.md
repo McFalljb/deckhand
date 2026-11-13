@@ -1132,7 +1132,17 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   there. If Codex there is signed out, its own sign-in screen shows in the tab. **Full access in
   new Codex tabs** is each machine's own setting: the switch on this Mac does not apply to Codex
   tabs started on another machine.
-- **Not yet**: accounts. [CODEX.md](CODEX.md) has the details.
+- **Accounts**: a Codex account is a Codex home (the folder `CODEX_HOME` names). Make the folder
+  yourself, then add it in Settings › Coding agents › Codex › **Add account…** (or **More
+  accounts…**, or the palette's **Add Codex account…**); Deckhand never creates or writes into it. Sign in on Codex's own screen in that
+  account's first tab, or run `CODEX_HOME=<that folder> codex login` in a terminal. With several,
+  New session's picker lists **Codex · Name** once per account, the menus **New Codex tab · Name**,
+  and tabs and rows show the account's name; each tab runs with its account's `CODEX_HOME` (set
+  again after your login profile), its conversations found on disk resume there, and Settings
+  lists each with **Rename…**, **Make default** and **Remove**. Your default account (your shell's
+  `CODEX_HOME`, else `~/.codex`) sets nothing. Like `~/.codex`, every account's sign-in, sessions
+  and state stay out of the editor and Files (its `config.toml`, `AGENTS.md`, `prompts/`,
+  `skills/`, `rules/` are yours). [CODEX.md](CODEX.md) has the details.
 
 ### Comments for the agent
 
@@ -1452,8 +1462,8 @@ then shows pi-kit's shell. Your pi tab starts either way.
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.
 
-**Codex.** Its version and how it was installed, as the checklist has it, and **Full access in
-new Codex tabs** (see [Codex tabs](#codex-tabs)).
+**Codex.** Its version and how it was installed, as the checklist has it, **Full access in
+new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tabs](#codex-tabs)).
 
 ### Machines
 
@@ -2455,6 +2465,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New browser tab |  | a web page in the session on screen (its address field takes the keyboard) |
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen, with Deckhand's plugin |
 | Add Claude account… |  | add a Claude Code config folder as an account (a folder picker) |
+| Add Codex account… |  | add a Codex home (`CODEX_HOME`) as an account (a folder picker) |
 | Claude: send the waiting message now |  | the Claude tab's held message goes into its prompt now |
 | Claude: drop the waiting messages |  | the Claude tab's held messages are dropped |
 | Browser: back, Browser: forward, Browser: reload page |  | the browser tab on screen |

@@ -291,7 +291,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
 		// else a new one), once per account while there are several; only while it is installed
 		if p.group == .Projects && core.claude_installed() do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
-		if p.group == .Projects && core.codex_offered(p.id) do append(&items, core.Menu_Item{label = "New Codex tab", cmd = core.New_Claude_Tab{project_id = p.id, codex = true}}) // codex.odin
+		if p.group == .Projects && core.codex_offered(p.id) do core.claude_account_items(&items, "New Codex tab", core.New_Claude_Tab{project_id = p.id, codex = true}) // once per Codex account while there are several (codex.odin)
 		if core.folder_of(.Jobs) != "" do append(&items, core.Menu_Item{label = "New job for this project…", cmd = core.Job_Sheet{open = true, for_project = core.path_tilde(p.cwd)}})
 		append(&items, core.Menu_Item{label = "Rename…", rename = true})
 		sep(&items)
@@ -325,7 +325,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			pin_moves(&items, at, len(state.sidebar.pinned_sessions), 0, t.pi_session_id)
 		}
 		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_offered(id) do append(&items, core.Menu_Item{label = "New Codex tab here", cmd = core.New_Claude_Tab{session = id, codex = true}}) // codex.odin
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_offered(id) do core.claude_account_items(&items, "New Codex tab here", core.New_Claude_Tab{session = id, codex = true}) // codex.odin
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
 		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)
@@ -367,7 +367,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			}
 			if id == "new_claude_tab" do label = action_label(a)
 			// several Claude accounts: one row per account (claude_accounts.odin)
-			if strings.has_prefix(id, "new_claude_") && core.claude_accounts_many() && core.claude_installed() {
+			if strings.has_prefix(id, "new_claude_") && core.claude_accounts_many() && core.claude_installed() || id == "new_codex_tab" && core.claude_accounts_many(codex = true) && core.codex_installed() {
 				if c, ok := a.make(); ok {
 					core.claude_account_items(&items, strings.trim_suffix(label, core.CLAUDE_MISSING_NOTE), c)
 					continue
@@ -907,7 +907,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		// which agent it runs (a Claude-only session, else pi), and the account of several
 		harness := core.open_session_harness(s)
 		tag := "" // another machine's account is that machine's, unknown here: never this Mac's label
-		if !remote && s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account)
+		if !remote && s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account, ct.codex)
 		if tag != "" {
 			right += text_w(tag, FONT_UI_SMALL)
 			n += 1

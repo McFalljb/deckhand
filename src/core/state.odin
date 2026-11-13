@@ -339,6 +339,11 @@ Settings :: struct {
 	last_harness: Harness, // the harness the user last started a session with from "New session" (harness.odin): the picker's first row
 	claude_account_default: string, // the user's default account ("" = the environment's: CLAUDE_CONFIG_DIR, else ~/.claude)
 	pi_extensions: [dynamic]Pi_Extension_Choice, // the user's on/off for the pi integration's optional extensions (pi_integration.odin; user-only); one not listed has the manifest's default
+	// Codex accounts (claude_accounts.odin with codex; user-only): Codex homes (CODEX_HOME) the
+	// user added, renamed or removed, the last used and the user's default ("" = the environment's)
+	codex_accounts:        [dynamic]Claude_Account_Setting,
+	codex_account_last:    string,
+	codex_account_default: string,
 }
 
 // Left column sections, each sorted on its own.

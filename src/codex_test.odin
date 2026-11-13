@@ -320,7 +320,7 @@ codex_session_start_and_row :: proc(t: ^testing.T) {
 	s := core.find_session(sess)
 	testing.expect_value(t, s.agent, core.Session_Agent.Claude)
 	_, tb, ct := core.claude_tab_of(tab)
-	testing.expect(t, ct != nil && ct.codex && tb.title == "Codex" && ct.account == "" && len(ct.args) == 0)
+	testing.expect(t, ct != nil && ct.codex && tb.title == "Codex" && ct.account == core.codex_home() && len(ct.args) == 0) // the default account
 	snap := core.state_json()
 	testing.expect_value(t, core.json_path(snap, "open_sessions.0.tabs.0.harness"), "codex")
 	testing.expect_value(t, core.json_path(snap, "codex_installed"), "true")
@@ -351,7 +351,7 @@ codex_session_start_and_row :: proc(t: ^testing.T) {
 	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", title = "Fix the login bug"}, CX_SCRIPT)
 	testing.expect_value(t, len(state.claude_history), 1)
 	rec := state.claude_history[0]
-	testing.expect(t, rec.codex && rec.id == sid && rec.account == "" && rec.transcript == "" && rec.title == "Fix the login bug", "the row: a Codex conversation")
+	testing.expect(t, rec.codex && rec.id == sid && rec.account == core.codex_home() && rec.transcript == "" && rec.title == "Fix the login bug", "the row: a Codex conversation")
 	testing.expect_value(t, core.find_session(sess).pi_session_id, sid)
 	snap = core.state_json()
 	testing.expect_value(t, core.json_path(snap, "claude_sessions.0.harness"), "codex")
@@ -993,4 +993,164 @@ codex_disk_long_cwd_skipped :: proc(t: ^testing.T) {
 		testing.expectf(t, skip == (c != "/tmp/ok"), "%d bytes: skip %v", len(c), skip)
 		if c == "/tmp/ok" do testing.expect_value(t, cwd, "/tmp/ok")
 	}
+}
+
+// ---- Codex accounts (claude_accounts.odin with codex; docs/CODEX.md §6a) ----
+
+// A fresh HOME with a login profile that sets CODEX_HOME elsewhere, a project, and a Codex home
+// added as the account "Work"; codex's argv and environment go to files at each start.
+@(private = "file")
+Cx_Acct :: struct {
+	home, work, pid_dir, envf, argf, old_home: string,
+	pid:                                       u64,
+}
+
+@(private = "file")
+cx_acct_setup :: proc(t: ^testing.T, a: ^Cx_Acct) {
+	a.old_home = strings.clone(os.get_env("HOME", context.temp_allocator))
+	a.home = cx_dir("acct-home")
+	os.set_env("HOME", a.home)
+	os.unset_env("CODEX_HOME")
+	core.login_env.children = nil
+	// the login profile moving CODEX_HOME must not move a tab of an account
+	_ = os.write_entire_file(fmt.tprintf("%s/.profile", a.home), transmute([]u8)string("CODEX_HOME=/wrong; export CODEX_HOME\n"))
+	a.work = fmt.aprintf("%s/.codex-work", a.home)
+	os.make_directory_all(a.work)
+	out := cx_dir("acct-out")
+	a.envf = fmt.aprintf("%s/env", out)
+	a.argf = fmt.aprintf("%s/argv", out)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; env > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, a.argf, a.argf, a.argf, a.envf, a.envf, a.envf))
+	r := core.run_command(core.Add_Claude_Account{dir = a.work, codex = true}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	core.codex_login_set(.Signed_In, a.work) // never asks (a stand-in would only sleep)
+	a.pid_dir = cx_dir("acct-proj")
+	a.pid = core.run_command(core.Add_Project{cwd = a.pid_dir}, CX_UI).created_id
+}
+
+@(private = "file")
+cx_acct_done :: proc(a: ^Cx_Acct) {
+	clear(&state.settings.codex_accounts)
+	os.set_env("HOME", a.old_home)
+	os.unset_env("CODEX_HOME")
+}
+
+@(private = "file")
+cx_wait_file :: proc(path: string) -> string {
+	for _ in 0 ..< 250 {
+		if data, err := os.read_entire_file(path, context.temp_allocator); err == nil && len(data) > 0 do return string(data)
+		time.sleep(20 * time.Millisecond)
+	}
+	return ""
+}
+
+// A tab of an added account gets CODEX_HOME=<its home>, set again after the login profile (which
+// sets another here); the default sets nothing (the profile's stays); the record keeps the account
+// and its resume runs there; agents and a hub name only a configured account.
+@(test)
+codex_accounts_start_env :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	a: Cx_Acct
+	cx_acct_setup(t, &a)
+	defer cx_acct_done(&a)
+	testing.expect_value(t, len(core.claude_accounts(codex = true)), 2)
+	snap := core.state_json()
+	testing.expectf(t, strings.contains(snap, fmt.tprintf(`"codex_accounts":[{{"label":"Codex","dir":"%s/.codex"`, a.home)), "the snapshot lists them: %s", snap[max(0, strings.index(snap, "codex_accounts")):][:200])
+	r := core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = "Work"}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	e := cx_wait_file(a.envf)
+	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
+	testing.expect(t, !strings.contains(e, "DECKHAND_CODEX_ACCOUNT"), "the marker is gone before codex runs")
+	s := core.find_session(r.created_id)
+	testing.expect_value(t, s.tabs[0].kind.(core.Claude_Tab).account, a.work)
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad5a1"
+	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = s.tabs[0].id, session_id = sid}, CX_SCRIPT).ok)
+	rec, _ := core.claude_record(sid)
+	testing.expect(t, rec != nil && rec.account == a.work, "the record keeps its account")
+	// the default account: nothing set (CODEX_HOME as the login profile leaves it)
+	os.remove(a.envf)
+	r2 := core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = "Codex"}, CX_UI)
+	testing.expect(t, r2.ok, r2.error)
+	e = cx_wait_file(a.envf)
+	testing.expect(t, strings.contains(e, "\nCODEX_HOME=/wrong\n") && !strings.contains(e, a.work), e)
+	// agents and a hub: a configured account only, never a folder of their own
+	other := cx_dir("acct-other")
+	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = other}, CX_CONTROL).ok, "an agent's folder")
+	hr := core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = other}, core.Caller{kind = .UI, hub = true})
+	testing.expect(t, !hr.ok && strings.contains(hr.error, "no such Codex account"), hr.error)
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = r2.created_id, codex = true, account = "nope"}, CX_CONTROL).ok)
+	// a resume of the record (its session closed) runs under its account
+	core.run_command(core.Close_Session{session = r.created_id}, core.Caller{kind = .Internal})
+	os.remove(a.envf)
+	rr := core.run_command(core.Claude_Resume{claude_session_id = sid}, CX_UI)
+	testing.expect(t, rr.ok, rr.error)
+	e = cx_wait_file(a.envf)
+	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
+	// removed: its record no longer starts anywhere else
+	if rs, _, _ := core.find_tab(rr.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", codex = true}, CX_UI).ok)
+	gr := core.run_command(core.Claude_Resume{claude_session_id = sid}, CX_UI)
+	testing.expect(t, !gr.ok && strings.contains(gr.error, "Codex accounts"), gr.error)
+}
+
+// Every Codex home is guarded like ~/.codex: its sign-in (also by a hard link), sessions and state;
+// a removed one while it holds Codex's files; never HOME or a folder inside another home.
+@(test)
+codex_accounts_guard :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	a: Cx_Acct
+	cx_acct_setup(t, &a)
+	defer cx_acct_done(&a)
+	os.make_directory_all(fmt.tprintf("%s/sessions/2026/11/12", a.work))
+	_ = os.write_entire_file(fmt.tprintf("%s/auth.json", a.work), transmute([]u8)string("{}"))
+	for p in ([]string{"/auth.json", "/sessions/2026/11/12/rollout-x.jsonl", "/history.jsonl"}) {
+		testing.expectf(t, core.settings_credential(strings.concatenate({a.work, p}, context.temp_allocator)), "%s refused", p)
+	}
+	testing.expect(t, !core.settings_credential(fmt.tprintf("%s/config.toml", a.work)), "its config is the user's")
+	link := fmt.tprintf("%s/innocent.json", a.home)
+	posix.link(strings.clone_to_cstring(fmt.tprintf("%s/auth.json", a.work), context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator))
+	testing.expect(t, core.settings_credential(link, core.credential_ids()), "a hard link to its auth.json")
+	// homes that cannot be accounts
+	for d in ([]string{a.home, "/", fmt.tprintf("%s/sub", a.work), fmt.tprintf("%s/.codex", a.home)}) {
+		os.make_directory_all(d)
+		testing.expectf(t, !core.run_command(core.Add_Claude_Account{dir = d, codex = true}, CX_UI).ok, "%s refused", d)
+	}
+	testing.expect(t, !core.run_command(core.Add_Project{cwd = fmt.tprintf("%s/sub", a.work)}, CX_UI).ok, "no project inside a Codex home")
+	// removed while it holds auth.json: still guarded; one that holds nothing of Codex's is free
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = a.work, codex = true}, CX_UI).ok)
+	testing.expect(t, core.settings_credential(fmt.tprintf("%s/auth.json", a.work)), "removed, still guarded")
+	empty := fmt.tprintf("%s/.codex-empty", a.home)
+	os.make_directory_all(empty)
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = empty, codex = true}, CX_UI).ok)
+	testing.expect(t, core.settings_credential(fmt.tprintf("%s/notes.md", empty)), "an account's home")
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = empty, codex = true}, CX_UI).ok)
+	testing.expect(t, !core.settings_credential(fmt.tprintf("%s/notes.md", empty)), "given back")
+}
+
+// A conversation found in an account's sessions/ is a row; its click resumes it under that account.
+@(test)
+codex_accounts_found_session :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	a: Cx_Acct
+	cx_acct_setup(t, &a)
+	defer cx_acct_done(&a)
+	id := "01a1d0d6-5353-7ff3-9308-ff91070ad5b1"
+	day := fmt.tprintf("%s/sessions/2026/11/12", a.work)
+	os.make_directory_all(day)
+	_ = os.write_entire_file(fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id), transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":"cli"}}}}`+"\n", id, a.pid_dir))
+	core.run_command(core.Select_Project{project_id = a.pid}, CX_UI)
+	core.claude_disk_wait()
+	found := false
+	for f in state.claude_disk do if f.listed && f.id == id {
+		found = true
+		testing.expect_value(t, f.account, a.work)
+	}
+	testing.expect(t, found, "listed")
+	r := core.run_command(core.Open_Session_Cmd{project_id = a.pid, pi_session_id = id}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	e := cx_wait_file(a.envf)
+	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
+	testing.expect(t, strings.has_prefix(cx_wait_file(a.argf), fmt.tprintf("resume\n%s\n", id)))
 }

@@ -16,7 +16,8 @@ package core
 //     flags (codex_args_check: only flags known safe for a tab; never one that touches the hooks,
 //     Deckhand's MCP server, the folder or the daemon) go before Deckhand's, which come last. Never
 //     --dangerously-bypass-hook-trust (it would run every hook unreviewed, the repo's too).
-//     Deckhand writes nothing under ~/.codex and never sets CODEX_HOME.
+//     Deckhand writes nothing under ~/.codex or any Codex home; it sets CODEX_HOME only for a
+//     tab of an account the user added (claude_accounts.odin with codex; docs/CODEX.md §6a).
 //   - The hooks: the bundled CLI by its absolute path (`'<cli>' hook codex-<event>`), each with a
 //     trusted_hash for this run in an inline `hooks.state` table (Codex 0.167.2's recipe:
 //     codex_hook_hash). Other hooks (the user's, a repo's) keep their own trust. When the recipe
@@ -28,6 +29,7 @@ package core
 //   - Values in -c are TOML (codex_toml_string). Only Deckhand's own text goes into them (the CLI's
 //     path and fixed words); the cwd is its own argv element (-C), never TOML.
 
+import "base:runtime"
 import "core:crypto/sha2"
 import "core:fmt"
 import "core:os"
@@ -418,10 +420,16 @@ codex_with_defaults :: proc(args: []string) -> []string {
 // Starts codex in the tab's terminal (claude_start for a Codex tab): the login shell, CODEX_TAB_CMD
 // and codex_args; the environment of a Claude tab (the socket, the tab's token, the CLI's path).
 // flags: the tab's own flags (an agent's restart starts without them); defaults: a start the user
-// makes, with the default flags as set now (codex_with_defaults). Never with an account.
+// makes, with the default flags as set now (codex_with_defaults). Its account: CODEX_HOME for a
+// home the user added (none for the default), set again after the login profile.
 codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
 	if v := codex_version(); claude_version_below(v, CODEX_MIN_VERSION) {
 		term_note(t, codex_old_text(v))
+		return false
+	}
+	// its account (claude_accounts.odin): only a configured one starts
+	if ct.account != "" && !claude_account_known(ct.account, codex = true) {
+		term_note(t, fmt.tprintf("This Codex tab's account (%s) is no longer in Settings → Codex accounts: add it again, then Restart.", path_tilde(ct.account)))
 		return false
 	}
 	cli := claude_cli_path()
@@ -436,16 +444,18 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 		term_note(t, fmt.tprintf("Codex can't start: %s.", why))
 		return false
 	}
-	argv := shell_script_argv(login_shell(), codex_tab_cmd(), "codex")
+	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator) // the account again after the login profile
+	argv := shell_script_argv(login_shell(), cmd, "codex")
 	append(&argv, ..args)
 	env := make([dynamic]string, context.temp_allocator)
 	append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli)))
+	append(&env, ..claude_account_env(ct.account, codex = true)) // its account: CODEX_HOME (none for the default)
 	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Codex}) { // tokens.json: never adopted as a Claude tab
 		socket_forget_tab(tab_id)
 		return false
 	}
 	claude_run_started(tab_id, t, ct)
-	codex_login_check()
+	codex_login_check(ct.account)
 	return true
 }
 
@@ -510,8 +520,10 @@ codex_installed :: proc() -> bool {
 
 codex_recheck :: proc() {
 	codex_found = .Unknown
-	sync.atomic_add(&codex_login.gen, 1)
-	sync.atomic_store(&codex_login.state, .Unknown)
+	for &x in codex_login {
+		sync.atomic_add(&x.gen, 1)
+		sync.atomic_store(&x.state, .Unknown)
+	}
 }
 
 codex_installed_now :: proc() -> bool {
@@ -581,44 +593,82 @@ codex_label :: proc(label: string) -> string {
 	return strings.concatenate({label, CODEX_MISSING_NOTE}, context.temp_allocator)
 }
 
-// Signed in? `codex login status` (exit 1: signed out), run once per recheck on a worker through
-// the login shell (the PATH tabs get), after a Codex tab started; its answer feeds the tab's bar
-// and the checklist. Only codex's exit status is used: its output is never read or kept.
+// Signed in? `codex login status` (exit 1: signed out) under an account's home (CODEX_HOME, as its
+// tabs get it), run once per recheck on a worker through the login shell (the PATH tabs get),
+// after a Codex tab of that account started; its answer feeds the tab's bar (and the default's,
+// the checklist). Only codex's exit status is used: its output is never read or kept.
 Codex_Login :: enum i32 {
 	Unknown,
 	Asking,
 	Signed_In,
 	Signed_Out,
 }
+// One answer per Codex home: slot 0 the default account's (the environment's), the others a
+// home's by its folder (set on the main thread only; the worker writes its slot's state).
 @(private = "file")
-codex_login: struct {
+CODEX_LOGIN_SLOTS :: 16
+@(private = "file")
+codex_login: [CODEX_LOGIN_SLOTS]struct {
+	home:  string, // heap; "" = the default (slot 0) or free
 	state: Codex_Login, // atomic
 	gen:   i32, // atomic
 }
 
 CODEX_LOGIN_TIMEOUT :: 15 * time.Second
 
-codex_login_state :: proc() -> Codex_Login {return Codex_Login(sync.atomic_load(&codex_login.state))}
+// The slot of an account's answer (account: a tab's; "" or the default's folder = slot 0); -1 =
+// none (more homes than slots: no bar for it). take: take a free slot. Main thread.
+@(private = "file")
+codex_login_slot :: proc(account: string, take := false) -> int {
+	d := claude_account_dir(account, codex = true)
+	if account == "" || d == codex_home() do return 0
+	for x, i in codex_login do if i > 0 && x.home == d do return i
+	if !take do return -1
+	for &x, i in codex_login do if i > 0 && x.home == "" {
+		x.home = strings.clone(d, runtime.heap_allocator())
+		return i
+	}
+	return -1
+}
 
-// Tests: sets the answer.
-codex_login_set :: proc(s: Codex_Login) {sync.atomic_store(&codex_login.state, s)}
+codex_login_state :: proc(account := "") -> Codex_Login {
+	i := codex_login_slot(account)
+	return i < 0 ? .Unknown : Codex_Login(sync.atomic_load(&codex_login[i].state))
+}
 
-codex_login_check :: proc() {
-	if _, ok := sync.atomic_compare_exchange_strong(&codex_login.state, .Unknown, .Asking); !ok do return
-	gen := sync.atomic_load(&codex_login.gen)
-	script := strings.clone(strings.concatenate({"set -- login status; ", codex_tab_cmd()}, context.temp_allocator))
+// Sets the answer for account's home (tests; and Unknown once its composer reports).
+codex_login_set :: proc(s: Codex_Login, account := "") {
+	if i := codex_login_slot(account, take = true); i >= 0 do sync.atomic_store(&codex_login[i].state, s)
+}
+
+// Asks once for account's home (a configured one; "" = the default, which sets no CODEX_HOME).
+codex_login_check :: proc(account := "") {
+	if account != "" && !claude_account_known(account, codex = true) do return
+	i := codex_login_slot(account, take = true)
+	if i < 0 do return
+	if _, ok := sync.atomic_compare_exchange_strong(&codex_login[i].state, .Unknown, .Asking); !ok do return
+	gen := sync.atomic_load(&codex_login[i].gen)
+	// its home after the login profile, as its tabs (CODEX_ACCOUNT_SH): the marker as a shell
+	// variable in the script (a configured folder, quoted), nothing for the default
+	set := ""
+	for e in claude_account_env(account, codex = true) do if strings.has_prefix(e, "DECKHAND_CODEX_ACCOUNT=") {
+		set = strings.concatenate({"DECKHAND_CODEX_ACCOUNT=", sh_quote(e[len("DECKHAND_CODEX_ACCOUNT="):]), "; "}, context.temp_allocator)
+	}
+	script := strings.clone(strings.concatenate({"set -- login status; ", set, CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator))
 	Job :: struct {
+		slot:   int,
 		gen:    i32,
 		script: string,
 	}
-	thread.create_and_start_with_poly_data(Job{gen, script}, proc(j: Job) {
+	thread.create_and_start_with_poly_data(Job{i, gen, script}, proc(j: Job) {
 		defer free_all(context.temp_allocator)
 		defer delete(j.script)
 		_, code, ran := run_bounded_exit("", shell_script_argv(login_shell(), j.script, "codex")[:], CODEX_LOGIN_TIMEOUT)
 		ans := Codex_Login.Unknown // a timeout or another failure proves nothing: no bar
 		if ran && code == 0 do ans = .Signed_In
 		else if ran && code == 1 do ans = .Signed_Out
-		if sync.atomic_load(&codex_login.gen) == j.gen do sync.atomic_compare_exchange_strong(&codex_login.state, .Asking, ans)
+		x := &codex_login[j.slot]
+		if sync.atomic_load(&x.gen) == j.gen do sync.atomic_compare_exchange_strong(&x.state, .Asking, ans)
 		if platform.wake != nil do platform.wake()
 	}, self_cleanup = true)
 }
@@ -663,24 +713,33 @@ codex_credential :: proc(p: string) -> bool {
 		ra := fs_real(a)
 		if p == a || (ra != "" && (p == ra || fs_real(p) == ra)) do return true
 	}
-	home := codex_home()
-	if home == "" do return false
-	for c in ([2]string{home, fs_real(home)}) {
-		if c == "" || !path_under(p, c) do continue
-		first, _, rest := strings.partition(p[len(c) + 1:], "/")
-		for f in CODEX_CONFIG_FOLDERS do if first == f do return false
-		if rest == "" do for f in CODEX_CONFIG_FILES do if first == f do return false
-		return true
+	// every Codex home (claude_account_dirs with codex): the default's, ~/.codex, each account's,
+	// a removed one's while it holds Codex's files; never HOME or above it
+	for home in claude_account_dirs(codex = true) {
+		for c in ([2]string{home, fs_real(home)}) {
+			if c == "" || !path_under(p, c) do continue
+			first, _, rest := strings.partition(p[len(c) + 1:], "/")
+			for f in CODEX_CONFIG_FOLDERS do if first == f do return false
+			if rest == "" do for f in CODEX_CONFIG_FILES do if first == f do return false
+			return true
+		}
 	}
 	return false
 }
 
-// Codex's sign-in file (its other names, hard links, are refused too: credential_ids).
+// Codex's sign-in files, every home's (their other names, hard links, are refused too:
+// credential_ids).
 codex_credential_files :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
-	if h := codex_home(); h != "" do append(&out, strings.concatenate({h, "/auth.json"}, context.temp_allocator))
-	if a := codex_auth_file(); a != "" && (len(out) == 0 || out[0] != a) do append(&out, a)
+	for h in claude_account_dirs(codex = true) do append(&out, strings.concatenate({h, "/auth.json"}, context.temp_allocator))
+	if a := codex_auth_file(); a != "" && !slice_has(out[:], a) do append(&out, a)
 	return out[:]
+}
+
+@(private = "file")
+slice_has :: proc(list: []string, x: string) -> bool {
+	for y in list do if y == x do return true
+	return false
 }
 
 // Whether p is strictly inside folder dir (by name).

@@ -1022,7 +1022,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// symlinks): the project, its pins and hidden entry use that path too
 		want = real_path(want)
 		if c := chats_project(); c != nil && c.cwd == want do return fail("that folder is where chats run: they are in the Chats section"), false
-		if l := claude_account_holding(want); l != "" do return fail(fmt.tprintf("that folder is inside the Claude account %s's config folder (Settings → Claude accounts)", l)), false
+		if why := account_holding_why(want); why != "" do return fail(why), false
 		p := project_by_cwd(want)
 		if p == nil {
 			cwd := strings.clone(want)
@@ -1862,7 +1862,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			claude_disk_rescan()
 			// an added account's projects (scan_projects: on the Rescan worker)
 			// (one running: once more after it, so every account added at once is scanned)
-			if _, is := cmd.(Add_Claude_Account); is && caller.kind == .UI {
+			if a, is := cmd.(Add_Claude_Account); is && !a.codex && caller.kind == .UI { // a Codex home holds no projects
 				if scan_thread == nil do run_command(Rescan{}, {kind = .Internal})
 				else do claude_rescan_again = true
 			}
@@ -1990,7 +1990,7 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 		args := make([]string, len(rt.args))
 		for a, i in rt.args do args[i] = strings.clone(a)
 		// its account: an absolute folder; checked again at its start (claude_start: configured only)
-		acct := filepath.is_abs(rt.account) && !rt.codex ? rt.account : ""
+		acct := filepath.is_abs(rt.account) ? rt.account : ""
 		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, account = strings.clone(acct), codex = rt.codex}, title = strings.clone(rt.codex ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 	}
 	if rt.kind != .Shell do return 0

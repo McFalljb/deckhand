@@ -52,7 +52,7 @@ settings_registry_commands :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, n >= 3, "optional pi extensions read")
 	// every group settings_file_rows makes has a section
-	for g in ([]string{"pi", "pi-ext", "ext", "project", "claude", "claude:work", "claude-project", "claude-accounts", "agents", "atlas", "jobs", "chats", "folders", "machines"}) {
+	for g in ([]string{"pi", "pi-ext", "ext", "project", "claude", "claude:work", "claude-project", "claude-accounts", "codex-accounts", "agents", "atlas", "jobs", "chats", "folders", "machines"}) {
 		_, _, ok := settings_group_section(g)
 		testing.expectf(t, ok, "group %s has no section", g)
 	}

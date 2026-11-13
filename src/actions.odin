@@ -270,6 +270,11 @@ ACTIONS := [?]Action {
 		if action_folder == "" do return nil, false
 		return core.Add_Claude_Account{dir = action_folder}, true
 	}},
+	// Settings → Codex accounts → Add account…: a Codex home (claude_accounts.odin with codex)
+	{id = "codex_account_add", pick_folder = true, make = proc() -> (core.Command, bool) {
+		if action_folder == "" do return nil, false
+		return core.Add_Claude_Account{dir = action_folder, codex = true}, true
+	}},
 	// the setup sheet's "Choose…" buttons: the picked folder goes into the sheet
 	{id = "setup_pick_main", label = "Choose another folder…", no_palette = true, pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder != "" do setup_picked(false, action_folder)

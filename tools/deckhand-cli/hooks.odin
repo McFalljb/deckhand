@@ -15,6 +15,11 @@ import "core:strings"
 import "core:unicode/utf8"
 
 HOOK_HELLO_MS :: 3000
+// Codex's UserPromptSubmit: its hello and three calls (turn, comments, attached) at their limits,
+// 1.5 + 3 x 2 = 7.5 s, stay under the hook's 10 s timeout (CODEX_HOOK_TIMEOUT, src/core/codex.odin):
+// a hook killed after printing could have its comments marked attached unseen
+CODEX_HOOK_HELLO_MS :: 1500
+CODEX_HOOK_CALL_MS :: 2000
 HOOK_CALL_MS :: 5000
 HOOK_TITLE_MAX :: 80 // bytes
 HOOK_TODOS_MAX :: 100 // todos sent (Deckhand refuses more)
@@ -212,8 +217,8 @@ background_snapshot :: proc(c: ^Ctx, input: json.Object) -> string {
 // UserPromptSubmit (Claude's and Codex's): the session's pending comments go with the message as
 // its additionalContext (the only thing printed), then are marked delivered (claude.attached).
 @(private = "file")
-attach_comments :: proc(c: ^Ctx, event, head: string) {
-	r, ok := hook_call(c, event, fmt.aprintf(`{{"type":"claude.comments","max":%d}}`, COMMENTS_ASK_MAX))
+attach_comments :: proc(c: ^Ctx, event, head: string, hello_ms := HOOK_HELLO_MS, call_ms := HOOK_CALL_MS) {
+	r, ok := hook_call(c, event, fmt.aprintf(`{{"type":"claude.comments","max":%d}}`, COMMENTS_ASK_MAX), hello_ms, call_ms)
 	if !ok do return
 	d := get_obj(r, "data")
 	n, _ := get_int(d, "count")
@@ -224,9 +229,9 @@ attach_comments :: proc(c: ^Ctx, event, head: string) {
 		hook_fail(c, event, "the comments block is too long for one message; they stay pending")
 		return
 	}
-	c.write_out(c, hook_output(text))
-	// only once the agent has it (written above) are they marked as delivered
-	hook_call(c, event, fmt.aprintf(`{{"type":"claude.attached","attachment_id":%d}}`, id))
+	// only once the agent has it (written in full) are they marked as delivered
+	if !c.write_out(c, hook_output(text)) do return
+	hook_call(c, event, fmt.aprintf(`{{"type":"claude.attached","attachment_id":%d}}`, id), hello_ms, call_ms)
 }
 
 run_hook :: proc(c: ^Ctx, event: string) {
@@ -390,8 +395,8 @@ run_hook :: proc(c: ^Ctx, event: string) {
 	case "codex-prompt-submit":
 		// the pending comments as additionalContext, as for Claude: the one output a Codex hook prints
 		prompt, _ := get_str(input, "prompt")
-		if _, ok := hook_call(c, event, turn_cmd("submitted", title_of(prompt, HOOK_TITLE_MAX))); !ok do return
-		attach_comments(c, event, CODEX_IMAGES_HEAD)
+		if _, ok := hook_call(c, event, turn_cmd("submitted", title_of(prompt, HOOK_TITLE_MAX)), CODEX_HOOK_HELLO_MS, CODEX_HOOK_CALL_MS); !ok do return
+		attach_comments(c, event, CODEX_IMAGES_HEAD, CODEX_HOOK_HELLO_MS, CODEX_HOOK_CALL_MS)
 	case "codex-permission":
 		hook_call(c, event, turn_cmd("waiting"))
 	case "codex-stop":

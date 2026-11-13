@@ -40,6 +40,7 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:thread"
 import "core:time"
 
@@ -340,19 +341,22 @@ claude_disk_wait :: proc() {
 CODEX_DISK_DAYS_MAX :: 60 // day folders looked at, newest first
 CODEX_DISK_FILES_MAX :: 400 // rollouts looked at, newest first
 CODEX_DISK_LINE_MAX :: 64 * 1024 // a rollout's first line (session_meta, ~25 KB); longer: skipped
+CODEX_CWD_MAX :: 1024 // a rollout's cwd; longer (or with a NUL): skipped, never walked
 
 // A rollout's session_meta (its first line, at most CODEX_DISK_LINE_MAX, never more of the file):
 // the cwd it ran in. skip: not a conversation to list (no session_meta, an id that is not the
 // file's, a subagent's or another non-string source). Never written to; nothing in it reaches a
 // shell or the screen (the cwd is only compared with the project's folder). Any thread.
-@(private = "file")
 codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
 	skip = true
-	f, err := os.open(path)
-	if err != nil do return
-	defer os.close(f)
+	// never a FIFO or a link swapped in since the listing (open would block, or go elsewhere)
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NONBLOCK, .NOFOLLOW, .CLOEXEC})
+	if fd < 0 do return
+	defer posix.close(fd)
+	st: posix.stat_t
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return
 	buf := make([]u8, CODEX_DISK_LINE_MAX, context.temp_allocator)
-	got, _ := os.read_at(f, buf, 0)
+	got := int(posix.pread(fd, raw_data(buf), len(buf), 0))
 	sync.atomic_add(&claude_disk_bytes_read, i64(max(got, 0)))
 	nl := strings.index_byte(string(buf[:max(got, 0)]), '\n')
 	if nl < 2 do return
@@ -368,6 +372,7 @@ codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
 	if _, src_ok := pl["source"].(json.String); !src_ok do return // a subagent's ({"subagent": …})
 	name := strings.trim_suffix(filepath.base(path), ".jsonl")
 	if !codex_id_ok(string(id)) || !strings.has_suffix(name, string(id)) || !filepath.is_abs(string(c)) do return
+	if len(c) > CODEX_CWD_MAX || strings.index_byte(string(c), 0) >= 0 do return
 	return string(c), false
 }
 
@@ -594,6 +599,9 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	// Claude's (one id, one harness: codex.odin)
 	if !(chats && state.settings.chats_readonly) {
 		m := 0
+		// the cwd as Codex wrote it, byte for byte: the project's path or its real path (never a
+		// path from the file resolved: a planted one would cost a walk per file per rescan)
+		preal := fs_real(p.cwd)
 		for c in codex_disk_files() {
 			if m >= MAX_SESSIONS do break
 			if rec, _ := claude_record(c.id); rec != nil do continue
@@ -602,7 +610,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 			for f in out do if f.id == c.id do dup = true
 			if dup do continue
 			_, cwd, skip, known := found_info(c.path, c.size, c.modified, &budget)
-			if !known || skip || !same_folder(cwd, p.cwd) do continue
+			if !known || skip || (cwd != p.cwd && cwd != preal) do continue
 			m += 1
 			append(out, Claude_Disk{id = strings.clone(c.id), modified = c.modified, created = c.created, listed = true, codex = true})
 		}

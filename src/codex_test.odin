@@ -858,3 +858,21 @@ codex_sessions_on_disk :: proc(t: ^testing.T) {
 	rec, _ := core.claude_record(ids[0])
 	testing.expect(t, rec != nil && rec.codex, "the history keeps it")
 }
+
+// A planted rollout's cwd never costs a path walk: one over CODEX_CWD_MAX bytes (or with a NUL)
+// is skipped when read, before any comparison.
+@(test)
+codex_disk_long_cwd_skipped :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	day := cx_dir("longcwd")
+	id := "01a1d0d6-5353-7ff3-9308-ff91070ad536"
+	long := strings.concatenate({"/a", strings.repeat("/a", 20_000)})
+	for c in ([]string{long, "/tmp/x\\u0000y", "/tmp/ok"}) {
+		path := fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id)
+		_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":"cli"}}}}`+"\n", id, c))
+		cwd, skip := core.codex_first_line(path)
+		testing.expectf(t, skip == (c != "/tmp/ok"), "%d bytes: skip %v", len(c), skip)
+		if c == "/tmp/ok" do testing.expect_value(t, cwd, "/tmp/ok")
+	}
+}

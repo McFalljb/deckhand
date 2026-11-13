@@ -13,11 +13,13 @@ Fake :: struct {
 	sent:    [dynamic]string, // command objects, in order
 	replies: map[string]string, // command type → result JSON
 	fail:    string, // transport error for every call
+	timeouts: [dynamic]int, // each call's timeout_ms, in order
 }
 
 fake_call :: proc(t: ^Transport, cmd: string, timeout_ms: int) -> (json.Object, string) {
 	f := (^Fake)(t.data)
 	append(&f.sent, cmd)
+	append(&f.timeouts, timeout_ms)
 	if f.fail != "" do return nil, f.fail
 	o, _ := parse_obj(cmd)
 	type := get_text(o, "type")
@@ -41,7 +43,7 @@ test_ctx :: proc(f: ^Fake, stdin := "", env: map[string]string = nil) -> Ctx {
 	t.call = fake_call
 	t.data = f
 	return Ctx {
-		write_out = proc(c: ^Ctx, s: string) {strings.write_string(&c.out, s)},
+		write_out = proc(c: ^Ctx, s: string) -> bool {strings.write_string(&c.out, s); return true},
 		write_err = proc(c: ^Ctx, s: string) {strings.write_string(&c.err, s)},
 		read_stdin = proc() -> string {return cur_stdin},
 		getenv = proc(k: string) -> string {return cur_env[k] or_else ""},
@@ -1154,6 +1156,11 @@ hook_codex_comments :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(ctx, "Deckhand comments (1)."), ctx)
 	testing.expect(t, strings.contains(ctx, "look at each image file") && !strings.contains(ctx, "Read tool"), ctx)
 	testing.expect(t, strings.contains(ctx, "image 1: /d/c1.png"), ctx)
+	// the whole hook, its hello and three calls at their limits, stays under Codex's hook timeout
+	// (10 s, src/core/codex.odin): killed after printing, the comments would be marked attached unseen
+	worst := CODEX_HOOK_HELLO_MS
+	for ms in f.timeouts do worst += ms
+	testing.expectf(t, worst <= 8000, "worst case %d ms", worst)
 	f2: Fake
 	f2.replies["claude.comments"] = `{"ok":true,"data":{"count":0}}`
 	c = test_ctx(&f2, stdin = `{"prompt":"hi"}`)

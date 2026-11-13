@@ -125,11 +125,11 @@ the selected project and Chats. **Read only, never written.**
 
 - **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), `YYYY/MM/DD/` folders
   newest first: at most 60 day folders and 400 files (`CODEX_DISK_DAYS_MAX`, `CODEX_DISK_FILES_MAX`),
-  regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks), the id from the name
+  regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
   (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set.
 - **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
   through the Claude scan's cache, budget and worker (`found_info`). The payload's `id` must be
-  the file's, `cwd` absolute and the project's folder (`same_folder`), `source` a string (a
+  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source` a string (a
   subagent's is an object: skipped). The cwd is only compared; no title is read (rows read
   "Untitled Codex session" with the file's date); nothing from the file reaches a shell, the
   terminal or the snapshot but the id (a UUID). The file's path is not kept.

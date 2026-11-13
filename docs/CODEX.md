@@ -265,7 +265,8 @@ Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/C
   `add_claude_account` with `"harness":"codex"`). Nothing is looked for (Claude's found folders
   have no Codex equivalent). The folder must exist: **Deckhand never makes or writes a home**. A
   home is refused when it is HOME or above it, holds a project, the main folder or the chats
-  folder, or is inside or holds another guarded Codex home or Claude config folder; a project is
+  folder, or is inside or holds another guarded Codex home or Claude config folder (or is one; a
+  Claude account is never a Codex home either); a project is
   refused inside a non-default account's home.
 - **Signing in**: on Codex's own screen in the account's first tab (the signed-out bar is per
   home, §5), or in a terminal with `CODEX_HOME=<home> codex login` (the Add row says so).

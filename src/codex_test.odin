@@ -1117,6 +1117,25 @@ codex_accounts_guard :: proc(t: ^testing.T) {
 		testing.expectf(t, !core.run_command(core.Add_Claude_Account{dir = d, codex = true}, CX_UI).ok, "%s refused", d)
 	}
 	testing.expect(t, !core.run_command(core.Add_Project{cwd = fmt.tprintf("%s/sub", a.work)}, CX_UI).ok, "no project inside a Codex home")
+	// one harness's folder is never the other's account: a Claude config folder as a Codex home,
+	// a Codex home as a Claude account
+	cw := fmt.tprintf("%s/.claude-work", a.home)
+	os.make_directory_all(cw)
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = cw}, CX_UI).ok, "a Claude account")
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = cw, codex = true}, CX_UI).ok, "a Claude config folder is no Codex home")
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = a.work}, CX_UI).ok, "a Codex home is no Claude account")
+	clear(&state.settings.claude_accounts)
+	// a home inside another home's config folder (skills/) is still guarded once that other is the
+	// default: any home that says "Codex's state" wins
+	outer := fmt.tprintf("%s/outer", a.home)
+	inner := fmt.tprintf("%s/skills/b", outer)
+	os.make_directory_all(fmt.tprintf("%s/sessions", inner))
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = inner, codex = true}, CX_UI).ok)
+	os.set_env("CODEX_HOME", outer)
+	testing.expect(t, core.settings_credential(fmt.tprintf("%s/sessions/x.jsonl", inner)), "the inner home's sessions")
+	testing.expect(t, !core.settings_credential(fmt.tprintf("%s/skills/notes.md", outer)), "the outer home's skills are the user's")
+	os.unset_env("CODEX_HOME")
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = inner, codex = true}, CX_UI).ok)
 	// removed while it holds auth.json: still guarded; one that holds nothing of Codex's is free
 	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = a.work, codex = true}, CX_UI).ok)
 	testing.expect(t, core.settings_credential(fmt.tprintf("%s/auth.json", a.work)), "removed, still guarded")

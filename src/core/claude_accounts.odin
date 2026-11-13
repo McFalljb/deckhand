@@ -500,7 +500,7 @@ claude_account_items :: proc(items: ^[dynamic]Menu_Item, label: string, cmd: Com
 // ~/.claude (claude_credential), so it may not be HOME or above it, nor hold a project, the main
 // folder or the chats folder (they would be locked out of the editor and Files). A Codex home
 // (codex) is guarded like ~/.codex, and is never inside another guarded Codex or Claude folder,
-// nor holds one.
+// nor holds one; a Claude account is never a guarded Codex home, inside one or holding one.
 claude_account_dir_refused :: proc(d: string, codex := false) -> string {
 	h := home_dir_now()
 	rd := fs_real(d)
@@ -515,11 +515,14 @@ claude_account_dir_refused :: proc(d: string, codex := false) -> string {
 	for p in state.projects do if p.machine == 0 && holds(d, rd, p.cwd) do return fmt.tprintf("it holds the project %s: %s", p.label != "" ? p.label : p.cwd, pick)
 	if holds(d, rd, state.settings.home_dir) do return fmt.tprintf("it holds Deckhand's main folder: %s", pick)
 	if holds(d, rd, chats_cwd()) do return fmt.tprintf("it holds the chats folder: %s", pick)
-	if codex {
-		// never one inside another (one home's guard would cover the other's files)
-		for both in ([2]bool{true, false}) do for o in claude_account_dirs(both) {
-			if o == d || fs_real(o) == rd do continue // itself (one removed and added again; equal: "already an account")
-			if holds(d, rd, o) || holds(o, fs_real(o), d) do return fmt.tprintf("it is inside, or holds, %s (%s)", both ? "another Codex home" : "a Claude Code config folder", path_tilde(o))
+	// never one harness's folder as the other's, nor (a Codex home) one inside another: one guard
+	// would cover the other's files. The same harness's own folder: itself (a removed one added
+	// again; a listed one: "already an account")
+	for same in ([2]bool{true, false}) {
+		if !codex && same do continue // Claude's own folders nest as before
+		for o in claude_account_dirs(same ? codex : !codex) {
+			if same && (o == d || fs_real(o) == rd) do continue
+			if holds(d, rd, o) || holds(o, fs_real(o), d) do return fmt.tprintf("it is, is inside, or holds %s (%s)", codex == same ? "a Codex home" : "a Claude Code config folder", path_tilde(o))
 		}
 	}
 	return ""

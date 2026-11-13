@@ -714,14 +714,16 @@ codex_credential :: proc(p: string) -> bool {
 		if p == a || (ra != "" && (p == ra || fs_real(p) == ra)) do return true
 	}
 	// every Codex home (claude_account_dirs with codex): the default's, ~/.codex, each account's,
-	// a removed one's while it holds Codex's files; never HOME or above it
+	// a removed one's while it holds Codex's files; never HOME or above it. Codex's state if any
+	// home says so (one home may sit in another's config folder: ~/a/skills/b)
 	for home in claude_account_dirs(codex = true) {
 		for c in ([2]string{home, fs_real(home)}) {
 			if c == "" || !path_under(p, c) do continue
 			first, _, rest := strings.partition(p[len(c) + 1:], "/")
-			for f in CODEX_CONFIG_FOLDERS do if first == f do return false
-			if rest == "" do for f in CODEX_CONFIG_FILES do if first == f do return false
-			return true
+			config := false
+			for f in CODEX_CONFIG_FOLDERS do if first == f do config = true
+			if rest == "" do for f in CODEX_CONFIG_FILES do if first == f do config = true
+			if !config do return true
 		}
 	}
 	return false

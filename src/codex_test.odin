@@ -163,15 +163,17 @@ codex_argv :: proc(t: ^testing.T) {
 	testing.expect_value(t, args[0], "--no-daemon")
 	testing.expect_value(t, args[1], "-C")
 	testing.expect_value(t, args[2], cwd)
-	testing.expect_value(t, len(args), 3 + 2 * (len(core.CODEX_HOOKS) + 1))
+	testing.expect_value(t, len(args), 3 + 2 * (len(core.CODEX_HOOKS) + 2))
 	for a, i in args {
 		if i >= 3 do testing.expectf(t, (i % 2 == 1) == (a == "-c"), "%d: %q", i, a)
 		for no in ([]string{"-s", "-a", "-m", "-p", "--sandbox", "--ask-for-approval", "--model", "--profile", "--dangerously-bypass-hook-trust", "--dangerously-bypass-approvals-and-sandbox", "--full-auto", "--yolo"}) do testing.expectf(t, a != no, "%q is the user's own setting", a)
-		testing.expectf(t, !strings.has_prefix(a, "projects") && !strings.has_prefix(a, "notify") && !strings.has_prefix(a, "mcp_servers"), "%q", a)
+		testing.expectf(t, !strings.has_prefix(a, "projects") && !strings.has_prefix(a, "notify") && (!strings.has_prefix(a, "mcp_servers") || i == len(args) - 1), "%q", a)
 	}
+	// Deckhand's tools: the CLI's MCP server, its token passed by name only (env_vars), never in argv
+	testing.expect_value(t, args[len(args) - 1], `mcp_servers.deckhand={command="/tmp/De\"ck h=and/it's\\x/deckhand-cli",args=["mcp"],env_vars=["DECKHAND_SOCKET","DECKHAND_CLAUDE_TOKEN","DECKHAND_SHOTS_DIR"],tool_timeout_sec=620}`)
 	testing.expect_value(t, args[4], `hooks.SessionStart=[{hooks=[{type="command",command="'/tmp/De\"ck h=and/it'\\''s\\x/deckhand-cli' hook codex-session-start",timeout=10}]}]`)
 	testing.expect_value(t, args[10], `hooks.Stop=[{hooks=[{type="command",command="'/tmp/De\"ck h=and/it'\\''s\\x/deckhand-cli' hook codex-stop",timeout=10}]}]`)
-	st := args[len(args) - 1]
+	st := args[len(args) - 3]
 	testing.expect(t, strings.has_prefix(st, `hooks.state={"/<session-flags>/config.toml:session_start:0:0"={trusted_hash="sha256:48f7baad2a00602dafa84fb9f059aadb66c31598c05c62935aca0f65a8f723a9"},`), st)
 	for h in core.CODEX_HOOKS do testing.expectf(t, strings.contains(st, fmt.tprintf(`"/<session-flags>/config.toml:%s:0:0"={{trusted_hash="%s"}}`, h.key, core.codex_hook_hash(h.key, core.codex_hook_command(CX_CLI, h.arg), core.CODEX_HOOK_TIMEOUT))), "%s trusted", h.key)
 	// resume: the subcommand and its UUID first

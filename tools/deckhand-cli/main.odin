@@ -26,6 +26,7 @@ Ctx :: struct {
 	clock:      proc() -> u64, // a hook's order stamp (monotonic ns at its start); nil = none (tests)
 	started:    u64, // clock() when run began (before stdin is read): the hook's seq
 	tr:         ^Transport, // nil: made from the environment on first use
+	mcp:        bool, // `deckhand mcp` (a Codex tab): screenshots say view_image, not the Read tool
 	out:        strings.Builder, // tests: what was written
 	err:        strings.Builder,
 }
@@ -122,6 +123,18 @@ run :: proc(c: ^Ctx, args: []string) -> int {
 		run_hook(c, len(args) > 1 ? args[1] : "")
 		return 0
 	}
+	if args[0] == "mcp" && len(args) == 1 {
+		mcp_serve(c) // Codex tabs: these commands as MCP tools over stdio (mcp.odin)
+		return 0
+	}
+	out, code := command(c, args)
+	println_out(c, out)
+	return code
+}
+
+// One command (args without the program name): its JSON line and exit status (the CLI's, and
+// each MCP tool's).
+command :: proc(c: ^Ctx, args: []string) -> (string, int) {
 	req, uerr := parse_cli(args, c.read_stdin)
 	if uerr != "" {
 		w := jw_begin()
@@ -129,26 +142,14 @@ run :: proc(c: ^Ctx, args: []string) -> int {
 		if req.name != "" do jw_str(&w, "command", req.name)
 		jw_str(&w, "error", uerr)
 		jw_str(&w, "usage", "deckhand --help (or deckhand --skill for the manual)")
-		println_out(c, jw_end(&w))
-		return 2
+		return jw_end(&w), 2
 	}
 	t, terr := transport(c)
-	if terr != "" {
-		println_out(c, local_error(req.name, terr))
-		return 1
-	}
+	if terr != "" do return local_error(req.name, terr), 1
 	result, err := t.call(t, req.cmd, req.timeout_ms)
-	if err != "" {
-		println_out(c, local_error(req.name, err))
-		return 1
-	}
-	if !is_true(result, "ok") {
-		println_out(c, req.kind == .Show ? show_error_out(&req, result) : error_out(&req, result))
-		return 1
-	}
-	out, code := format_ok(c, &req, result)
-	println_out(c, out)
-	return code
+	if err != "" do return local_error(req.name, err), 1
+	if !is_true(result, "ok") do return req.kind == .Show ? show_error_out(&req, result) : error_out(&req, result), 1
+	return format_ok(c, &req, result)
 }
 
 format_ok :: proc(c: ^Ctx, req: ^Req, result: json.Object) -> (string, int) {
@@ -171,12 +172,12 @@ format_ok :: proc(c: ^Ctx, req: ^Req, result: json.Object) -> (string, int) {
 	case .State:      return state_out(req, result), 0
 	case .Show:       return show_out(req, result), 0
 	case .Shot, .App_Shot:
-		return shot_out(req, d, shots_env(c))
+		return shot_out(req, d, shots_env(c), c.mcp ? MCP_VIEW_IT : READ_IT)
 	}
 	return local_error(req.name, "unknown command kind"), 1
 }
 
-shot_out :: proc(req: ^Req, d: json.Object, shots_dir: string) -> (string, int) {
+shot_out :: proc(req: ^Req, d: json.Object, shots_dir: string, read_it := READ_IT) -> (string, int) {
 	path, why := shot_check(req.tab, get_text(d, "path"), shots_dir)
 	if why != "" do return local_error(req.name, fmt.aprintf("the screenshot Deckhand wrote is not usable: %s", why)), 1
 	w := ok_begin(req)
@@ -190,11 +191,11 @@ shot_out :: proc(req: ^Req, d: json.Object, shots_dir: string) -> (string, int) 
 	if req.kind == .Shot {
 		if v, has := get_bool(d, "on_screen"); has do jw_bool(&w, "on_screen", v)
 		hidden := is_false(d, "on_screen") ? " The tab is not on screen (no pane shows it): Deckhand painted it for this, unseen." : ""
-		jw_str(&w, "note", strings.concatenate({SHOT_NOTE, hidden, READ_IT}))
+		jw_str(&w, "note", strings.concatenate({SHOT_NOTE, hidden, read_it}))
 	} else {
 		if v, has := get_bool(d, "visible"); has do jw_bool(&w, "visible", v)
 		hidden := is_false(d, "visible") ? " The tab is not on screen (no pane shows it): the last frame it showed." : ""
-		jw_str(&w, "note", strings.concatenate({APP_SHOT_NOTE, hidden, READ_IT}))
+		jw_str(&w, "note", strings.concatenate({APP_SHOT_NOTE, hidden, read_it}))
 	}
 	return jw_end(&w), 0
 }

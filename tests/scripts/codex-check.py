@@ -41,7 +41,7 @@ for h in hooks:
         bad(f"{h['hook']} exited {h.get('exit')}: {h.get('err', '')[:200]}")
 for p in prompts:
     lead = p.lstrip(" \t\n")
-    if lead[:1] in ("/", "$") or (lead[:1] == "!" and not lead.startswith(("!perm", "!ask", "!exit", "!quit"))):
+    if lead[:1] in ("/", "$") or (lead[:1] == "!" and not lead.startswith(("!perm", "!ask", "!exit", "!quit", "!mcp"))):
         bad(f"a command reached codex: {p!r}")
 if "from atlas" not in prompts:
     bad("the held prompt never arrived")

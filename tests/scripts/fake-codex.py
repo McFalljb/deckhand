@@ -7,7 +7,8 @@ Deckhand starts it in a Codex tab's PTY as
 
 - Checks the command line as Codex would read it and prints `FAKE CODEX ARGS OK` (else
   `FAKE CODEX ARGS BAD: <why>` and exit 3): --no-daemon present; -C an absolute folder; no -s, -a,
-  -m, -p, `projects`, `notify` or --dangerously-bypass-hook-trust; every -c value is TOML
+  -m, -p, `projects`, `notify` or --dangerously-bypass-hook-trust; mcp_servers only as Deckhand's own
+  server (one inline table: an absolute command, args ["mcp"], env_vars, no env); every -c value is TOML
   (tomllib); every hook Deckhand passes has a trusted_hash in hooks.state that matches Codex
   0.167.2's recipe (the hash below). Each hook that matches is "trusted" (`FAKE CODEX TRUST OK n`);
   one that does not is "modified": it never runs and `HOOKS NEED REVIEW` is printed (Codex's dialog).
@@ -21,6 +22,10 @@ Deckhand starts it in a Codex tab's PTY as
   FAKE_CODEX_TURN_MS (default 300), then Stop (last_assistant_message "Done.") and OSC done.
   A message starting with / prints `SLASH COMMAND RAN: …`, with ! `SHELL MODE: …`, with $ `SKILL: …`,
   and one containing an @word `MENTION POPUP: …` (Deckhand must never send those).
+- `!mcp`: starts Deckhand's MCP server as Codex does (mcp_servers.deckhand: its command and args,
+  an environment of PATH and HOME plus only the variables env_vars names), runs initialize,
+  tools/list and tools/call `state`, then the same call from a server given a wrong token; prints
+  `FAKE MCP OK …` or `FAKE MCP BAD: <why>`.
 - `!perm`: OSC blocked kind=permission, PermissionRequest hooks, then waits for a line (y) before
   the turn goes on. `!ask`: the Stop's last message ends with a question. `!exit N`: exits N.
   `!quit`: exits 0.
@@ -44,6 +49,7 @@ PASTE_START = ESC + "[200~"
 PASTE_END = ESC + "[201~"
 HOOK_KEYS = {"SessionStart": "session_start", "UserPromptSubmit": "user_prompt_submit", "PermissionRequest": "permission_request", "Stop": "stop", "SessionEnd": "session_end"}
 LOG = os.environ.get("FAKE_CODEX_LOG", "")
+MCP = None
 
 
 def log(obj):
@@ -71,7 +77,9 @@ def hook_hash(key, handler):
 
 
 def check_args(argv):
-    """(resume id or None, cwd, {event: [command]} of trusted hooks, why-bad or "")."""
+    """(resume id or None, cwd, {event: [command]} of trusted hooks, why-bad or ""); MCP is set to
+    Deckhand's MCP server's table."""
+    global MCP
     a = list(argv)
     resume = None
     if a[:1] == ["resume"]:
@@ -106,6 +114,14 @@ def check_args(argv):
         key, eq, value = o.partition("=")
         if not eq:
             return None, "", {}, "-c without ="
+        if key == "mcp_servers.deckhand":
+            try:
+                MCP = tomllib.loads("v = " + value)["v"]
+            except tomllib.TOMLDecodeError as e:
+                return None, "", {}, f"-c {key}: not TOML ({e})"
+            if not (isinstance(MCP, dict) and set(MCP) == {"command", "args", "env_vars", "tool_timeout_sec"} and MCP["command"].startswith("/") and MCP["args"] == ["mcp"] and "DECKHAND_CLAUDE_TOKEN" in MCP["env_vars"]):
+                return None, "", {}, "mcp_servers.deckhand is not Deckhand's server: " + value
+            continue
         if key.split(".")[0] in ("projects", "notify", "mcp_servers", "sandbox_mode", "approval_policy", "model", "profile"):
             return None, "", {}, "-c sets the user's own setting " + key
         try:
@@ -134,6 +150,47 @@ def check_args(argv):
                 else:
                     bad.append(event)
     return resume, cwd, trusted, ",".join(bad) and ("MODIFIED " + ",".join(bad))
+
+
+def mcp_session(env, calls):
+    """Runs Deckhand's MCP server with env and sends initialize, then each (method, params): the
+    replies' results (or errors), in order."""
+    p = subprocess.Popen([MCP["command"]] + MCP["args"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True)
+    msgs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "fake-codex", "version": "0"}}}, {"jsonrpc": "2.0", "method": "notifications/initialized"}]
+    msgs += [{"jsonrpc": "2.0", "id": i + 1, "method": m, "params": pr} for i, (m, pr) in enumerate(calls)]
+    replies = []
+    for m in msgs:
+        p.stdin.write(json.dumps(m) + "\n")
+        p.stdin.flush()
+        if "id" in m:
+            r = json.loads(p.stdout.readline())
+            if r.get("id") != m["id"]:
+                raise ValueError(f"reply id {r.get('id')} for {m['id']}")
+            replies.append(r.get("result", r.get("error")))
+    p.stdin.close()
+    p.wait(timeout=10)
+    return replies
+
+
+def mcp_check():
+    if MCP is None:
+        return "no mcp_servers.deckhand"
+    env = {k: os.environ[k] for k in ("PATH", "HOME") if k in os.environ}  # Codex's base, not the tab's
+    env.update({k: os.environ[k] for k in MCP["env_vars"] if k in os.environ})
+    init, tools, state = mcp_session(env, [("tools/list", {}), ("tools/call", {"name": "state", "arguments": {}})])
+    if "Deckhand" not in init.get("instructions", ""):
+        return "no instructions"
+    ro = {t["name"]: t["annotations"]["readOnlyHint"] for t in tools["tools"]}
+    if not ro.get("state") or ro.get("show_file") or ro.get("browser_click") is not False:
+        return f"readOnlyHint wrong: {ro}"
+    out = json.loads(state["content"][0]["text"])
+    if state["isError"] or not out.get("ok"):
+        return "state failed: " + state["content"][0]["text"][:200]
+    env["DECKHAND_CLAUDE_TOKEN"] = "0" * 64
+    _, wrong = mcp_session(env, [("tools/call", {"name": "browser_tabs", "arguments": {}})])
+    if not wrong["isError"] or "refused" not in wrong["content"][0]["text"]:
+        return "a wrong token was not refused: " + wrong["content"][0]["text"][:200]
+    return ""
 
 
 def read_message():
@@ -176,7 +233,7 @@ class Fake:
         lead = text.lstrip(" \t\n")
         if lead[:1] == "/":
             out("SLASH COMMAND RAN: " + lead)
-        elif lead[:1] == "!" and not lead.startswith(("!perm", "!ask", "!exit", "!quit")):
+        elif lead[:1] == "!" and not lead.startswith(("!perm", "!ask", "!exit", "!quit", "!mcp")):
             out("SHELL MODE: " + lead)
         elif lead[:1] == "$":
             out("SKILL: " + lead)
@@ -191,6 +248,12 @@ class Fake:
         self.run_hooks("UserPromptSubmit", {"turn_id": str(self.turn_id), "prompt": text})
         out("PROMPT: " + text.replace("\n", " | "))
         osc("working:app=codex")
+        if text == "!mcp":
+            try:
+                why = mcp_check()
+            except Exception as e:  # noqa: BLE001 (the scene reads the line)
+                why = f"{type(e).__name__}: {e}"
+            out(("FAKE MCP BAD: " + why) if why else "FAKE MCP OK state, wrong token refused")
         if text.startswith("!exit"):
             parts = text.split()
             sys.exit(int(parts[1]) if len(parts) > 1 else 1)

@@ -39,6 +39,13 @@ assert_state claude_sessions.# 1
 assert_state claude_sessions.0.harness codex
 assert_state claude_sessions.0.title tidy the README
 assert_state open_sessions.0.tabs.0.model gpt-5.5
+# 3b. Deckhand's tools: the fake starts the MCP server as Codex does (only env_vars' variables), a
+# tool call with the tab's token works, one with a wrong token is refused
+type !mcp
+key enter
+waitfor FAKE MCP OK 15000
+assert_not_screen FAKE MCP BAD
+wait 1500
 # 4. a permission while the window is behind: the waiting mark, ⌥⌘A's next, a bell entry; held
 # text waits for it
 window_active off

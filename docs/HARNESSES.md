@@ -192,6 +192,8 @@ tab's bar explains. The details: [CODEX.md](CODEX.md).
 - **Minimum Codex 0.163.0** (`CODEX_MIN_VERSION`): OSC 7501 program status. Older ones are not
   started.
 - Codex starts its session at the first prompt: SessionStart (the session id, the row) comes then.
+- Deckhand's tools: a per-run stdio MCP server (`-c mcp_servers.deckhand={…}`, `deckhand-cli mcp`),
+  the tab's token passed by name in `env_vars` ([CODEX.md §7](CODEX.md#7-deckhands-tools-a-per-run-mcp-server)).
 
 ## 6. The harness manifest
 

@@ -140,7 +140,7 @@ tool_w :: proc(t: Changes_Tool) -> f32 {return text_w(tool_label(t)) + px(2 * SP
 tool_label :: proc(t: Changes_Tool) -> string {
 	if t == .Review {
 		if v := active_changes(); v != nil {
-			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do return "Ask Claude to review"
+			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do return fmt.tprintf("Ask %s to review", comments_agent_word(s))
 		}
 	}
 	if t == .Merge {
@@ -584,7 +584,7 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 		case .Refresh: tip = "Read the changes again"
 		case .Review:
 			tip = "Ask this session's pi to review these changes"
-			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do tip = "Ask this session's Claude to review these changes (sent once it is idle and nothing is typed)"
+			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do tip = fmt.tprintf("Ask this session's %s to review these changes (sent once it is idle and nothing is typed)", comments_agent_word(s))
 		case .Merge:   tip = fmt.tprintf("%s coming later", strings.trim_suffix(tool_label(.Merge), "…"))
 		case .Commit:  tip, keys = "Commit the staged files (your git hooks run)", "Enter"
 		case .Prev:    tip, keys = "Previous file", "K"
@@ -633,7 +633,7 @@ changes_review_command :: proc(s: ^core.Open_Session, text: string) -> (core.Com
 	if s.agent == .Claude {
 		if len(s.tabs) == 0 do return nil, ""
 		if _, is := s.tabs[0].kind.(core.Claude_Tab); !is do return nil, ""
-		return core.Claude_Prompt{tab_id = s.tabs[0].id, text = text}, "Ask Claude to review"
+		return core.Claude_Prompt{tab_id = s.tabs[0].id, text = text}, fmt.tprintf("Ask %s to review", comments_agent_word(s))
 	}
 	if pt := core.session_pi_tab(s); pt != nil do return core.Pi_Prompt{tab_id = pt.id, text = text}, TOOL_LABEL[.Review]
 	return nil, ""

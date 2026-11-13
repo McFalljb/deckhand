@@ -238,15 +238,17 @@ labels_w :: proc(labels: []string) -> f32 {
 	return w
 }
 
-// Who a session's comments go to, in words: its Claude in a Claude-only session (no pi), else pi.
+// Who a session's comments go to, in words: its Claude or Codex in a Claude-only session (no pi),
+// else pi.
 comments_agent_word :: proc(s: ^core.Open_Session) -> string {
-	return s != nil && s.agent == .Claude ? "Claude" : "pi"
+	if s == nil || s.agent != .Claude do return "pi"
+	return core.open_session_harness(s) == .Codex ? "Codex" : "Claude"
 }
 
-// Who the strip's comments go to now: the Claude tab on screen (comments_claude_target) or a
-// Claude-only session's Claude, else pi.
+// Who the strip's comments go to now: the Claude or Codex tab on screen (comments_claude_target)
+// or a Claude-only session's, else pi.
 comments_to_word :: proc(s: ^core.Open_Session) -> string {
-	if s != nil && core.comments_claude_target(s) != nil do return "Claude"
+	if s != nil do if tab := core.comments_claude_target(s); tab != nil do return core.claude_tab_is_codex(tab^) ? "Codex" : "Claude"
 	return comments_agent_word(s)
 }
 
@@ -401,7 +403,7 @@ comments_tip :: proc(h: Hit_Comments) -> (label, keys: string) {
 	case .Send:
 		if s := comments_strip_session(); s != nil {
 			if ok, why := core.comments_can_send(s); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
-			if core.comments_claude_target(s) != nil || s.agent == .Claude do return "Send the comments to Claude now, as a message of their own", ""
+			if core.comments_claude_target(s) != nil || s.agent == .Claude do return fmt.tprintf("Send the comments to %s now, as a message of their own", comments_to_word(s)), ""
 		}
 		return "Send the comments to pi now, as a message of their own", ""
 	case .Edit:   return "Change this comment's text", ""
@@ -415,7 +417,7 @@ comments_tip :: proc(h: Hit_Comments) -> (label, keys: string) {
 			if ok, why := core.comments_can_send(s, for_tab = state.comments_ask.tab_id != 0); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
 			agent = comments_agent_word(s)
 			// a Claude-only session's Send and close: Claude's hook takes all of its comments
-			if s.agent == .Claude && state.comments_ask.tab_id != 0 do return "Send the session's comments to Claude now (its next message takes them all), then close the tab", ""
+			if s.agent == .Claude && state.comments_ask.tab_id != 0 do return fmt.tprintf("Send the session's comments to %s now (its next message takes them all), then close the tab", agent), ""
 		}
 		return state.comments_ask.tab_id != 0 ? fmt.tprintf("Send its comments to %s now, then close the tab", agent) : fmt.tprintf("Send the comments to %s now; the session stays open", agent), ""
 	case .Ask_Drop:   return "Remove the comments and close", ""

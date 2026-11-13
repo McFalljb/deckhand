@@ -905,7 +905,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		}
 		if !chat do n += 1
 		// which agent it runs (a Claude-only session, else pi), and the account of several
-		harness := s.agent == .Claude ? core.Harness.Claude : core.Harness.Pi
+		harness := core.open_session_harness(s)
 		tag := "" // another machine's account is that machine's, unknown here: never this Mac's label
 		if !remote && s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account)
 		if tag != "" {

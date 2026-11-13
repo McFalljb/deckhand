@@ -109,6 +109,12 @@ ACTIONS := [?]Action {
 		if cs == nil || cs.home || cs.missing do return nil, false // in chats too (read-only while chats are: claude.odin)
 		return core.New_Claude_Tab{session = cs.id}, true
 	}},
+	// Codex (codex.odin): codex in the session on screen's folder; not in a chat while chats are read-only
+	{id = "new_codex_tab", label = "New Codex tab", title = proc() -> string {return core.codex_label("New Codex tab")}, make = proc() -> (core.Command, bool) {
+		cs := core.cur()
+		if cs == nil || cs.home || cs.missing || core.codex_chat_refused(cs.id) do return nil, false
+		return core.New_Claude_Tab{session = cs.id, codex = true}, true
+	}},
 	{id = "claude_held_send", label = "Claude: send the waiting message now", make = proc() -> (core.Command, bool) {
 		t := core.active_tab()
 		if t == nil do return nil, false

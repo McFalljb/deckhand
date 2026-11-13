@@ -1094,15 +1094,15 @@ cli_reads_old_env_names :: proc(t: ^testing.T) {
 }
 
 // Codex's hooks (src/core/codex.odin passes them with -c): the same reports as Claude's, from
-// Codex's fields; NOTHING on stdout, whatever Deckhand answers (Codex would add a SessionStart's or
-// UserPromptSubmit's output to the model's context and read a Stop's or PermissionRequest's as a
-// decision); a SessionStart never says idle (it comes with the first prompt); never the comments.
+// Codex's fields; nothing on stdout, whatever Deckhand answers (Codex would add a SessionStart's
+// output to the model's context and read a Stop's or PermissionRequest's as a decision), but the
+// pending comments from UserPromptSubmit (hook_codex_comments); a SessionStart never says idle (it
+// comes with the first prompt).
 @(test)
 hook_codex :: proc(t: ^testing.T) {
 	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad530"
 	cases := [][3]string {
 		{"codex-session-start", fmt.aprintf(`{{"session_id":"%s","turn_id":"x","transcript_path":"/Users/u/.codex/sessions/2026/11/12/rollout-x-%s.jsonl","cwd":"/w/p","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.5"}}`, sid, sid), fmt.aprintf(`{{"type":"claude.session","session_id":"%s","cwd":"/w/p","source":"startup","model":"gpt-5.5"}}`, sid)},
-		{"codex-prompt-submit", `{"session_id":"x","hook_event_name":"UserPromptSubmit","prompt":"  Fix the login bug\nSECRET second line"}`, `{"type":"claude.turn","state":"submitted","title":"Fix the login bug"}`},
 		{"codex-permission", `{"session_id":"x","hook_event_name":"PermissionRequest","tool_name":"exec","tool_input":{"command":"SECRET rm"}}`, `{"type":"claude.turn","state":"waiting"}`},
 		{"codex-stop", `{"session_id":"x","hook_event_name":"Stop","last_assistant_message":"SECRET Shall I go on?"}`, `{"type":"claude.turn","state":"idle","question":true}`},
 		{"codex-stop", `{"session_id":"x","hook_event_name":"Stop","last_assistant_message":"SECRET Done."}`, `{"type":"claude.turn","state":"idle"}`},
@@ -1133,5 +1133,31 @@ hook_codex :: proc(t: ^testing.T) {
 	c := test_ctx(&f, stdin = `{"prompt":"x"}`, env = env)
 	testing.expect_value(t, run(&c, {"hook", "codex-prompt-submit"}), 0)
 	testing.expect_value(t, len(f.sent), 0)
+	testing.expect_value(t, strings.to_string(c.out), "")
+}
+
+// Codex's UserPromptSubmit: the turn, then the pending comments as additionalContext (Claude's
+// path, Codex's image line), marked delivered only once printed; nothing pending: nothing printed.
+@(test)
+hook_codex_comments :: proc(t: ^testing.T) {
+	f: Fake
+	f.replies["claude.comments"] = `{"ok":true,"data":{"count":1,"attachment_id":7,"text":"Deckhand comments (1).","images":[{"no":1,"path":"/d/c1.png"}]}}`
+	c := test_ctx(&f, stdin = `{"session_id":"x","hook_event_name":"UserPromptSubmit","prompt":"  Fix the login bug\nSECRET second line"}`)
+	testing.expect_value(t, run(&c, {"hook", "codex-prompt-submit"}), 0)
+	testing.expectf(t, len(f.sent) == 3, "%v", f.sent)
+	testing.expect_value(t, f.sent[0], `{"type":"claude.turn","state":"submitted","title":"Fix the login bug"}`)
+	testing.expect_value(t, f.sent[1], `{"type":"claude.comments","max":9000}`)
+	testing.expect_value(t, f.sent[2], `{"type":"claude.attached","attachment_id":7}`)
+	hso := get_obj(out_obj(&c), "hookSpecificOutput")
+	testing.expect_value(t, get_text(hso, "hookEventName"), "UserPromptSubmit")
+	ctx := get_text(hso, "additionalContext")
+	testing.expect(t, strings.has_prefix(ctx, "Deckhand comments (1)."), ctx)
+	testing.expect(t, strings.contains(ctx, "look at each image file") && !strings.contains(ctx, "Read tool"), ctx)
+	testing.expect(t, strings.contains(ctx, "image 1: /d/c1.png"), ctx)
+	f2: Fake
+	f2.replies["claude.comments"] = `{"ok":true,"data":{"count":0}}`
+	c = test_ctx(&f2, stdin = `{"prompt":"hi"}`)
+	run(&c, {"hook", "codex-prompt-submit"})
+	testing.expect_value(t, len(f2.sent), 2)
 	testing.expect_value(t, strings.to_string(c.out), "")
 }

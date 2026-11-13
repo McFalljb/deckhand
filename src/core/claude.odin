@@ -344,15 +344,16 @@ claude_command_text :: proc(text: string) -> string {
 // hooks and OSC 7501, bracketed paste, nothing typed); Enter follows (claude_tick). "" = sent,
 // else why not. Deckhand's own fixed text only (comments' Send now), never page or agent text.
 // slash: Deckhand's own fixed slash command (CLAUDE_MODEL_COMMAND: Restart with model…), the one
-// case a leading / may go in; never text from anyone else.
+// case a leading / may go in; never text from anyone else (never into Codex: /model is Claude
+// Code's). A Codex tab's text goes under Codex's composer rule (codex_command_text).
 claude_paste_message :: proc(tab: ^Tab, text: string, slash := false) -> string {
 	ct, is := &tab.kind.(Claude_Tab)
 	if !is do return "not a Claude tab"
-	if ct.codex do return CODEX_NO_COMMENTS // comments, review asks, /model: Claude's (codex.odin)
+	if slash && ct.codex do return "not Deckhand's own command"
 	if ok, why := claude_ready(tab, ct); !ok do return why
 	if slash {
 		if text != CLAUDE_MODEL_COMMAND do return "not Deckhand's own command"
-	} else if why := claude_command_text(text); why != "" do return why
+	} else if why := claude_tab_command_text(ct, text); why != "" do return why
 	t := term_of(tab.id)
 	if t == nil || !t.running do return "Claude is not running in this tab"
 	term_paste(t, text)
@@ -1129,6 +1130,18 @@ claude_open_disk :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Result
 	return claude_open_session(p, p.cwd, f.id, nil, caller, f.account, f.path)
 }
 
+// A Codex conversation found on disk (claude_disk.odin) resumed in a Codex-only session of p:
+// `codex resume <id>` in the project's folder, no flags; the history keeps it from now on. An id
+// Claude Code's transcript has is Claude's (codex.odin: one id, one harness). created_id = the session.
+codex_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Result, bool) {
+	if !codex_id_ok(f.id) do return fail("not a Codex session id"), false
+	if claude_conversation_seen(p, f.id) do return fail("that id is another harness's conversation"), false
+	if mr, missing := codex_missing(caller); missing do return mr, false
+	if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
+	if claude_open_tab(f.id) != 0 || claude_tab_of_session(f.id) != 0 do return fail("that conversation is open in a tab"), false
+	return claude_open_session(p, p.cwd, f.id, nil, caller, "", codex = true)
+}
+
 // Where a Claude session of the history runs again: the folder it ran in while that is still
 // inside its project, else the project's (temp).
 @(private = "file")
@@ -1437,13 +1450,11 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 	case Claude_Comments:
 		s, _, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
-		if ct.codex do return fail(CODEX_NO_COMMENTS), false
 		limit := c.max <= 0 ? CLAUDE_COMMENTS_MAX : min(c.max, CLAUDE_COMMENTS_MAX)
-		return comments_claude_take(s, max(limit, 4000)), false
+		return comments_claude_take(s, max(limit, 4000)), false // a Codex tab's hook takes them the same way (codex-prompt-submit)
 	case Claude_Attached:
 		s, _, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
-		if ct.codex do return fail(CODEX_NO_COMMENTS), false
 		return {ok = true}, comments_claude_attached(s, c.attachment_id)
 	case Claude_Prompt:
 		_, tab, ct := claude_tab_of(c.tab_id)

@@ -24,6 +24,9 @@ package core
 //     by stat (the file it reported, else its account's folder for the project).
 //   - A click resumes the conversation in a Claude-only session under its account, by the
 //     transcript's absolute path (--resume <path>), with no flags (claude_disk_resume).
+//   - Codex conversations (codex_disk_files, docs/CODEX.md §2b): the newest rollouts in Codex's
+//     sessions/YYYY/MM/DD folders, read through the same cache and worker, but only their first
+//     line (session_meta: its id and cwd); rows with no title and no path, resumed by id.
 //   - Projects where only Claude ran (scan_projects, on the Rescan worker): every folder under
 //     each account's projects/ whose newest transcript records a `cwd` whose own folder name is
 //     that folder's; never a folder decoded from its name.
@@ -53,6 +56,7 @@ Claude_Disk :: struct {
 	created:  time.Time,
 	listed:   bool, // a row of its own: Deckhand's history does not have it
 	gone:     bool, // a history entry whose transcript is gone (no file)
+	codex:    bool, // a Codex conversation (codex_disk_files): no path kept, resumed by id
 }
 
 // The title cache's size (tests lower it).
@@ -109,6 +113,10 @@ line_parsable :: proc(line: string) -> bool {
 // Reads a transcript's head and tail (at most CLAUDE_DISK_CHUNK each). Any thread.
 @(private = "file")
 found_read :: proc(path: string, size: i64) -> (title, cwd: string, sidechain: bool) {
+	if strings.has_prefix(filepath.base(path), "rollout-") {
+		cwd, sidechain = codex_first_line(path)
+		return
+	}
 	f, err := os.open(path)
 	if err != nil do return
 	defer os.close(f)
@@ -327,6 +335,109 @@ claude_disk_wait :: proc() {
 	claude_disk_tick()
 }
 
+// ---- Codex's conversations (~/.codex/sessions; codex.odin) ----
+
+CODEX_DISK_DAYS_MAX :: 60 // day folders looked at, newest first
+CODEX_DISK_FILES_MAX :: 400 // rollouts looked at, newest first
+CODEX_DISK_LINE_MAX :: 64 * 1024 // a rollout's first line (session_meta, ~25 KB); longer: skipped
+
+// A rollout's session_meta (its first line, at most CODEX_DISK_LINE_MAX, never more of the file):
+// the cwd it ran in. skip: not a conversation to list (no session_meta, an id that is not the
+// file's, a subagent's or another non-string source). Never written to; nothing in it reaches a
+// shell or the screen (the cwd is only compared with the project's folder). Any thread.
+@(private = "file")
+codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
+	skip = true
+	f, err := os.open(path)
+	if err != nil do return
+	defer os.close(f)
+	buf := make([]u8, CODEX_DISK_LINE_MAX, context.temp_allocator)
+	got, _ := os.read_at(f, buf, 0)
+	sync.atomic_add(&claude_disk_bytes_read, i64(max(got, 0)))
+	nl := strings.index_byte(string(buf[:max(got, 0)]), '\n')
+	if nl < 2 do return
+	line := string(buf[:nl])
+	if line[0] != '{' || !json_depth_ok(line) do return
+	v, perr := jg.parse(transmute([]u8)line, .JSON, false, context.temp_allocator)
+	if perr != nil do return
+	o, _ := v.(json.Object)
+	if t, _ := o["type"].(json.String); t != "session_meta" do return
+	pl, _ := o["payload"].(json.Object)
+	id, _ := pl["id"].(json.String)
+	c, _ := pl["cwd"].(json.String)
+	if _, src_ok := pl["source"].(json.String); !src_ok do return // a subagent's ({"subagent": …})
+	name := strings.trim_suffix(filepath.base(path), ".jsonl")
+	if !codex_id_ok(string(id)) || !strings.has_suffix(name, string(id)) || !filepath.is_abs(string(c)) do return
+	return string(c), false
+}
+
+// A rollout found on disk: its id (from its name), path and dates. Temp.
+@(private = "file")
+Codex_File :: struct {
+	id, path:          string,
+	size:              i64,
+	modified, created: time.Time,
+}
+
+// Codex's sessions folder ("" = none; in tests and test mode only a CODEX_HOME they set, never the
+// developer's own ~/.codex).
+@(private = "file")
+codex_sessions_dir :: proc() -> string {
+	when TEST_HOOKS {
+		if ODIN_TEST || test_mode() {
+			if _, ok := env_lookup(child_base_env(), "CODEX_HOME"); !ok do return ""
+		}
+	}
+	h := codex_home()
+	return h == "" ? "" : strings.concatenate({h, "/sessions"}, context.temp_allocator)
+}
+
+// The newest rollouts, by their folders' and names' dates (sessions/YYYY/MM/DD/rollout-<time>-<uuid>.jsonl):
+// at most CODEX_DISK_DAYS_MAX day folders and CODEX_DISK_FILES_MAX files; regular files only. Temp.
+@(private = "file")
+codex_disk_files :: proc() -> []Codex_File {
+	out := make([dynamic]Codex_File, context.temp_allocator)
+	root := codex_sessions_dir()
+	if root == "" do return nil
+	// the numbered folders under dir, newest (largest) first
+	numbered :: proc(dir: string) -> []os.File_Info {
+		entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+		if err != nil do return nil
+		list := make([dynamic]os.File_Info, context.temp_allocator)
+		for e in entries {
+			if e.type != .Directory || e.name == "" do continue
+			digits := true
+			for ch in transmute([]u8)e.name do if ch < '0' || ch > '9' do digits = false
+			if digits do append(&list, e)
+		}
+		slice.sort_by(list[:], proc(a, b: os.File_Info) -> bool {return a.name > b.name})
+		return list[:]
+	}
+	days := 0
+	for y in numbered(root) {
+		for m in numbered(y.fullpath) {
+			for d in numbered(m.fullpath) {
+				if days >= CODEX_DISK_DAYS_MAX || len(out) >= CODEX_DISK_FILES_MAX do return out[:]
+				days += 1
+				entries, err := os.read_all_directory_by_path(d.fullpath, context.temp_allocator)
+				if err != nil do continue
+				slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {return a.name > b.name})
+				for e in entries {
+					if len(out) >= CODEX_DISK_FILES_MAX do break
+					if e.type != .Regular || !strings.has_prefix(e.name, "rollout-") || !strings.has_suffix(e.name, ".jsonl") do continue
+					name := strings.trim_suffix(e.name, ".jsonl")
+					if len(name) < 37 || name[len(name) - 37] != '-' do continue
+					id := name[len(name) - 36:]
+					if !codex_id_ok(id) do continue
+					created := e.creation_time != {} ? e.creation_time : e.modification_time
+					append(&out, Codex_File{id = id, path = e.fullpath, size = e.size, modified = e.modification_time, created = created})
+				}
+			}
+		}
+	}
+	return out[:]
+}
+
 // ---- where a project's transcripts are ----
 
 @(private = "file")
@@ -478,6 +589,24 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 		n += 1
 		append(out, Claude_Disk{id = strings.clone(c.id), path = strings.clone(c.path), account = strings.clone(c.account), title = strings.clone(title), modified = c.modified, created = c.created, listed = true})
 	}
+	// Codex conversations that ran in p's folder (not in Chats while chats are read-only: Codex is
+	// not offered there). Deckhand's own are its history's rows; an id Claude's transcript has is
+	// Claude's (one id, one harness: codex.odin)
+	if !(chats && state.settings.chats_readonly) {
+		m := 0
+		for c in codex_disk_files() {
+			if m >= MAX_SESSIONS do break
+			if rec, _ := claude_record(c.id); rec != nil do continue
+			if session_listed(state.sessions[:], c.id) || session_listed(state.chats[:], c.id) do continue
+			dup := false
+			for f in out do if f.id == c.id do dup = true
+			if dup do continue
+			_, cwd, skip, known := found_info(c.path, c.size, c.modified, &budget)
+			if !known || skip || !same_folder(cwd, p.cwd) do continue
+			m += 1
+			append(out, Claude_Disk{id = strings.clone(c.id), modified = c.modified, created = c.created, listed = true, codex = true})
+		}
+	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
 		if r.project != p.cwd || r.codex do continue // a Codex conversation has no Claude transcript (codex.odin)
@@ -517,14 +646,19 @@ claude_disk_of :: proc(id: string) -> ^Claude_Disk {
 // account's folders for p (an agent's open_session of a project not selected). Temp.
 claude_disk_lookup :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) {
 	if r, _ := claude_record(id); r != nil && !r.codex do return {}, false
-	return claude_disk_find(p, id)
+	if f, ok = claude_disk_find(p, id); ok do return
+	// a Codex conversation listed for p (its scan's rows only: the selected project and Chats)
+	if p == nil do return {}, false
+	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
+	for x in list do if x.listed && x.codex && x.id == id do return x, true
+	return {}, false
 }
 
 // claude_disk_lookup whatever Deckhand's history says (codex.odin: whose conversation an id is).
 claude_disk_find :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) {
 	if p == nil || !claude_id_ok(id) do return {}, false
 	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
-	for x in list do if x.listed && x.id == id do return x, true
+	for x in list do if x.listed && !x.codex && x.id == id do return x, true
 	for a in claude_accounts() {
 		root := strings.concatenate({a.dir, "/projects"}, context.temp_allocator)
 		if path_kind(root) != .Dir do continue
@@ -546,7 +680,7 @@ claude_disk_rows :: proc(p: Project, out: ^[dynamic]Session) {
 	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
 	for f in list {
 		if !f.listed || session_listed(out[:], f.id) do continue
-		append(out, Session{id = f.id, title = f.title, untitled = "Untitled Claude session", when_ = utc_minute(f.created), modified = f.modified, claude = true, account = f.account, found = true})
+		append(out, Session{id = f.id, title = f.title, untitled = f.codex ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(f.created), modified = f.modified, claude = true, codex = f.codex, account = f.account, found = true})
 	}
 }
 
@@ -572,6 +706,7 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 			json_quote(b, tag)
 		}
 		if p.group == .Chats && state.settings.chats_readonly do strings.write_string(b, `,"readonly":true`)
+		if f.codex do strings.write_string(b, `,"harness":"codex"`)
 		strings.write_string(b, `,"found":true,"open":false}`)
 	}
 }
@@ -579,6 +714,7 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 // A found row clicked (open_session): resumed in a Claude-only session under its account, by
 // the transcript's path; the history keeps it from now on (with its title).
 claude_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Result, bool) {
+	if f.codex do return codex_disk_resume(p, f, caller)
 	if mr, missing := claude_missing(caller); missing do return mr, false
 	if !claude_account_known(f.account) do return fail("its Claude account is no longer in Settings → Claude accounts"), false
 	if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false

@@ -568,9 +568,51 @@ codex_held_prompts :: proc(t: ^testing.T) {
 	// Send now: into what is typed, at idle only
 	testing.expect(t, core.run_command(core.Claude_Held_Op{tab_id = tab, op = "send"}, CX_UI).ok)
 	testing.expect_value(t, len(ct.held), 0)
-	// comments and Deckhand's own pastes are Claude's: refused
-	testing.expect_value(t, core.claude_paste_message(tb, "x"), core.CODEX_NO_COMMENTS)
-	testing.expect_value(t, core.run_command(core.Claude_Comments{tab_id = tab}, CX_SCRIPT).error, core.CODEX_NO_COMMENTS)
+	// Restart with model's /model is Claude Code's: never pasted into Codex
+	testing.expect_value(t, core.claude_paste_message(tb, core.CLAUDE_MODEL_COMMAND, slash = true), "not Deckhand's own command")
+}
+
+// Comments into a Codex tab: Send now pastes only Deckhand's fixed line, at Codex's idle (OSC 7501
+// and its hooks), as for Claude; its UserPromptSubmit hook takes them (claude.comments) and
+// claude.attached clears them. Deckhand's paste keeps the composer rule.
+@(test)
+codex_comments_send_now :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	dir := cx_dir("cmsend")
+	got := fmt.tprintf("%s/stdin", dir)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf("exec cat > %s", got))
+	_, sess, tab := cx_codex_session(t, "cmsend")
+	s := core.find_session(sess)
+	b := core.Tab{id = core.new_id(), kind = core.Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
+	core.pane_add_tab(s, b)
+	testing.expect(t, core.run_command(core.Comment_Add{source = .Browser, tab_id = b.id, what = "button", text = "make it blue"}).ok)
+	core.session_show_tab(s, tab)
+	cx_paste_mode(tab)
+	// working: refused with Codex's words
+	cx_osc(tab, .Working)
+	r := core.run_command(core.Comments_Send_Now{session = sess}, CX_UI)
+	testing.expect_value(t, r.error, "Codex is working: wait for its turn to end")
+	cx_osc(tab, .Idle)
+	r = core.run_command(core.Comments_Send_Now{session = sess}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	text := cx_read_after(got, 100)
+	testing.expectf(t, strings.has_prefix(text, strings.concatenate({"\x1b[200~", core.CLAUDE_SEND_NOW_LINE, "\x1b[201~"})), "%q", text)
+	// the hook's take, then its ack: gone
+	data := core.run_command(core.Claude_Comments{tab_id = tab}, CX_SCRIPT).data
+	testing.expect(t, strings.contains(core.json_path(data, "text"), "make it blue"), data)
+	att := core.json_path(data, "attachment_id")
+	id: u64
+	for ch in att do id = id * 10 + u64(ch - '0')
+	testing.expect(t, core.run_command(core.Claude_Attached{tab_id = tab, attachment_id = id}, CX_SCRIPT).ok)
+	testing.expect_value(t, len(core.find_session(sess).comments), 0)
+	// Deckhand's own text into Codex keeps the composer rule
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	time.sleep(core.CLAUDE_ENTER_DELAY + 20 * time.Millisecond)
+	core.claude_tick()
+	_, tb, _ := core.claude_tab_of(tab) // (the browser tab moved the session's tabs)
+	why := core.claude_paste_message(tb, "see @x")
+	testing.expectf(t, strings.contains(why, "@mention"), "%q", why)
 }
 
 // The bars: signed out (Codex reports no OSC 7501 behind its login screen); hooks silent after its
@@ -755,4 +797,62 @@ codex_wire_and_persist :: proc(t: ^testing.T) {
 	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, readonly = true}}}, core.Caller{kind = .Internal})
 	testing.expect(t, !r.ok, "read-only")
 	testing.expect_value(t, len(state.open_sessions), n)
+}
+
+// Codex conversations found on disk (claude_disk.odin): CODEX_HOME's sessions/YYYY/MM/DD rollouts
+// whose first line (session_meta) records the project's folder are rows ("harness":"codex", no
+// path); a subagent's, one whose id is not its file's, another folder's and one Deckhand's history
+// has are not; a click resumes it with `codex resume <id>`. The files are never written.
+@(test)
+codex_sessions_on_disk :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("codexhome")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	dir := cx_dir("disk")
+	day := fmt.tprintf("%s/sessions/2026/11/12", home)
+	os.make_directory_all(day)
+	ids := [5]string{"01a1d0d6-5353-7ff3-9308-ff91070ad531", "01a1d0d6-5353-7ff3-9308-ff91070ad532", "01a1d0d6-5353-7ff3-9308-ff91070ad533", "01a1d0d6-5353-7ff3-9308-ff91070ad534", "01a1d0d6-5353-7ff3-9308-ff91070ad535"}
+	meta :: proc(id, cwd, source: string) -> string {
+		return fmt.tprintf(`{{"timestamp":"2026-11-12T10:00:00Z","type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":%s,"base_instructions":{{"text":"x"}}}}}}`+"\n"+`{{"type":"response_item"}}`+"\n", id, cwd, source)
+	}
+	write :: proc(day, id, text: string) {
+		_ = os.write_entire_file(fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id), transmute([]u8)text)
+	}
+	write(day, ids[0], meta(ids[0], dir, `"cli"`)) // listed
+	write(day, ids[1], meta(ids[1], dir, `{"subagent":"review"}`)) // a subagent's
+	write(day, ids[2], meta(ids[3], dir, `"cli"`)) // an id that is not its file's
+	write(day, ids[3], meta(ids[3], "/elsewhere", `"cli"`)) // another folder's
+	write(day, ids[4], meta(ids[4], dir, `"cli"`)) // Deckhand's own (its history row)
+	core.run_command(core.Claude_Restore_History{records = {{id = ids[4], cwd = dir, project = dir, title = "mine", used = 1, codex = true}}}, core.Caller{kind = .Internal})
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	core.run_command(core.Select_Project{project_id = pid}, CX_UI)
+	core.claude_disk_wait()
+	listed := 0
+	for f in state.claude_disk do if f.listed {
+		listed += 1
+		testing.expect_value(t, f.id, ids[0])
+		testing.expect(t, f.codex && f.path == "", "a Codex row, no path kept")
+	}
+	testing.expect_value(t, listed, 1)
+	js := core.state_json()
+	testing.expect(t, strings.contains(js, fmt.tprintf(`"id":"%s","project":`, ids[0])) && strings.contains(js, `"harness":"codex","found":true`), js)
+	// a click: `codex resume <id>` in a Codex-only session of the project
+	argf := fmt.tprintf("%s/argv", dir)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, argf))
+	r := core.run_command(core.Open_Session_Cmd{project_id = pid, pi_session_id = ids[0]}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	s := core.find_session(r.created_id)
+	testing.expect(t, s != nil && core.open_session_harness(s) == .Codex)
+	got := ""
+	for _ in 0 ..< 50 {
+		data, _ := os.read_entire_file(argf, context.temp_allocator)
+		got = string(data)
+		if strings.contains(got, "hooks.state") do break
+		time.sleep(20 * time.Millisecond)
+	}
+	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n--no-daemon\n-C\n", ids[0])), "%q", got)
+	rec, _ := core.claude_record(ids[0])
+	testing.expect(t, rec != nil && rec.codex, "the history keeps it")
 }

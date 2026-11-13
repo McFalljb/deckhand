@@ -72,6 +72,9 @@ ACTIONS := [?]Action {
 	{id = "claude_skip_permissions", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
 	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "Claude Code · on: --dangerously-skip-permissions in the tabs you start" : "Claude Code · off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
+	{id = "codex_full_access", make = proc() -> (core.Command, bool) {
+		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.codex_full_access, codex = true}, true
+	}, detail = proc() -> string {return state.settings.codex_full_access ? "Codex · on: --dangerously-bypass-approvals-and-sandbox in the tabs you start" : "Codex · off"}, done = proc() -> string {return turns("Codex full access", state.settings.codex_full_access)}},
 	{id = "chats_dir", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return core.Set_Folder{kind = .Chats, path = state.settings.folders[.Chats]}, true // listing
 		return core.Set_Folder{kind = .Chats, path = action_folder}, true

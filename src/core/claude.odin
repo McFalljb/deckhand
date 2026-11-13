@@ -461,7 +461,7 @@ claude_tab_cmd :: proc() -> string {
 // restart): the user's default flags as the setting is now (claude_with_defaults), never saved;
 // a read-only start leaves them out and says so.
 claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
-	if ct.codex do return codex_start(s, t, tab_id, ct, cwd) // codex.odin: no plugin, flags, account or read-only profile
+	if ct.codex do return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule; no plugin, account or read-only profile
 	plugin := claude_plugin_dir()
 	if plugin == "" {
 		term_note(t, "Deckhand's Claude Code plugin is missing from this build (integrations/claude-code): rebuild Deckhand.")
@@ -1246,13 +1246,12 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if s.home do return fail("Home has only its pi tab"), false
 		if s.missing do return fail("this session is gone"), false
 		if c.codex {
-			// Codex (codex.odin): no flags, no account, never read-only
-			if len(c.args) > 0 do return fail(CODEX_NO_FLAGS), false
+			// Codex (codex.odin): its own flags' rule, no account, never read-only
 			if c.account != "" do return fail("a Codex tab has no Claude Code account"), false
 			if claude_chat_readonly(s) do return fail(CODEX_READONLY), false
 		}
-		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail("only the user sets Claude Code's flags"), false
-		if e := claude_args_check(c.args); e != "" do return fail(e), false
+		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
+		if e := c.codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
 		// read-only (a chat while chats are, or a conversation that ran read-only): the allowlist
 		ro := claude_chat_readonly(s)
 		if claude_readonly_known(c.resume) do ro = true
@@ -1281,7 +1280,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			if !within(p, fs_real(s.cwd)) && (pr == nil || !within(p, fs_real(pr.cwd))) do return fail("cwd must be inside the session's project"), false
 			cwd = p
 		}
-		if c.codex do return claude_open(s, cwd, c.resume, nil, caller, "", codex = true)
+		if c.codex do return claude_open(s, cwd, c.resume, c.args, caller, "", codex = true)
 		// its account: the one named (configured only), else the resumed entry's, else the default pick
 		account, aerr := claude_account_resolve(c.account)
 		if aerr != "" do return fail(aerr), false
@@ -1305,13 +1304,12 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		}
 		if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
 		if c.codex {
-			// Codex (codex.odin): no flags, no account, never read-only
-			if len(c.args) > 0 do return fail(CODEX_NO_FLAGS), false
+			// Codex (codex.odin): its own flags' rule, no account, never read-only
 			if c.account != "" do return fail("a Codex session has no Claude Code account"), false
 			if p.group == .Chats && state.settings.chats_readonly do return fail(CODEX_READONLY), false
 		}
-		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail("only the user sets Claude Code's flags"), false
-		if e := claude_args_check(c.args); e != "" do return fail(e), false
+		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
+		if e := c.codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
 		if p.group == .Chats && state.settings.chats_readonly do if e := claude_readonly_refusal(c.args); e != "" do return fail(e), false
 		cwd := p.cwd
 		if c.cwd != "" {
@@ -1325,7 +1323,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		}
 		if c.codex {
 			if mr, missing := codex_missing(caller); missing do return mr, false
-			return claude_open_session(p, cwd, "", nil, caller, "", codex = true)
+			return claude_open_session(p, cwd, "", c.args, caller, "", codex = true)
 		}
 		if mr, missing := claude_missing(caller); missing do return mr, false
 		account, aerr := claude_account_resolve(c.account)
@@ -1362,11 +1360,17 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
 		}
 		if rec.codex {
-			// a Codex conversation (codex.odin): `codex resume <id>`, no flags, no account
+			// a Codex conversation (codex.odin): `codex resume <id>`, the user's saved flags on the
+			// user's own resume only (as Claude's below), no account
 			if !codex_id_ok(rec.id) do return fail("not a Codex session id"), false
 			if mr, missing := codex_missing(caller); missing do return mr, false
 			id := strings.clone(rec.id, context.temp_allocator)
-			r, ch := claude_open_session(p, claude_resume_cwd(rec, p), id, nil, caller, "", codex = true)
+			args: []string
+			if caller.kind == .UI {
+				args = make([]string, len(rec.args), context.temp_allocator)
+				for x, i in rec.args do args[i] = strings.clone(x, context.temp_allocator)
+			}
+			r, ch := claude_open_session(p, claude_resume_cwd(rec, p), id, args, caller, "", codex = true)
 			if !r.ok do return r, ch
 			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
 		}

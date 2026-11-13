@@ -11,8 +11,10 @@ package core
 //   - The command: `codex --no-daemon -C <cwd> -c hooks.<Event>=[…] … -c hooks.state={…}`
 //     (`codex resume <id> --no-daemon -C <cwd> …` to resume). --no-daemon is mandatory: without it
 //     the TUI attaches to Codex's shared background server, whose hooks do not descend from the
-//     tab's process, and the token's process check (socket.odin) refuses them. No -s, -a, -m, -p,
-//     `projects` or `notify`: the user's own Codex settings apply. Never
+//     tab's process, and the token's process check (socket.odin) refuses them. Deckhand itself adds
+//     no -s, -a, -m, -p, `projects` or `notify`: the user's own Codex settings apply. The user's own
+//     flags (codex_args_check: only flags known safe for a tab; never one that touches the hooks,
+//     Deckhand's MCP server, the folder or the daemon) go before Deckhand's, which come last. Never
 //     --dangerously-bypass-hook-trust (it would run every hook unreviewed, the repo's too).
 //     Deckhand writes nothing under ~/.codex and never sets CODEX_HOME.
 //   - The hooks: the bundled CLI by its absolute path (`'<cli>' hook codex-<event>`), each with a
@@ -43,7 +45,6 @@ CODEX_MISSING :: "Codex is not installed: install it with `" + CODEX_INSTALL_COM
 CODEX_MISSING_NOTE :: " — Codex not installed"
 CODEX_HOOK_TIMEOUT :: 10 // seconds (part of the trust hash); the CLI gives up sooner: UserPromptSubmit's hello and three calls take at most 7.5 s (tools/deckhand-cli/hooks.odin CODEX_HOOK_CALL_MS), the others' one call 8 s
 CODEX_REMOTE :: "its Deckhand is too old to start Codex tabs: update Deckhand there (Update in its row's menu in the sidebar), then try again" // after "on <machine>: " (machine_route.odin)
-CODEX_NO_FLAGS :: "Codex tabs take no extra flags yet: your own Codex settings (~/.codex/config.toml) apply"
 CODEX_READONLY :: "Codex can't run read-only yet, and Start chats read-only is on: start Codex in a project, or turn read-only chats off"
 
 // One hook Deckhand passes to a Codex tab: Codex's event name (the -c key), its snake_case name
@@ -210,16 +211,20 @@ codex_hook_overrides :: proc(cli: string) -> (out: []string, why: string) {
 	return list[:], ""
 }
 
-// What follows `codex` in a Codex tab's argv (temp): a new conversation `--no-daemon -C <cwd>
-// <hooks>`, a resume `resume <id> --no-daemon -C <cwd> <hooks>`. why: none can start (a resume id
-// that is not a UUID, a cwd that is not absolute, a CLI path that cannot go into TOML).
-codex_args :: proc(cli, cwd, resume: string) -> (args: []string, why: string) {
+// What follows `codex` in a Codex tab's argv (temp): a new conversation `<user> --no-daemon -C <cwd>
+// <hooks>`, a resume `resume <id> <user> --no-daemon -C <cwd> <hooks>`. user: the user's flags, which
+// passed codex_args_check; Deckhand's come after them (its -c last: Codex applies -c in order). why:
+// none can start (a resume id that is not a UUID, a cwd that is not absolute, a CLI path that
+// cannot go into TOML, a refused flag).
+codex_args :: proc(cli, cwd, resume: string, user: []string = nil) -> (args: []string, why: string) {
 	if !filepath.is_abs(cwd) do return nil, "the tab's folder is not an absolute path"
 	if resume != "" && !codex_id_ok(resume) do return nil, "not a Codex session id"
+	if e := codex_args_check(user); e != "" do return nil, e
 	hooks, herr := codex_hook_overrides(cli)
 	if herr != "" do return nil, herr
 	out := make([dynamic]string, context.temp_allocator)
 	if resume != "" do append(&out, "resume", resume)
+	append(&out, ..user)
 	append(&out, "--no-daemon", "-C", cwd)
 	append(&out, ..hooks)
 	append(&out, "-c", codex_mcp_override(cli))
@@ -249,10 +254,174 @@ codex_mcp_override :: proc(cli: string) -> string {
 	return strings.to_string(b)
 }
 
+// ---- the user's flags ----
+
+// A Codex flag the user may add to a tab (codex --help, 0.167.2): its long name, its short letter,
+// whether it takes a value. Anything else is refused (an allowlist: a flag Codex adds later is
+// refused until it is looked at).
+@(private = "file")
+Codex_Flag :: struct {
+	long:  string,
+	short: u8,
+	value: bool,
+}
+
+@(private = "file")
+CODEX_FLAGS_OK := [?]Codex_Flag {
+	{"--model", 'm', true},
+	{"--sandbox", 's', true},
+	{"--ask-for-approval", 'a', true},
+	{"--config", 'c', true}, // its key is checked (codex_config_refused)
+	{"--add-dir", 0, true},
+	{"--local-provider", 0, true},
+	{"--oss", 0, false},
+	{"--search", 0, false},
+	{"--no-alt-screen", 0, false},
+	{"--strict-config", 0, false},
+	{"--approve-for-me", 0, false},
+	{"--dangerously-bypass-approvals-and-sandbox", 0, false},
+}
+
+// Codex flags refused by name, and why (the others not in CODEX_FLAGS_OK: "not one Deckhand passes").
+@(private = "file")
+CODEX_FLAGS_REFUSED := [?]struct {
+	long:  string,
+	short: u8,
+	why:   string,
+} {
+	{"--no-daemon", 0, "Deckhand sets it (its hooks must run under the tab's own Codex)"},
+	{"--cd", 'C', "Deckhand sets the tab's folder"},
+	{"--worktree", 0, "it moves the session to another folder than the tab's"},
+	{"--dangerously-bypass-hook-trust", 0, "it would run every hook unreviewed, a repository's too"},
+	{"--remote", 0, "the tab runs its own Codex: Deckhand's hooks and token check need it"},
+	{"--remote-auth-token-env", 0, "the tab runs its own Codex: Deckhand's hooks and token check need it"},
+	{"--last", 0, "Deckhand picks the conversation"},
+	{"--all", 0, "Deckhand picks the conversation"},
+	{"--include-non-interactive", 0, "Deckhand picks the conversation"},
+	{"--image", 'i', "a Codex tab starts without a prompt"},
+	{"--enable", 0, CODEX_FEATURES_WHY},
+	{"--disable", 0, CODEX_FEATURES_WHY},
+	{"--profile", 'p', CODEX_PROFILES_WHY},
+	{"--help", 'h', "it prints and exits"},
+	{"--version", 'V', "it prints and exits"},
+}
+
+CODEX_FEATURES_WHY :: "Codex features are set in your ~/.codex/config.toml, not per tab"
+CODEX_PROFILES_WHY :: "profiles are not supported per tab yet"
+
+// Why a -c key=value cannot go ("" = it can): nothing under `hooks` (Deckhand's hooks and their
+// trust), `mcp_servers.deckhand` or the whole `mcp_servers` table (Deckhand's tools), `features`
+// (any: some turn hooks off or change the daemon or MCP; Codex adds and renames them), `profile`
+// or `profiles` (a profile's place against Deckhand's -c is unchecked). The key as Codex reads it:
+// before the first `=`, a dotted path (quotes and spaces around a part ignored).
+@(private = "file")
+codex_config_refused :: proc(kv: string) -> string {
+	key, eq, _ := strings.partition(kv, "=")
+	if eq == "" || strings.trim_space(key) == "" do return "-c takes key=value"
+	parts := strings.split(strings.trim_space(key), ".", context.temp_allocator)
+	for &part in parts do part = strings.trim(strings.trim_space(part), `"'`)
+	first := parts[0]
+	second := len(parts) > 1 ? parts[1] : ""
+	if first == "hooks" do return "-c hooks… would change Deckhand's hooks or their trust"
+	if first == "mcp_servers" && (len(parts) == 1 || second == "deckhand") do return "-c mcp_servers.deckhand is Deckhand's own MCP server"
+	if first == "features" do return "-c features… is refused: " + CODEX_FEATURES_WHY
+	if first == "profile" || first == "profiles" do return "-c profile… is refused: " + CODEX_PROFILES_WHY
+	return ""
+}
+
+// Why these flags of the user's cannot go to a Codex tab ("" = they can): at most CLAUDE_ARGS_MAX;
+// no empty, long or multi-line one; flags only (a word that is not a flag's value would be a Codex
+// subcommand, `codex exec`, or a prompt); only CODEX_FLAGS_OK, each value-taking one with its value
+// (`-m o3`, `-mo3`, `--model=o3`; a separate value never starts with `-`, as Codex reads it); no
+// -c of Deckhand's (codex_config_refused), no --disable hooks.
+codex_args_check :: proc(args: []string) -> string {
+	if len(args) > CLAUDE_ARGS_MAX do return fmt.tprintf("at most %d extra flags", CLAUDE_ARGS_MAX)
+	for a in args do if a == "" || len(a) > 1024 || strings.contains_any(a, "\x00\r\n") do return "an extra flag is empty, too long or has a line break"
+	for i := 0; i < len(args); i += 1 {
+		a := args[i]
+		if len(a) < 2 || a[0] != '-' || a == "--" do return fmt.tprintf("%q is not a flag: Codex would take it for a command or a prompt", a)
+		name, val: string
+		has_val := false
+		if a[1] == '-' {
+			n, eq, v := strings.partition(a, "=")
+			name, val, has_val = n, v, eq != ""
+		} else {
+			name = a[:2]
+			if len(a) > 2 do val, has_val = strings.trim_prefix(a[2:], "="), true
+		}
+		flag: Maybe(Codex_Flag)
+		for f in CODEX_FLAGS_OK do if name == f.long || (f.short != 0 && len(name) == 2 && name[1] == f.short) do flag = f
+		f, ok := flag.?
+		if !ok {
+			for r in CODEX_FLAGS_REFUSED do if name == r.long || (r.short != 0 && len(name) == 2 && name[1] == r.short) do return fmt.tprintf("%s is refused: %s", name, r.why)
+			return fmt.tprintf("%s is not a Codex flag Deckhand passes on", name)
+		}
+		if !f.value {
+			if has_val do return fmt.tprintf("%s takes no value", f.long)
+			continue
+		}
+		if !has_val {
+			if i + 1 >= len(args) || strings.has_prefix(args[i + 1], "-") do return fmt.tprintf("%s needs a value", f.long)
+			i += 1
+			val = args[i]
+		}
+		if f.long == "--config" do if e := codex_config_refused(val); e != "" do return e
+	}
+	return ""
+}
+
+// Whether args (passed codex_args_check) choose how Codex asks or sandboxes: -s, -a,
+// --approve-for-me, full access itself, or a -c of approval_policy, sandbox_mode or
+// sandbox_workspace_write.
+@(private = "file")
+codex_args_choose_access :: proc(args: []string) -> bool {
+	for a, i in args {
+		if len(a) < 2 || a[0] != '-' do continue
+		kv := ""
+		if a[1] == '-' {
+			n, _, v := strings.partition(a, "=")
+			switch n {
+			case "--sandbox", "--ask-for-approval", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox": return true
+			case "--config": kv = v != "" ? v : (i + 1 < len(args) ? args[i + 1] : "")
+			}
+		} else {
+			switch a[1] {
+			case 's', 'a': return true
+			case 'c': kv = len(a) > 2 ? strings.trim_prefix(a[2:], "=") : (i + 1 < len(args) ? args[i + 1] : "")
+			}
+		}
+		if kv == "" do continue
+		key, _, _ := strings.partition(kv, "=")
+		first, _, _ := strings.partition(strings.trim_space(key), ".")
+		switch strings.trim(strings.trim_space(first), `"'`) {
+		case "approval_policy", "sandbox_mode", "sandbox_workspace_write": return true
+		}
+	}
+	return false
+}
+
+// What turning full access on asks the user (Set_Claude_Default_Flags with harness codex).
+CODEX_FULL_ACCESS_CONFIRM :: "Start the Codex tabs you start with --dangerously-bypass-approvals-and-sandbox? Codex will edit files and run commands without asking you first, outside its sandbox. Agents' tabs never get it."
+
+// args with the user's default Codex flags as the setting is NOW, after them (codex_start, for a
+// start the user makes; never saved into a tab's or a record's flags): full access
+// (--dangerously-bypass-approvals-and-sandbox), left out when the tab's flags already choose how
+// Codex asks or sandboxes (codex_args_choose_access; Codex refuses it beside -a or
+// --approve-for-me), or past CLAUDE_ARGS_MAX. Temp.
+codex_with_defaults :: proc(args: []string) -> []string {
+	if !state.settings.codex_full_access || len(args) + 1 > CLAUDE_ARGS_MAX || codex_args_choose_access(args) do return args
+	list := make([dynamic]string, 0, len(args) + 1, context.temp_allocator)
+	append(&list, ..args)
+	append(&list, "--dangerously-bypass-approvals-and-sandbox")
+	return list[:]
+}
+
 // Starts codex in the tab's terminal (claude_start for a Codex tab): the login shell, CODEX_TAB_CMD
 // and codex_args; the environment of a Claude tab (the socket, the tab's token, the CLI's path).
-// Never read-only (refused: a chat while chats are read-only), never with flags or an account.
-codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string) -> bool {
+// flags: the tab's own flags (an agent's restart starts without them); defaults: a start the user
+// makes, with the default flags as set now (codex_with_defaults). Never read-only (refused: a chat
+// while chats are read-only), never with an account.
+codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
 	if claude_tab_readonly(s, ct) {
 		term_note(t, CODEX_READONLY)
 		return false
@@ -262,7 +431,13 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 		return false
 	}
 	cli := claude_cli_path()
-	args, why := codex_args(cli, cwd, ct.session_id)
+	user := flags ? ct.args : nil
+	if e := codex_args_check(user); e != "" { // a saved tab or entry: checked again at every start
+		term_note(t, fmt.tprintf("Codex can't start with this tab's flags: %s.", e))
+		return false
+	}
+	if defaults do user = codex_with_defaults(user)
+	args, why := codex_args(cli, cwd, ct.session_id, user)
 	if why != "" {
 		term_note(t, fmt.tprintf("Codex can't start: %s.", why))
 		return false

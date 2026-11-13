@@ -184,7 +184,8 @@ that run (`-c hooks.<Event>=[…]`, the bundled `deckhand-cli` by absolute path)
 those for that run in the same layer (`-c hooks.state={…}` with each hook's `trusted_hash`,
 Codex 0.167.2's recipe), so Codex shows no "Hooks need review" dialog for them and the user's own
 hooks keep their own trust. Nothing goes into `~/.codex`; `CODEX_HOME` is never set; the user's own
-settings (model, sandbox, approvals, profiles, `notify`, folder trust) apply untouched, and
+settings (model, sandbox, approvals, profiles, `notify`, folder trust) apply untouched (the user's
+extra flags and **Full access in new Codex tabs** come before Deckhand's own: CODEX.md §1a), and
 `--no-daemon` keeps the TUI and its hooks in the tab's own process tree. A Codex that changes the
 recipe shows its review dialog for Deckhand's hooks; status still works from its OSC 7501 and the
 tab's bar explains. The details: [CODEX.md](CODEX.md).

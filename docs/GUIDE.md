@@ -1127,14 +1127,25 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
 - **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app
   tabs, as Claude can with the `deckhand` command (here Deckhand's MCP tools, for that run only).
   Codex asks you before a tool that changes something, if your approval settings say so.
+- **Full access by default**: turn on **Full access in new Codex tabs** in Settings › Coding agents
+  › Codex (⌘,) or the palette to start your own Codex tabs with
+  `--dangerously-bypass-approvals-and-sandbox`: Codex then edits files and runs commands without
+  asking you, outside its sandbox. Deckhand asks you to confirm when you turn it on. It applies when
+  you start Codex yourself (a new tab or session, your resume, a restored tab you show, your
+  Restart), never to a tab Atlas, a script or an app starts, and not to a tab whose own flags pick
+  a sandbox or approval mode.
+- **Extra flags** on a tab (yours only, as for Claude) are checked against Codex's own: flags that
+  would change Deckhand's hooks or tools, the tab's folder, Codex features or profiles (set those in
+  your `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …)
+  are refused, with why.
 - **On another machine**: **+ New session** under one of its projects (or **New Codex tab** in its
-  menu) starts Codex there, with that machine's own Codex, settings and sign-in; its Codex rows
-  open there too. It needs Deckhand on that machine to be new enough (Deckhand says to update it
-  there otherwise) and Codex installed there. If Codex there is signed out, its own sign-in screen
-  shows in the tab.
+  menu) starts Codex there, with that machine's own Codex, settings and sign-in (its own **Full
+  access in new Codex tabs**, never this Mac's); its Codex rows open there too. It needs Deckhand
+  on that machine to be new enough (Deckhand says to update it there otherwise) and Codex installed
+  there. If Codex there is signed out, its own sign-in screen shows in the tab.
 - **Not yet**: read-only chats (Codex is not offered in Chats while **Start chats read-only** is
   on: Codex's read-only sandbox does not cover your MCP servers, and you can lift it from its
-  composer) and extra flags. [CODEX.md](CODEX.md) has the details.
+  composer) and accounts. [CODEX.md](CODEX.md) has the details.
 
 ### Comments for the agent
 
@@ -1454,8 +1465,8 @@ then shows pi-kit's shell. Your pi tab starts either way.
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.
 
-**Codex.** Its version and how it was installed, as the checklist has it (see
-[Codex tabs](#codex-tabs)).
+**Codex.** Its version and how it was installed, as the checklist has it, and **Full access in
+new Codex tabs** (see [Codex tabs](#codex-tabs)).
 
 ### Machines
 

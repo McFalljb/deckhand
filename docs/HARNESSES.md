@@ -236,6 +236,7 @@ either: its hooks are Deckhand's own CLI, passed per run (§5a).
 | `too_old` | a known version below `min_version`, pi's own or a project's `.pi/settings.json` npm pin (that one: a note to change it there, nothing run) | the version, the update command, **Update** (runnable layouts) or **Copy** |
 | `ok` | found, new enough, or its version unknown (never "too old" on a guess) | ✓, the version and layout |
 | `unchecked` | a pi package from a `git:` or local-path source in pi's own settings: its version cannot be checked | ? Found, version not checked; no Install (another copy would be a second one) |
+| `unchecked` (pi's row) | pi not found by stat while the login shell is still being asked (`command -v pi`): New session still offers pi; the row is made again when the shell answers | ? Looking for pi in the login shell… |
 | `built_in` | Deckhand's own integration, in the build | ✓ Built in |
 | `not_loaded` | in the build but pi is older than 1.4.0, or not in the build | why |
 | `needs_harness` | a third-party item whose harness is missing or too old | Needs pi first |

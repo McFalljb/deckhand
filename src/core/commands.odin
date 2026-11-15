@@ -487,6 +487,7 @@ Restore_Session :: struct {
 	pi_pane:       Maybe(int), // with a layout: the pi tab's saved pane (nil, unset = not known: the focused pane); a Claude-only session's main tab is tabs[0]
 	pi_active:     bool, // with a layout: the pi tab was its pane's shown tab
 	pi_held:       u32, // the pi tab's (Home's) session holder terminal (Restore_Tab.held)
+	no_file:       bool, // saved before pi wrote its session file (persist.odin "no_file"): not gone for that
 }
 Bridge_Done :: struct { 	// a bridge answered (or dropped) a Pi_Prompt/Pi_Reload/Pi_Wait_Idle
 	request_id: u64,
@@ -1936,14 +1937,17 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			// a session in a worktree: there again while it is a checkout of the project's repository
 			if at, err := wt_session_check(p, c.cwd, listed = false); err == "" do cwd = at
 		}
+		// saved before pi wrote its file (no pi there, persist.odin): not gone for that, and saved
+		// again only as one opened this run is (while it has a live tab, or once pi writes it)
+		unwritten := c.no_file && path == ""
 		s := Open_Session {
 			pi_session_id = strings.clone(c.pi_session_id),
 			session_dir   = strings.clone(c.session_dir),
 			session_file  = strings.clone(path),
 			project_id    = p.id,
 			cwd           = strings.clone(cwd),
-			missing       = path == "" || !os.exists(cwd),
-			restored      = true,
+			missing       = (path == "" && !unwritten) || !os.exists(cwd),
+			restored      = !unwritten,
 		}
 		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Not_Started, held = c.pi_held})
 		s.id = new_id()

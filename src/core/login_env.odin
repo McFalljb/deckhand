@@ -264,8 +264,13 @@ login_env_run :: proc(argv: []string, timeout: time.Duration, env: []string = ni
 			}
 			sync.unlock(&login_probe.lock)
 		}
-		// killed by a signal (login_env_kill_probe at quit, or anyone's): no answer, and no second try
-		if exited && (!open || login_env_complete(strings.to_string(b))) do return strings.to_string(b), !posix.WIFSIGNALED(wstatus) || login_env_complete(strings.to_string(b))
+		// killed by a signal (login_env_kill_probe at quit, or anyone's): no answer, and no second try.
+		// The signal by hand (the low 7 bits, on macOS and Linux alike): Odin's posix.WIFSIGNALED on
+		// Linux (dev-2026-09) says yes for a plain exit 0 (musl's macro, without its unsigned cast)
+		if exited && (!open || login_env_complete(strings.to_string(b))) {
+			sig := wstatus & 0x7f
+			return strings.to_string(b), (sig == 0 || sig == 0x7f) || login_env_complete(strings.to_string(b))
+		}
 		if time.tick_now()._nsec > deadline do break
 	}
 	// timed out (or too much output): the session's group, at once

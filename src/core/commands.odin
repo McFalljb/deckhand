@@ -1725,7 +1725,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// unknown: only Deckhand itself, when the tab's last bridge connection is gone
 		if c.agent == .Unknown && caller.kind != .Internal do return fail("agent must be idle, working or error"), false
 		// a turn ended: a new chat's file exists now, list it
-		if c.agent == .Idle && tab.agent != .Idle do refresh_listing(ps)
+		if c.agent == .Idle && tab.agent != .Idle {
+			refresh_listing(ps)
+			persist_file_appeared(ps) // saved without its file: saved again now that it is there
+		}
 		if ps.home {
 			agent_status_changed(tab.agent, tab.waiting, c.agent, c.waiting)
 			if c.agent != .Unknown {

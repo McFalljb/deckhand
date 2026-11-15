@@ -209,6 +209,14 @@ mirror_on_screen_shown_again :: proc(t: ^testing.T) {
 	persist_machine_merged(3)
 	testing.expect_value(t, state.current_session, state.open_sessions[0].id)
 	testing.expect_value(t, persist.focus_machine, "")
+	// the user chose a view since launch (here the Deck view), even if none is current when the
+	// link comes back: left as it is
+	persist.focus_machine = strings.clone("m3:abc")
+	run_command(Show_No_Session{}, {kind = .UI})
+	testing.expect_value(t, persist.focus_machine, "")
+	state.current_session = 0
+	persist_machine_merged(3)
+	testing.expect_value(t, state.current_session, u64(0))
 }
 
 // Review round 1: another machine's session on screen is not "the session on screen" for anything

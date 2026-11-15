@@ -55,7 +55,8 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   runs or waits to start (a machine without pi: its pi tab exited 127 and the user works in a
   shell there). Such a session is saved with `"no_file": true`: restored not gone (its held tabs
   are adopted, its pi tab tries pi again when shown, `pi --session-id`), and saved again only by
-  the same rule, so once its last live tab ends it is dropped. An older Deckhand ignores the key
+  the same rule, so once its last live tab ends it is dropped. When pi writes the file after all,
+  the workspace is saved again at the end of that turn, without the key. An older Deckhand ignores the key
   and restores it gone. File lookups are cached: a found file costs a stat, a missing one a
   stat of its dir until that dir changes. `tabs[0]` is the pi tab (a Claude-only session's: its Claude tab, below); shell tabs save
   their title and the live shell's cwd (read from the process; the start dir if unknown).
@@ -113,7 +114,8 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   current before it (`shown_before`), so a relaunch shows that one.
   When that session is another machine's, `current_machine_session` holds its id as this Mac shows
   it (`m<machine no>:<id>`) instead: once that machine's link brings its sessions back, it is shown
-  again, unless another session is shown by then (`persist_machine_merged`).
+  again, unless the user chose a session, the Deck view, Settings or a project since launch
+  (`persist_machine_merged`, `persist_user_chose`).
 - Other machines' projects and open sessions (Machines over SSH) are never saved here: each
   machine saves its own (only the id of the one on screen, `current_machine_session` above).
   `selected_project` is saved only when it is this Mac's.

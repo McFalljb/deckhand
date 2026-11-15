@@ -352,10 +352,21 @@ workspace_saves_session_without_pi :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.current_session, s.id)
 	testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Running) // the shell
 	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Running) // pi tried again (here the stand-in)
-	testing.expect(t, strings.contains(core.workspace_json(), `"no_file":true`))
 	// its last live tab ended: no longer saved
 	s.tabs[1].status = .Exited
 	testing.expect(t, !strings.contains(core.workspace_json(), id))
+	s.tabs[1].status = .Running
+	testing.expect(t, strings.contains(core.workspace_json(), `"no_file":true`))
+	// pi writes its file after all (a turn ends): the workspace is saved again, without no_file
+	core.persist.saved_gen = core.persist.gen // as after a save
+	path := fmt.tprintf("%s/2026-10-31T00-00-00-000Z_%s.jsonl", core.pi_store_dir(a), id)
+	_ = os.write_entire_file(path, transmute([]u8)string("{}\n"))
+	s.session_file = strings.clone(path)
+	pi := s.tabs[0].id
+	core.run_command(core.Pi_Status_Update{tab_id = pi, agent = .Working}, {kind = .Panel, tab_id = pi})
+	core.run_command(core.Pi_Status_Update{tab_id = pi, agent = .Idle}, {kind = .Panel, tab_id = pi})
+	testing.expect(t, core.persist_dirty(), "saved again once the file is there")
+	testing.expect(t, !strings.contains(core.workspace_json(), `"no_file"`))
 }
 
 // Status and panel reports from a working pi are not saved: they must not

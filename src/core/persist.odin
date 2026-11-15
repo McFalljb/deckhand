@@ -40,7 +40,8 @@ Persist :: struct {
 	writes:        int,
 	dir_lists:     int, // session dir listings by the save check (tests)
 	restored_clean: bool, // persist_load restored the saved file (not missing, --fresh, or moved aside)
-	focus_machine: string, // the saved current_machine_session: focused once its machine's link merges it
+	focus_machine: string, // the saved current_machine_session: focused once its machine's link merges it, unless the user chose a view first
+	no_file:       map[u64]bool, // sessions the last save check wrote with "no_file" (persist_file_appeared)
 }
 
 persist: Persist
@@ -56,6 +57,7 @@ persist_init :: proc(dir: string) {
 // panels about once a second; those must not cost a save check each.
 persist_on_event :: proc(ev: Event) {
 	e, ok := ev.(Command_Event)
+	if ok && e.result.ok do persist_user_chose(e.command, e.caller)
 	if !ok || !e.changed do return
 	#partial switch _ in e.command {
 	case Browser_Update:
@@ -65,6 +67,26 @@ persist_on_event :: proc(ev: Event) {
 	case Pi_Status_Update, Program_Status, Set_Unread, Mark_All_Read, Show_No_Session, Panel_Set, Panel_Remove, Set_Focus, Focus_Take, Focus_Release, Set_Files_Filter, Tab_Exited, Cancel_Confirmation, Bridge_Done, Agent_Model_Picker, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared, Jobs_Sync, Jobs_Tick, Job_Run_Done, Job_Mark_Read, Job_Run_Now, Job_Stop, Job_Open, App_Update, App_Restart, App_Input, App_Call, App_Call_Done, App_Screenshot, App_Inspect, Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop, Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel, Claude_Comments, Claude_Prompt, Claude_Wait_Idle, Claude_Wait_Tick, Claude_Held_Op, Claude_Deliver, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background, Claude_Readonly_Ack:
 		return
 	}
+	persist.gen += 1
+}
+
+// The user chose what to show (a session, the Deck view or Settings, a project): another
+// machine's session saved as on screen no longer takes the screen when its link comes back.
+persist_user_chose :: proc(cmd: Command, caller: Caller) {
+	if persist.focus_machine == "" || caller.kind != .UI do return
+	#partial switch _ in cmd {
+	case Focus_Session, Focus_Tab, Show_No_Session, Select_Project:
+		delete(persist.focus_machine)
+		persist.focus_machine = ""
+	}
+}
+
+// A pi turn ended (Pi_Status_Update): a session saved with "no_file" whose file is there now is
+// saved again (status reports never mark the workspace dirty), so a crash later does not leave a
+// stale "no_file" that would keep it from showing as gone.
+persist_file_appeared :: proc(s: ^Open_Session) {
+	if s == nil || !persist.no_file[s.id] || s.session_file == "" || !os.exists(s.session_file) do return
+	delete_key(&persist.no_file, s.id)
 	persist.gen += 1
 }
 
@@ -303,6 +325,8 @@ workspace_json :: proc() -> string {
 		if !keep && s.agent != .Claude && session_has_live_tab(s) do keep, unwritten[s.id] = true, true
 		if keep do append(&saved, &s)
 	}
+	clear(&persist.no_file)
+	for id in unwritten do persist.no_file[id] = true
 
 	// projects: added by hand, renamed, selected, or holding a saved session
 	strings.write_string(&w.b, ",\n")

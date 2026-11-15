@@ -177,6 +177,48 @@ mirror_never_saved :: proc(t: ^testing.T) {
 	replica_free(&r, runtime.heap_allocator())
 }
 
+// Another machine's session on screen (#135): only its id is saved, and once that machine's link
+// merges it again it is shown again, unless something else is on screen by then.
+@(test)
+mirror_on_screen_shown_again :: proc(t: ^testing.T) {
+	mm_reset()
+	r := mm_replica(5, 9, 1)
+	m: Machine_Mirror
+	defer {
+		mirror_unmerge(3)
+		mirror_free(&m)
+		replica_free(&r, runtime.heap_allocator())
+	}
+	mirror_merge(3, &r, &m)
+	sid, _ := id_pack(3, 9)
+	run_command(Focus_Session{session = sid}, {kind = .Internal})
+	ws := workspace_json()
+	testing.expect(t, strings.contains(ws, `"current_machine_session":"m3:abc"`) && !strings.contains(ws, `"current_session"`) && !strings.contains(ws, "/home/me/proj"), ws)
+	// after a restart: restored, then shown by its machine's merge (not another machine's)
+	testing.expect_value(t, workspace_restore(`{"v":1,"current_machine_session":"m3:abc"}`), "")
+	testing.expect_value(t, persist.focus_machine, "m3:abc")
+	state.current_session = 0
+	persist_machine_merged(4)
+	testing.expect_value(t, state.current_session, u64(0))
+	persist_machine_merged(3)
+	testing.expect_value(t, state.current_session, sid)
+	testing.expect_value(t, persist.focus_machine, "")
+	// something else on screen first: left as it is
+	persist.focus_machine = strings.clone("m3:abc")
+	state.current_session = state.open_sessions[0].id
+	persist_machine_merged(3)
+	testing.expect_value(t, state.current_session, state.open_sessions[0].id)
+	testing.expect_value(t, persist.focus_machine, "")
+	// the user chose a view since launch (here the Deck view), even if none is current when the
+	// link comes back: left as it is
+	persist.focus_machine = strings.clone("m3:abc")
+	run_command(Show_No_Session{}, {kind = .UI})
+	testing.expect_value(t, persist.focus_machine, "")
+	state.current_session = 0
+	persist_machine_merged(3)
+	testing.expect_value(t, state.current_session, u64(0))
+}
+
 // Review round 1: another machine's session on screen is not "the session on screen" for anything
 // that acts (cur): a split, a shown file or quick-open, the Files tab's base. Nothing local is added
 // to it, and no local folder it names is read.

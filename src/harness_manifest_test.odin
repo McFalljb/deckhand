@@ -345,6 +345,13 @@ harness_checklist_states :: proc(t: ^testing.T) {
 	items = core.harness_checklist(f)
 	testing.expect_value(t, item_of(items, "pi").state, core.Harness_Item_State.Ok)
 	testing.expect_value(t, item_of(items, "claude").state, core.Harness_Item_State.Ok)
+	// pi not found by stat, the login shell still asked (#135): not checked yet, never "ok" (a hub
+	// shows this row); New session still offers pi (unchecked counts as there)
+	f = facts_both(root)
+	f.bin[.Pi], f.real[.Pi], f.version[.Pi] = "", "", ""
+	f.pi_asking = true
+	pi = item_of(core.harness_checklist(f), "pi")
+	testing.expect(t, pi.state == .Unchecked && pi.action == .None && pi.version == "" && core.harness_item_text(pi) == pi.note && pi.note != "", core.harness_item_text(pi))
 }
 
 @(test)

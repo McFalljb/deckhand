@@ -323,7 +323,9 @@ ch_default_flags :: proc(t: ^testing.T) {
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = rsid}, CH_SCRIPT)
 	core.run_command(core.Claude_Turn_Report{tab_id = core.find_session(r.created_id).tabs[0].id, state = "submitted", title = "restore me"}, CH_SCRIPT)
 	text := strings.clone(core.workspace_json())
-	testing.expect(t, !strings.contains(text, SKIP), "never saved")
+	// the default never; only the flag the user gave one tab themselves (its saved flags: the pi
+	// session beside them is saved while its Claude tabs run, though pi never wrote its file)
+	testing.expect(t, strings.count(text, SKIP) == 1 && strings.contains(text, `"args":["--dangerously-skip-permissions"]`), "never saved")
 	for want_on in ([]bool{false, true}) {
 		context.allocator = ch_reset(&env, keep_dirs = true)
 		testing.expect_value(t, core.workspace_restore(text), "")

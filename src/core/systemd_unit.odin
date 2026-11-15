@@ -104,13 +104,16 @@ systemd_pid_word :: proc(s: string) -> int {
 
 // Whether a handover's successor takes this core's own process (execve, launch_linux.odin) rather
 // than a new one (#135): only when this process is deckhand-core.service's main process
-// (main_pid == own_pid), and the successor is the binary the unit runs (core/current's, bin and
+// (main_pid == own_pid) and the unit is "active" (not deactivating: a `systemctl stop` or `restart`
+// that came during the handover keeps MainPID until the core exits, and a core exec'd into it
+// would be killed at the stop timeout; then the successor starts as a new process, as a
+// SIGTERM during a handover always did), and the successor is the binary the unit runs (core/current's, bin and
 // current resolved) with Use previous core not holding, outside test mode. The unit then stays
 // active with the same main pid, now running the new build, so `systemctl --user status`, `restart`
 // and `stop` keep naming the core that serves. Else (a core started directly or in a scope, Use
 // previous, no unit): a new process, as before (scope_launch).
 systemd_exec_wanted :: proc(bin, current: string, main_pid, own_pid: int, active: string, test_mode, use_previous: bool) -> bool {
-	return !test_mode && !use_previous && current != "" && bin == current && main_pid > 0 && main_pid == own_pid
+	return !test_mode && !use_previous && active == "active" && current != "" && bin == current && main_pid > 0 && main_pid == own_pid
 }
 
 Linger :: enum u8 {

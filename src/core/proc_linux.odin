@@ -116,5 +116,26 @@ proc_stat_state :: proc(stat: string) -> u8 {
 	return fields[0][0]
 }
 
-// STUB (failing test first): the children this process inherited are not reaped yet.
-core_reap_inherited :: proc() {}
+// The children this process has at its start, each reaped by a thread when it exits
+// (holder_reap_later), as a child it spawned is. A core has none at its start unless a handover
+// exec'd it in its predecessor's process (core_exec_in_place): then the predecessor's children
+// (the session holder systemd-run started, a pty child still closing) are ours with no waiter, and
+// one that exits would stay a zombie (holder_alive). Before any child of our own (serve_main):
+// waitpid on those pids only, never -1, so run_group's and the ptys' own waits are untouched.
+core_reap_inherited :: proc() {
+	me := i32(posix.getpid())
+	dir := posix.opendir("/proc")
+	if dir == nil do return
+	defer posix.closedir(dir)
+	n := 0
+	for {
+		e := posix.readdir(dir)
+		if e == nil do break
+		pid, ok := strconv.parse_int(string(cstring(&e.d_name[0])), 10)
+		if !ok || pid <= 0 || pid > int(max(i32)) || i32(pid) == me do continue
+		if proc_stat_ppid(proc_stat_of(i32(pid))) != me do continue
+		holder_reap_later(i32(pid))
+		n += 1
+	}
+	if n > 0 do log_fln("deckhand-core serve: %d process(es) inherited from the core this one replaced: reaped when they exit", n)
+}

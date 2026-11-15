@@ -91,6 +91,9 @@ serve_main :: proc(args: []string) -> int {
 		if n == 65 && buf[64] == '\n' do copy(core.successor_given[:], buf[:64])
 		core.trust_wipe(buf[:])
 	}
+	// Linux: a handover that exec'd this core in its predecessor's process left us that one's
+	// children, with no waiter (core_exec_in_place): reaped from now on, before any child of ours
+	when ODIN_OS == .Linux do core.core_reap_inherited()
 	core.persist.launch = time.tick_now()
 	core.core_separate = true
 	core.app_context = context

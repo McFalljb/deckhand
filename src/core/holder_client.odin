@@ -781,9 +781,15 @@ holder_alive :: proc() -> bool {
 	return pid_running(hc.pid)
 }
 
-// STUB (failing test first): kill(pid, 0) alone.
+// pid runs: it exists (kill 0) and, on Linux, is not a zombie (a child of ours nobody reaped yet,
+// such as a holder inherited across an in-place exec: core_reap_inherited).
 pid_running :: proc(pid: i32) -> bool {
-	return pid > 0 && posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK
+	if pid <= 0 || posix.kill(posix.pid_t(pid), posix.Signal(0)) != .OK do return false
+	when ODIN_OS == .Linux {
+		return proc_stat_state(proc_stat_of(pid)) != 'Z'
+	} else {
+		return true
+	}
 }
 
 // The holder terminal a tab's process still runs in although this run cannot reach it (held_away

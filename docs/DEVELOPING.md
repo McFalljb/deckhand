@@ -197,7 +197,10 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   process (`execve` at the very end of its stop, the holder's secret on a pipe for stdin, as for a
   direct spawn: `core_handover_exec`), so the unit stays active with the same main pid and
   `systemctl --user status|restart|stop deckhand-core` name the core that serves (#135); a
-  failed `execve` falls back to a new process in a scope. Its log:
+  failed `execve` falls back to a new process in a scope, and so does a unit that is no longer
+  `active` (a `systemctl stop` or `restart` during the handover). The new image reaps the
+  children it inherited (the holder systemd-run started: `core_reap_inherited`), and a zombie
+  holder never counts as alive (`pid_running`). Its log:
   `journalctl --user -u deckhand-core`. `KillMode=process` keeps systemd from killing
   processes left in the unit's cgroup on a stop or restart.
 - **The session holder** (M6-L3, `src/holder/sys_linux.odin`): `keep_sessions` works as on macOS.

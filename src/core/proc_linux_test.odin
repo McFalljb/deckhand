@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:strings"
 import "core:sys/posix"
 import "core:testing"
+import "core:time"
 
 @(test)
 proc_stat_ppid_parse :: proc(t: ^testing.T) {
@@ -58,4 +59,25 @@ proc_reads_self :: proc(t: ^testing.T) {
 	testing.expect(t, !bad)
 	// another data dir keeps <data>/run; only the default one moves to ~/.local/state
 	testing.expect_value(t, runtime_dir_linux(fmt.tprintf("/nonexistent/deckhand-%d", me)), "")
+}
+
+// #135 review: after an in-place exec (core_exec_in_place) the new image inherits the old one's
+// children with no reaper of its own. A zombie is not running (holder_alive), and the new image
+// reaps what it inherited (core_reap_inherited), so a dead holder's pid goes away.
+@(test)
+proc_inherited_child_reaped :: proc(t: ^testing.T) {
+	testing.expect_value(t, proc_stat_state("77 (a b) c) Z 42 77 77 0 -1"), u8('Z'))
+	testing.expect_value(t, proc_stat_state("5 (sh) S 4 5 5"), u8('S'))
+	testing.expect_value(t, proc_stat_state("9 x S 4"), u8(0))
+	// a child of ours nobody waits for, as an exec'd image finds its predecessor's
+	argv := []cstring{"/bin/true", nil}
+	pid: posix.pid_t
+	testing.expect(t, posix.posix_spawn(&pid, "/bin/true", nil, nil, raw_data(argv), posix.environ) == .NONE)
+	start := time.tick_now()
+	for proc_stat_state(proc_stat_of(i32(pid))) != 'Z' && time.tick_since(start) < 5 * time.Second do time.sleep(10 * time.Millisecond)
+	testing.expect_value(t, proc_stat_state(proc_stat_of(i32(pid))), u8('Z'))
+	testing.expect(t, !pid_running(i32(pid)), "a zombie does not run")
+	core_reap_inherited()
+	for proc_stat_of(i32(pid)) != "" && time.tick_since(start) < 5 * time.Second do time.sleep(10 * time.Millisecond)
+	testing.expect(t, proc_stat_of(i32(pid)) == "", "the inherited child was reaped")
 }

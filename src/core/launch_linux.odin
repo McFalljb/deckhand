@@ -55,7 +55,8 @@ core_exec_in_place_wanted :: proc(bin, data: string) -> bool {
 	if real_path(bin) == "" || real_path(bin) != real_path(current) || core_use_previous_serve(data) != "" do return false
 	out, st := run_group(systemd_argv(.Main_Pid), 5 * time.Second)
 	if st != .Ok do return false
-	return systemd_exec_wanted(real_path(bin), real_path(current), systemd_main_pid_parse(out), int(posix.getpid()), autotest_active, false)
+	main_pid, active := systemd_show_parse(out)
+	return systemd_exec_wanted(real_path(bin), real_path(current), main_pid, int(posix.getpid()), active, autotest_active, false)
 }
 
 // The successor in this very process: execve of `bin serve --run run --data data`, with the

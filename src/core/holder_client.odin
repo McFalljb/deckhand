@@ -778,7 +778,12 @@ holder_keeps_sessions :: proc() -> bool {
 // a GOODBYE: a shutdown hangs everything up.
 holder_alive :: proc() -> bool {
 	if hc.pid <= 0 || hc.handed do return false
-	return posix.kill(posix.pid_t(hc.pid), posix.Signal(0)) == .OK
+	return pid_running(hc.pid)
+}
+
+// STUB (failing test first): kill(pid, 0) alone.
+pid_running :: proc(pid: i32) -> bool {
+	return pid > 0 && posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK
 }
 
 // The holder terminal a tab's process still runs in although this run cannot reach it (held_away

@@ -99,3 +99,22 @@ runtime_dir_linux :: proc(data: string) -> string {
 	os.make_directory_all(parent, {.Read_User, .Write_User, .Execute_User})
 	return fmt.tprintf("%s/run", parent)
 }
+
+// /proc/<pid>/stat's text ("" = no such process, or not readable). Temp.
+proc_stat_of :: proc(pid: i32) -> string {
+	if pid <= 0 do return ""
+	b, err := os.read_entire_file(fmt.tprintf("/proc/%d/stat", pid), context.temp_allocator)
+	return err == nil ? string(b) : ""
+}
+
+// The state letter of a /proc/<pid>/stat line (R, S, D, Z, T…; 0 when malformed).
+proc_stat_state :: proc(stat: string) -> u8 {
+	close := strings.last_index_byte(stat, ')')
+	if close < 0 do return 0
+	fields := strings.fields(stat[close + 1:], context.temp_allocator)
+	if len(fields) < 1 || len(fields[0]) != 1 do return 0
+	return fields[0][0]
+}
+
+// STUB (failing test first): the children this process inherited are not reaped yet.
+core_reap_inherited :: proc() {}

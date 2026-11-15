@@ -232,10 +232,19 @@ commands either.
 - **Installed**: `codex` on the PATH new tabs get, by stat (never run). The checklist (Settings →
   Coding agents) has a Codex row: Install runs `npm install -g @openai/codex@latest` after the
   user's click, as for the other harnesses.
-- **Version**: from the npm package's `package.json` next to where `codex` links (or Homebrew's
-  `Caskroom/codex/<v>/`); any other install (the standalone one in `~/.local/bin`) runs
-  `codex --version` (argv, no shell, 3 s at most), once per binary. Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab says
-  how to update, the checklist offers Update.
+- **Version**: read from the install's own files, without running `codex`: the npm package's
+  `package.json` next to where `codex` links, Homebrew's `Caskroom/codex/<v>/`, or Codex's own
+  installer's release folder (`~/.local/bin/codex` -> `~/.codex/packages/standalone/releases/<v>-<target>/`:
+  the version is in that path). Only any other install (a plain copy, as Codex's installer made
+  before it kept releases) runs `codex --version` (argv, no shell, 3 s at most, once per binary:
+  cached by its path, size, mtime and inode). Codex writes its helper links under
+  `$CODEX_HOME/tmp/arg0` at every start, `--version` too, so that run gets `CODEX_HOME` set to a new
+  empty 0700 folder in `$TMPDIR` (`deckhand-codex-XXXXXX`), removed right after: nothing under
+  `~/.codex` is written (#135). Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab
+  says how to update for its install (npm, Homebrew, bun or pnpm: that command; Codex's own
+  installer: run it again, `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the
+  command's refusal says the same in one line (`Codex 0.135.0 is older than 0.163.0: update it
+  with …`), and the checklist offers Update (for Codex's own installer: that command, to copy).
 - **Signed out**: `codex login status` (exit 1), run once per recheck through the login shell on a
   worker when a Codex tab starts or the checklist looks, per Codex home: a tab of an account asks
   under its `CODEX_HOME` (set after the login profile, as the tab's), the checklist for the
@@ -357,7 +366,7 @@ tab, which that core checks under its own flag rule (§1a), as it would its own 
   know `harness` and would start Claude Code). A Codex row is listed only by a core that has
   Codex tabs, so its click is forwarded as any row's.
 - **What that machine says** comes back as for its Claude tabs: not installed (`"on <machine>:
-  Codex is not installed …"`), too old (`"on <machine>: could not start Codex"`), signed out as
+  Codex is not installed …"`), too old (`"on <machine>: Codex 0.135.0 is older than 0.163.0: update it with …"`), signed out as
   Codex's own sign-in screen in the tab's relayed terminal; its checklist on the machine's row.
   The bars over a tab (signed out, hooks not running) are that machine's core's and are not
   mirrored, as for its Claude tabs; this Mac's own sign-in never puts one over it.

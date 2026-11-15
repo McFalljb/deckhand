@@ -7,6 +7,8 @@ package core
 // (no unit, no user manager, test mode, another data dir, a handover's successor) it is spawned
 // directly in its own session (setsid; holder_launch_direct), its output in <run>/core.log, and
 // is reparented once its launcher exits. The arguments are launchd_darwin.odin's core_launch's.
+// The one exception: a handover of the unit's own main process to the unit's binary execs the
+// successor in that process (core_exec_in_place; core_handover.odin), so the unit stays its (#135).
 //
 // The session holder (M6-L3) and a core started directly each run in a transient scope of their
 // own (systemd_scope_argv: deckhand-holder-<rand>.scope, deckhand-core-<rand>.scope), so stopping
@@ -26,7 +28,9 @@ import "core:crypto"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:strconv"
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
 import "core:time"
 
@@ -41,6 +45,82 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 	}
 	ours, _ := os.environ(context.temp_allocator)
 	return scope_launch(bin, run, data, core_launch_env(ours, from_tab), "serve", secret)
+}
+
+// A handover's successor takes this process (systemd_exec_wanted): this core is the unit's main
+// process and bin is the unit's binary. Asks systemctl (5 s at most).
+core_exec_in_place_wanted :: proc(bin, data: string) -> bool {
+	if autotest_active || !systemd_unit_ours(data) do return false
+	current := core_serve_of(data, CORE_CURRENT)
+	if real_path(bin) == "" || real_path(bin) != real_path(current) || core_use_previous_serve(data) != "" do return false
+	out, st := run_group(systemd_argv(.Main_Pid), 5 * time.Second)
+	if st != .Ok do return false
+	return systemd_exec_wanted(real_path(bin), real_path(current), systemd_main_pid_parse(out), int(posix.getpid()), autotest_active, false)
+}
+
+// The successor in this very process: execve of `bin serve --run run --data data`, with the
+// holder's secret (when there is one) on a pipe for stdin and --secret-stdin, as a direct spawn
+// gives it (holder_launch_direct), and the environment a launch gives (core_launch_env). Every fd
+// above 2 is made close-on-exec first (the core's own are already: jobs_run.odin), the signal mask
+// emptied (caught signals go back to their defaults at the exec). stdout and stderr stay: the
+// unit's journal. Returns only when execve failed: why, with stdin put back.
+core_exec_in_place :: proc(bin, run, data, secret: string) -> string {
+	args := make([dynamic]cstring, 0, 8, context.temp_allocator)
+	append(&args, strings.clone_to_cstring(bin, context.temp_allocator), "serve", "--run", strings.clone_to_cstring(run, context.temp_allocator), "--data", strings.clone_to_cstring(data, context.temp_allocator))
+	if secret != "" do append(&args, "--secret-stdin")
+	append(&args, nil)
+	ours, _ := os.environ(context.temp_allocator)
+	env := core_launch_env(ours, false)
+	cenv := make([]cstring, len(env) + 1, context.temp_allocator)
+	for e, i in env do cenv[i] = strings.clone_to_cstring(e, context.temp_allocator)
+	cloexec_above_stdio()
+	saved := posix.fcntl(0, .DUPFD_CLOEXEC, 3) // stdin as it was, for a failed exec
+	if secret != "" {
+		sp: [2]posix.FD
+		sync.rw_mutex_lock(&fork_lock) // fork_lock, pty.odin: no child is born holding the pipe
+		pok := posix.pipe(&sp) == .OK
+		if pok do for fd in sp do posix.fcntl(fd, .SETFD, posix.FD_CLOEXEC)
+		sync.rw_mutex_unlock(&fork_lock)
+		if !pok {
+			if saved >= 0 do posix.close(posix.FD(saved))
+			return "cannot make a pipe"
+		}
+		line := fmt.tprintf("%s\n", secret) // 65 bytes: fits any pipe buffer
+		posix.write(sp[1], raw_data(line), len(line))
+		trust_wipe(transmute([]u8)line)
+		posix.close(sp[1])
+		posix.dup2(sp[0], 0) // fd 0 is not close-on-exec
+		posix.close(sp[0])
+	}
+	none: posix.sigset_t
+	posix.sigemptyset(&none)
+	old: posix.sigset_t
+	posix.pthread_sigmask(.SETMASK, &none, &old)
+	posix.execve(args[0], raw_data(args[:]), raw_data(cenv))
+	e := posix.errno()
+	posix.pthread_sigmask(.SETMASK, &old, nil)
+	if saved >= 0 {
+		posix.dup2(posix.FD(saved), 0) // the pipe (and the secret in it) goes with the old stdin's return
+		posix.close(posix.FD(saved))
+	}
+	return fmt.tprintf("execve %s: %s", bin, posix.strerror(e))
+}
+
+// Every fd above 2 close-on-exec (the ones /proc/self/fd lists).
+@(private = "file")
+cloexec_above_stdio :: proc() {
+	dir := posix.opendir("/proc/self/fd")
+	if dir == nil do return
+	defer posix.closedir(dir)
+	own := posix.dirfd(dir)
+	for {
+		e := posix.readdir(dir)
+		if e == nil do break
+		n, ok := strconv.parse_int(string(cstring(&e.d_name[0])), 10)
+		if !ok || n < 3 || posix.FD(n) == own do continue
+		flags := posix.fcntl(posix.FD(n), .GETFD)
+		if flags >= 0 && flags & i32(posix.FD_CLOEXEC) == 0 do posix.fcntl(posix.FD(n), .SETFD, flags | i32(posix.FD_CLOEXEC))
+	}
 }
 
 // Starts a session holder for run and data, running bin (holder_install), with env (nil = this

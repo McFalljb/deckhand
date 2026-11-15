@@ -36,6 +36,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:thread"
 import "core:time"
 import "core:unicode/utf8"
@@ -422,27 +423,32 @@ codex_with_defaults :: proc(args: []string) -> []string {
 // flags: the tab's own flags (an agent's restart starts without them); defaults: a start the user
 // makes, with the default flags as set now (codex_with_defaults). Its account: CODEX_HOME for a
 // home the user added (none for the default), set again after the login profile.
-codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
-	if v := codex_version(); claude_version_below(v, CODEX_MIN_VERSION) {
-		term_note(t, codex_old_text(v))
-		return false
+codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
+	bin := codex_binary()
+	if v := codex_version_of(bin); claude_version_below(v, CODEX_MIN_VERSION) {
+		hint := codex_update_hint(bin)
+		term_note(t, codex_old_text(v, hint))
+		return false, fmt.tprintf("Codex %s is older than %s: update it %s", v, CODEX_MIN_VERSION, hint) // the refusal: short (a hub cuts it)
 	}
 	// its account (claude_accounts.odin): only a configured one starts
 	if ct.account != "" && !claude_account_known(ct.account, codex = true) {
-		term_note(t, fmt.tprintf("This Codex tab's account (%s) is no longer in Settings → Codex accounts: add it again, then Restart.", path_tilde(ct.account)))
-		return false
+		why = fmt.tprintf("This Codex tab's account (%s) is no longer in Settings → Codex accounts: add it again, then Restart.", path_tilde(ct.account))
+		term_note(t, why)
+		return false, why
 	}
 	cli := claude_cli_path()
 	user := flags ? ct.args : nil
 	if e := codex_args_check(user); e != "" { // a saved tab or entry: checked again at every start
-		term_note(t, fmt.tprintf("Codex can't start with this tab's flags: %s.", e))
-		return false
+		why = fmt.tprintf("Codex can't start with this tab's flags: %s.", e)
+		term_note(t, why)
+		return false, why
 	}
 	if defaults do user = codex_with_defaults(user)
-	args, why := codex_args(cli, cwd, ct.session_id, user)
-	if why != "" {
-		term_note(t, fmt.tprintf("Codex can't start: %s.", why))
-		return false
+	args, awhy := codex_args(cli, cwd, ct.session_id, user)
+	if awhy != "" {
+		why = fmt.tprintf("Codex can't start: %s.", awhy)
+		term_note(t, why)
+		return false, why
 	}
 	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator) // the account again after the login profile
 	argv := shell_script_argv(login_shell(), cmd, "codex")
@@ -452,11 +458,11 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 	append(&env, ..claude_account_env(ct.account, codex = true)) // its account: CODEX_HOME (none for the default)
 	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Codex}) { // tokens.json: never adopted as a Claude tab
 		socket_forget_tab(tab_id)
-		return false
+		return false, ""
 	}
 	claude_run_started(tab_id, t, ct)
 	codex_login_check(ct.account)
-	return true
+	return true, ""
 }
 
 // ---- text Deckhand types into Codex's composer ----
@@ -554,13 +560,49 @@ codex_version_of :: proc(bin: string) -> string {
 			dir = filepath.dir(dir)
 		}
 	}
+	if v := codex_standalone_version(real); v != "" do return v
 	return codex_version_run(real)
 }
 
-// Any other install (the standalone one: ~/.local/bin/codex -> ~/.codex/packages/standalone/…,
-// #135): `<real> --version` run (argv, no shell, stdin /dev/null, 3 s at most: run_group), its
-// last word ("codex-cli 0.46.0" -> 0.46.0) if it looks like a version. Once per binary: cached by
-// its real path and stamp (main thread). "" = unknown.
+CODEX_STANDALONE_DIR :: "/packages/standalone/releases/" // under CODEX_HOME (~/.codex)
+CODEX_STANDALONE_INSTALL_COMMAND :: "curl -fsSL https://chatgpt.com/codex/install.sh | sh" // openai/codex README
+
+// Codex's own installer (scripts/install/install.sh in openai/codex, #135): ~/.local/bin/codex ->
+// ~/.codex/packages/standalone/current/… -> releases/<version>-<target>/bin/codex, so the version
+// is in the real path ("0.135.0-x86_64-unknown-linux-musl" -> 0.135.0; the installer's versions:
+// x.y.z, -alpha[.N[.M]], -beta[.N]). Read from the path, never run. "" = not that layout.
+codex_standalone_version :: proc(real: string) -> string {
+	i := strings.index(real, CODEX_STANDALONE_DIR)
+	if i < 0 do return ""
+	seg, _, _ := strings.partition(real[i + len(CODEX_STANDALONE_DIR):], "/")
+	n := 0
+	for part in 0 ..< 3 { // x.y.z
+		start := n
+		for n < len(seg) && seg[n] >= '0' && seg[n] <= '9' do n += 1
+		if n == start do return ""
+		if part < 2 {
+			if n >= len(seg) || seg[n] != '.' do return ""
+			n += 1
+		}
+	}
+	for pre in ([]string{"-alpha", "-beta"}) do if strings.has_prefix(seg[n:], pre) {
+		n += len(pre)
+		for n + 1 < len(seg) && seg[n] == '.' && seg[n + 1] >= '0' && seg[n + 1] <= '9' {
+			n += 1
+			for n < len(seg) && seg[n] >= '0' && seg[n] <= '9' do n += 1
+		}
+		break
+	}
+	if n < len(seg) && seg[n] != '-' do return ""
+	return seg[:n]
+}
+
+// Any other install (Codex's installer before it kept releases: a plain ~/.local/bin/codex; #135):
+// `<real> --version` run (argv, no shell, stdin /dev/null, 3 s at most: run_group), its last word
+// ("codex-cli 0.46.0" -> 0.46.0) if it looks like a version. Codex writes its helper links under
+// $CODEX_HOME/tmp/arg0 at every start, even for --version, and Deckhand never writes under
+// ~/.codex: so it runs with CODEX_HOME at a new empty folder of ours (0700, in $TMPDIR), removed
+// after. Once per binary: cached by its real path and stamp (main thread). "" = unknown.
 @(private = "file")
 codex_ran: struct {
 	real:    string, // heap
@@ -573,7 +615,10 @@ codex_version_run :: proc(real: string) -> string {
 	k, st := path_stat(real)
 	if k != .File || !exe_in(filepath.dir(real), filepath.base(real)) do return ""
 	if codex_ran.real == real && codex_ran.stamp.mtime == st.mtime && codex_ran.stamp.size == st.size && codex_ran.stamp.inode == st.inode do return codex_ran.version
-	out, rs := run_group({real, "--version"}, 3 * time.Second, cap = 4096)
+	home := codex_scratch_home()
+	if home == "" do return "" // never with the real CODEX_HOME; asked again next time
+	defer remove_tree(home)
+	out, rs := run_group({"/usr/bin/env", strings.concatenate({"CODEX_HOME=", home}, context.temp_allocator), real, "--version"}, 3 * time.Second, cap = 4096)
 	v := ""
 	if rs == .Ok {
 		line, _, _ := strings.partition(strings.trim_space(out), "\n")
@@ -587,6 +632,17 @@ codex_version_run :: proc(real: string) -> string {
 	return codex_ran.version
 }
 
+// A new empty 0700 folder for codex_version_run's CODEX_HOME ("" = none could be made). Temp.
+@(private = "file")
+codex_scratch_home :: proc() -> string {
+	tmp := strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")
+	if !strings.has_prefix(tmp, "/") do tmp = "/tmp"
+	tmpl := strings.clone_to_cstring(fmt.tprintf("%s/deckhand-codex-XXXXXX", tmp), context.temp_allocator)
+	d := posix.mkdtemp(transmute([^]byte)tmpl)
+	if d == nil do return ""
+	return strings.clone(string(d), context.temp_allocator)
+}
+
 @(private = "file")
 codex_version_word :: proc(v: string) -> bool {
 	if v == "" || len(v) > 40 || v[0] < '0' || v[0] > '9' do return false
@@ -597,9 +653,22 @@ codex_version_word :: proc(v: string) -> bool {
 // The version of the codex new tabs start ("" = unknown or none).
 codex_version :: proc() -> string {return codex_version_of(codex_binary())}
 
-// What a Codex too old for Deckhand says (the tab's note, the checklist).
-codex_old_text :: proc(v: string) -> string {
-	return fmt.tprintf("Codex %s is older than %s, which Deckhand needs (its status reports): update it with `%s`, then open the tab again.", v, CODEX_MIN_VERSION, CODEX_INSTALL_COMMAND)
+// What a Codex too old for Deckhand says in the tab. hint: codex_update_hint's.
+codex_old_text :: proc(v, hint: string) -> string {
+	return fmt.tprintf("Codex %s is older than %s, which Deckhand needs (its status reports): update it %s, then open the tab again.", v, CODEX_MIN_VERSION, hint)
+}
+
+// How to update the codex at bin, for its install (install_layout): "with `<command>`" for npm,
+// Homebrew, bun or pnpm (the bare command, as harness_update_bare names it); Codex's own installer
+// run again for its standalone layout (never npm there); else the way it was installed. Temp.
+codex_update_hint :: proc(bin: string) -> string {
+	real := fs_real(bin)
+	if real == "" do real = bin
+	layout := install_layout(.Codex, real, "")
+	if layout == .Managed do return fmt.tprintf("with Codex's own installer (`%s`)", CODEX_STANDALONE_INSTALL_COMMAND)
+	if c := harness_update_bare(HARNESS_MANIFEST[harness_first_row(.Codex)], layout, real); c != "" do return fmt.tprintf("with `%s`", c)
+	if bin == "" do return fmt.tprintf("with `%s`", CODEX_INSTALL_COMMAND)
+	return "the way you installed it"
 }
 
 // Restart refused because codex is still not found (exit 127, codex_installed says no).

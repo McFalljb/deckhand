@@ -306,6 +306,11 @@ harness_checklist_states :: proc(t: ^testing.T) {
 	pi, cl = item_of(items, "pi"), item_of(items, "claude")
 	testing.expect(t, pi.action == .Update && !pi.runnable && pi.command == "nix profile upgrade pi" && pi.note != "")
 	testing.expect(t, cl.action == .Update && !cl.runnable && cl.command == "" && strings.contains(cl.note, "mise"))
+	// #135: Codex from its own installer (~/.codex/packages/standalone/releases/…): that installer
+	// again, shown to copy, never npm
+	f.real[.Codex] = "/home/u/.codex/packages/standalone/releases/0.135.0-x86_64-unknown-linux-musl/bin/codex"
+	cx = item_of(core.harness_checklist(f), "codex")
+	testing.expectf(t, cx.state == .Too_Old && !cx.runnable && cx.command == core.CODEX_STANDALONE_INSTALL_COMMAND && strings.contains(cx.note, "Codex's own installer"), "codex standalone too old: %v", cx)
 
 	// a third-party package: not listed, Install by the detected pi; older than its minimum, Update
 	f = facts_both(root)

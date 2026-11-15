@@ -169,12 +169,23 @@ login_env_parse :: proc(out: string) -> (vars: []string, ok: bool) {
 // this process's). Temp-allocated.
 Login_Env_Probe :: #type proc(shell: string, timeout: time.Duration, env: []string) -> (vars: []string, ok: bool)
 
-// The environment of `shell -i -l -c`, as `env -0` prints it between markers.
+// The environment of `shell -i -l -c`, as `env -0` prints it between markers. A shell that exits
+// without printing them (an rc file that execs another shell, as `exec zsh` in ~/.bashrc does:
+// the -c is lost; #135) is asked again as `shell -l -c`, not interactive (its login profile only),
+// with the same timeout: at most twice the timeout in all, and never after a timeout. Which one
+// answered, or that neither did, goes in the log (never a value).
 login_env_ask :: proc(shell: string, timeout: time.Duration, env: []string = nil) -> (vars: []string, ok: bool) {
 	cmd := fmt.tprintf(`printf '%%s' '%s'; /usr/bin/env -0; printf '%%s' '%s'`, LOGIN_ENV_MARK, LOGIN_ENV_MARK)
 	out, run_ok := login_env_run({shell, "-i", "-l", "-c", cmd}, timeout, env)
-	if !run_ok do return
-	return login_env_parse(out)
+	if !run_ok do return // timed out, or never started: no second try
+	if login_env_complete(out) do return login_env_parse(out)
+	out, run_ok = login_env_run({shell, "-l", "-c", cmd}, timeout, env)
+	if run_ok && login_env_complete(out) {
+		log_fln("Deckhand: login shell environment: `%s -i -l -c` printed nothing (an rc file that execs another shell?); `%s -l -c` answered", shell, shell)
+		return login_env_parse(out)
+	}
+	log_fln("Deckhand: login shell environment: neither `%s -i -l -c` nor `%s -l -c` printed it: using the install folders", shell, shell)
+	return
 }
 
 when ODIN_OS == .Darwin {
@@ -192,7 +203,8 @@ when ODIN_OS == .Darwin {
 // put in the background may hold the pipe; it is left alone). At the
 // timeout: SIGKILL to the session's group (interactive shells ignore
 // SIGTERM). ok: the shell exited in time (any status: an rc file's last
-// command may fail; the markers tell whether the answer came).
+// command may fail; the markers tell whether the answer came), not by a signal (killed at quit:
+// login_env_kill_probe) unless its answer was complete.
 login_env_run :: proc(argv: []string, timeout: time.Duration, env: []string = nil) -> (out: string, ok: bool) {
 	cargv := make([]cstring, len(argv) + 1, context.temp_allocator)
 	for a, i in argv do cargv[i] = strings.clone_to_cstring(a, context.temp_allocator)
@@ -252,7 +264,8 @@ login_env_run :: proc(argv: []string, timeout: time.Duration, env: []string = ni
 			}
 			sync.unlock(&login_probe.lock)
 		}
-		if exited && (!open || login_env_complete(strings.to_string(b))) do return strings.to_string(b), true
+		// killed by a signal (login_env_kill_probe at quit, or anyone's): no answer, and no second try
+		if exited && (!open || login_env_complete(strings.to_string(b))) do return strings.to_string(b), !posix.WIFSIGNALED(wstatus) || login_env_complete(strings.to_string(b))
 		if time.tick_now()._nsec > deadline do break
 	}
 	// timed out (or too much output): the session's group, at once

@@ -303,6 +303,7 @@ serve_stop :: proc(run: string) {
 	core.window_door_stop()
 	core.log_ln("deckhand-core serve: stopped cleanly")
 	if core.autotest_active do fmt.println("[autotest] core: stopped")
+	core.core_handover_exec(run) // Linux, the unit's main process: the successor runs in this process (no return)
 }
 
 // `deckhand-core __detach serve ARGS...` (the launchd job, launchd_darwin.odin): fork, the parent

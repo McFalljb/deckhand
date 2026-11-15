@@ -287,6 +287,13 @@ route_control :: proc(t: ^testing.T) {
 	}
 	for x in rt_finished do result_free(x)
 	clear(&rt_finished)
+	// #135: a refused Codex start's reason (codex_start) arrives whole, said whose
+	run_command(Pi_Prompt{tab_id = tid, text = "x"}, {kind = .Control, tab_id = 1}, 62)
+	old := fmt.tprintf("Codex 0.135.0 is older than %s: update it with Codex's own installer (`%s`)", CODEX_MIN_VERSION, CODEX_STANDALONE_INSTALL_COMMAND)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"%s"}}}}`, json_path(rt_last_text(), "id"), old))
+	if testing.expect_value(t, len(rt_finished), 1) do testing.expect_value(t, rt_finished[0].error, strings.concatenate({"on nuc: ", old}, context.temp_allocator))
+	for x in rt_finished do result_free(x)
+	clear(&rt_finished)
 	// its confirmation: refused here, nothing in the bar
 	run_command(Close_Session{session = sid}, {kind = .Control, tab_id = 1}, 62)
 	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"needs_confirmation","needs_confirmation":{{"token":"REMOTE-9","summary":"close it?"}}}}}}`, json_path(rt_last_text(), "id")))

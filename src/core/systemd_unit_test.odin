@@ -95,6 +95,24 @@ systemd_start_wanted_cases :: proc(t: ^testing.T) {
 	testing.expect(t, !systemd_start_wanted(bin = "", current = "", from_core = false, test_mode = false, unit_there = true, use_previous = false), "no current core")
 }
 
+// #135: a handover's successor takes the unit's main process (exec in place), or a new process.
+@(test)
+systemd_exec_wanted_cases :: proc(t: ^testing.T) {
+	cur := "/h/.local/share/deckhand/core/0.4.2-aaaaaaaaaaaa/deckhand-core-serve"
+	testing.expect(t, systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 4242, test_mode = false, use_previous = false))
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 777, test_mode = false, use_previous = false), "a core in a scope (not the unit's main process)")
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 0, own_pid = 0, test_mode = false, use_previous = false), "the unit is not active")
+	testing.expect(t, !systemd_exec_wanted(bin = "/h/build/deckhand-core-serve", current = cur, main_pid = 4242, own_pid = 4242, test_mode = false, use_previous = false), "another binary than the unit's")
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 4242, test_mode = false, use_previous = true), "Use previous core holds")
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 4242, test_mode = true, use_previous = false), "test mode")
+	testing.expect(t, !systemd_exec_wanted(bin = "", current = "", main_pid = 4242, own_pid = 4242, test_mode = false, use_previous = false), "no current core")
+	testing.expect(t, argv_eq(systemd_argv(.Main_Pid), {"systemctl", "--user", "--no-ask-password", "show", "--property=MainPID", "--value", "deckhand-core.service"}))
+	testing.expect_value(t, systemd_main_pid_parse("4242\n"), 4242)
+	testing.expect_value(t, systemd_main_pid_parse("0\n"), 0)
+	testing.expect_value(t, systemd_main_pid_parse(""), 0)
+	testing.expect_value(t, systemd_main_pid_parse("Failed to connect to bus: No medium found"), 0)
+}
+
 @(test)
 systemd_scope_cases :: proc(t: ^testing.T) {
 	testing.expect(t, argv_eq(systemd_scope_argv("deckhand-holder-0a1b2c3d"), {"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit", "deckhand-holder-0a1b2c3d", "--"}))

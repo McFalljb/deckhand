@@ -423,7 +423,7 @@ claude_cli_path :: proc() -> string {
 // Not on PATH: Claude Code's own install folders (~/.local/bin, the native
 // installer's; ~/.claude/local, the older local install) are tried, after a
 // line saying where it was found. Neither: what to do, exit 127.
-CLAUDE_TAB_CMD :: `command -v claude >/dev/null 2>&1 || for d in "$HOME/.local/bin" "$HOME/.claude/local"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/claude" ] && [ -x "$d/claude" ]; then printf '%s\n' "Deckhand: Claude Code is installed at $d/claude but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v claude >/dev/null 2>&1 || { printf '%s\n' "Claude Code (claude) was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.local/bin or ~/.claude/local." "Install Claude Code, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh, ~/.bash_profile for bash), then open a Claude tab again."; exit 127; }; exec claude "$@"`
+CLAUDE_TAB_CMD :: `command -v claude >/dev/null 2>&1 || for d in "$HOME/.local/bin" "$HOME/.claude/local"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/claude" ] && [ -x "$d/claude" ]; then printf '%s\n' "Deckhand: Claude Code is installed at $d/claude but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v claude >/dev/null 2>&1 || { printf '%s\n' "Claude Code (claude) was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.local/bin or ~/.claude/local." "Install Claude Code, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh; for bash ~/.bash_profile if you have one, else ~/.profile), then open a Claude tab again."; exit 127; }; exec claude "$@"`
 
 // What a Claude tab runs: DECKHAND_CLAUDE_CMD (tests: a fake claude), else claude (CLAUDE_TAB_CMD);
 // in test mode never the real claude: TEST_NO_CLAUDE_CMD (commands.odin).
@@ -445,18 +445,22 @@ claude_tab_cmd :: proc() -> string {
 // not start (the terminal says why). s: the tab's session (the tab may not be in it yet).
 // defaults: a start the user makes (a new tab, session or chat, the user's resume, restore and
 // restart): the user's default flags as the setting is now (claude_with_defaults), never saved.
-claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
+// why: the reason it did not start, as the terminal says it ("" = the terminal itself failed), for
+// the command's refusal (a start that fails drops its tab, and a hub forwarding it sees only this).
+claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
 	if ct.codex do return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule and account; no plugin
 	plugin := claude_plugin_dir()
 	if plugin == "" {
-		term_note(t, "Deckhand's Claude Code plugin is missing from this build (integrations/claude-code): rebuild Deckhand.")
-		return false
+		why = "Deckhand's Claude Code plugin is missing from this build (integrations/claude-code): rebuild Deckhand."
+		term_note(t, why)
+		return false, why
 	}
 	cli := claude_cli_path()
 	// its account (claude_accounts.odin): only a configured one starts
 	if ct.account != "" && !claude_account_known(ct.account) {
-		term_note(t, fmt.tprintf("This Claude tab's account (%s) is no longer in Settings → Claude accounts: add it again, then Restart.", path_tilde(ct.account)))
-		return false
+		why = fmt.tprintf("This Claude tab's account (%s) is no longer in Settings → Claude accounts: add it again, then Restart.", path_tilde(ct.account))
+		term_note(t, why)
+		return false, why
 	}
 	cmd := strings.concatenate({CLAUDE_ACCOUNT_SH, claude_tab_cmd()}, context.temp_allocator) // the account again after the login profile
 	argv := shell_script_argv(login_shell(), cmd, "claude") // fish and co.: /bin/sh (commands.odin)
@@ -478,10 +482,10 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 	// every DECKHAND_ name with its PI_DESK_ twin (env_names.odin)
 	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Claude}) {
 		socket_forget_tab(tab_id)
-		return false
+		return false, ""
 	}
 	claude_run_started(tab_id, t, ct)
-	return true
+	return true, ""
 }
 
 // A Claude or Codex tab's process started (its pid in t): its token's hellos must come from below
@@ -791,11 +795,13 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	ct := &tab.kind.(Claude_Tab)
 	t := new_term(tab.id)
-	if !claude_start(s, t, tab.id, ct, cwd, defaults = caller.kind == .UI) { // the user's: with the default flags
+	if ok, why := claude_start(s, t, tab.id, ct, cwd, defaults = caller.kind == .UI); !ok { // the user's: with the default flags
 		drop_term(tab.id)
 		tab_free_kind(&tab)
 		delete(tab.title)
 		delete(tab.cwd)
+		// the reason, not only that it failed: the tab that said it is dropped here (#135)
+		if why != "" do return fail(why), false
 		return fail(codex ? "could not start Codex" : "could not start Claude Code"), false
 	}
 	pane_add_tab(s, tab, pane = open_pane(s, caller))

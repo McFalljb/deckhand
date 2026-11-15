@@ -61,17 +61,43 @@ systemd_quote :: proc(b: ^strings.Builder, s: string, arg: bool) {
 Systemd_Op :: enum {
 	Reload, // daemon-reload, after the unit is written
 	Start, // the core's unit
+	Main_Pid, // the unit's main process (0: none), for a handover's exec in place
 }
 
 // systemctl's argv for op: the user manager, never a password prompt.
 systemd_argv :: proc(op: Systemd_Op) -> []string {
 	@(static, rodata) reload := [?]string{"systemctl", "--user", "--no-ask-password", "daemon-reload"}
 	@(static, rodata) start := [?]string{"systemctl", "--user", "--no-ask-password", "start", SYSTEMD_UNIT}
+	@(static, rodata) main_pid := [?]string{"systemctl", "--user", "--no-ask-password", "show", "--property=MainPID", "--value", SYSTEMD_UNIT}
 	switch op {
-	case .Reload: return reload[:]
-	case .Start:  return start[:]
+	case .Reload:   return reload[:]
+	case .Start:    return start[:]
+	case .Main_Pid: return main_pid[:]
 	}
 	return nil
+}
+
+// systemd_argv(.Main_Pid)'s output: the pid, or 0 (none, or not a number).
+systemd_main_pid_parse :: proc(out: string) -> int {
+	s := strings.trim_space(out)
+	if s == "" || len(s) > 10 do return 0
+	n := 0
+	for c in transmute([]u8)s {
+		if c < '0' || c > '9' do return 0
+		n = n * 10 + int(c - '0')
+	}
+	return n
+}
+
+// Whether a handover's successor takes this core's own process (execve, launch_linux.odin) rather
+// than a new one (#135): only when this process is deckhand-core.service's main process
+// (main_pid == own_pid), and the successor is the binary the unit runs (core/current's, bin and
+// current resolved) with Use previous core not holding, outside test mode. The unit then stays
+// active with the same main pid, now running the new build, so `systemctl --user status`, `restart`
+// and `stop` keep naming the core that serves. Else (a core started directly or in a scope, Use
+// previous, no unit): a new process, as before (scope_launch).
+systemd_exec_wanted :: proc(bin, current: string, main_pid, own_pid: int, test_mode, use_previous: bool) -> bool {
+	return !test_mode && !use_previous && current != "" && bin == current && main_pid > 0 && main_pid == own_pid
 }
 
 Linger :: enum u8 {

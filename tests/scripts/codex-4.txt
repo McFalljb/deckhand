@@ -4,7 +4,7 @@ wait 1500
 window_active on
 command {"type":"select_project","project_id":$project}
 command {"type":"new_claude_session","project_id":$project,"harness":"codex"}
-assert_result error could not start Codex
+assert_result error Codex 0.160.0 is older than 0.163.0: update it with `npm install -g @openai/codex@latest`
 command {"type":"open_session","project_id":$project,"pi_session_id":"cccc-1"}
 assert_result ok true
 ui_command {"type":"quit"}

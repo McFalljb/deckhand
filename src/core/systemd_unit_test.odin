@@ -95,6 +95,32 @@ systemd_start_wanted_cases :: proc(t: ^testing.T) {
 	testing.expect(t, !systemd_start_wanted(bin = "", current = "", from_core = false, test_mode = false, unit_there = true, use_previous = false), "no current core")
 }
 
+// #135: a handover's successor takes the unit's main process (exec in place), or a new process.
+@(test)
+systemd_exec_wanted_cases :: proc(t: ^testing.T) {
+	cur := "/h/.local/share/deckhand/core/0.4.2-aaaaaaaaaaaa/deckhand-core-serve"
+	testing.expect(t, systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 4242, active = "active", test_mode = false, use_previous = false))
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 777, active = "active", test_mode = false, use_previous = false), "a core in a scope (not the unit's main process)")
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 0, own_pid = 0, active = "active", test_mode = false, use_previous = false), "the unit is not active")
+	testing.expect(t, !systemd_exec_wanted(bin = "/h/build/deckhand-core-serve", current = cur, main_pid = 4242, own_pid = 4242, active = "active", test_mode = false, use_previous = false), "another binary than the unit's")
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 4242, active = "active", test_mode = false, use_previous = true), "Use previous core holds")
+	testing.expect(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 4242, active = "active", test_mode = true, use_previous = false), "test mode")
+	testing.expect(t, !systemd_exec_wanted(bin = "", current = "", main_pid = 4242, own_pid = 4242, active = "active", test_mode = false, use_previous = false), "no current core")
+	// review: a stop or restart under way keeps MainPID until the core exits: never exec into it
+	for st in ([]string{"deactivating", "reloading", "activating", "inactive", "failed", ""}) do testing.expectf(t, !systemd_exec_wanted(bin = cur, current = cur, main_pid = 4242, own_pid = 4242, active = st, test_mode = false, use_previous = false), "ActiveState %q", st)
+	testing.expect(t, argv_eq(systemd_argv(.Main_Pid), {"systemctl", "--user", "--no-ask-password", "show", "--property=MainPID,ActiveState", "deckhand-core.service"}))
+	pid, active := systemd_show_parse("MainPID=4242\nActiveState=deactivating\n")
+	testing.expect(t, pid == 4242 && active == "deactivating", active)
+	pid, active = systemd_show_parse("ActiveState=active\nMainPID=7\n")
+	testing.expect(t, pid == 7 && active == "active", active)
+	pid, active = systemd_show_parse("MainPID=0\nActiveState=inactive\n")
+	testing.expect(t, pid == 0 && active == "inactive")
+	pid, active = systemd_show_parse("MainPID=x9\n")
+	testing.expect(t, pid == 0 && active == "")
+	pid, active = systemd_show_parse("Failed to connect to bus: No medium found")
+	testing.expect(t, pid == 0 && active == "")
+}
+
 @(test)
 systemd_scope_cases :: proc(t: ^testing.T) {
 	testing.expect(t, argv_eq(systemd_scope_argv("deckhand-holder-0a1b2c3d"), {"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit", "deckhand-holder-0a1b2c3d", "--"}))

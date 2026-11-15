@@ -786,7 +786,8 @@ codex_too_old_and_missing :: proc(t: ^testing.T) {
 	dir := cx_dir("old")
 	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
 	r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_UI)
-	testing.expect_value(t, r.error, "could not start Codex")
+	// #135: the reason, not only "could not start Codex" (a hub forwarding the start sees only this)
+	testing.expect_value(t, r.error, fmt.tprintf("Codex 0.160.0 is older than %s: update it with `npm install -g @openai/codex@latest`", core.CODEX_MIN_VERSION))
 	testing.expect_value(t, len(state.open_sessions), 0)
 	core.codex_installed_probe = proc() -> bool {return false}
 	defer core.codex_installed_probe = nil
@@ -804,17 +805,56 @@ codex_version_from_run :: proc(t: ^testing.T) {
 	defer os.remove_all(d)
 	bin := fmt.tprintf("%s/codex", d)
 	count := fmt.tprintf("%s/runs", d)
-	script := fmt.tprintf("#!/bin/sh\n[ \"$1\" = --version ] || exit 2\necho x >> '%s'\necho 'codex-cli 0.168.0'\n", count)
+	// as codex does at every start (#135): its helper links under $CODEX_HOME/tmp/arg0. The run's
+	// CODEX_HOME is a new empty folder (never ~/.codex), gone afterwards
+	script := fmt.tprintf("#!/bin/sh\n[ \"$1\" = --version ] || exit 2\ncase \"$CODEX_HOME\" in /*) ;; *) exit 3;; esac\n[ -z \"$(ls -A \"$CODEX_HOME\")\" ] || exit 4\nmkdir -p \"$CODEX_HOME/tmp/arg0\"\necho \"$CODEX_HOME\" >> '%s'\necho 'codex-cli 0.168.0'\n", count)
 	_ = os.write_entire_file(bin, transmute([]u8)script)
 	posix.chmod(strings.clone_to_cstring(bin, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 	testing.expect_value(t, core.codex_version_of(bin), "0.168.0")
 	testing.expect_value(t, core.codex_version_of(bin), "0.168.0")
 	runs, _ := os.read_entire_file(count, context.temp_allocator)
-	testing.expect_value(t, string(runs), "x\n") // cached: run once
+	home := strings.trim_space(string(runs))
+	testing.expect(t, home != "" && !strings.contains(home, "\n"), "cached: run once") // one line
+	testing.expect(t, !strings.contains(home, "/.codex"), home)
+	testing.expect(t, !os.exists(home), "the scratch CODEX_HOME is removed")
 	other := fmt.tprintf("%s/codex2", d)
 	_ = os.write_entire_file(other, transmute([]u8)string("#!/bin/sh\necho 'something else'\n"))
 	posix.chmod(strings.clone_to_cstring(other, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 	testing.expect_value(t, core.codex_version_of(other), "")
+}
+
+// #135: Codex's own installer keeps each release under ~/.codex/packages/standalone/releases/
+// <version>-<target>/: the version is read from that path (never run), and its update hint is that
+// installer, not npm.
+@(test)
+codex_standalone_layout :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	R :: "/home/u/.codex/packages/standalone/releases/"
+	cases := [][2]string{
+		{R + "0.135.0-x86_64-unknown-linux-musl/bin/codex", "0.135.0"},
+		{R + "0.170.1-aarch64-apple-darwin/codex", "0.170.1"},
+		{R + "0.171.0-alpha.2-x86_64-unknown-linux-musl/bin/codex", "0.171.0-alpha.2"},
+		{R + "0.171.0-beta-aarch64-unknown-linux-musl/bin/codex", "0.171.0-beta"},
+		{R + "0.171.0/bin/codex", "0.171.0"},
+		{R + "latest-x86_64/bin/codex", ""},
+		{R + "0.171-x86_64/bin/codex", ""},
+		{"/home/u/.local/bin/codex", ""},
+	}
+	for c in cases do testing.expectf(t, core.codex_standalone_version(c[0]) == c[1], "%s: %q", c[0], core.codex_standalone_version(c[0]))
+	// a real (fake) layout behind ~/.local/bin/codex: its version, the binary never run
+	d := cx_dir("standalone-layout")
+	defer os.remove_all(d)
+	rel := fmt.tprintf("%s/.codex/packages/standalone/releases/0.135.0-x86_64-unknown-linux-musl/bin", d)
+	os.make_directory_all(rel)
+	ran := fmt.tprintf("%s/ran", d)
+	_ = os.write_entire_file(fmt.tprintf("%s/codex", rel), transmute([]u8)fmt.tprintf("#!/bin/sh\ntouch '%s'\necho 'codex-cli 9.9.9'\n", ran))
+	posix.chmod(strings.clone_to_cstring(fmt.tprintf("%s/codex", rel), context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+	os.make_directory_all(fmt.tprintf("%s/.local/bin", d))
+	link := fmt.tprintf("%s/.local/bin/codex", d)
+	posix.symlink(strings.clone_to_cstring(fmt.tprintf("%s/codex", rel), context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator))
+	testing.expect_value(t, core.codex_version_of(link), "0.135.0")
+	testing.expect(t, !os.exists(ran), "never run")
+	testing.expect_value(t, core.codex_update_hint(link), fmt.tprintf("with Codex's own installer (`%s`)", core.CODEX_STANDALONE_INSTALL_COMMAND))
 }
 
 // The version from where codex links to (never run).

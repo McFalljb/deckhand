@@ -192,7 +192,15 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   enabled: `connect` from `core/current` starts it with `systemctl --user start` when no core
   answers, and the idle exit (10 min, exit 0) stops it. Any other binary, no unit, no user
   manager (or a failed start), another data dir, test mode, Use previous core, or a running
-  core's handover: that binary is spawned directly, as before. Its log:
+  core's handover: that binary is spawned directly, as before. A handover (an update) of the
+  unit's own core to core/current's binary is the exception: the successor takes the old core's
+  process (`execve` at the very end of its stop, the holder's secret on a pipe for stdin, as for a
+  direct spawn: `core_handover_exec`), so the unit stays active with the same main pid and
+  `systemctl --user status|restart|stop deckhand-core` name the core that serves (#135); a
+  failed `execve` falls back to a new process in a scope, and so does a unit that is no longer
+  `active` (a `systemctl stop` or `restart` during the handover). The new image reaps the
+  children it inherited (the holder systemd-run started: `core_reap_inherited`), and a zombie
+  holder never counts as alive (`pid_running`). Its log:
   `journalctl --user -u deckhand-core`. `KillMode=process` keeps systemd from killing
   processes left in the unit's cgroup on a stop or restart.
 - **The session holder** (M6-L3, `src/holder/sys_linux.odin`): `keep_sessions` works as on macOS.
@@ -200,7 +208,10 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   deckhand-holder-<rand> -- deckhand-core hold …`, so it runs in a transient scope of its own and
   stopping or restarting `deckhand-core.service` never reaches the sessions. A core started
   directly (a handover's successor, no unit) gets its own `deckhand-core-<rand>` scope the same
-  way. No user manager, or a scope that does not run the binary within 3 s: spawned directly, with
+  way (a core that is not the unit's main process: one a 0.4.x handover left in a scope keeps
+  handing over into scopes until it stops, by its idle exit or
+  `systemctl --user stop deckhand-core-<rand>.scope`, a clean stop that keeps the sessions; the
+  next `connect` starts the unit). No user manager, or a scope that does not run the binary within 3 s: spawned directly, with
   a warning in the log. Test mode spawns directly unless `DECKHAND_HOLDER_SYSTEMD=1`. Find them
   with `systemctl --user list-units 'deckhand-*'`. The holder's supervisor relaunches a crashed
   core with `deckhand-core-serve launch` (the unit, else a scope).
@@ -816,7 +827,10 @@ What an app's test can rely on:
 (`login_env_compose`): the shell's values win, inherited variables it didn't print stay,
 `PWD`/`OLDPWD`/`SHLVL`/`_`/`DECKHAND_*` never come from it, and `PATH` is the shell's order plus
 inherited folders it lacks. With no answer: `PATH` plus the fallback folders that exist
-(`DECKHAND_PATH_DIRS` in tests). Values are never printed or logged.
+(`DECKHAND_PATH_DIRS` in tests). A shell that exits without printing the markers (an rc file that
+execs another shell, as `exec zsh` in `~/.bashrc`, loses the `-c`; #135) is asked again as
+`$SHELL -l -c` (the login profile only, the same 4 s; never after a timeout), and the log says
+which answered or that neither did. Values are never printed or logged.
 
 **Claude Code's session markers never pass through** (`claude_session_marker`: `CLAUDECODE`,
 `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_PID`, `CLAUDE_CODE_SESSION_*` and

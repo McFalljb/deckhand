@@ -85,6 +85,32 @@ login_env_ask_fake_shell :: proc(t: ^testing.T) {
 	testing.expect(t, rc, "the rc file's exports come along")
 }
 
+// #135: ~/.bashrc does `exec zsh`, so `bash -i -l -c` loses its -c and prints nothing: asked again
+// as `-l -c` (the login profile only), which answers.
+@(test)
+login_env_ask_exec_away_falls_back :: proc(t: ^testing.T) {
+	d := le_dir("execaway")
+	defer os.remove_all(d)
+	asks := fmt.tprintf("%s/asks", d)
+	sh := le_fake_shell(d, "", fmt.tprintf(
+		"#!/bin/sh\necho \"$1 $2\" >> '%s'\n" +
+		"[ \"$1\" = -i ] && exec /bin/sh -c 'echo another shell; exit 0' </dev/null\n" + // the rc file's exec: the -c is gone
+		"[ \"$1 $2\" = \"-l -c\" ] || exit 2\n" +
+		"export PATH=\"/le/profile/bin:$PATH\"\n/bin/sh -c \"$3\"\n",
+		asks,
+	))
+	vars, ok := login_env_ask(sh, LE_ANSWER_TIMEOUT)
+	testing.expect(t, ok, "the non-interactive login shell answered")
+	path, _ := env_lookup(vars, "PATH")
+	testing.expect(t, strings.has_prefix(path, "/le/profile/bin:"), path)
+	got, _ := os.read_entire_file(asks, context.temp_allocator)
+	testing.expect_value(t, string(got), "-i -l\n-l -c\n")
+	// neither answers: none, and asked twice
+	none := le_fake_shell(d, "", "#!/bin/sh\nexit 0\n")
+	_, ok = login_env_ask(none, LE_ANSWER_TIMEOUT)
+	testing.expect(t, !ok)
+}
+
 // A shell that hangs (a slow or waiting rc file) or fails: no answer, in time.
 @(test)
 login_env_ask_timeout_and_failure :: proc(t: ^testing.T) {

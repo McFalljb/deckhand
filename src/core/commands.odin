@@ -2439,7 +2439,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 			}
 			// Claude Code again, resuming its session (--resume) when its plugin reported one
 			cwd := tab.cwd != "" && os.is_dir(tab.cwd) ? tab.cwd : s.cwd
-			ok = claude_start(s, t, tab.id, &tab.kind.(Claude_Tab), cwd, defaults = true) // shown by the user (an agent's focus leaves it not started): the default flags as set now
+			ok, _ = claude_start(s, t, tab.id, &tab.kind.(Claude_Tab), cwd, defaults = true) // shown by the user (an agent's focus leaves it not started): the default flags as set now
 		case Editor_Tab, Changes_Tab, Markdown_Tab, Browser_Tab, App_Tab: // handled above; Changes and app tabs are not kept
 		}
 		if ok do tab.status = .Running
@@ -2629,7 +2629,7 @@ shell_script_argv :: proc(shell, script, name: string) -> [dynamic]string {
 // ~/.pi/agent/bin; absolute folders only, never one relative to the project;
 // pi_managed_path) runs, after a line saying where it was
 // found and that PATH lacks it. Neither: what to do, exit 127 (dead_tab.odin).
-PI_TAB_CMD :: `_pa=${PI_CODING_AGENT_DIR:-}; case "$_pa" in "~") _pa=$HOME;; "~/"*) _pa=$HOME/${_pa#"~/"};; esac; command -v pi >/dev/null 2>&1 || for d in "${_pa:+$_pa/bin}" "$HOME/.pi/agent/bin"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/pi" ] && [ -x "$d/pi" ]; then printf '%s\n' "Deckhand: pi is installed at $d/pi but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v pi >/dev/null 2>&1 || { printf '%s\n' "pi was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.pi/agent/bin (pi's managed install)." "Install pi, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh, ~/.bash_profile for bash), then open this tab again."; exit 127; }; exec pi "$@"`
+PI_TAB_CMD :: `_pa=${PI_CODING_AGENT_DIR:-}; case "$_pa" in "~") _pa=$HOME;; "~/"*) _pa=$HOME/${_pa#"~/"};; esac; command -v pi >/dev/null 2>&1 || for d in "${_pa:+$_pa/bin}" "$HOME/.pi/agent/bin"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/pi" ] && [ -x "$d/pi" ]; then printf '%s\n' "Deckhand: pi is installed at $d/pi but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v pi >/dev/null 2>&1 || { printf '%s\n' "pi was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.pi/agent/bin (pi's managed install)." "Install pi, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh; for bash ~/.bash_profile if you have one, else ~/.profile), then open this tab again."; exit 127; }; exec pi "$@"`
 
 // Test mode (DECKHAND_SCRIPT) fails closed: without a stand-in a tab runs this instead of the real
 // pi or claude (docs/DEVELOPING.md "Test mode"). Deckhand's own log says so too (test_mode_refused).

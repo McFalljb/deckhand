@@ -91,6 +91,9 @@ serve_main :: proc(args: []string) -> int {
 		if n == 65 && buf[64] == '\n' do copy(core.successor_given[:], buf[:64])
 		core.trust_wipe(buf[:])
 	}
+	// Linux: a handover that exec'd this core in its predecessor's process left us that one's
+	// children, with no waiter (core_exec_in_place): reaped from now on, before any child of ours
+	when ODIN_OS == .Linux do core.core_reap_inherited()
 	core.persist.launch = time.tick_now()
 	core.core_separate = true
 	core.app_context = context
@@ -303,6 +306,7 @@ serve_stop :: proc(run: string) {
 	core.window_door_stop()
 	core.log_ln("deckhand-core serve: stopped cleanly")
 	if core.autotest_active do fmt.println("[autotest] core: stopped")
+	core.core_handover_exec(run) // Linux, the unit's main process: the successor runs in this process (no return)
 }
 
 // `deckhand-core __detach serve ARGS...` (the launchd job, launchd_darwin.odin): fork, the parent

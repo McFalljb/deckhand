@@ -1117,8 +1117,9 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   a `!` shell line, a `$skill` or an `@mention` into Codex: such a text is refused, with why.
 - **Bars over the tab**: *Codex is signed out* (sign in on Codex's own screen in the tab, or run
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
-  in a dialog). A Codex older than 0.163.0 does not start: the tab says how to update
-  (`npm install -g @openai/codex@latest`), as does Settings › **Coding agents**.
+  in a dialog). A Codex older than 0.163.0 does not start: the tab, and the refusal, say how to update
+  for how it was installed (`npm install -g @openai/codex@latest` for npm; Codex's own installer run
+  again for its standalone install), as does Settings › **Coding agents**.
 - **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app
   tabs, as Claude can with the `deckhand` command (here Deckhand's MCP tools, for that run only).
   Codex asks you before a tool that changes something, if your approval settings say so.
@@ -2282,7 +2283,8 @@ signal that stopped it, and its output above it says why. Click the bar's **Rest
 **Where Deckhand's environment comes from.** Started from a terminal, Deckhand and everything it
 starts use that terminal's environment, unchanged. Started from the Dock, Finder, Spotlight or
 `open`, macOS gives an app only a minimal environment, so Deckhand asks your interactive login
-shell (`$SHELL -i -l`, at most 4 s) for its environment and merges it in: your shell's values win
+shell (`$SHELL -i -l`, at most 4 s; when that prints nothing, as when `~/.bashrc` runs `exec zsh`, a
+login shell that is not interactive, `$SHELL -l`) for its environment and merges it in: your shell's values win
 (so `AWS_PROFILE`, Homebrew's `brew shellenv` or a 1Password `SSH_AUTH_SOCK` set in `~/.zshrc`
 reach your tabs), and `PATH` becomes the shell's, followed by any folders only the original `PATH`
 had. If the shell fails or takes over 4 s, `PATH` gets `~/.pi/agent/bin`, `/opt/homebrew/bin`,

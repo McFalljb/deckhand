@@ -197,6 +197,7 @@ install_layout :: proc(h: Harness, real, agent_dir: string) -> Install_Layout {
 		if strings.contains(real, "/claude/versions/") do return .Managed
 		if strings.contains(real, "/node_modules/") do return .Npm
 	case .Codex:
+		if strings.contains(real, CODEX_STANDALONE_DIR) do return .Managed // Codex's own installer (codex.odin)
 		if strings.contains(real, "/node_modules/") do return .Npm
 	}
 	return .Unknown
@@ -572,6 +573,9 @@ harness_checklist :: proc(f: Harness_Facts) -> []Harness_Item {
 				p := harness_plan(r, .Update, it.layout, f.bin[h], f.real[h])
 				it.command, it.runnable, it.note, it.path_dir = p.command, p.runnable, p.note, p.path_dir
 				if strings.contains(r.update[it.layout], "{pm}") do it.pm = p.pm
+				// Codex's own installer: run again, shown to copy (it writes under ~/.codex, which
+				// Deckhand itself never does), never an npm command
+				if h == .Codex && it.layout == .Managed do it.command, it.runnable, it.note = CODEX_STANDALONE_INSTALL_COMMAND, false, "Installed with Codex's own installer: run it again to update"
 				if it.note == "" && !it.runnable do it.note = fmt.tprintf("Installed with %s: update it with that package manager", INSTALL_LAYOUT_NAMES[it.layout])
 				it.target, it.target_real = f.bin[h], f.real[h]
 			}

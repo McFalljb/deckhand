@@ -20,6 +20,12 @@ package core
 //        from handover.json and serves. A launch that fails falls back to this core's own binary,
 //        with the same secret, so the sessions are never left without a core for long (the holder
 //        keeps them either way; its reservation lapses after 60 s).
+//        Linux, when this core is deckhand-core.service's main process and the successor is the
+//        unit's binary (an update's core/current): the successor takes this process instead, by
+//        execve at the very end of the stop (core_handover_exec; the secret on a pipe for stdin,
+//        as for a direct spawn), so the unit stays active with the same main pid and
+//        `systemctl --user status|restart|stop deckhand-core` keep naming the core that serves
+//        (#135). A failed execve launches it as a new process, as above.
 //
 // The window's connection ends at step 3; it dials core.sock again (client_core.odin).
 
@@ -134,11 +140,53 @@ core_handover_finish :: proc(run: string) {
 	if len(secret) != 64 do log_ln("Deckhand: background core: no successor secret (no held session, or no ack): the successor attaches as any core does")
 	// a scene's older core hands over to the new one, which says its own version (remote-install.sh)
 	when TEST_HOOKS do posix.unsetenv(strings.clone_to_cstring(HOOK_ENV[.Core_Version], context.temp_allocator))
-	pid, ok, why := core_launch(handover.to, run, home_root, secret = len(secret) == 64 ? secret : "")
+	// Linux, the unit's main process: the successor takes this process, at the very end of the
+	// stop (core_handover_exec), so the unit keeps naming the core that serves (#135)
+	when ODIN_OS == .Linux {
+		if core_exec_in_place_wanted(handover.to, home_root) {
+			in_place.due = true
+			in_place.n = len(secret) == 64 ? copy(in_place.secret[:], secret) : 0
+			return
+		}
+	}
+	core_handover_launch(run, len(secret) == 64 ? secret : "")
+}
+
+// A handover that execs its successor in place (Linux): due, with the holder's secret (n bytes).
+@(private = "file")
+in_place: struct {
+	due:    bool,
+	secret: [64]u8,
+	n:      int,
+}
+
+// serve_stop's very last step: a handover's successor in this process (Linux, the unit's main
+// process: core_exec_in_place). Returns only when there was none to make, or execve failed: then
+// the successor is launched as a new process, as anywhere else.
+core_handover_exec :: proc(run: string) {
+	if !in_place.due do return
+	in_place.due = false
+	secret := strings.clone(string(in_place.secret[:in_place.n]), context.temp_allocator)
+	trust_wipe(in_place.secret[:])
+	in_place.n = 0
+	defer trust_wipe(transmute([]u8)secret)
+	when ODIN_OS == .Linux {
+		log_fln("Deckhand: background core: the successor %s runs in this process (pid %d, the unit's main process)", handover.to, posix.getpid())
+		why := core_exec_in_place(handover.to, run, home_root, secret)
+		log_ln("Deckhand: background core: the successor could not run in this process:", why, "- starting it as a new process")
+	}
+	core_handover_launch(run, secret)
+}
+
+// The successor as a new process (core_launch), with the holder's secret ("" = none); this core's
+// own binary when it fails.
+@(private = "file")
+core_handover_launch :: proc(run, secret: string) {
+	pid, ok, why := core_launch(handover.to, run, home_root, secret = secret)
 	if !ok {
 		self := executable_path()
 		log_ln("Deckhand: background core: the successor did not start:", why, "- starting this core's binary again,", self)
-		pid, ok, why = core_launch(self, run, home_root, secret = len(secret) == 64 ? secret : "")
+		pid, ok, why = core_launch(self, run, home_root, secret = secret)
 	}
 	if !ok do log_ln("Deckhand: background core: no core started:", why, "- the next window launches one")
 	else if autotest_active do fmt.printfln("[autotest] core handover: successor pid %d", pid)

@@ -289,13 +289,14 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 	exit := tab.exit
 	tab.exit = {}
 	cwd := tab.cwd != "" && os.is_dir(tab.cwd) ? tab.cwd : s.cwd
-	if !claude_start(s, new_term(tab.id), tab.id, ct, cwd, flags, defaults = flags) { // the user's restart: the default flags as set now
+	if sok, swhy := claude_start(s, new_term(tab.id), tab.id, ct, cwd, flags, defaults = flags); !sok { // the user's restart: the default flags as set now
 		drop_term(tab.id)
 		if old != nil do terms[tab.id] = old
 		tab.status, tab.exit = .Exited, exit
 		what := ct.codex ? "Codex" : "Claude Code"
-		window_toast(fmt.tprintf("Restart %s: could not start %s", session_where(s), what), err = true)
-		return fail(fmt.tprintf("could not start %s", what))
+		why := swhy != "" ? swhy : fmt.tprintf("could not start %s", what) // the new terminal that said why is dropped
+		window_toast(fmt.tprintf("Restart %s: %s", session_where(s), why), err = true)
+		return fail(why)
 	}
 	if old != nil {
 		term_free(old)

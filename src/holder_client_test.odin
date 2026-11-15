@@ -556,6 +556,35 @@ holder_unclaimed_released_when_known :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.fake_holder_count(&f, .Release, 8), 0)
 }
 
+// A session saved without a pi session file (no pi on that machine, #135: "no_file") comes back
+// not gone, its held shell adopts its terminal (none left unclaimed), and it is saved again while
+// that shell runs.
+@(test)
+holder_adopt_session_without_pi :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "sh\r\n")}, tails = {transmute([]u8)string("sh\r\n")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Shell}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"dddd-nopi","no_file":true,"cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":1}}]}}`, f.instance, proj, proj, proj, proj)
+	toast_clear()
+	adopt_run(t, &f, text, binds)
+	s: ^core.Open_Session
+	for &x in state.open_sessions do if !x.home do s = &x
+	testing.expect(t, s != nil && len(s.tabs) == 2, "restored")
+	if s == nil || len(s.tabs) != 2 do return
+	testing.expect(t, !s.missing, "not gone")
+	testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Running)
+	testing.expect(t, core.term_of(s.tabs[1].id) != nil, "adopted")
+	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Not_Started) // pi: tried again when shown
+	testing.expect(t, !strings.contains(toast.text, "wasn't restored"), toast.text)
+	testing.expect(t, strings.contains(core.workspace_json(), `"pi_session_id":"dddd-nopi","no_file":true`), core.workspace_json())
+	if x := core.term_of(s.tabs[1].id); x != nil do x.pty.held, x.running = 0, false // never a RELEASE from a test
+}
+
 // workspace.json's held ids are for the holder they were saved with (its instance id): another
 // holder's terminals with the same numbers are never adopted (two holders both count from 1).
 @(test)

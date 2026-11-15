@@ -51,7 +51,13 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   hand-added projects (on top, in saved order). A project whose folder is gone shows as missing.
 - `open_sessions`: sessions restored from the file are always kept, even while gone (a volume may
   come back); sessions opened this run are saved once their session file exists (a new chat pi has
-  not written yet is left out). File lookups are cached: a found file costs a stat, a missing one a
+  not written yet is left out), or before that while a shell, Claude or Codex tab beside the pi tab
+  runs or waits to start (a machine without pi: its pi tab exited 127 and the user works in a
+  shell there). Such a session is saved with `"no_file": true`: restored not gone (its held tabs
+  are adopted, its pi tab tries pi again when shown, `pi --session-id`), and saved again only by
+  the same rule, so once its last live tab ends it is dropped. When pi writes the file after all,
+  the workspace is saved again at the end of that turn, without the key. An older Deckhand ignores the key
+  and restores it gone. File lookups are cached: a found file costs a stat, a missing one a
   stat of its dir until that dir changes. `tabs[0]` is the pi tab (a Claude-only session's: its Claude tab, below); shell tabs save
   their title and the live shell's cwd (read from the process; the start dir if unknown).
   Editor tabs save their file's `path` (diff views are not saved; unsaved edits are not kept:
@@ -106,8 +112,13 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
 - `current_session` and `active_tab` are positions in the saved lists (left out if none). While
   the Deck view shows no session (`show_no_session`), `current_session` is the session that was
   current before it (`shown_before`), so a relaunch shows that one.
+  When that session is another machine's, `current_machine_session` holds its id as this Mac shows
+  it (`m<machine no>:<id>`) instead: once that machine's link brings its sessions back, it is shown
+  again, unless the user chose a session, the Deck view, Settings or a project since launch
+  (`persist_machine_merged`, `persist_user_chose`).
 - Other machines' projects and open sessions (Machines over SSH) are never saved here: each
-  machine saves its own. `selected_project` is saved only when it is this Mac's.
+  machine saves its own (only the id of the one on screen, `current_machine_session` above).
+  `selected_project` is saved only when it is this Mac's.
 - `home`: `{"pi_session_id", "model_applied"?}` of the Home session, once it was opened. Its
   session dir (`<data dir>/home`) and cwd (the main folder when set and reachable, else
   `<data dir>/home`; never `~`, for macOS privacy prompts; looked up at each start) are

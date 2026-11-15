@@ -199,7 +199,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		layout := c.layout
 		layout.nodes = make([]Restore_Node, len(c.layout.nodes), allocator)
 		copy(layout.nodes, c.layout.nodes)
-		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent, layout = layout, pi_pane = c.pi_pane, pi_active = c.pi_active, pi_held = c.pi_held}
+		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent, layout = layout, pi_pane = c.pi_pane, pi_active = c.pi_active, pi_held = c.pi_held, no_file = c.no_file}
 	case Set_Agent_Name:      return Set_Agent_Name{name = s(c.name, allocator)}
 	case Core_Handover:       return Core_Handover{to = s(c.to, allocator)}
 	case Set_Agent_Model:     return Set_Agent_Model{model = s(c.model, allocator)}

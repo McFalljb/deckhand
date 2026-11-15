@@ -506,6 +506,7 @@ Harness_Facts :: struct {
 	integration: [Harness]bool, // the bundled integration is in this build
 	packages:  map[string]Pi_Package_Found, // pi packages by name (temp)
 	codex_signed_out: bool, // `codex login status` said signed out (codex.odin)
+	pi_asking: bool, // pi counts as installed only because the login shell has not answered yet (pi_installed)
 }
 
 harness_facts_now :: proc() -> Harness_Facts {
@@ -521,6 +522,7 @@ harness_facts_now :: proc() -> Harness_Facts {
 		}
 		b := harness_binary(h)
 		f.bin[h] = b
+		if h == .Pi && b == "" && f.installed[h] && pi_found == .Unknown && pi_lookup_state() == .Asking do f.pi_asking = true
 		if b != "" {
 			r := fs_real(b)
 			f.real[h] = r != "" ? r : b
@@ -553,6 +555,12 @@ harness_checklist :: proc(f: Harness_Facts) -> []Harness_Item {
 				it.state, it.action = .Missing, .Install
 				p := harness_plan(r, .Install, .Unknown, "", "")
 				it.command, it.runnable = p.command, p.runnable
+				break
+			}
+			if h == .Pi && f.pi_asking {
+				// not known yet: never "ok" for a pi that may not be there (a hub shows this row);
+				// made again once the shell answers (harness_checklist_tick)
+				it.state, it.note = .Unchecked, "Looking for pi in the login shell…"
 				break
 			}
 			it.version, it.where_ = f.version[h], f.bin[h]
@@ -719,7 +727,7 @@ harness_item_text :: proc(it: Harness_Item) -> string {
 	case .Missing:       return "Not installed"
 	case .Needs_Harness: return fmt.tprintf("Needs %s first", HARNESS_MANIFEST[harness_first_row(r.harness)].name)
 	case .Built_In:      return "Built in"
-	case .Unchecked:     return "Found, version not checked"
+	case .Unchecked:     return it.note != "" && r.kind == .Harness ? it.note : "Found, version not checked"
 	case .Not_Loaded:    return it.note
 	case .Too_Old:       return fmt.tprintf("%s, older than %s", it.version != "" ? it.version : "an old version", r.min_version)
 	case .Ok:

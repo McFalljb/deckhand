@@ -40,6 +40,8 @@ Persist :: struct {
 	writes:        int,
 	dir_lists:     int, // session dir listings by the save check (tests)
 	restored_clean: bool, // persist_load restored the saved file (not missing, --fresh, or moved aside)
+	focus_machine: string, // the saved current_machine_session: focused once its machine's link merges it, unless the user chose a view first
+	no_file:       map[u64]bool, // sessions the last save check wrote with "no_file" (persist_file_appeared)
 }
 
 persist: Persist
@@ -55,6 +57,7 @@ persist_init :: proc(dir: string) {
 // panels about once a second; those must not cost a save check each.
 persist_on_event :: proc(ev: Event) {
 	e, ok := ev.(Command_Event)
+	if ok && e.result.ok do persist_user_chose(e.command, e.caller)
 	if !ok || !e.changed do return
 	#partial switch _ in e.command {
 	case Browser_Update:
@@ -64,6 +67,26 @@ persist_on_event :: proc(ev: Event) {
 	case Pi_Status_Update, Program_Status, Set_Unread, Mark_All_Read, Show_No_Session, Panel_Set, Panel_Remove, Set_Focus, Focus_Take, Focus_Release, Set_Files_Filter, Tab_Exited, Cancel_Confirmation, Bridge_Done, Agent_Model_Picker, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared, Jobs_Sync, Jobs_Tick, Job_Run_Done, Job_Mark_Read, Job_Run_Now, Job_Stop, Job_Open, App_Update, App_Restart, App_Input, App_Call, App_Call_Done, App_Screenshot, App_Inspect, Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop, Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel, Claude_Comments, Claude_Prompt, Claude_Wait_Idle, Claude_Wait_Tick, Claude_Held_Op, Claude_Deliver, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background, Claude_Readonly_Ack:
 		return
 	}
+	persist.gen += 1
+}
+
+// The user chose what to show (a session, the Deck view or Settings, a project): another
+// machine's session saved as on screen no longer takes the screen when its link comes back.
+persist_user_chose :: proc(cmd: Command, caller: Caller) {
+	if persist.focus_machine == "" || caller.kind != .UI do return
+	#partial switch _ in cmd {
+	case Focus_Session, Focus_Tab, Show_No_Session, Select_Project:
+		delete(persist.focus_machine)
+		persist.focus_machine = ""
+	}
+}
+
+// A pi turn ended (Pi_Status_Update): a session saved with "no_file" whose file is there now is
+// saved again (status reports never mark the workspace dirty), so a crash later does not leave a
+// stale "no_file" that would keep it from showing as gone.
+persist_file_appeared :: proc(s: ^Open_Session) {
+	if s == nil || !persist.no_file[s.id] || s.session_file == "" || !os.exists(s.session_file) do return
+	delete_key(&persist.no_file, s.id)
 	persist.gen += 1
 }
 
@@ -141,8 +164,9 @@ Lookup :: struct {
 }
 
 // Whether the session's file exists now. Sessions opened this run without
-// one (a new chat pi has not written yet) are not saved; restored ones always
-// are (a gone session may be on a volume that comes back). A found file
+// one (a new chat pi has not written yet) are not saved unless they have a live tab
+// (session_has_live_tab); restored ones always are (a gone session may be on a volume that comes
+// back), except one saved without a file ("no_file"), which counts as opened this run. A found file
 // costs a stat afterwards; a missing one a stat of its dir.
 @(private = "file")
 session_on_disk :: proc(s: Open_Session) -> bool {
@@ -163,6 +187,20 @@ session_on_disk :: proc(s: Open_Session) -> bool {
 	} else do key = strings.clone(key)
 	persist.lookups[key] = {path = strings.clone(path), dir = strings.clone(dir), mtime = mtime}
 	return path != ""
+}
+
+// Whether a session has a terminal tab other than its pi tab (a shell, Claude or Codex) that runs,
+// or waits to start (restored, or held away in the session holder). Editor, browser and other
+// view tabs do not count: a session is not kept for them alone.
+@(private = "file")
+session_has_live_tab :: proc(s: Open_Session) -> bool {
+	for tab in s.tabs {
+		if tab.status == .Exited do continue
+		#partial switch _ in tab.kind {
+		case Shell_Tab, Claude_Tab: return true
+		}
+	}
+	return false
 }
 
 // The session holder terminal a tab's process runs in, while the holder keeps it at quit
@@ -277,12 +315,18 @@ workspace_json :: proc() -> string {
 	else if held_away_any() && held_holder != "" do ks(&w, "holder", held_holder)
 
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
+	unwritten := make(map[u64]bool, context.temp_allocator) // saved without a session file ("no_file")
 	for &s in state.open_sessions {
 		if s.home || s.machine != 0 do continue // another machine's is its own to save (machine_mirror.odin)
-		// a Claude-only session once its Claude session id came (claude.session), a pi session once its file is there
+		// a Claude-only session once its Claude session id came (claude.session), a pi session once
+		// its file is there, or before that while it has a live tab beside pi (no pi there: its pi
+		// tab exited 127, the user works in a shell next to it)
 		keep := s.agent == .Claude ? s.pi_session_id != "" : s.restored || session_on_disk(s)
+		if !keep && s.agent != .Claude && session_has_live_tab(s) do keep, unwritten[s.id] = true, true
 		if keep do append(&saved, &s)
 	}
+	clear(&persist.no_file)
+	for id in unwritten do persist.no_file[id] = true
 
 	// projects: added by hand, renamed, selected, or holding a saved session
 	strings.write_string(&w.b, ",\n")
@@ -324,6 +368,7 @@ workspace_json :: proc() -> string {
 			ks(&w, "claude_session_id", s.pi_session_id)
 			ks(&w, "pi_session_id", "")
 		} else do ks(&w, "pi_session_id", s.pi_session_id)
+		if unwritten[s.id] do kb(&w, "no_file", true) // pi never wrote it: restored not gone (Restore_Session)
 		ks(&w, "cwd", s.cwd)
 		ks(&w, "session_dir", s.session_dir)
 		ks(&w, "project", p != nil ? p.cwd : s.cwd)
@@ -372,6 +417,10 @@ workspace_json :: proc() -> string {
 	}
 	strings.write_byte(&w.b, ']')
 	if current >= 0 do ki(&w, "current_session", current)
+	else if s := find_session(state.current_session != 0 ? state.current_session : state.shown_before); s != nil && s.machine != 0 {
+		// another machine's on screen: shown again once its link brings it back (persist_machine_merged)
+		ks(&w, "current_machine_session", s.pi_session_id)
+	}
 	// Home: only its pi session id (its dir and cwd are Deckhand's own)
 	if hs := home_session(); hs != nil {
 		strings.write_string(&w.b, ",\n")
@@ -885,11 +934,16 @@ workspace_restore :: proc(text: string) -> string {
 			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 		}
 		scwd, _ := so["cwd"].(json.String) // a worktree of the project (Restore_Session checks it)
-		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active, pi_held = pi_held})
+		no_file, _ := so["no_file"].(json.Boolean) // saved before pi wrote its session file
+		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active, pi_held = pi_held, no_file = bool(no_file)})
 		if r.ok && has_current && i64(i) == i64(current) {
 			if s := find_session(r.created_id); s != nil do persist.focus_tab = s.active_tab
 		}
 	}
+
+	delete(persist.focus_machine)
+	persist.focus_machine = ""
+	if fm, fok := root["current_machine_session"].(json.String); fok && !has_current && len(fm) <= 256 do persist.focus_machine = strings.clone(string(fm))
 
 	// Home, not started until its pane opens
 	if h, is := root["home"].(json.Object); is {
@@ -1121,6 +1175,21 @@ persist_after_layout :: proc(skip: bool) {
 	if skip do return
 	run_command(Focus_Tab{tab_id = id}, {kind = .Internal})
 	if persist.launch != {} do log_f("Deckhand: restored session started %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
+}
+
+// Machine no's open sessions were merged here (machine_mirror.odin): the session of it that was on
+// screen when the workspace was saved comes back on screen, once, unless something else is shown
+// by then. Only this Mac's view changes (nothing is sent to that machine).
+persist_machine_merged :: proc(no: u64) {
+	if persist.focus_machine == "" || !strings.has_prefix(persist.focus_machine, fmt.tprintf("m%d:", no)) do return
+	want := persist.focus_machine
+	persist.focus_machine = ""
+	defer delete(want)
+	if state.current_session != 0 do return
+	for s in state.open_sessions do if s.machine == no && s.pi_session_id == want {
+		run_command(Focus_Session{session = s.id}, {kind = .Internal})
+		return
+	}
 }
 
 // A dim line in a terminal before its child starts (restored shells).

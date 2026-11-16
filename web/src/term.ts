@@ -7,7 +7,13 @@
 
 import { Terminal, type IDisposable, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { TERM_DARK, TERM_LIGHT, type TermColors } from "./theme.gen.ts";
+import { TERM_LOOKS, type TermColors } from "./theme.gen.ts";
+
+// The terminal colours of the page's look (data-look on <html>, set from the user's setting).
+function colors(light: boolean): TermColors {
+  const look = TERM_LOOKS[document.documentElement.dataset.look ?? ""] ?? TERM_LOOKS.graphite;
+  return light ? look.light : look.dark;
+}
 
 export interface Fit {
   cols: number;
@@ -65,7 +71,7 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     fontFamily: 'Menlo, "SF Mono", ui-monospace, "JetBrains Mono", Consolas, monospace',
     fontSize: opts.fontSize,
     scrollback: 5000,
-    theme: xtermTheme(opts.light ? TERM_LIGHT : TERM_DARK),
+    theme: xtermTheme(colors(opts.light)),
     windowOptions: {},
     linkHandler: {
       activate: (_e, uri) => linkFn?.(uri),
@@ -190,7 +196,7 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       return term.modes.applicationCursorKeysMode;
     },
     setLight(light) {
-      term.options.theme = xtermTheme(light ? TERM_LIGHT : TERM_DARK);
+      term.options.theme = xtermTheme(colors(light));
     },
     setFontSize(px) {
       term.options.fontSize = px;

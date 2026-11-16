@@ -59,6 +59,7 @@ export function TermPane(props: {
   const latest = useRef(props);
   latest.current = props;
   const light = document.documentElement.dataset.light === "1";
+  const look = document.documentElement.dataset.look ?? "";
 
   // one copy per pane, for its life
   useEffect(() => {
@@ -115,7 +116,7 @@ export function TermPane(props: {
 
   useEffect(() => {
     h.current?.view.setLight(light);
-  }, [light]);
+  }, [light, look]);
 
   return (
     <div class="term-host" onMouseDown={() => latest.current.onFocus?.()}>

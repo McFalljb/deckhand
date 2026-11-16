@@ -137,7 +137,7 @@ function Root() {
     })();
   }, []);
 
-  useAppearance(link.store.settings.appearance);
+  useAppearance(link.store.settings.appearance, link.store.settings.theme);
 
   const app: App = {
     link,
@@ -206,7 +206,7 @@ function parseHash(): App["route"] {
 }
 
 // The look's light or dark variant: the user's setting, "system" following this browser.
-function useAppearance(mode: unknown) {
+function useAppearance(mode: unknown, look: unknown) {
   const [, tick] = useReducer((x: number) => x + 1, 0);
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: light)");
@@ -215,6 +215,7 @@ function useAppearance(mode: unknown) {
   }, []);
   const m = String(mode ?? "system");
   const el = document.documentElement;
+  el.dataset.look = String(look ?? "graphite");
   if (m === "light" || m === "dark") el.dataset.appearance = m;
   else delete el.dataset.appearance;
   el.dataset.light = m === "light" || (m !== "dark" && window.matchMedia("(prefers-color-scheme: light)").matches) ? "1" : "0";

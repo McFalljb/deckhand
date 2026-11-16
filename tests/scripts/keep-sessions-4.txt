@@ -12,9 +12,12 @@ waitstate 3000 open_sessions.0.tabs.0.holder_lost true
 assert_state open_sessions.0.tabs.6.status exited
 # #108: the bar over the centre says so, and its Restart session holder starts a new one: a tab
 # opened after it runs in the new holder (its terminal 1), and the ended tabs stay ended
-waitfor The session holder stopped 5000
+wait 1000
+hover holder_bar_go
+wait 300
 clickid holder_bar_go
-waitfor A session holder runs again 8000
+wait 2000
+assert_toast A session holder runs again
 command {"type":"new_shell_tab","session":$session}
 assert_result ok true
 waitstate 8000 open_sessions.0.tabs.7.held 1

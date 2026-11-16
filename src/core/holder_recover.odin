@@ -48,6 +48,7 @@ Holder_Recover :: struct {
 
 // Holder_Recover (main thread). See the top.
 holder_recover :: proc(stop: bool) -> Result {
+	log_fln("Deckhand: session holder: Restart session holder (stop %v), as the user asked", stop)
 	if !sync.atomic_load(&hc.lost) || hc.handed do return fail("the session holder is not lost")
 	for _, t in terms do if t.running && t.pty.held != 0 do return fail("the tabs of the lost session holder are still ending: try again in a moment")
 	old_pid := hc.pid

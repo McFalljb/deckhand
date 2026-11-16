@@ -1658,7 +1658,12 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		holder_restart_start()
 		return {ok = true}, false
 	case Holder_Recover:
-		return holder_recover(c.stop), true
+		r := holder_recover(c.stop)
+		if !r.ok {
+			log_ln("Deckhand: session holder: Restart session holder:", r.error)
+			window_toast(fmt.tprintf("Restart session holder: %s", r.error), err = true) // the bar's click has no other answer
+		}
+		return r, true
 	case Core_Handover:
 		return core_handover_start(c.to), false
 	case Claude_Typed:

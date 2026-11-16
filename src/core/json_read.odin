@@ -685,7 +685,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "machine_linger":      cmd = Machine_Linger{no = get_u64(&r, "no")}
 	case "machine_open_page":   cmd = Machine_Open_Page{no = get_u64(&r, "no"), port = get_u64(&r, "port"), path = get_str(&r, "path", optional = true)}
 	case "holder_replace":      cmd = Holder_Replace{stop = get_bool(&r, "stop")}
-	case "holder_recover":      cmd = Holder_Recover{stop = get_bool(&r, "stop")}
+	case "holder_recover":      cmd = Holder_Recover{stop = opt_bool(&r, "stop").? or_else false}
 	case "core_handover":       cmd = Core_Handover{to = get_str(&r, "to")}
 	case "copy_control_token":  cmd = Copy_Control_Token{}
 	case "update_check":        cmd = Update_Check{}

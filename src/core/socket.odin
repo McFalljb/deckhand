@@ -1119,9 +1119,12 @@ core_installed :: proc() -> bool {
 // older core would start Claude Code for one, or refuse it: machine_route.odin asks for this first).
 // hub_add_project: a hub's add_project names a folder here that this core checks (absolute or ~/…,
 // there, a folder; an older core would take a relative or ~ path against its own working directory).
-CORE_FEATURES := [?]string{"challenge_hello", FEATURE_CODEX_TABS, FEATURE_HUB_ADD_PROJECT}
+// pi_handoff: a hub may send a copy of one of its pi transcripts here, which this core forks into
+// a new pi session (pi_handoff_part, pi_handoff.odin; an older core has no such command).
+CORE_FEATURES := [?]string{"challenge_hello", FEATURE_CODEX_TABS, FEATURE_HUB_ADD_PROJECT, FEATURE_PI_HANDOFF}
 FEATURE_CODEX_TABS :: "codex_tabs"
 FEATURE_HUB_ADD_PROJECT :: "hub_add_project"
+FEATURE_PI_HANDOFF :: "pi_handoff"
 
 // This core's release version ("X.Y.Z" from its bundle's Info.plist; on Linux, which has no
 // Info.plist, LINUX_RELEASE_VERSION), or "" for a development build. Read once.

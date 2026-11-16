@@ -129,6 +129,8 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Machines_Reachable: return Set_Machines_Reachable{on = c.on, confirm = s(c.confirm, allocator)}
 	case Machine_Rename:      return Machine_Rename{no = c.no, name = s(c.name, allocator)}
 	case Machine_Open_Page:   return Machine_Open_Page{no = c.no, port = c.port, path = s(c.path, allocator)}
+	case Pi_Handoff:          return Pi_Handoff{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), to_project_id = c.to_project_id, run = s(c.run, allocator), folder = s(c.folder, allocator)}
+	case Pi_Handoff_Part:     return Pi_Handoff_Part{project_id = c.project_id, offset = c.offset, data = s(c.data, allocator), last = c.last}
 	case App_Socket:          return App_Socket{tab_id = c.tab_id, op = c.op, line = s(c.line, allocator)}
 	case Harness_Install:     return Harness_Install{item = s(c.item, allocator), command = s(c.command, allocator), dismiss = c.dismiss}
 	case Fs_Changed:
@@ -296,6 +298,11 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	#partial switch c in cmd {
 	case Add_Project:         delete(c.cwd, allocator)
 	case Machine_Open_Page:   delete(c.path, allocator)
+	case Pi_Handoff:
+		delete(c.pi_session_id, allocator)
+		delete(c.run, allocator)
+		delete(c.folder, allocator)
+	case Pi_Handoff_Part:     delete(c.data, allocator)
 	case Machine_Remove:      delete(c.confirm, allocator)
 	case Set_Machines_Reachable: delete(c.confirm, allocator)
 	case Machine_Rename:      delete(c.name, allocator)

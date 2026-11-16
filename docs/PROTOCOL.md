@@ -272,6 +272,8 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `machine_remove` | `no`, `confirm`? | **this Mac's user only** (`User_Here`), confirmed by the user first (`needs_confirmation`, whatever the policy): forgets a machine (its link ends; nothing on it is touched; an install running to it ends and removes what it copied). Its session on screen gives way to this Mac's last shown session |
 | `machine_rename` | `no`, `name` | **this Mac's user only** (`User_Here`): what Deckhand calls a machine (one line, at most 64 bytes, unique); its ssh target stays. A machine waiting for the user (`needs_login`, `refused`, `unsupported`) tries again |
 | `machine_install` | `no`, `cancel`? | **this Mac's user only** (`User_Here`), with `remote_machines` on, never while this core is viewed from another machine: **Install…** (a `not_installed` machine; also started once by itself after `machine_add` finds no core) or **Update** (`machines[].update` = `button`: a core of Deckhand's own folder, older than this one, or `needs_update` below `CORE_MIN` / an older generation; never a downgrade). `update` = `command`: refused with what to do there. One per machine, two at once. Steps (`machines[].job`): `fetching` (Linux: `releases/tags/v<this version>` for the asset's size, ≤ 128 MiB, then `deckhand-core-<v>-linux-x86_64.tar.gz.sig` and the tarball, with the updater's curl: https only, `User-Agent: deckhand`), `verifying` (a worker: another Mac → this Mac's `core/current` Deckhand Core.app against our designated requirement; Linux → size, sha256 and the v3 `.sig` with `cdhash none` under the release key, then every name under the one top dir, unpacked here: only folders and regular files), `installing` (`ssh -S <ctl> -o ControlMaster=no -o ControlPersist=no …` on the link's master, the archive on its stdin, running the fixed `sh -c '<script>' dh <nonce> [<version>]`: it refuses any other arguments, unpacks with `--no-same-owner --no-same-permissions` into `<data>/core/.incoming-<nonce>`, runs `deckhand-core-serve install --data <data>` (Linux: `--allow-hubs`) from there and removes that dir on exit), `handing_over` (the link connects again; an older core of Deckhand's own gets `core_handover{to:"current"}` as `ui` on it, once; the hello of a core run other than the one that answered before the copy (its `core` id; a fresh install's first) ends it, `installed`; 3 min at most), `cleaning up` (a failure after the copy started: ssh `rm -rf` of that staging dir), `failed` (`job_note`). `cancel: true` stops it. Every end kills the step's process group (SIGTERM, SIGKILL 1 s later, then reaped) and removes `<data>/machine-install/` temp files; copy 15 min, cleanup 30 s at most |
+| `pi_handoff` | `project_id`, `pi_session_id`, `to_project_id`, `run`, `folder` | **this Mac's user only** (`User_Here`, caller `ui`), long-running: Continue this conversation on <machine>: a copy of this Mac's pi session's transcript (everything in it) to the project of the same folder name on another machine, forked there into a new pi session (new id; the session here stays as it is); only to a machine whose `machines[].pi_handoff` is true; at most 256 MB; one at a time; finished `created_id` = the new session, packed (§5a "Working on another machine") |
+| `pi_handoff_part` | `project_id`, `offset`, `data`, `last?` | one part of a `pi_handoff`, on the machine that takes it: only from a hub on behalf of its user; `data` base64, at most 1 MiB decoded, in order from `offset` 0, at most 256 MB in all; `last`: checked (a pi session header first) and forked, `created_id` = the new session (§5a) |
 | `machine_linger` | `no` | **this Mac's user only** (`User_Here`), as `machine_install`: Linux: runs `"$HOME/.local/share/deckhand/core/current/deckhand-core-serve" linger --enable` over the link's master (20 s); `on` sets `machines[].linger`, anything else says to run `loginctl enable-linger` there. Never `sudo` |
 | `machine_connect` | `no` | **this Mac's user only** (`User_Here`): connects now: Take back from that machine's own window or another hub (`taken`), a retry without waiting for the backoff, or the retry of a machine that waits for the user (`needs_login`, `refused`, `unsupported`: these never retry on a timer) |
 | `machine_login` | `no` | **this Mac's user only** (`User_Here`): **Log in…** for a `needs_login` machine: a shell tab in an open session of this Mac (the one on screen, else the last shown; with none, a new chat while pi is installed, else refused with what to do) runs `/bin/sh -c 'exec ssh -S "$1" -M -o ControlPersist=600 -- "$2"'` with the link's control path and the target as arguments, so ssh's password, host key or code prompt is answered in a real terminal; the link connects once that master's control socket is there (looked for once a second, for 10 min), and then reuses it. `created_id` = the tab. Refused for a `via` machine |
@@ -1284,9 +1286,10 @@ answers `no_window` at once. A window that detaches ends every wait with `no_win
 **The framed hello.** A hello (plain or challenge) with `"framed": true` asks for framed mode.
 The reply is the connection's last line. Beside the usual fields it carries `framed: true`,
 `generation` (the wire's, `1`), `version` (the core's release version, `""` in a development
-build), `features` (`["challenge_hello", "codex_tabs", "hub_add_project"]`; `codex_tabs`: a hub may start and resume
+build), `features` (`["challenge_hello", "codex_tabs", "hub_add_project", "pi_handoff"]`; `codex_tabs`: a hub may start and resume
 Codex tabs here, [CODEX.md](CODEX.md) §8; `hub_add_project`: a hub may add a folder here as a project, §5a
-"Working on another machine"; a hub reads them from each machine's hello), `methods` (the commands this caller may send),
+"Working on another machine"; `pi_handoff`: a hub may send a copy of one of its pi conversations here
+(`pi_handoff_part`, §5a); a hub reads them from each machine's hello), `methods` (the commands this caller may send),
 `core` (this run's id: 64 hex; a hub tells an install's new core from the old one by it), `machine` (`{os, arch, installed}`; `installed`: the core runs from its data dir's `core/`, which another machine's Update requires; a Linux core adds `linger`, `false` when its jobs stop at logout, and leaves it out when logind gave no answer), `holder_wire` and `snapshot` (the formats it decodes, best first:
 `["ghostsnp/1", "vt"]`). From the next byte on, the connection carries frames
 ([background-core.md](plans/background-core.md) §5.1; `src/corewire/transport_sock.odin`): channel 0
@@ -1385,7 +1388,38 @@ and is a folder) and keeps the project as its own (not selected there: that mach
 selection). The window offers it only for a machine whose `machines[].hub_add_project` (this
 core's reading of that hello, in the window's state stream) is true. Its `created_id`, packed, is selected here once
 the mirror has it; nothing is added on this Mac. A refusal from there is a toast for the user's
-(*Add folder: on <machine>: no such folder: …*). Not forwarded: `terminal_link` (the user's click opens on this Mac, in
+(*Add folder: on <machine>: no such folder: …*). **A pi conversation to another machine**
+(`pi_handoff`, the user's **Continue this conversation on <machine> in <project>**; #115): it
+runs here, never forwarded (one naming another machine's `project_id` is refused: a conversation
+goes only from this Mac outward). It needs the user at this window (`ui`, `User_Here`: never
+Atlas, a script or a hub), a pi session of this Mac's project with its transcript file in pi's
+store here, and the remote project as its row showed it: `to_project_id` (packed), `run` (that
+machine's core run) and `folder` (that project's folder), checked again here along with the
+machine being online and the folder names matching; and a core whose last hello listed
+`pi_handoff` (else refused here, nothing sent: "its Deckhand is too old to take a conversation
+from here…"). One at a time; at most 256 MB. The file's whole lines (up to its last newline when
+it was opened) go as `pi_handoff_part` commands on that machine's link, as the user's
+(`"on_behalf":{"kind":"ui"}`), `project_id` unpacked: `{"type":"pi_handoff_part","project_id":…,
+"offset":…,"data":"<base64>","last":true?}`, 1 MiB per part, each sent after the last one's
+answer (each waits up to 30 s); a refusal, a timeout or the link going down ends it. The last
+answer's `created_id` (packed) finishes the request and its session is shown here. Only this
+side sends `pi_handoff_part`: anyone's here is refused. **On the machine that takes it**,
+`pi_handoff_part` is accepted only over a hub link on behalf of its user (`on_behalf` `ui`; this
+machine's own window, Atlas, scripts and a hub's `control` are refused), and its bytes are
+untrusted: one copy at a time (another's offset 0 is refused while one comes, unless that one
+had no part for 60 s), parts in order from offset 0 (else the copy is dropped), each at most
+1 MiB decoded, at most 256 MB in all, valid base64. It is written to a file the core names
+(random) in `<data dir>/pi-handoff/` (0700; the file 0600, created exclusively, never through a
+link), never in pi's store and never at a path the hub names. Once whole (`last`), its first line
+must be a pi session header (`{"type":"session","id":…,"cwd":…}`) or it is dropped. Its new id is
+a name-based UUID of the header's id, the project's folder there and the copy's SHA-256: the same
+copy again is the same id (an open session with it is shown; its session file, resumed); else a pi
+tab starts as `pi --fork <copy> --session-id <id>` in the project's folder, and pi writes the new
+session file in its own store. The copy is deleted once that file is there, or the tab exited
+(its terminal says so when pi wrote nothing) or its session closed; a dropped or stopped copy, and
+what a crash left in the folder (at the next start), are deleted too. `pi_handoff_part`'s data
+is never in an event or the log (`<redacted N bytes>`). Whatever the conversation holds (file
+contents and command output its tools read) goes to that machine with it. Not forwarded: `terminal_link` (the user's click opens on this Mac, in
 the default browser, after the same checks as a local terminal's link; anyone else's is refused).
 The user's `mark_all_read` at this Mac goes to every online machine at once (its row in §3). That core's `result` (and its `finished`, for one it answered pending)
 ends the request here: `created_id` packed (a session the user opened or made is shown here too),

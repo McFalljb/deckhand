@@ -683,6 +683,8 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "machine_login":       cmd = Machine_Login{no = get_u64(&r, "no")}
 	case "machine_install":     cmd = Machine_Install{no = get_u64(&r, "no"), cancel = opt_bool(&r, "cancel").? or_else false}
 	case "machine_linger":      cmd = Machine_Linger{no = get_u64(&r, "no")}
+	case "pi_handoff":          cmd = Pi_Handoff{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id"), to_project_id = get_u64(&r, "to_project_id"), run = get_str(&r, "run", optional = true), folder = get_str(&r, "folder")}
+	case "pi_handoff_part":     cmd = Pi_Handoff_Part{project_id = get_u64(&r, "project_id"), offset = get_u64(&r, "offset"), data = get_str(&r, "data"), last = opt_bool(&r, "last").? or_else false}
 	case "machine_open_page":   cmd = Machine_Open_Page{no = get_u64(&r, "no"), port = get_u64(&r, "port"), path = get_str(&r, "path", optional = true)}
 	case "holder_replace":      cmd = Holder_Replace{stop = get_bool(&r, "stop")}
 	case "core_handover":       cmd = Core_Handover{to = get_str(&r, "to")}

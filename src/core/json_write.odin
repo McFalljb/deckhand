@@ -220,6 +220,8 @@ command_type :: proc(cmd: Command) -> string {
 	case Machine_Login:       return "machine_login"
 	case Machine_Install:     return "machine_install"
 	case Machine_Linger:      return "machine_linger"
+	case Pi_Handoff:          return "pi_handoff"
+	case Pi_Handoff_Part:     return "pi_handoff_part"
 	case Machine_Open_Page:   return "machine_open_page"
 	case Holder_Replace:      return "holder_replace"
 	case Holder_Restart:      return "holder_restart"
@@ -506,6 +508,17 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.cancel do kv_bool(&w, "cancel", true)
 	case Machine_Linger:
 		kv_u64(&w, "no", c.no)
+	case Pi_Handoff:
+		kv_u64(&w, "project_id", c.project_id)
+		kv_str(&w, "pi_session_id", c.pi_session_id)
+		kv_u64(&w, "to_project_id", c.to_project_id)
+		kv_str(&w, "run", c.run)
+		kv_str(&w, "folder", c.folder)
+	case Pi_Handoff_Part:
+		kv_u64(&w, "project_id", c.project_id)
+		kv_u64(&w, "offset", c.offset)
+		kv_str(&w, "data", redact ? fmt.tprintf("<redacted %d bytes>", len(c.data)) : c.data) // a conversation: never in an event or the log
+		if c.last do kv_bool(&w, "last", true)
 	case Machine_Open_Page:
 		kv_u64(&w, "no", c.no)
 		kv_u64(&w, "port", c.port)

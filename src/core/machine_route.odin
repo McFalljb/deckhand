@@ -97,6 +97,7 @@ Forward :: struct {
 	sent:       time.Tick,
 	wait:       time.Duration, // its answer, at most this late
 	fan:        u64, // one machine's part of a Mark_All_Read fan (its id; 0: none)
+	handoff:    u64, // one part of a pi conversation sent there (pi_handoff.odin: its id; 0: none)
 }
 
 // The user's Mark all sessions as read (⌥⇧⌘U) at this Mac: this Mac's sessions marked here, then
@@ -241,6 +242,12 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		if c.codex && !machine_codex(no) do return codex_remote_old(no), true
 	case New_Claude_Tab:
 		if c.codex && !machine_codex(no) do return codex_remote_old(no), true
+	case Pi_Handoff_Part:
+		// only pi_handoff's own sending (machine_handoff_send) puts one on a link, never a caller's
+		return fail("pi_handoff_part is sent only by pi_handoff"), true
+	case Pi_Handoff:
+		// a conversation goes only from this Mac outward: never another machine's sent on from here
+		return fail("only a conversation on this Mac can be continued on another machine"), true
 	case Focus_Session:
 		// this Mac's view; the user's goes there too, so its restored tabs start
 		if caller.kind == .UI && !caller.hub do machine_link_send_text(no, hub_command_json(Focus_Session{session = id_local(c.session), reopen = c.reopen}, "", .UI))
@@ -305,13 +312,13 @@ codex_remote_old :: proc(no: u64) -> Result {
 
 // cmd (ids packed) sent to machine no's core as kind's: pending, or why it could not go.
 @(private = "file")
-forward_send :: proc(cmd: Command, no: u64, kind: Caller_Kind, request_id: u64, fan: u64 = 0) -> Result {
+forward_send :: proc(cmd: Command, no: u64, kind: Caller_Kind, request_id: u64, fan: u64 = 0, handoff: u64 = 0) -> Result {
 	if !machine_link_up(no) do return machine_offline(no)
 	if len(route.forwards) >= ROUTE_FORWARDS_MAX do return fail("too many commands are waiting for other machines")
 	heap := runtime.heap_allocator()
 	route.next += 1
 	f := new(Forward, heap)
-	f^ = {id = route.next, machine = no, request_id = request_id, cmd = command_clone(cmd, heap), kind = kind, sent = time.tick_now(), wait = route_wait(cmd), fan = fan}
+	f^ = {id = route.next, machine = no, request_id = request_id, cmd = command_clone(cmd, heap), kind = kind, sent = time.tick_now(), wait = route_wait(cmd), fan = fan, handoff = handoff}
 	if !machine_link_send_text(no, hub_command_json(command_for_machine(cmd, no), fmt.tprintf("h%d", f.id), kind)) {
 		forward_free(f)
 		return machine_offline(no)
@@ -319,6 +326,12 @@ forward_send :: proc(cmd: Command, no: u64, kind: Caller_Kind, request_id: u64, 
 	append(&route.forwards, f)
 	if autotest_active do fmt.printfln("[autotest] machine %s: forwarded %s", machine_name(no), command_type(cmd))
 	return {ok = true, pending = true}
+}
+
+// One part of a pi conversation of this Mac's to machine no's core, as the user's (pi_handoff.odin):
+// pending until its answer, which goes to pi_handoff_answer(handoff, …), never to a request.
+machine_handoff_send :: proc(part: Pi_Handoff_Part, no: u64, handoff: u64) -> Result {
+	return forward_send(part, no, .UI, 0, handoff = handoff)
 }
 
 // The machine of the open session a Set_Unread names by its pi session id (0: this Mac's, or none
@@ -446,6 +459,10 @@ forward_finish :: proc(i: int, r: Result) {
 	defer forward_free(f)
 	if f.fan != 0 {
 		fan_answer(f, r)
+		return
+	}
+	if f.handoff != 0 {
+		pi_handoff_answer(f.handoff, f.machine, r)
 		return
 	}
 	if f.kind == .UI do route_toast(f.cmd, r)
@@ -799,4 +816,5 @@ machine_route_tick :: proc(now: time.Tick) {
 		r.retry_at = {}
 		relay_attach(r)
 	}
+	pi_handoff_tick(now) // a copy coming in that stopped, the copies pi has forked (pi_handoff.odin)
 }

@@ -130,7 +130,7 @@ export interface WebView {
   machines: { no: number; open: number[]; projects: WebProjectRow[] }[];
   attention: WebAttention[];
   deck: WebAttention[];
-  titles: Record<string, { title: string; place: string; chat: boolean; age: string }>;
+  titles: Record<string, { title: string; place: string; chat: boolean; at: number }>; // at: Unix ns, 0 "new"
   filtered: number;
 }
 

@@ -287,7 +287,7 @@ export function OpenRow({ s, from, mach }: { s: OpenSession; from?: number; mach
   const v = fromTab ? tabView(fromTab) : sessionView(store, s);
   const current = store.currentSession === s.id;
   const age = v.dot !== "none" && v.dot !== "exited" ? ago(v.since) : "";
-  let when = age || w?.age || "";
+  let when = age || (w ? (w.at ? ago(w.at) : "new") : "");
   if (v.dot === "waiting") when = v.msg || "Waiting for you";
   const elsewhere = current && !w?.chat && s.project_id !== store.selectedProject;
   return (

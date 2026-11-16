@@ -85,7 +85,7 @@ function Card({ r }: { r: WebAttention }) {
   const need = r.group === "needs_you";
   const lines = r.group === "idle" ? 0 : need ? 3 : 1;
   const harness = openHarness(store, s);
-  const age = v.dot !== "none" ? ago(v.since) : (w?.age ?? "");
+  const age = v.dot !== "none" ? ago(v.since) : w ? (w.at ? ago(w.at) : "new") : "";
   const others = tabs.length > 1 ? tabs.filter((t) => t !== from).map((t) => tabView(t).dot) : [];
   const dots = (["waiting", "error", "unseen", "working"] as const).filter((d) => others.includes(d));
   return (

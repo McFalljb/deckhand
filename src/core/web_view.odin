@@ -17,11 +17,20 @@ package core
 //   machines   [{no, open: [ids], projects: [{id, name}]}], each other machine in state.machines
 //   attention  [{session, group, tab}]: the Attention view (group: needs_you, finished, working, idle)
 //   deck       the same for the Deck's cards
-//   titles     {open session id: {title, place, chat, age}}: the rows' words (age: "5m", "new")
+//   titles     {open session id: {title, place, chat, at}}: the rows' words; at: when its file (a
+//              Claude session: its history entry) last changed, Unix ns (0: "new")
+//
+// Computed only when something it reads changed (web_view_cached: a hash of the other sections
+// and the open sessions' file stamps), and never reading a disk on a flush: the titles and stamps
+// are the ones web_view_tick last read, at most once a second per open session.
 //   filtered   waiting sessions the filter hides ("N waiting (filtered)")
 
+import "base:runtime"
 import "core:fmt"
+import "core:hash"
+import "core:mem"
 import "core:strings"
+import "core:time"
 
 WEB_VIEW_SECTION :: "web"
 
@@ -30,6 +39,48 @@ ATTENTION_GROUP_NAMES := [Attention_Group]string {
 	.Finished  = "finished",
 	.Working   = "working",
 	.Idle      = "idle",
+}
+
+// The section's last JSON and what it was computed from (heap); builds counts computations (tests).
+@(private)
+web_view_last: struct {
+	key:    u64,
+	json:   string,
+	builds: int,
+}
+
+// The section for these other sections (state_sections' out so far): the last one when none of
+// them, nor an open session's file stamp, changed.
+web_view_cached :: proc(sections: [][2]string) -> string {
+	h := hash.fnv64a(transmute([]u8)string("web"))
+	for x in sections {
+		h = hash.fnv64a(transmute([]u8)x[0], h)
+		h = hash.fnv64a(transmute([]u8)x[1], h)
+	}
+	for &s in state.open_sessions {
+		stamp := [2]i64{s.mtime._nsec, s.title_size}
+		h = hash.fnv64a(mem.ptr_to_bytes(&stamp), h)
+		h = hash.fnv64a(transmute([]u8)s.title, h)
+	}
+	if web_view_last.builds > 0 && h == web_view_last.key do return web_view_last.json
+	j := web_view_json()
+	delete(web_view_last.json, runtime.heap_allocator())
+	web_view_last.json = strings.clone(j, runtime.heap_allocator())
+	web_view_last.key = h
+	web_view_last.builds += 1
+	return web_view_last.json
+}
+
+// While a browser is attached: each open session's file looked at (title, stamp), at most once a
+// second (open_session_refresh); a changed stamp is a change to send.
+web_view_tick :: proc() {
+	if !window_link_web() do return
+	for &s in state.open_sessions {
+		if s.home do continue
+		before := s.mtime
+		open_session_refresh(&s)
+		if s.mtime != before do window_state_changed()
+	}
 }
 
 web_view_json :: proc() -> string {
@@ -74,15 +125,26 @@ web_view_json :: proc() -> string {
 		n += 1
 		ic, place := session_place(&s)
 		fmt.sbprintf(&b, `"%d":{{"title":`, s.id)
-		json_quote(&b, open_session_title(&s))
+		json_quote(&b, open_session_title(&s, refresh = false))
 		strings.write_string(&b, `,"place":`)
 		json_quote(&b, place)
-		fmt.sbprintf(&b, `,"chat":%v,"age":`, ic == .Chat)
-		json_quote(&b, s.machine == 0 ? open_session_age(&s) : "")
-		strings.write_byte(&b, '}')
+		fmt.sbprintf(&b, `,"chat":%v,"at":%d}}`, ic == .Chat, web_view_stamp(&s))
 	}
 	fmt.sbprintf(&b, `}},"filtered":%d}}`, sidebar_waiting_filtered())
 	return strings.to_string(b)
+}
+
+// When an open session last changed, as its row's age says it (open_session_age, without a
+// disk read): Unix ns, 0 = "new" (or another machine's: not known here).
+@(private = "file")
+web_view_stamp :: proc(s: ^Open_Session) -> i64 {
+	if s.machine != 0 do return 0
+	if s.agent == .Claude {
+		if r, _ := claude_record(s.pi_session_id); r != nil do return time.to_unix_nanoseconds(time.unix(r.used, 0))
+		return 0
+	}
+	if s.session_file == "" do return 0
+	return s.mtime._nsec
 }
 
 @(private = "file")

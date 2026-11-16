@@ -50,6 +50,7 @@ core_tick_body :: proc() {
 	pty_reap()
 	persist_tick()
 	titles_tick() // titles the worker read (titles.odin)
+	web_view_tick() // a browser's open sessions: their titles and ages, at most once a second each (web_view.odin)
 	jobs_tick() // Atlas's jobs: notes, the clock, running runs (jobs.odin)
 	agent_pending_tick() // Send to Atlas text that waited too long for pi (session_info.odin)
 	claude_tick() // Claude tabs: held texts that can go now, their Enter (claude.odin)

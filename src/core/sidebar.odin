@@ -818,7 +818,7 @@ session_place :: proc(s: ^Open_Session) -> (ic: Icon, name: string) {
 // selected project's), else read from its session file (cached until the
 // file grows); "Untitled session · <created>" (a project's) or "Untitled
 // chat · …" while the file has no title, plain while there is no file yet.
-open_session_title :: proc(s: ^Open_Session) -> string {
+open_session_title :: proc(s: ^Open_Session, refresh := true) -> string {
 	// another machine's: the title it sent (its session file and Claude history are not on this Mac)
 	if s.machine != 0 && s.title != "" do return strings.clone(s.title, context.temp_allocator)
 	// a Claude-only session: its history entry's title (claude.odin; the first prompt, or the user's)
@@ -830,7 +830,7 @@ open_session_title :: proc(s: ^Open_Session) -> string {
 	untitled := open_session_is_chat(s) ? "Untitled chat" : "Untitled session"
 	for l in state.sessions do if l.id == s.pi_session_id do return session_label(l)
 	if s.session_file == "" do return untitled
-	open_session_refresh(s) // at most once a second (sidebar.odin)
+	if refresh do open_session_refresh(s) // at most once a second (sidebar.odin); a browser's view: never (web_view.odin)
 	// a copy for this frame: a later call may replace the cached one while
 	// earlier palette items still point at it
 	if s.title != "" do return strings.clone(s.title, context.temp_allocator)

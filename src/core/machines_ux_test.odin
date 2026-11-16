@@ -4,6 +4,7 @@ package core
 // plain status words (the sidebar, Settings and tooltips share them), the statuses that wait for
 // the user (no retry on a timer), Rename and Remove. No ssh runs.
 
+import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -284,6 +285,7 @@ machines_get_state_codex_and_empty :: proc(t: ^testing.T) {
 // on its Settings row.
 @(test)
 machines_checklist_version :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator() // settings_file_rows may fill the global checklist (harness_items)
 	saved, saved_on := state.machines, state.settings.remote_machines
 	defer state.machines, state.settings.remote_machines = saved, saved_on
 	r: State

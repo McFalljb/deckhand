@@ -365,3 +365,30 @@ web_view_attention :: proc(b: ^strings.Builder, rows: []Attention_Row) {
 	}
 	strings.write_byte(b, ']')
 }
+
+// The "projects" section as a browser gets it (state_sections, a web link): what the page reads of
+// each project (id, machine, group, name, cwd, label; missing, temp, repo and parent when set), not
+// the window's whole Project (its session folder, times and tidy fields): 190 KB -> about 45 KB at
+// 420 projects, on every load and reconnect. Same section name and shape.
+web_projects_json :: proc() -> string {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"projects":[`)
+	for &p, i in state.projects {
+		if i > 0 do strings.write_byte(&b, ',')
+		fmt.sbprintf(&b, `{{"id":%d,"machine":%d,"group":`, p.id, p.machine)
+		wire_write(&b, &p.group, type_info_of(Sidebar_Group))
+		strings.write_string(&b, `,"name":`)
+		json_quote(&b, p.name)
+		strings.write_string(&b, `,"cwd":`)
+		json_quote(&b, p.cwd)
+		strings.write_string(&b, `,"label":`)
+		json_quote(&b, p.label)
+		if p.missing do strings.write_string(&b, `,"missing":true`)
+		if p.temp do strings.write_string(&b, `,"temp":true`)
+		if p.repo do strings.write_string(&b, `,"repo":true`)
+		if p.parent != 0 do fmt.sbprintf(&b, `,"parent":%d`, p.parent)
+		strings.write_byte(&b, '}')
+	}
+	fmt.sbprintf(&b, `],"selected_project":%d}}`, state.selected_project)
+	return strings.to_string(b)
+}

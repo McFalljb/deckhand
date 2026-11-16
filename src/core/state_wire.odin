@@ -153,7 +153,8 @@ state_sections :: proc(s: ^State) -> [dynamic][2]string {
 	}
 	// a browser's views, computed from State (web_view.odin): only a web link gets them
 	if s == &state && window_link_web() {
-		append(&out, ..web_view_cached(out[:]))
+		append(&out, ..web_view_cached(out[:])) // keyed by the whole sections (the tree's order uses project times)
+		for &x in out do if x[0] == "projects" do x[1] = web_projects_json() // then what the page reads of them (web_view.odin)
 		web_changes_sections(&out) // the Changes tabs' lists and diffs (web_changes.odin)
 		web_settings_sections(&out) // the Settings page, while it shows (web_settings.odin)
 	}

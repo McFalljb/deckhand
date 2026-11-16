@@ -79,6 +79,11 @@ ACTIONS := [?]Action {
 		if !handoff_action_ok() do return nil, false
 		return core.Select_Project{state.selected_project}, true
 	}, ui = handoff_action_ui},
+	// a copy of the current pi session's conversation, forked there as a new session (ui_handoff.odin)
+	{id = "continue_elsewhere", label = "Continue this conversation on another machine…", make = proc() -> (core.Command, bool) {
+		if !pi_handoff_action_ok() do return nil, false
+		return core.Focus_Session{session = state.current_session}, true
+	}, ui = pi_handoff_action_ui},
 	{id = "claude_skip_permissions", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
 	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "Claude Code · on: --dangerously-skip-permissions in the tabs you start" : "Claude Code · off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},

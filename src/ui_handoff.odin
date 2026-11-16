@@ -21,6 +21,10 @@ HANDOFF_RESTARTED :: "That machine restarted: choose the project again"
 // The palette's menu of the matches, while there are several (this Mac's project id).
 Menu_Handoff :: distinct u64
 
+// The palette's menu of Continue this conversation on <machine>…, while there are several (this
+// Mac's open session id).
+Menu_Pi_Handoff :: distinct u64
+
 // One row per match for this Mac's project pid, then "and N more on <machine>" as plain text
 // (none: no rows).
 handoff_items :: proc(items: ^[dynamic]core.Menu_Item, pid: u64) {
@@ -35,6 +39,7 @@ handoff_items :: proc(items: ^[dynamic]core.Menu_Item, pid: u64) {
 Handoff_Drawn :: struct {
 	row: int,
 	ns:  core.Menu_New_Session,
+	ph:  Maybe(core.Pi_Handoff), // a Continue this conversation on <machine> row: the command it showed
 }
 handoff_drawn: [dynamic]Handoff_Drawn
 
@@ -42,6 +47,11 @@ handoff_drawn_clear :: proc() {
 	for d in handoff_drawn {
 		delete(d.ns.run)
 		delete(d.ns.folder)
+		if ph, ok := d.ph.?; ok {
+			delete(ph.pi_session_id)
+			delete(ph.run)
+			delete(ph.folder)
+		}
 	}
 	clear(&handoff_drawn)
 }
@@ -50,9 +60,54 @@ handoff_drawn_clear :: proc() {
 handoff_drawn_note :: proc(items: []core.Menu_Item) {
 	handoff_drawn_clear()
 	for it, i in items {
+		if ph, is := it.cmd.(core.Pi_Handoff); is {
+			append(&handoff_drawn, Handoff_Drawn{row = i, ph = core.Pi_Handoff{project_id = ph.project_id, pi_session_id = strings.clone(ph.pi_session_id), to_project_id = ph.to_project_id, run = strings.clone(ph.run), folder = strings.clone(ph.folder)}})
+			continue
+		}
 		ns, ok := it.picker.?
 		if !ok || core.id_machine(ns.project_id) == 0 do continue
 		append(&handoff_drawn, Handoff_Drawn{row = i, ns = {project_id = ns.project_id, run = strings.clone(ns.run), folder = strings.clone(ns.folder)}})
+	}
+}
+
+// Continue this conversation on <machine> in <project> (core/pi_handoff.odin): one row per match
+// for this Mac's pi session sid of project pid that has its transcript here (none: no rows).
+pi_handoff_items :: proc(items: ^[dynamic]core.Menu_Item, pid: u64, sid: string) {
+	for t in core.pi_handoff_targets(pid, sid) {
+		append(items, core.Menu_Item{label = t.label, cmd = core.Pi_Handoff{project_id = pid, pi_session_id = sid, to_project_id = t.project_id, run = t.run, folder = t.folder}})
+	}
+}
+
+// Row i of the menu (closed since), a Continue this conversation row, was chosen: the command it
+// showed when drawn goes (the core checks that machine's run and the project's folder again), or
+// nothing and a toast.
+pi_handoff_run :: proc(i: int) {
+	for d in handoff_drawn do if d.row == i {
+		ph, ok := d.ph.?
+		if !ok do break
+		cmd := core.Pi_Handoff{project_id = ph.project_id, pi_session_id = strings.clone(ph.pi_session_id, context.temp_allocator), to_project_id = ph.to_project_id, run = strings.clone(ph.run, context.temp_allocator), folder = strings.clone(ph.folder, context.temp_allocator)}
+		ui_do_menu(cmd, "Continue this conversation")
+		return
+	}
+	toast_show(HANDOFF_GONE, err = true)
+}
+
+// The palette's Continue this conversation on another machine… applies: the current session is a
+// pi session of this Mac's with somewhere to go.
+pi_handoff_action_ok :: proc() -> bool {
+	s := core.find_session(state.current_session)
+	return s != nil && !s.home && s.machine == 0 && s.agent == .Pi && core.machines_in_sidebar() && len(core.pi_handoff_targets(s.project_id, s.pi_session_id)) > 0
+}
+
+// The palette action: one match goes at once (just made from the state now); several, their menu.
+pi_handoff_action_ui :: proc() {
+	s := core.find_session(state.current_session)
+	if s == nil do return
+	targets := core.pi_handoff_targets(s.project_id, s.pi_session_id)
+	switch len(targets) {
+	case 0: toast_show("No online machine can take this conversation")
+	case 1: ui_do(core.Pi_Handoff{project_id = s.project_id, pi_session_id = s.pi_session_id, to_project_id = targets[0].project_id, run = targets[0].run, folder = targets[0].folder})
+	case:   menu_open(Menu_Pi_Handoff(s.id), new_session_anchor())
 	}
 }
 

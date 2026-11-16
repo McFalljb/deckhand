@@ -310,6 +310,20 @@ another machine…** in the palette does the same for the selected project (and 
 machine has a project of that name). Nothing of this Mac's goes with it: not the conversation,
 not your uncommitted changes, not a path, account or git state. Push or sync your work yourself
 first, then pick it up there.
+**Continue this conversation on another machine.** A pi session of one of this Mac's projects
+(its row's or open row's menu) also has **Continue this conversation on nuc in api** for each
+such project on a machine whose Deckhand is new enough to take one. It copies the conversation
+(pi's transcript file) to that machine, whose Deckhand forks it into a **new session** there with
+`pi --fork` (pi 1.4.0 or later there), in that project's folder: the conversation goes on there
+from where it was, with a new id. The session here stays as it is, open or not; nothing is closed
+or deleted. **Continue this conversation on another machine…** in the palette does the same for
+the session on screen. The whole transcript is copied, with everything in it: what you and the
+agent wrote, and the file contents, command output and anything else its tools read or printed.
+Only pi sessions (not Claude Code or Codex), only from this Mac to another machine (never the
+other way), only from your click in this window (not Atlas, a script or another machine viewing
+this one), one at a time, at most 256 MB. Paths in the history still name this Mac's folders, and
+your working tree does not go with it: push or sync it yourself. Sending the same conversation
+again opens the same session there; sending it again after more turns here makes another one.
 While one of its sessions is on screen, the top bar shows a quiet **on <machine>** before its tabs,
 and the window's title and the tabs' tooltips start with the machine's name: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
@@ -2502,6 +2516,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New chat | ⌘N | a new chat in the Chats folder |
 | New session | ⇧⌘N | a new session in the selected project (pi or Claude Code: a picker when both are installed) |
 | New session on another machine… |  | a fresh session in the project of the same folder name on an online machine ([Other machines](#projects-sessions-and-chats)) |
+| Continue this conversation on another machine… |  | a copy of the pi session on screen (its whole transcript) forked into a new session in the project of the same folder name on another machine; this one stays here ([Other machines](#projects-sessions-and-chats)) |
 | Chats folder… |  | pick the folder chats run in |
 | Chats folder: back to the default |  | undo the above |
 | New shell tab | ⌘T | a shell in the session's folder |

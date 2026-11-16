@@ -482,3 +482,49 @@ handoff_picker_restart :: proc(t: ^testing.T) {
 	core.inbox_drain()
 	testing.expect(t, toast.text != "That machine restarted: choose the project again", toast.text)
 }
+
+// Continue this conversation on <machine> (core/pi_handoff.odin): in a pi session's menu of this
+// Mac's project, only while it has its transcript here, only for a machine whose core takes one;
+// a click sends the row as drawn (that machine's run and the project's folder then), which the
+// core checks again: a machine that restarted since is refused there with nothing sent.
+@(test)
+pi_handoff_menu_rows :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	append(&state.sessions, core.Session{id = strings.clone("s1"), path = strings.clone("/Users/me/.pi/agent/sessions/--Users-me-code-api--/2026-11-01T10-00-00-000Z_s1.jsonl")})
+	rows :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for it in menu_items() do if strings.has_prefix(it.label, "Continue this conversation on ") {
+			if strings.builder_len(b) > 0 do strings.write_byte(&b, '|')
+			strings.write_string(&b, it.label)
+		}
+		return strings.to_string(b)
+	}
+	// no machine takes one yet: no row
+	menu_open(Menu_Session{project_id = 1, pi_session_id = "s1"}, {})
+	testing.expect_value(t, rows(), "")
+	menu_close()
+	state.machines[0].pi_handoff = true // nuc's core does; box's does not
+	menu_open(Menu_Session{project_id = 1, pi_session_id = "s1"}, {})
+	testing.expect_value(t, rows(), "Continue this conversation on nuc in api")
+	menu_close()
+	// a session with no transcript here (a Claude row's), a project's own menu: none
+	menu_open(Menu_Session{project_id = 1, pi_session_id = "c9"}, {})
+	testing.expect_value(t, rows(), "")
+	menu_close()
+	menu_open(Menu_Project(1), {})
+	testing.expect_value(t, rows(), "")
+	menu_close()
+	// chosen after nuc restarted (drawn with its old run): refused by the core, nothing sent
+	menu_open(Menu_Session{project_id = 1, pi_session_id = "s1"}, {})
+	at := -1
+	for it, i in menu_items() do if strings.has_prefix(it.label, "Continue this conversation on nuc") do at = i
+	if !testing.expect(t, at >= 0, "the row") do return
+	drawn_now()
+	state.machines[0].core_run = "r-nuc-2"
+	menu_run(at)
+	core.inbox_drain()
+	testing.expect(t, strings.contains(toast.text, core.PI_HANDOFF_GONE), toast.text)
+}

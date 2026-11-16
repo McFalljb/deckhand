@@ -579,6 +579,8 @@ Command :: union {
 	Machine_Open_Page, // a machine's web page in a local browser tab (machine_page.odin)
 	Machine_Install, // Install… and Update of another machine's core (machine_install.odin)
 	Machine_Linger, // Linux: linger on there (machine_install.odin)
+	Pi_Handoff, // Continue this conversation on <machine>: a copy of a pi transcript to another machine (pi_handoff.odin)
+	Pi_Handoff_Part, // and one part of it, as that machine takes it
 	Holder_Replace,
 	Holder_Restart, // a separate core's window: the palette's Restart session holder (holder_restart.odin)
 	Core_Handover,
@@ -885,6 +887,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	case Claude_Wait_Tick:     q3 = true // the timer's: what it does says itself
 	case Job_List, Job_Runs:   q3 = true
 	case Job_Run_Done:         q3 = true // job.finished says it (the run is freed by now)
+	case Pi_Handoff_Part:      q3 = true // a conversation's bytes: never in an event (pi_handoff.odin)
 	case Focus_Release:        q3 = !changed // nothing had the keyboard (test mode's barrier: client_barrier)
 	}
 	// app tabs: answers and queries (App_Call_Done finishes its request itself)
@@ -1651,6 +1654,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Machine_Open_Page: return machine_open_page_apply(c, caller, request_id)
 	case Machine_Install: return machine_install_apply(c, caller), false // its job changes the machines section itself
 	case Machine_Linger:  return machine_linger_apply(c, caller), false
+	case Pi_Handoff:      return pi_handoff_apply(c, caller, request_id), false
+	case Pi_Handoff_Part: return pi_handoff_part_apply(c, caller)
 	case Holder_Replace:
 		return holder_replace(c.stop), true
 	case Holder_Restart:
@@ -2539,7 +2544,7 @@ find_session_file :: proc(p: Project, pi_session_id: string, session_dir := "") 
 
 // path = "" starts a new chat with `pi --session-id <id>`, so Deckhand knows
 // which file it will be; otherwise resumes the file.
-open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "") -> (Result, bool) {
+open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "", fork := "") -> (Result, bool) {
 	tab := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi"}
 	// the bridge in this pi finds Deckhand with these (token = this tab, panel)
 	env := socket_pi_env({kind = .Panel, tab_id = tab.id})
@@ -2549,7 +2554,7 @@ open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd :=
 		os.make_directory_all(p.cwd) // made on the first chat, with its instructions (folders.odin)
 		chats_instructions_ensure(date_stamp())
 	}
-	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env) {
+	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env, fork = fork) {
 		socket_forget_tab(tab.id)
 		drop_term(tab.id)
 		return fail("could not start pi"), false
@@ -2720,7 +2725,7 @@ start_pi :: proc(t: ^Term, tab: ^Tab, pi_session_id, path, session_dir, cwd: str
 	append(&argv, ..pi_integration_args()) // first: Deckhand's pi integration, `-e` per extension (pi_integration.odin)
 	tab.reload.extras = pi_integration_extras() // which optional ones: a later change offers a restart (reload_outdated)
 	if session_dir != "" do append(&argv, "--session-dir", session_dir)
-	if fork != "" do append(&argv, "--fork", fork) // Atlas only (home_session_start): copied into session pi_session_id, here
+	if fork != "" do append(&argv, "--fork", fork) // Atlas (home_session_start) and a conversation from another machine (pi_handoff.odin): copied into session pi_session_id, here
 	if path != "" do append(&argv, "--session", path)
 	else do append(&argv, "--session-id", pi_session_id)
 	append(&argv, ..extra) // last: Atlas's (agent_extra_args)

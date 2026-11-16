@@ -214,6 +214,7 @@ Menu_Target :: union {
 	Menu_Machine, // another machine's header (right click)
 	Menu_Tab, // a tab (right click: ui_panes.odin)
 	Menu_Handoff, // the palette's New session on another machine…, several matches (ui_handoff.odin)
+	Menu_Pi_Handoff, // the palette's Continue this conversation on another machine…, several matches (ui_handoff.odin)
 }
 
 Menu_Machine :: distinct u64 // its number
@@ -328,6 +329,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_offered(id) do core.claude_account_items(&items, "New Codex tab here", core.New_Claude_Tab{session = id, codex = true}) // codex.odin
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
 		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
+		pi_handoff_items(&items, t.project_id, t.pi_session_id) // Continue this conversation on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)
 		claude_row := core.claude_row_record(t.project_id, t.pi_session_id) != nil // its info from Deckhand's history (claude_rows.odin)
 		if perr == "" || claude_row {
@@ -396,6 +398,8 @@ menu_items :: proc() -> []core.Menu_Item {
 		tab_menu_items(u64(t), &items)
 	case Menu_Handoff:
 		handoff_items(&items, u64(t))
+	case Menu_Pi_Handoff:
+		if s := core.find_session(u64(t)); s != nil do pi_handoff_items(&items, s.project_id, s.pi_session_id)
 	case Menu_Sort:
 		sec := core.Sort_Section(t)
 		for by in core.Sort_By do append(&items, core.Menu_Item{label = SORT_LABELS[by], check = state.sidebar.sort[sec] == by, cmd = core.Set_Sort{section = sec, by = by}})
@@ -460,6 +464,11 @@ menu_run :: proc(i: int) {
 			if t.page ? settings_page_file_step(p, it.files) : files_step(p, it.files) do toast_show("Path copied")
 		}
 	} else if it.cmd != nil {
+		if _, is := it.cmd.(core.Pi_Handoff); is {
+			pi_handoff_run(i) // what row i showed (ui_handoff.odin)
+			menu_close()
+			return
+		}
 		// a tab's menu: Close tab is the user's own close (⇧⌘T reopens it: closed_tabs.odin)
 		if _, on_tab := target.(Menu_Tab); on_tab do if ct, is := it.cmd.(core.Close_Tab); is do closed_tab_record(ct.tab_id)
 		// a Settings page row's Open: its session shown again (the page goes), as the row's click

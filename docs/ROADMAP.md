@@ -8,7 +8,7 @@ Status key: ✅ done · 🔨 in progress · ⬜ not started · ❓ open question
 
 ## 1. What Deckhand is
 
-A native desktop app for working with coding agents ([pi](https://pi.dev) and Claude Code)
+A native desktop app for working with coding agents ([pi](https://pi.dev), Claude Code and Codex)
 across projects, with the feel of the Codex desktop app (smooth, mouse-friendly, calm). Each agent
 stays itself, unchanged, as the engine: the conversation happens in a real terminal running the
 agent's own TUI, and everything around it is native UI.
@@ -16,9 +16,9 @@ agent's own TUI, and everything around it is native UI.
 - **Native.** No Electron, no browser engine for the app shell. The app is macOS today; a
   headless Linux core serves sessions to it over SSH. A Linux and a Windows app are planned
   (phase 5).
-- **Agents stay themselves.** pi and Claude Code keep working in any plain terminal. Deckhand adds
-  a frame around them and brings its own integration for each (loaded at start, nothing written
-  into their config); it never forks them. [pi-kit](https://github.com/McFalljb/pi-kit) is
+- **Agents stay themselves.** pi, Claude Code and Codex keep working in any plain terminal.
+  Deckhand adds a frame around them and brings its own integration for each (loaded or passed at
+  start, nothing written into their config); it never forks them. [pi-kit](https://github.com/McFalljb/pi-kit) is
   optional ([HARNESSES.md](HARNESSES.md)).
 - **UI/UX is the product.** Every screen should feel deliberate and fast.
 
@@ -51,7 +51,7 @@ agent's own TUI, and everything around it is native UI.
 | G5 | Browser tabs where you select parts of a page and comment on them for the agent. | 3 |
 | G6 | Games: the agent works with the engine through an engine bridge; showing the game in a tab is optional. | 4 |
 | G7 | The Codex desktop app's feel as the UX reference (adapted, not cloned). | all |
-| G8 | Settings are first class: a Settings tab to edit pi's and Claude Code's files and reload running agents. | 2 |
+| G8 | Settings are first class: a Settings page to edit pi's and Claude Code's files and reload running agents. | 2 |
 | G9 | **Atlas**, a built-in agent that drives Deckhand: projects, sessions, settings, jobs. | 2 |
 | G10 | Everything is an interface (principle 1). | all |
 | G11 | Hot reload: reload agent tabs when extensions or settings change; restart them when the agent itself updates. | 2 |
@@ -95,6 +95,8 @@ agent's own TUI, and everything around it is native UI.
     the socket; extensions publish panels and receive actions.
   - **Claude Code:** a bundled plugin (`integrations/claude-code`, loaded with `--plugin-dir`)
     with the `deckhand` CLI and hooks ([CLAUDE.md](CLAUDE.md)).
+  - **Codex:** hooks and a stdio MCP server (`deckhand-cli mcp`) passed on the command line for
+    each run; nothing written under `~/.codex` ([CODEX.md](CODEX.md)).
   - **Control:** commands, state and events over the same socket, for Atlas and scripts
     ([PROTOCOL.md](PROTOCOL.md)).
   - **Engines** (later): the tab protocol's control channel, exposed to agents as tools
@@ -106,11 +108,12 @@ agent's own TUI, and everything around it is native UI.
 
 In this order:
 
-1. ⬜ **Codex CLI harness:** Codex CLI as a third coding agent beside pi and Claude Code, with
-   its own integration ([HARNESSES.md](HARNESSES.md)).
-2. ❓ **Moving a live conversation between machines:** design only so far. Today **New session
-   on another machine** starts a fresh session in the same project there; nothing of the
-   conversation crosses.
+1. 🔨 **Moving a live conversation between machines**
+   ([#115](https://github.com/McFalljb/deckhand/issues/115)): pi is done (0.5.0, **Continue this
+   conversation on <machine>**, from this Mac outward only; tested with stand-ins, not yet between
+   two real machines). Claude Code and Codex conversations are still to do.
+2. ⬜ **0.5.0 leftovers** ([#146](https://github.com/McFalljb/deckhand/issues/146)): unsaved
+   Claude/Codex-only sessions, the Linux handover race, checks on real hardware, two load flakes.
 3. Then the open items below, phase by phase.
 
 ### Phases 0–1: the shell ✅
@@ -141,7 +144,8 @@ nightly canary and CI on macOS.
 - ✅ Atlas: pi's TUI in a drawer (⌘J), the desk tools, its own model and prompt.
 - ✅ Jobs and memory ([ATLAS.md](ATLAS.md)): job notes in the main folder, run by the core on
   their schedule, also with the window closed.
-- ✅ Settings tab (pi's and Claude Code's files), hot reload (G11), the Markdown tab (G4).
+- ✅ Settings: the Settings page (⌘,) with search, and Quick settings in the gear (0.4.0; it
+  replaced the Settings tab), agents' files by an allowlist; hot reload (G11), the Markdown tab (G4).
 - 🔨 Changes tab: stage, discard, commit, review. Not yet: merge, push, per-hunk staging.
 - 🔨 Worktrees: the switcher and clean-up are in. Creating worktrees waits on a rule (§7).
 - ⬜ Updating pi's packages from Settings (G12).
@@ -162,13 +166,21 @@ rows at parity with pi's ([CLAUDE.md](CLAUDE.md)).
 
 - ⬜ Deckhand without pi: Atlas and jobs on Claude.
 
+### Codex tabs ✅
+
+Codex CLI as a third coding agent (0.4.0, [#112](https://github.com/McFalljb/deckhand/issues/112)):
+Codex tabs and Codex-only sessions, Deckhand's tools over a per-run MCP server, comments, sessions
+found on disk, extra flags and **Full access in new Codex tabs**, several accounts, Codex tabs on
+other machines ([CODEX.md](CODEX.md)). Minimum Codex 0.163.0.
+
 ### Many sessions on many machines ✅
 
 What needs you, across every machine ([GUIDE.md](GUIDE.md)): status marks and how long, next
 needing you (⌥⌘A), the Attention view (⌥⌘.), the fleet pill, the Deck view (`⇧⌘\`), Peek (look
 only), sounds and per-kind notifications, the Dock badge, new session on another machine, and a
 keyboard pack (reopen closed tab, recent session, mark unread and mark all read, open session
-1–6).
+1–6). Deck cards (0.4.0): fixed width, what the session needs, its agent and machine, its other
+tabs, Peek and a menu on hover.
 
 ### Phase 4: games and the engine bridge
 
@@ -201,7 +213,11 @@ Design: [plans/background-core.md](plans/background-core.md) (G13, G14).
   Linux core ([#5](https://github.com/McFalljb/deckhand/issues/5)): six Mac→Mac PRs, then four
   Linux PRs ([plans/background-core.md §10.4](plans/background-core.md#104-m6-in-prs)). The local
   Atlas reaches every machine; their jobs and bells ring here (M6-F). On by default, with an
-  opt-out in Settings; nothing runs until a machine is added.
+  opt-out in Settings; nothing runs until a machine is added. Since then: **Add folder on
+  <machine>…**, a shell on a machine with no agent, sessions without pi kept while a tab runs
+  (0.4.1); the lost-holder bar with **Restart session holder** (0.5.0,
+  [#108](https://github.com/McFalljb/deckhand/issues/108)); **Continue this conversation on
+  <machine>** for pi (0.5.0).
 - ⬜ **M7** Several windows on one core.
 - ⬜ **M8** A remote machine's own browser, shown here: a full browser running on that machine
   (headless, so a Linux core has one too), its frames streamed into a tab of this window and the
@@ -243,7 +259,9 @@ Decisions that still shape the code. Superseded ones are gone; their history is 
 | 2026-11-08 | Every core is fully featured (sessions, jobs, Atlas), with or without a window; remotes are cores too | Nothing local-only that remote machines must undo. |
 | 2026-11-08 | Builds are signed with "Deckhand Self-Signed" until a Developer ID; the trust checks pick their mode from the process's own signature | The split didn't wait for a Developer ID; switching later is one line. |
 | 2026-11-11 | Atlas on another machine's ids acts as `control` there, and only this machine's own user and Atlas are forwarded; a confirmation that machine wants for Atlas is refused, not asked here | No machine drives a third through this one; a remote token never reaches an agent. |
+| 2026-11-12 | Codex tabs: the user's own `codex` with Deckhand's hooks and MCP server passed per run, trusted for that run only; minimum 0.163.0 | Codex has no plugin folder; nothing is written under `~/.codex` or any Codex home. |
 | 2026-11-12 | **Start chats read-only** removed: chats start as full agents; what a chat's agent may do is the chats folder's `AGENTS.md` / `CLAUDE.md` | Its limits got in the way; the user's own instructions file is the simpler control. `set_chats_readonly` and `claude.readonly_ack` stay on the grow-only wire, always refused. |
+| 2026-11-15 | Moving a conversation: copy and fork with the other machine's own `pi --fork`; pi only, from this Mac outward only, started only by the user at this Mac's window | A transcript planted on another machine must never come into this one; Deckhand never writes into a harness's session store. |
 
 ## 7. Open questions
 
@@ -264,7 +282,8 @@ Decisions that still shape the code. Superseded ones are gone; their history is 
 
 ## 9. Related
 
-- [GUIDE.md](GUIDE.md) (the user guide), [HARNESSES.md](HARNESSES.md), [CLAUDE.md](CLAUDE.md).
+- [GUIDE.md](GUIDE.md) (the user guide), [HARNESSES.md](HARNESSES.md), [CLAUDE.md](CLAUDE.md),
+  [CODEX.md](CODEX.md).
 - [DEVELOPING.md](DEVELOPING.md) (build, architecture, releases), [TESTING.md](TESTING.md).
 - [PROTOCOL.md](PROTOCOL.md), [TAB-PROTOCOL.md](TAB-PROTOCOL.md), [PERSISTENCE.md](PERSISTENCE.md).
 - [ATLAS.md](ATLAS.md), [BROWSER.md](BROWSER.md), [ENGINE-BRIDGE.md](ENGINE-BRIDGE.md).

@@ -1,5 +1,12 @@
 # Deckhand split panes: implementation plan
 
+> **Historical design record, not current documentation.** Kept for its reasoning and the
+> user's decisions (§8); the text below is as of when it was written. Shipped: P1–P6 (split
+> panes, a tab strip per pane, live browser and app tabs in every pane, dragging tabs, saved per
+> session) in 0.1.6; Zoom pane and dimmed inactive panes in 0.3.0. Code paths named below may have
+> moved (the pane code is now `src/core/panes*.odin`). Current behaviour:
+> [GUIDE.md](../GUIDE.md#tabs) (users) and [ROADMAP.md](../ROADMAP.md) (what is left).
+
 Status (2026-11-07): all phases built. P1–P3 merged (`main` 8d3cf47); P4 (live browser and app
 tabs, branch `panes-p4`), P5 (dragging tabs, `panes-p5`) and P6 (agent-facing text and docs,
 `panes-p6`) on branches in review. Left for later: a maximize-pane toggle, one file in two panes,

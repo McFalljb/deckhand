@@ -6,10 +6,12 @@ it, call any method it offers, and play it with injected input. The user can com
 shows. Contract: [TAB-PROTOCOL.md](TAB-PROTOCOL.md). Envelope: [PROTOCOL.md](PROTOCOL.md). How to
 use app tabs: [GUIDE.md](GUIDE.md#tabs).
 
-**Status.** Built: frames, app tabs, input, the method pass-through (`app_call`),
-`app_screenshot`, `app_input`, `app_events`, and Inspect boxes with comments. Not built: comment
-mode on a game tab with hit testing (§6), record and replay in the toolbar, the direct mode
-without Deckhand (§5).
+**Status.** Built (macOS only): frames, app tabs, input, the method pass-through (`app_call`),
+`app_screenshot`, `app_input`, `app_events`, and Inspect boxes with comments. Tested with the fake
+app (§7) only: the first spike with a real engine (§8) has not happened, so the `tab.*`
+vocabulary (§4) is the fake app's, not a shipped engine's. Not built: comment mode on a game tab
+with hit testing (§6), record and replay in the toolbar, the direct mode without Deckhand (§5),
+IME, gamepads and cursor lock (§3).
 
 **Decision: the game's agent API belongs in the engine, not in Deckhand.** Deckhand is the pipe,
 plus what only the host can do (the frame it shows, its overlays). Agents discover an app's

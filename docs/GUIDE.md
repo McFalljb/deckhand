@@ -1,7 +1,8 @@
 # Deckhand user guide
 
-Deckhand is a desktop app for coding agents: [pi](https://pi.dev) and
-[Claude Code](https://code.claude.com). It keeps your projects and their sessions in one window:
+Deckhand is a desktop app for coding agents: [pi](https://pi.dev),
+[Claude Code](https://code.claude.com) and [Codex](https://github.com/openai/codex). It keeps your
+projects and their sessions in one window:
 the list on the left, the agent's normal terminal screen in the middle, more tabs (shells, files,
 web pages) beside it, a built-in assistant, **Atlas**, in a drawer on the right, and **jobs**:
 prompts that pi runs for you on a schedule.
@@ -17,7 +18,7 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 
 ## Contents
 
-1. [The window](#the-window) (and [the first run](#the-first-run))
+1. [The window](#the-window) ([installing](#installing) and [the first run](#the-first-run))
 2. [How Deckhand runs](#how-deckhand-runs): the window, Deckhand Core, the session holder, ⌘Q
 3. [Projects, sessions and chats](#projects-sessions-and-chats)
 4. [Tabs](#tabs)
@@ -64,18 +65,70 @@ To resize a column, drag its edge. To reset its width, double-click the edge.
 When Deckhand needs you to confirm something (closing a running tab, quitting), a bar appears
 above the tabs with **Cancel** and **Confirm**.
 
+### Installing
+
+**What you need:**
+
+- macOS 14 or later on Apple silicon (arm64). Intel Macs are not supported.
+- At least one coding agent: pi 1.4.0 or later, Claude Code 2.1.295 or later, or Codex 0.163.0 or
+  later. An older pi runs without Deckhand's integration ([pi in Deckhand](#pi-in-deckhand)); an
+  older Claude Code runs with status from Deckhand's hooks only; an older Codex does not start.
+  Atlas and jobs need pi. The [first run](#the-first-run) can install them.
+- Optional: [other machines](#machines) you reach with `ssh`: Macs on Apple silicon, or Linux on
+  x86_64. Deckhand installs its core there for you.
+
+The app is about 340 MB, most of it Chromium for the browser tabs.
+
+**With the install script**, in Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/install.sh | sh
+```
+
+It downloads the latest release and its `.sha256` from GitHub over HTTPS, checks the SHA-256,
+clears the quarantine flag, checks the app's code signature (`codesign --verify --deep
+--strict`) and installs `Deckhand.app` in `/Applications` (`~/Applications` when it can't write
+there). It never uses `sudo`. It does not check the release's updater signature (`.sig`): a stock
+Mac has no tool for it; the in-app updater checks it. It changes nothing while Deckhand or its
+background core runs (⌘Q leaves the core running): update a running Deckhand with **Check for
+Updates…**, which keeps your sessions ([Updates](#updates)). Options go after `sh -s --`:
+`--version X.Y.Z` for a given release, `--dir PATH` for another folder. Then `open -a Deckhand`.
+Installed this way it opens without a Gatekeeper prompt.
+[Read the script](https://github.com/McFalljb/deckhand/blob/main/scripts/install.sh) before you
+pipe it to `sh`.
+
+**By hand:**
+
+1. Download `deckhand-<version>-macos-arm64.zip` and its `.sha256` from the
+   [releases page](https://github.com/McFalljb/deckhand/releases), and check it with
+   `shasum -a 256 -c deckhand-<version>-macos-arm64.zip.sha256`.
+2. Unzip it and move `Deckhand.app` to `/Applications`.
+3. Open it. Deckhand is not signed with an Apple Developer ID or notarized, so Gatekeeper blocks
+   the first open of a copy downloaded with a browser:
+   - **macOS 15 and later**: open the app, close the warning, then click **Open Anyway** next to
+     Deckhand in **System Settings › Privacy & Security**.
+   - **macOS 14**: right-click (or Control-click) the app in Finder, choose **Open**, then
+     **Open** again.
+   - Or clear the download flag in Terminal:
+     `xattr -dr com.apple.quarantine /Applications/Deckhand.app`.
+
+   After the first open it starts normally.
+
+Coming from pi-desk: see [From pi-desk to Deckhand](#from-pi-desk-to-deckhand).
+
 ### The first run
 
 The first time Deckhand starts without a main folder, a **Set up Deckhand** sheet opens over the window. It has four steps (five when
 Deckhand finds more than one Claude Code account):
 
-0. **Your coding agents**: a checklist per harness (pi, Claude Code), from the
+0. **Your coding agents**: a checklist per harness (pi, Claude Code, Codex), from the
    [harness manifest](HARNESSES.md#6-the-harness-manifest):
-   - **The harness**: installed or not, its version against the minimum (pi 1.4.0, Claude Code
-     2.1.295) and how it was installed (its installer, Homebrew, npm, bun, pnpm, nix, mise).
-     Deckhand finds this by looking where the binary links to; it never runs pi or claude to ask.
-     A harness you don't have is one collapsed line, **Not installed**, with its official install
-     command and **Install**: you need one harness, not both.
+   - **The harness**: installed or not, its version against the minimum
+     ([Installing](#installing)) and how it was installed (its installer, Homebrew, npm, bun,
+     pnpm, nix, mise). Deckhand finds this by looking where the binary links to; it never runs
+     pi or claude to ask (for Codex it runs `codex login status`, to see whether you are signed
+     in). A harness you don't have is one collapsed line, **Not installed**, with
+     its official install command and **Install**: one harness is enough.
    - **Deckhand's integration** (its pi extensions, its Claude Code plugin): **Built in**. It ships
      inside the app; there is nothing to install. "Not loaded" says why (a pi older than 1.4.0).
    - **Recommended**: third-party items, each with a one-line reason, ticked when installed. For pi:
@@ -162,7 +215,7 @@ Deckhand is three programs:
 - **Deckhand Core**: your projects, sessions and tabs, jobs, Atlas, the bell and the control
   socket. It runs on its own (`Deckhand Core.app`, inside `Deckhand.app`), and the window is a
   view of it. With no window open, its macOS notifications come from Deckhand Core.
-- **The session holder**: keeps the terminals of your pi, Claude and shell tabs, so they outlive
+- **The session holder**: keeps the terminals of your pi, Claude, Codex and shell tabs, so they outlive
   Deckhand Core when it restarts or updates.
 
 **⌘Q closes only the window** (so do Quit in the Dock and closing the window). Your sessions,
@@ -187,17 +240,15 @@ start fresh.
 - **The Mac sleeps, or Deckhand Core stalls for a while**: sessions keep running. If the holder
   stopped hearing from Deckhand Core meanwhile, the core attaches to it again and its tabs carry
   on. Both logs (`holder.log`, `core.log` in the runtime folder) give each line's time in UTC.
-- **The session holder crashes**: its tabs stop and say "the session holder stopped". pi and
-  Claude resume from their files when you restart them; shells start fresh.
-- **The session holder is lost while Deckhand runs** (it crashed, or stopped answering and
-  attaching to it again failed): a bar over the centre says so. The sessions it kept can't be
-  reached from here, and tabs you open meanwhile run in Deckhand Core itself, so they don't keep
-  running when it restarts or quits. **Restart session holder** on the bar fixes that: if the
-  old holder still runs, Deckhand attaches to it again and its sessions come back to their tabs
-  (their screens rebuilt from what it kept); if it is gone, a new holder starts, and the tabs
-  whose sessions were in it say why they ended and restart as usual. If the old holder runs but
-  still doesn't answer, Deckhand never starts a second one beside it: the button then reads
-  **Stop it (ends its N sessions) and start a new one**. Either way, new tabs keep running again.
+- **The session holder crashes, or stops answering** and attaching to it again fails: a bar over
+  the centre says so. The sessions it kept can't be reached from here (after a crash they have
+  ended; pi, Claude and Codex resume from their files when you restart them, shells start
+  fresh), and tabs you open meanwhile run in Deckhand Core itself, so they don't outlive it.
+  **Restart session holder** on the bar: if the old holder still runs, Deckhand attaches to it
+  again and its sessions come back to their tabs; if it is gone, a new holder starts and the
+  ended tabs restart as usual. If the old holder runs but still doesn't answer, Deckhand never
+  starts a second one beside it: the button then reads **Stop it (ends its N sessions) and start
+  a new one**. Either way, new tabs keep running again.
 - **Stop All Sessions, a logout or a restart of the Mac**: everything stops. The next start
   restores your sessions. Scheduled jobs wait until Deckhand runs again.
 
@@ -240,16 +291,18 @@ settings. The Developer ID will close that gap.
   leading `~` meaning your home folder as pi reads it; Deckhand lists them, it does not copy them).
   pi's `PI_CODING_AGENT_SESSION_DIR` and its `sessionDir` setting are not followed yet: sessions
   kept there do not show in Deckhand.
-- A **chat** is a pi conversation outside any project. Chats run in one folder, the main
-  folder's `chats/` (or `~/Chats` without a main folder, or the folder you chose), so
-  `cd <that folder> && pi --resume` finds them too. That folder has its own **chat
-  instructions** (`AGENTS.md`, which pi reads there besides your global one): in chats pi is a
-  conversation partner and researcher, not a coding agent. It explains, looks things up and
-  cites sources, and draws diagrams in text. Edit them with the palette's **Edit chat
-  instructions** or Settings › Sessions & chats.
+- A **chat** is a conversation (pi, Claude Code or Codex) outside any project. Chats run in one
+  folder, the main folder's `chats/` (or `~/Chats` without a main folder, or the folder you
+  chose), so `cd <that folder> && pi --resume` finds them too. That folder has its own **chat
+  instructions** (`AGENTS.md`, which pi and Codex read there besides your global one): the
+  starter makes the agent a conversation partner and researcher, not a coding agent. It
+  explains, looks things up, cites sources and draws diagrams in text. Edit them with the
+  palette's **Edit chat instructions** or Settings › Sessions & chats
+  ([Chats settings](#chats-settings)).
 - An **open session** is a session running in Deckhand now, with its tabs.
-- A **Claude session** is a [Claude Code](#claude-code-tabs) conversation in a project. It is a
-  session of its own, beside your pi sessions: its main tab is Claude, there is no pi tab.
+- A **Claude session** or **Codex session** is a [Claude Code](#claude-code-tabs) or
+  [Codex](#codex-tabs) conversation in a project: a session of its own, beside your pi sessions,
+  whose main tab is Claude or Codex, with no pi tab.
 
 The Sessions tab has three sections:
 
@@ -262,105 +315,108 @@ The Sessions tab has three sections:
   and **+ New session**. Its Claude sessions are listed with its pi sessions, marked **Claude**.
 - **Chats**: your chats, with **+ New chat**.
 
-**Other machines** (with **Machines over SSH** on, as it is by default): **+ Add a machine…** at
+**Other machines** (with **Machines over SSH** on, as it is by default). **+ Add a machine…** at
 the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
 Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter
 (for another port, add a `Host` entry with its `Port` to `~/.ssh/config` and type that name).
-Deckhand calls it by its host's name (`nuc` for `me@nuc.local`); once it is added, Settings
-closes and you are back at your session, with the machine in the sidebar (an add started on the
-Settings page stays there).
-**Rename…** changes the name.
-While Machines over SSH is on, this Mac's own sections (Open, Projects, Chats) sit under a header
-of their own: a green dot, this Mac's name and *this Mac*. After them, each machine has its own, under its name, with a dot (green online,
-amber when it needs you, red when its install failed, grey offline), its status in a word or two
-(*Online*, *Offline*, *Connecting…*, *Needs you to log in*: the Jobs tab and Settings use the same
-words) or, when something is wrong, a note of up to two lines under it that says what, and a button
-when there is something to do: **Log in…** (ssh wants a password, a host key or a
-code: a shell tab here runs `ssh` to it so you can answer, in a new chat if no session is open,
-and the link connects once you are in), **Connect**, **Take back**, **Try again**, **Install…**, **Retry** (an
-install that failed), **Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
-and **Cancel** while an install runs. Point at its name for why, and ssh's own words. Its **…**
-button (or a right click on it) has **Connect**, **Log in…** or **Take back**, **Add folder on nuc…**,
-**Open web page…**, **Rename…**, **Remove…** and **Machines settings…** (Settings › Machines). This Mac's **…** has
-**Add a machine…** and **Machines settings…**. Click a header (this Mac's too) to fold it, as Open, Projects and Chats
-fold: a folded machine shows only its sessions that wait for you, and its header counts its open
-sessions. This Mac's fold is saved; other machines' last until Deckhand quits.
-A machine that refuses this Mac says to turn on **Allow other machines to connect** on it, and
-one that is not a Mac or Linux says so; its button (and its **…** menu) says **Try again**, for
-after you have fixed it on that machine. Deckhand does not keep retrying a machine that needs you (to log in, or to allow
-this Mac): it tries again when you click. An offline machine is retried on its own, less and less
-often. Under it are its open sessions, then its projects, drawn as this Mac's are (the status
-mark, how long it has been so and what it asks; an open session's age is not known here) and thinned by the filter and
-the Running, Waiting and Pinned chips like this Mac's (its header stays). Click a project to list its sessions,
-as that machine has them. Its projects are the folders where pi or Claude Code have sessions there,
-and the folders you add from here: **Add folder on nuc…** (its **…** menu, and under a machine
-with no projects yet) asks for the folder's path on that machine in the palette (`~/code/app` or
-`/srv/app`; there is no file browser of another machine). That machine's Deckhand checks it is a
-folder there and keeps the project, as if you had added it at its own window; a path that is not
-there is refused with its words. It is offered only while both this Mac's Deckhand and that
-machine's are new enough for it (update Deckhand there if it is missing). The
-palette names the machine of its items that are on another one (*… · on nuc*). Click an open session to show it, or one of a project's sessions to open
-it there (**+ New session** under it starts one there, with what that machine has installed and its
-own Claude Code account; Codex once that machine runs a Deckhand that starts Codex tabs: an older
-one says to update Deckhand there), and work in its terminals as in a local tab. On a machine with
-no coding agent yet, **+ New session** still opens a session there: its pi tab says pi is missing
-and how to install it, and a shell tab beside it (⌘T) is a terminal on that machine, to install
-pi or Claude Code from.
+Deckhand calls it by its host's name (`nuc` for `me@nuc.local`; **Rename…** changes it). Once it
+is added, Settings closes and you are back at your session, with the machine in the sidebar (an
+add started on the Settings page stays there).
+
+**Its header.** This Mac's own sections (Open, Projects, Chats) sit under a header of their own:
+a green dot, this Mac's name and *this Mac*. Each machine follows under its name, with a dot
+(green online, amber when it needs you, red when its install failed, grey offline) and its status
+in a word or two (*Online*, *Offline*, *Connecting…*, *Needs you to log in*: the Jobs tab and
+Settings use the same words), or a note of up to two lines that says what is wrong. Point at its
+name for why, and ssh's own words. Its button, when there is something to do: **Log in…** (ssh
+wants a password, a host key or a code: a shell tab here runs `ssh` to it so you can answer, in a
+new chat if no session is open, and the link connects once you are in), **Connect**, **Take
+back**, **Try again**, **Install…**, **Retry** (a failed install), **Update** or **Keep
+running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
+and **Cancel** while an install runs. Its **…** (or a right click) has **Connect**, **Log in…** or
+**Take back**, **Add folder on nuc…**, **Open web page…**, **Rename…**, **Remove…** and
+**Machines settings…**; this Mac's **…** has **Add a machine…** and **Machines settings…**. Click
+a header (this Mac's too) to fold it: a folded machine shows only its sessions that wait for you,
+and its header counts its open sessions. This Mac's fold is saved; other machines' last until
+Deckhand quits. A machine that refuses this Mac says to turn on **Allow other machines to
+connect** on it, and one that is not a Mac or Linux says so; fix it there, then click **Try
+again**. Deckhand retries an offline machine on its own, less and less often, but never one that
+needs you (to log in, or to allow this Mac) until you click.
+
+**Its sessions and projects.** Under the header are its open sessions, then its projects, drawn
+as this Mac's (an open session's age is not known here) and thinned by the filter and the
+Running, Waiting and Pinned chips. Its projects are the folders where pi or Claude Code have
+sessions there, and the folders you add with **Add folder on nuc…** (its **…** menu, and under a
+machine with no projects yet): type the folder's path on that machine in the palette
+(`~/code/app` or `/srv/app`; there is no file browser of another machine). That machine's
+Deckhand checks it is a folder there and keeps the project as if you had added it at its own
+window; it is offered only while both Deckhands are new enough. The palette names the machine of
+items on another one (*… · on nuc*). Click an open session to show it, or a project's session to
+open it there. **+ New session** under a project starts one there, with that machine's own coding
+agents and accounts (Codex only once that machine's Deckhand starts Codex tabs; an older one says
+to update it). On a machine with no coding agent yet, **+ New session** still opens a session:
+its pi tab says pi is missing and how to install it, and a shell tab beside it (⌘T) is a terminal
+there to install pi, Claude Code or Codex from. Such a session (pi never started, so pi has no
+file for it) is kept across core restarts and updates while a shell, Claude or Codex tab in it
+runs; its pi tab tries pi again when you show it.
+
 **New session on another machine.** The menu of one of this Mac's projects, sessions or open
-sessions (right click, or its **…**) has **New session on nuc in api** for each online machine with
-a project of the same folder name (`api`): the last part of its folder, exactly, upper and lower
-case as they are. When one machine has several, each shows its folder there (*New session on nuc
-in api (~/work/api)*: `~` only for the home of the user you log in there as, when you added it as
-`user@host`; a long folder is cut in its middle). At most three rows per machine and eight in all;
-the rest is counted (*and 4 more on nuc*). It does what **+ New session** under that project does: it selects it and
-starts a fresh session there, with that machine's coding agents and account. If that machine went
-offline or restarted, or the project moved, after the menu was drawn, nothing starts and a toast
-says so (an open picker for another machine's project does the same after a restart there). **New session on
-another machine…** in the palette does the same for the selected project (and says so when no
-machine has a project of that name). Nothing of this Mac's goes with it: not the conversation,
-not your uncommitted changes, not a path, account or git state. Push or sync your work yourself
-first, then pick it up there.
+sessions (right click, or its **…**) has **New session on nuc in api** for each online machine
+with a project of the same folder name (`api`: the last part of its folder, exactly, case
+included). When one machine has several, each shows its folder (*New session on nuc in api
+(~/work/api)*; `~` only for the home of the user you log in there as, when you added it as
+`user@host`). At most three rows per machine and eight in all; the rest is counted (*and 4 more
+on nuc*). It selects that project and starts a fresh session there, as **+ New session** does.
+If the machine went offline or restarted, or the project moved, after the menu was drawn,
+nothing starts and a toast says so. **New session on another machine…** in the palette does the
+same for the selected project. Nothing of this Mac's goes with it: not the conversation, not
+your uncommitted changes, not a path, account or git state. Push or sync your work first.
+
 **Continue this conversation on another machine.** A pi session of one of this Mac's projects
 (its row's or open row's menu) also has **Continue this conversation on nuc in api** for each
-such project on a machine whose Deckhand is new enough to take one. It copies the conversation
-(pi's transcript file) to that machine, whose Deckhand forks it into a **new session** there with
-`pi --fork` (pi 1.4.0 or later there), in that project's folder: the conversation goes on there
-from where it was, with a new id. The session here stays as it is, open or not; nothing is closed
-or deleted. **Continue this conversation on another machine…** in the palette does the same for
-the session on screen. The whole transcript is copied, with everything in it: what you and the
-agent wrote, and the file contents, command output and anything else its tools read or printed.
-Only pi sessions (not Claude Code or Codex), only from this Mac to another machine (never the
-other way), only from your click in this window (not Atlas, a script or another machine viewing
-this one), one at a time, at most 256 MB. Paths in the history still name this Mac's folders, and
-your working tree does not go with it: push or sync it yourself. Sending the same conversation
-again opens the same session there; sending it again after more turns here makes another one.
-While one of its sessions is on screen, the top bar shows a quiet **on <machine>** before its tabs,
-and the window's title and the tabs' tooltips start with the machine's name: what you type, paste and resize goes to
-that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
-**⌘1**–**⌘9** and clicking its tabs act on that machine; a confirmation it asks for shows here as
-*On <machine>: …*. **Open web page…** in an online machine's **…** (or **Open a machine's web page…** in the
-palette) asks for a port on that machine, like `3000` or `3000/admin`, and opens the page its own
-`localhost` serves there (a dev server) in an ordinary browser tab here: in the session on screen,
-or the last one of this Mac's you looked at when another machine's is on screen (with none open,
-in a new chat). Deckhand starts
-an ssh of its own for that page (a new connection with your ssh config, not the machine's link), which forwards a
-free port of this Mac (`127.0.0.1` only) to that port on the machine's own `127.0.0.1`, never to another
-host; the tab opens once the forward answers. That ssh cannot ask for a password or passphrase, so
-**opening pages needs key-based login to that machine** (a key ssh can use without asking: in your
-agent, or without a passphrase). Deckhand ends it when you close the tab, when the link drops or
-when you remove the machine; if the connection drops by itself, its tab closes. The tab is like any other local tab:
-you and this Mac's agents can use it. While it is open, any program of yours on this Mac can
-reach that port too, as with your own `ssh -L`. Its agents' browser is that machine's own: they never open pages in this Mac's
-browser, and while you view that machine from here (or if it has no window, like a Linux machine)
-their browser tools answer that no browser is available there. Its other kinds of tab (editors, pages, apps) show only on that machine for
-now. This Mac's [Atlas](#what-atlas-can-do) sees its sessions and jobs and can work in its
-sessions; this Mac's other agents can't act on it. Its programs can't use this Mac's clipboard (OSC 52
-is ignored), open windows or links (a link you ⌘-click in its terminal opens in this Mac's default
-browser: your click, not that machine's) or notify here, but its jobs that need you and its bell's new entries
-ring the bell ([Notifications](#notifications)) here. If the link drops, its terminals reconnect with their
-screen when it comes back. While the machine is offline its rows are greyed and show what it had
-when last seen; they come back up to date when it does. Nothing of another machine is saved on this
-Mac.
+such project on a machine whose Deckhand can take one; **Continue this conversation on another
+machine…** in the palette does it for the session on screen. It copies pi's transcript file to
+that machine, whose Deckhand forks it into a **new session** in that project's folder with
+`pi --fork` (pi 1.4.0 or later there): the conversation goes on there with a new id. The session
+here stays as it is. The whole transcript goes, with everything in it: what you and the agent
+wrote, and the file contents, command output and anything else its tools read or printed. Only
+pi sessions (not Claude Code or Codex), only from this Mac to another machine, only from your
+click in this window (not Atlas, a script or another machine viewing this one), one at a time,
+at most 256 MB. Paths in the history still name this Mac's folders, and your working tree does
+not go with it: push or sync it yourself. Sending the same conversation again opens the same
+session there; after more turns here it makes another one.
+
+**Working in its sessions.** While one of its sessions is on screen, the top bar shows a quiet
+**on <machine>** before its tabs, and the window's title and the tabs' tooltips start with the
+machine's name: what you type, paste and resize goes to that machine, and its output comes back
+here. **⌘T** (or **+** › New shell tab), **⌘W**, **⌘1**–**⌘9** and clicking its tabs act on that
+machine; a confirmation it asks for shows here as *On <machine>: …*. Its other kinds of tab
+(editors, pages, apps) show only on that machine for now. If the link drops, its terminals
+reconnect with their screen when it comes back; while it is offline its rows are greyed and show
+what it had when last seen. Nothing of another machine is saved on this Mac.
+
+**Its web pages.** **Open web page…** in an online machine's **…** (or **Open a machine's web
+page…** in the palette) asks for a port on that machine, like `3000` or `3000/admin`, and opens
+the page its own `localhost` serves (a dev server) in an ordinary browser tab here: in the
+session on screen, or the last one of this Mac's you looked at when another machine's is on
+screen (with none open, in a new chat). Deckhand starts an ssh of its own for it (a new
+connection with your ssh config, not the machine's link) that forwards a free port of this Mac
+(`127.0.0.1` only) to that port on the machine's own `127.0.0.1`, never to another host; the tab
+opens once the forward answers. That ssh cannot ask for a password or passphrase, so **opening
+pages needs key-based login to that machine** (a key ssh can use without asking: in your agent,
+or without a passphrase). The forward ends when you close the tab, when the link drops or when
+you remove the machine; if it drops by itself, its tab closes. The tab is like any other local
+tab: you and this Mac's agents can use it, and while it is open any program of yours on this Mac
+can reach that port too, as with your own `ssh -L`.
+
+**What crosses over.** This Mac's [Atlas](#what-atlas-can-do) sees the machine's sessions and jobs
+and can work in its sessions; this Mac's other agents can't act on it. That machine's agents use
+its own browser, never this Mac's: while you view it from here (or if it has no window, like a
+Linux machine) their browser tools answer that no browser is available there. Its programs can't
+use this Mac's clipboard (OSC 52 is ignored), open windows or links (a link you ⌘-click in its
+terminal opens in this Mac's default browser: your click, not that machine's) or notify here,
+but its jobs that need you and its bell's new entries ring the bell here
+([Notifications](#notifications)).
 
 A session's **title** is pi's own: the name you gave it with `/name` in pi, else your first
 message, else "Untitled session · <date>" (see [Troubleshooting](#troubleshooting)).
@@ -617,10 +673,10 @@ is waiting for you).
   row), use the **⌄** menu, or press ⇧⌘N (in the selected project). `build/deckhand --claude DIR`
   starts a Claude session in DIR.
 - **To start a new chat**, click the New chat button in the top bar or **+ New chat**, or press ⌘N.
-- **Which agent starts.** Deckhand looks for pi and Claude Code (it never runs them to find out).
-  With both installed, **New session** and **New chat** open a small picker: **pi** and **Claude
-  Code** (once per account when you have several), each with its icon, under the button or row you
-  used. ↑↓ and Enter, a number key (1, 2…, the keypad's too) or a click picks; Esc closes it. The one you used last comes first and is selected, so
+- **Which agent starts.** Deckhand looks for pi, Claude Code and Codex (it never runs them to find
+  out). With more than one installed, **New session** and **New chat** open a small picker: **pi**,
+  **Claude Code** and **Codex** (once per account when you have several), each with its icon,
+  under the button or row you used. ↑↓ and Enter, a number key (1, 2…, the keypad's too) or a click picks; Esc closes it. The one you used last comes first and is selected, so
   Enter starts it again. With only one installed it starts at once, without a picker; with
   neither, a message says how to install one. Deckhand looks again each time you start one, so a
   harness you just installed is offered. The same picker opens from a project's **…** menu
@@ -670,7 +726,7 @@ is waiting for you).
 - **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
-- **To pick up new pi sessions** started outside Deckhand, use the gear's "Rescan sessions".
+- **To pick up new sessions** started outside Deckhand, use the gear's "Rescan sessions".
 
 ### Chats settings
 
@@ -687,8 +743,9 @@ do is up to the chats folder's own instructions, which you write: its `AGENTS.md
 
 ## Tabs
 
-Each open session has one **pi tab** (always first) and any number of **shell tabs**,
-**Claude tabs**, **editor tabs**, **browser tabs** and **app tabs**.
+Each open session has one main tab, always first: **pi**, or **Claude** or **Codex** in a Claude or
+Codex session. Beside it go any number of **shell tabs**, **Claude tabs**, **Codex tabs**,
+**editor tabs**, **browser tabs** and **app tabs**.
 
 - **To open a shell tab**, click **+** in the tab strip or press ⌘T. It starts your login shell
   in the session's folder. The Files tab's row menu also has **Open terminal here**.
@@ -1006,8 +1063,8 @@ the extra flags it first ran with) in a Claude session; click an open one to go 
 it runs as a tab of a pi session). The list comes from Deckhand's own record of the last 100
 Claude sessions it ran, plus the Claude conversations you ran outside Deckhand (below).
 
-**Every row shows its agent:** pi's logo for pi, Clawd (Claude Code's little orange mascot) for Claude Code, also on
-the tabs and in the **New session** picker.
+**Every row shows its agent:** pi's logo for pi, Clawd (Claude Code's little orange mascot) for
+Claude Code, a `>_` prompt for Codex, also on the tabs and in the **New session** picker.
 With more than one Claude account, Claude rows and tabs also show the account's name.
 
 **Claude sessions you ran outside Deckhand** (in a terminal, an IDE) are rows too: Deckhand lists
@@ -1074,11 +1131,12 @@ button again, or use **Refresh shell environment** (the palette), or restart Dec
 session or tab saved while Claude Code was installed and restored without it does not start: its
 tab says why. If `claude` is installed but cannot start, the tab says so and how to fix it.
 
-**Without pi.** Deckhand works with Claude Code alone. It looks for `pi` on your login shell's
+**Without pi.** Deckhand works with Claude Code or Codex alone. It looks for `pi` on your login shell's
 PATH and in pi's managed install (`$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`), never running
 it; when neither has it, it asks your login shell (`command -v pi`, as a pi tab's shell would find
 it: nvm, fnm, mise or pnpm set up in `~/.zprofile`), and until that answers, pi counts as
-installed. Without pi, **New session**, **New chat** and `deckhand DIR` start Claude Code at once (no picker), Atlas's
+installed. Without pi, **New session** and **New chat** start the one you have at once (no
+picker when only one is installed), `deckhand DIR` starts Claude Code, Atlas's
 button is not shown and ⌘J says that Atlas needs pi, and a job's run fails with "Jobs run pi,
 which was not found…" (Atlas and jobs run on pi for now). The Settings page, the palette and the gear
 show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With neither pi nor Claude Code,
@@ -1180,34 +1238,38 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
 ### Comments for the agent
 
 You can point at part of a tab and write a note for the session's agent; the note waits and goes
-to that tab's session's pi, Claude or Codex tab **with your next message**: your text, what you picked,
-and a cropped picture of it.
-Today: **an app tab's Inspect boxes**: with **Inspect** on, click a box; a bar "Comment on box
-“coin”:" takes your text (**Add** or Enter; **Cancel** or Esc). The picker for browser pages is on
-its way and feeds the same path.
+to that session's pi, Claude or Codex tab **with your next message**: your text, what you picked,
+and a cropped picture of it. Two places to point:
 
-- **The strip.** While the session on screen has comments, a strip shows above its pi tab (and
+- **A browser page**: **Annotate** in its bar (or ⇧⌘.) turns comment mode on. Hover outlines an
+  element, a click picks it, a drag picks an area; the page gets no clicks or keys meanwhile. A
+  numbered badge marks each pending comment on the page; click it to edit the comment. Esc closes
+  the comment bar, then leaves the mode. Details: [BROWSER.md](BROWSER.md).
+- **An app tab's Inspect boxes**: with **Inspect** on, click a box.
+
+Either way a bar ("Comment on button “Save”:", "Comment on box “coin”:") takes your text (**Add** or Enter; **Cancel** or Esc).
+
+- **The strip.** While the session on screen has comments, a strip shows above its main tab (and
   its browser and app tabs): "2 comments will go with your next message", with **View**, **Send
-  now** and **Clear**. Type your next message in pi as usual: the comments go with it, after your
-  text, and the strip goes away once pi has them.
+  now** and **Clear**. Type your next message as usual: the comments go with it, after your
+  text, and the strip goes away once the agent has them.
 - **View** opens the list: each comment with **Edit** (change its text; **Save** or Enter,
   **Cancel** or Esc) and **Delete**. **Clear** removes them all; nothing is sent.
 - **Send now** sends them on their own, as a message "Here are my comments:". It is disabled, and
   the strip says why, while the session's pi is not running, Deckhand's bridge is not connected
   to it, or a pi dialog is open; the comments wait meanwhile and go once pi is back.
-- **Claude tabs.** The session's comments go with your next message to whichever agent gets it
-  first: its pi, or a Claude tab of the session (as context of that message, the pictures as
-  files Claude reads). The strip shows on Claude tabs too. On a Claude tab, **Send now** sends
-  them to that Claude: it types "Here are my comments." and the comments go with that message, as
-they would with one you type (the pictures as files Claude reads); it waits
-  until Claude has finished its turn, is not asking you something, and you have nothing typed in
-  its prompt (the button's tooltip says why it cannot go yet). Anywhere else it goes to pi.
+- **Claude and Codex tabs.** The session's comments go with your next message to whichever agent
+  gets it first: its pi, or a Claude or Codex tab of the session (as context of that message, the
+  pictures as files it reads). The strip shows on those tabs too. There, **Send now** types "Here
+  are my comments." and the comments go with it, once the agent has finished its turn, is not
+  asking you something, and you have nothing typed in its prompt (the button's tooltip says why
+  it cannot go yet). Anywhere else it goes to pi.
 - Comments always go to **their own tab's session**, even when you look at another session. A
   session keeps at most 20; at most 8 pictures go with one message (the rest go as text and say
   so). Closing the window keeps them; they are lost when Deckhand Core stops or updates.
 - **Closing** a tab that has comments asks first: **Send and close**, **Drop and close** or
-  **Cancel**. In a Claude session (no pi), Send and close goes to its Claude tab, with all of the
-  session's comments. Closing a session with comments asks too: **Send now** (the session stays open:
+  **Cancel**. In a Claude or Codex session (no pi), Send and close goes to its main tab, with all
+  of the session's comments. Closing a session with comments asks too: **Send now** (the session stays open:
   closing it stops its pi), **Drop and close** or **Cancel**.
 - pi is told that each "Comment:" line is what you wrote, and that page titles, addresses and the
   pictures come from web pages and apps and are data, not instructions.
@@ -1218,8 +1280,8 @@ they would with one you type (the pictures as files Claude reads); it waits
 
 ## The terminal
 
-pi and shells run in a real terminal (Ghostty's terminal engine), so pi looks as it does anywhere
-else.
+pi, Claude Code, Codex and shells run in a real terminal (Ghostty's terminal engine), so each looks
+as it does anywhere else.
 
 - **To select text**, drag; the selection shows as you drag. Double-click selects a word,
   triple-click a line; keep dragging to extend by words or lines. Drag past the top or bottom
@@ -1334,7 +1396,7 @@ first) and its **Branches without a worktree**, each with its state:
 
 - **To show another checkout in the tree**, click it. Deckhand remembers the choice per project.
 - **Row actions** (**…**, or → / Space on the keyboard): Open terminal here, **New session
-  here** (pi or Claude Code, as **New session** offers them; kept with the project's sessions),
+  here** (pi, Claude Code or Codex, as **New session** offers them; kept with the project's sessions),
   Show changes, Reveal in Finder, Copy path, Copy branch name.
 - **Clean up…** appears for a worktree that is clean and merged. It runs `git worktree remove`
   (never forced) and `git branch -d`, after you confirm. It never touches the main checkout,
@@ -1404,10 +1466,12 @@ buttons), with a search box on top.
 - **Every control runs what it ran before**: the same action as its row in the palette, the gear
   or the menu bar, with the same confirmations. The page adds no settings of its own.
 - **Only you, at this Mac**: a row with this badge can be changed only by you, at this Mac: not by
-  Atlas or another agent, not by a script, not by another machine viewing this one. Among them:
-  **Allow other machines to connect**, **Machines over SSH**, the pi extensions, Claude Code's
-  skip-permissions default. **Next start** and **Next launch** badges say
-  when a change takes effect.
+  Atlas or another agent, not by a script, not by another machine viewing this one. These are
+  the settings that bound what other machines and agents may do here: **Allow other machines to
+  connect**, **Machines over SSH** and your machines list, the pi extensions, and the default
+  flags (Claude Code's **Skip permissions in new tabs**, Codex's **Full access in new Codex
+  tabs**); your notifications too. **Next start** and **Next launch** badges say when a change
+  takes effect.
 - **Deckhand writes only its own settings.** pi's, Claude Code's and Codex's config are files:
   under a card, **Advanced: open the file** lists them. Click one to open it in an ordinary
   editor tab of the session you opened the page from (this Mac's sessions only; otherwise a toast
@@ -1522,16 +1586,16 @@ over `ssh` as you (Remote Login on, your keys) can see and drive this Mac's sess
 other machine can. A machine you allow acts as you on this Mac: it can type into its shells and
 prompt its sessions and its Atlas, and so reach the machines this Mac reaches. It can't change the
 settings that bound it and your agents here: **Allow other machines to connect**, **Machines over
-SSH**, the pi extensions (guardrails among them) and Claude Code's skip-permissions default;
-only you, at this Mac, change those (as with your notifications and your machines
-list). Allow only machines you trust as yourself.
+SSH**, your machines list, the pi extensions (guardrails among them) and the Claude Code and
+Codex default flags; only you, at this Mac, change those (and your notifications). Allow only
+machines you trust as yourself.
 
 A Linux machine (x86_64) runs its core as your systemd user service `deckhand-core`, started when
 needed. Unless lingering is on for you there, it stops when you log out of that machine, and its
 jobs with it: `loginctl enable-linger` there keeps it running. Its sessions keep running when that
 core restarts or updates, as on a Mac: they run in a session holder of their own
 (`deckhand-holder-…` in `systemctl --user list-units`). Under each online machine, its coding
-agents (pi, Claude Code and their extras, as that machine's own checklist has them) are listed
+agents (pi, Claude Code, Codex and their extras, as that machine's own checklist has them) are listed
 read-only, each with **Copy** for the command that installs or updates it there: open a shell tab
 on that machine and paste it (a fresh machine: **Add folder on nuc…**, then **+ New session**
 under that project and ⌘T, as above).
@@ -1728,7 +1792,7 @@ when the build session finishes").
 - **The header** shows its status (starting…, working…, needs you, error, stopped) and its model.
 - The top bar's Atlas button counts the runs that finished while the drawer was shut, and is
   tinted while Atlas waits for you. While Deckhand is in the background, Atlas finishing or
-  asking raises a macOS notification (gear: **Atlas's notifications**).
+  asking raises a macOS notification (Settings › Notifications: **Atlas's notifications**).
 - **Where it works**: Atlas starts in your [main folder](#your-folders), or in the data dir's
   `home/` while no main folder is set or it cannot be reached; never in your home folder (`~`),
   even if you made `~` the main folder.
@@ -1781,8 +1845,10 @@ In short, Atlas can:
 - look at what is open (projects, sessions, tabs, panels, status);
 - do what you can do in the window: open, start, focus and close sessions and tabs, open files,
   change the layout and the look;
-- send a prompt to another session, and wait for it to finish, in a pi tab or a Claude tab (its
+- send a prompt to another session, and wait for it to finish, in a pi, Claude or Codex tab (its
   message waits like any other: never into what you are typing);
+- type a command into a shell tab, only while it sits at its prompt (never while a program runs
+  there; at most 64 KB; [PROTOCOL.md](PROTOCOL.md) has the details);
 - **watch** a session when you ask ("tell me when it finishes / needs me / exits"): it gets one
   message when that happens and tells you (`desk_watch`; at most 5 at a time);
 - tell you **what happened while you were away**, from the bell's entries (`desk_events`);
@@ -1816,7 +1882,7 @@ What it cannot do:
 ## Jobs
 
 A job is a prompt that pi runs for you, on a schedule or when you click **Run now**, while
-Deckhand is open: "every weekday at 7, list the pull requests waiting on me", "every hour, check
+Deckhand Core runs (also with the window closed: [Running](#running)): "every weekday at 7, list the pull requests waiting on me", "every hour, check
 the build". Each run is a fresh, one-shot pi that cannot ask you anything; it finishes and
 reports. There are no jobs until you make one. Jobs need pi installed: without it, a run fails
 and says so.
@@ -1988,10 +2054,10 @@ The bell in the top bar collects what happened in sessions you were **not lookin
 
 | Entry | When |
 |---|---|
-| Finished | pi went idle after working |
-| Waiting for you | a pi dialog opened, or its answer ended with a question |
-| Stopped with an error | pi's run ended with an error |
-| pi exited | pi's process exited |
+| Finished | the agent (pi, Claude Code or Codex) went idle after working |
+| Waiting for you | it wants a permission, an answer or a login (a pi dialog too), or its answer ended with a question |
+| Stopped with an error | its turn ended with an error |
+| pi exited, Claude exited, Codex exited | pi's process exited; a Claude or Codex tab's only when it ended with an error code |
 | Jobs | a job's run finished, needs you or failed ([Jobs](#jobs)), named *project · job* (Atlas, Chats; nothing for Other) |
 | Another machine's | its own bell's entries, and its jobs that need you, named with the machine (a job: *machine · project · job*) ([Machines over SSH](#projects-sessions-and-chats)) |
 
@@ -2083,14 +2149,14 @@ nothing about you (only `User-Agent: Deckhand/<version>`). Pre-releases and draf
 offered. If the check fails (offline, GitHub down) nothing shows; the attempt is in
 `commands.log`.
 
-**When a newer version exists**, a bar over the centre says "Deckhand 0.1.1 is available":
+**When a newer version exists**, a bar over the centre says "Deckhand 0.5.1 is available":
 
 - **Release notes**: the release's page on GitHub, in your browser.
 - **Skip this version**: it is not offered again (a newer one is). **Check for Updates…** offers
   it again.
 - **Later**: hides the bar until the next check finds a release.
 - **Update**: downloads the release and checks it. Nothing is replaced yet, and you can keep
-  working. Then the bar says "Deckhand 0.1.1 is ready" with **Restart to update**.
+  working. Then the bar says "Deckhand 0.5.1 is ready" with **Restart to update**.
 - **Restart to update**: replaces Deckhand and restarts the window. Your sessions **carry on
   through the update**: the new window installs its Deckhand Core, and the running one hands your
   sessions over to it, each screen exactly as it was (a pi turn keeps running). Browser pages
@@ -2141,30 +2207,21 @@ setting. **Check for updates automatically** (Settings › Deckhand, or the pale
 off. Your choices (the setting, the skipped version, the last check's time) are in
 `<data dir>/update.json`.
 
-**To update by hand**, quit Deckhand (**Quit Deckhand and Stop All Sessions…**: this stops your
-sessions, which the in-app update keeps) and run the install script again:
+**To update by hand**, quit Deckhand with **Quit Deckhand and Stop All Sessions…** (this stops
+your sessions, which the in-app update keeps), then install again as in
+[Installing](#installing): the install script replaces `Deckhand.app` where it is, or replace it
+yourself with a downloaded copy.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/install.sh | sh
-```
-
-It downloads the latest release, checks its SHA-256 and code signature and replaces
-`Deckhand.app` where it is (`/Applications`, else `~/Applications`; `sh -s -- --dir PATH` for
-another folder, `--version X.Y.Z` for a given release). It refuses to run while Deckhand runs.
-[Read it](https://github.com/McFalljb/deckhand/blob/main/scripts/install.sh) before you pipe it to `sh`. Or download the zip from the
-[releases page](https://github.com/McFalljb/deckhand/releases), check it with
-`shasum -a 256 -c deckhand-<version>-macos-arm64.zip.sha256`, quit Deckhand and replace
-`Deckhand.app` in Applications.
+Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
+download or install one: only you can.
 
 ### From pi-desk to Deckhand
 
 pi-desk is now Deckhand. pi-desk 0.1.x does not update itself to Deckhand: install it fresh. Quit
-pi-desk first (the two must not run at the same time), delete `pi-desk.app`, then install Deckhand with
-`curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/install.sh | sh` (or
-download it from the [releases page](https://github.com/McFalljb/deckhand/releases) and move
-`Deckhand.app` to Applications). Your projects, sessions, settings, Atlas, jobs and Claude accounts carry over.
-While pi-desk runs, Deckhand does not start: it says so and quits. From Deckhand on, releases come
-as `deckhand-<version>-macos-arm64.zip`.
+pi-desk first (the two must not run at the same time), delete `pi-desk.app`, then
+[install Deckhand](#installing) (the install script reminds you if `pi-desk.app` is still there).
+Your projects, sessions, settings, Atlas, jobs and Claude accounts carry over. While pi-desk
+runs, Deckhand does not start: it says so and quits.
 
 **Old names that still work.** From 0.2.0 everything is named Deckhand, and the old names keep
 working, so your data and setup carry over and nothing you rely on breaks:
@@ -2179,11 +2236,8 @@ working, so your data and setup carry over and nothing you rely on breaks:
   (Deckhand never moves it: `git mv` it when you like);
 - your main folder, wherever it is (`~/pi-desk` stays `~/pi-desk`).
 
-The bundle id is still `dev.pi-desk.app` (0.2.0 and 0.3.0); a later release changes it to
+The app's bundle id is still `dev.pi-desk.app` (through 0.5.0); a later release changes it to
 `dev.deckhand.app`, and macOS then asks once more for folder access and notifications.
-
-Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
-download or install one: only you can.
 
 ## Your data
 
@@ -2337,6 +2391,13 @@ tabs do the same for `claude` with `~/.local/bin` and `~/.claude/local`.
 **A session shows "Session gone".** Its session file or folder no longer exists; click the button
 to close it.
 
+**A Claude or Codex session did not come back.** A session with only a Claude Code or Codex tab
+whose program exited before it reported its conversation id is not saved. Start it again.
+
+**A Linux machine's core runs outside its unit.** A `systemctl --user stop` or `restart` of
+`deckhand-core` in the middle of an update can leave the new core running outside the unit until
+it is stopped once. No sessions are lost.
+
 **Where are the logs?** `commands.log` in the data dir (every command and its result), and
 `run/core.log` and `run/holder.log` (what Deckhand Core and the session holder print). The
 window's errors go to the terminal you started Deckhand from. A pi session's own logs are pi's.
@@ -2385,8 +2446,8 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 
 | Menu item | Shortcut | Notes |
 |---|---|---|
-| New chat | ⌘N | pi or Claude Code: a picker when both are installed |
-| New session in project | ⇧⌘N | in the selected project; pi or Claude Code, as New chat |
+| New chat | ⌘N | pi, Claude Code or Codex: a picker when more than one is installed |
+| New session in project | ⇧⌘N | in the selected project; pi, Claude Code or Codex, as New chat |
 | New shell tab | ⌘T | |
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen |
 | New browser tab |  | a blank page, its address field ready |
@@ -2524,7 +2585,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Action | Shortcut | What it does |
 |---|---|---|
 | New chat | ⌘N | a new chat in the Chats folder |
-| New session | ⇧⌘N | a new session in the selected project (pi or Claude Code: a picker when both are installed) |
+| New session | ⇧⌘N | a new session in the selected project (pi, Claude Code or Codex: a picker when more than one is installed) |
 | New session on another machine… |  | a fresh session in the project of the same folder name on an online machine ([Other machines](#projects-sessions-and-chats)) |
 | Continue this conversation on another machine… |  | a copy of the pi session on screen (its whole transcript) forked into a new session in the project of the same folder name on another machine; this one stays here ([Other machines](#projects-sessions-and-chats)) |
 | Chats folder… |  | pick the folder chats run in |
@@ -2532,6 +2593,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New shell tab | ⌘T | a shell in the session's folder |
 | New browser tab |  | a web page in the session on screen (its address field takes the keyboard) |
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen, with Deckhand's plugin |
+| New Codex tab |  | Codex in the session on screen, with Deckhand's hooks and tools ([Codex tabs](#codex-tabs)) |
+| Skip permissions in new tabs |  | on or off: your new Claude tabs start with `--dangerously-skip-permissions` (asks first when turned on) |
+| Full access in new Codex tabs |  | on or off: your new Codex tabs start with `--dangerously-bypass-approvals-and-sandbox` (asks first when turned on) |
 | Add Claude account… |  | add a Claude Code config folder as an account (a folder picker) |
 | Add Codex account… |  | add a Codex home (`CODEX_HOME`) as an account (a folder picker) |
 | Claude: send the waiting message now |  | the Claude tab's held message goes into its prompt now |
@@ -2543,6 +2607,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Browser: open in default browser |  | the page's address in your default browser (web addresses only) |
 | Browser: open the blocked popup |  | the popup the page tried to open, in a new tab of the same session |
 | Browser: show downloads folder |  | the folder downloads go to, in Finder |
+| Browser: take over from the agent, Browser: hand back to the agent, Browser: stop the agent |  | the agent's strip on the browser tab on screen ([Browser tabs](#browser-tabs)) |
 | New app tab… |  | a program that draws into the tab (asks for the command) |
 | Open a machine's web page… |  | a page an online machine serves on its own `127.0.0.1` (asks for the port), in a local browser tab through its ssh connection; see [Projects, sessions and chats](#projects-sessions-and-chats) |
 | Add a machine… |  | the add field in Settings › Machines (Machines over SSH off: its row there, to turn it on) |
@@ -2611,12 +2676,13 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Text size: Small, Text size: Medium, Text size: Default, Text size: Large |  | the chrome's text size |
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
-| Rescan sessions |  | read pi's session store again (Claude rows are Deckhand's own history) |
+| Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |
 | Run sessions in a background core |  | on by default: on or off (Settings › Sessions & chats) |
 | Machines over SSH |  | on by default: on or off; see [Settings › Machines](#machines) |
+| Copy a control token |  | `export DECKHAND_SOCKET=… DECKHAND_TOKEN=…` on the clipboard, for `deckhand --ctl` ([Updates](#updates)) |
 | Use previous core |  | a background core only: hand the sessions to the core from before the last update |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |
@@ -2669,3 +2735,5 @@ Planned; this guide covers each once it ships:
   [ATLAS.md](ATLAS.md)). Jobs already run while the window is closed.
 - **Several windows** on one Deckhand Core ([ROADMAP.md](ROADMAP.md)).
 - **Merging** from the Changes tab.
+- **Continue this conversation on another machine** for Claude Code and Codex sessions (pi's
+  works today; [#115](https://github.com/McFalljb/deckhand/issues/115)).

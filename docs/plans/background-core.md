@@ -1,5 +1,15 @@
 # Deckhand background core and remote machines: design
 
+> **Historical design record, not current documentation.** Kept for its reasoning and
+> decisions; the text below (including "design only" and the status lines) is as of when it was
+> written. Shipped: M1–M4 (session holder, core boundary, separate core, self-signed trust checks)
+> in 0.2.0; M6 (other machines over SSH, the headless Linux core and its signed tarball) in 0.3.0,
+> with Linux fixes in 0.4.1. Not built: M5 (jobs while closed), M7 (several windows), M8 (a remote
+> machine's own browser), D0 (Developer ID). Current behaviour: [GUIDE.md](../GUIDE.md#how-deckhand-runs)
+> (users), [DEVELOPING.md](../DEVELOPING.md#architecture) (code, the Linux core, releases),
+> [PROTOCOL.md](../PROTOCOL.md) §5a (the window's link and the hub), and
+> [ROADMAP.md](../ROADMAP.md) (what is next).
+
 Issues [#4](https://github.com/McFalljb/deckhand/issues/4) (sessions keep running after the
 window closes) and [#5](https://github.com/McFalljb/deckhand/issues/5) (every machine in one
 sidebar). Design only: no app code has changed. Investigated at `main` 6ee5586. Modelled on

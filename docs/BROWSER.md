@@ -25,8 +25,9 @@ runs](GUIDE.md#how-deckhand-runs).
 always its own machine's, in a window there. A core whose sessions are viewed from another
 machine (or one with no window at all, such as a Linux core) answers its agents' browser commands
 `browser_not_here` at once; this Mac's core drops any tab host message from another machine, and
-the window opens no page for another machine's tab ("Shown on its machine only"). (Decided
-2026-11-09; design §8.2.)
+the window opens no page for another machine's tab ("Shown on its machine only"). A link
+clicked in another machine's terminal opens in this Mac's default browser, never in a browser
+tab. (Decided 2026-11-09; [background-core.md §8.2](plans/background-core.md#82-what-stays-local).)
 
 ## 1. Engine: CEF
 
@@ -156,6 +157,10 @@ Deckhand.app/Contents/
     or agent passes its own (the caller's) session, never "whatever is focused";
   - popups, `target=_blank`, ⌘-click and `window.open` open a new tab in the **opener's** session
     (§2.5);
+  - a link in a terminal: **⇧⌘-click** opens an http(s) link in a new browser tab of that
+    terminal's session, in front; **⌘-click** opens the default browser (mailto: the mail app).
+    From Atlas's terminal, or without a browser, ⇧⌘-click opens the default browser too
+    (`terminal_link`, the user's only; `src/term_links.odin`; GUIDE.md "The terminal");
   - tabs never move between sessions;
   - comments made on it go to its session's agent, whichever session is on screen (§3.6).
 - The record (in the core's State): `url`, `title`, `loading`, `can_back`, `can_forward`, `zoom`,
@@ -338,8 +343,10 @@ For a pi tab:
    changed since. A message pi refuses never starts, so the comments stay.
 3. **Send now** is `pi_prompt` with `images`.
 
-Claude tabs get the same block with the next message through the plugin ([CLAUDE.md
-§6](CLAUDE.md)).
+Claude tabs get the same block with the next message through the plugin's UserPromptSubmit hook
+([CLAUDE.md §6](CLAUDE.md#6-comments)), Codex tabs through Deckhand's hook for Codex
+([CODEX.md §2a](CODEX.md#2a-comments)). Their **Send now** types only a fixed line ("Here are my
+comments.") and the hook adds the comments.
 
 The block marks what the user wrote and what is data (a page may carry injected instructions);
 the fence is longer than any run of backticks inside:
@@ -369,14 +376,20 @@ Code: `src/browser_agent.odin` (reads, reader `src/native/browser_read.js`) and
 
 ### 4.1 Tools and path
 
-A pi tab's `browser` extension (`integrations/pi/extensions/browser`) sends `browser_*` commands
-over its bridge's connection; a Claude tab uses the `deckhand` command (`deckhand read`, `deckhand click`…, [CLAUDE.md](CLAUDE.md)); Atlas uses `desk_run`. All
-go to the core, which routes them to the window, which runs them on the main thread through the
-tab's CDP session.
+- **pi tab:** the `browser` extension (`integrations/pi/extensions/browser`) sends `browser_*`
+  commands over its bridge's connection.
+- **Claude tab:** the `deckhand` command (`deckhand read`, `deckhand click`…; [CLAUDE.md](CLAUDE.md)).
+- **Codex tab:** the same commands as MCP tools (`browser_read`, `browser_click`…) from a per-run
+  MCP server, with the tab's own token ([CODEX.md §7](CODEX.md#7-deckhands-tools-a-per-run-mcp-server)).
+- **Atlas:** the same `browser` extension, over the desk extension's control connection (it names
+  the session), or `desk_run`.
 
-A pi or Claude tab may read and drive **its own session's** browser tabs only (`browser_target`,
-unit test `browser_agent_session_scope`): an explicit exception to the self-reference rule
-(PROTOCOL.md §2). Atlas and control callers name any session.
+All go to the core, which routes them to the window, which runs them on the main thread through
+the tab's CDP session.
+
+A pi, Claude or Codex tab may read and drive **its own session's** browser tabs only
+(`browser_target`, unit test `browser_agent_session_scope`): an explicit exception to the
+self-reference rule (PROTOCOL.md §2). Atlas and control callers name any session.
 
 | Command | Does |
 |---|---|

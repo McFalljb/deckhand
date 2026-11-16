@@ -6,6 +6,7 @@ Thanks for your interest. Deckhand is a small project, so keep changes focused a
 
 You need macOS 14 or later on Apple silicon, [Odin](https://odin-lang.org/) `dev-2026-09`,
 `clang` from the Xcode command line tools, and Node 22.18 or later for the pi integration's tests.
+To run what you build you need pi, Claude Code or Codex ([Requirements](docs/DEVELOPING.md#requirements)).
 
 ```sh
 git clone --recursive https://github.com/McFalljb/deckhand.git
@@ -17,7 +18,7 @@ cd deckhand
 ```
 
 Scenes run the real app in test mode, with a fake `HOME`, a fake pi and no network; they never
-start a real `pi` or `claude`. Run `--all` only for a change to the build or the runner, and
+start a real `pi`, `claude` or `codex`. Run `--all` only for a change to the build or the runner, and
 before a release ([What to run](docs/TESTING.md#what-to-run)). Scenes in the `paid` tier run a
 real pi against paid models: only run those on purpose, with your own account.
 
@@ -34,11 +35,14 @@ real pi against paid models: only run those on purpose, with your own account.
   test checks that every action is in the guide and every command in the guide or
   [docs/PROTOCOL.md](docs/PROTOCOL.md). See [Contributing in DEVELOPING.md](docs/DEVELOPING.md#contributing)
   for that and the other rules CI enforces (the session holder's revision, the core boundary).
-- CI runs the unit tests and the required scenes on every pull request.
+- CI runs the unit tests, the Linux core's build and tests, and the required scenes on every pull
+  request that changes code (docs-only changes skip it, except `docs/GUIDE.md` and
+  `docs/PROTOCOL.md`). The other scenes run nightly.
 
 ## Reporting bugs and security issues
 
-Open an issue for bugs, with your Deckhand and macOS versions and the steps to reproduce.
+Open an issue for bugs, with your Deckhand and macOS versions (and the agent's version, or the
+Linux distribution for another machine's core) and the steps to reproduce.
 Report security problems privately, as described in [SECURITY.md](SECURITY.md).
 
 ## Licence

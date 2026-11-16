@@ -6,7 +6,8 @@ restore, comments, and how text from agents is kept out of a half-typed prompt. 
 is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PROTOCOL.md)
 (§2 tokens, §3 "Claude Code tabs"). Code: `src/core/claude.odin`, `src/ui_claude.odin`, `src/core/claude_panels.odin`, `src/core/claude_status.odin`, `src/core/dead_tab.odin`,
 `src/core/claude_reload.odin`, `src/ui_claude_reload.odin`, `src/core/claude_accounts.odin`, `src/core/claude_disk.odin`,
-`integrations/claude-code/`, `tools/deckhand-cli/`.
+`integrations/claude-code/`, `tools/deckhand-cli/`. Codex tabs reuse this machinery (a Claude tab
+record with `codex` set); what differs is in [CODEX.md](CODEX.md).
 
 **Where it runs.** A Claude tab's process is a child of the session holder, like every terminal
 tab. The core runs everything else: tokens and the socket, the hooks' reports, held prompts and
@@ -54,13 +55,19 @@ running when the window closes (⌘Q), when the core restarts, and through an up
     start as full agents (§1a).
   - **Who.** `new_claude_session` is `Anyone` (the user, Atlas, scripts; never a pi or Claude
     tab). An agent's opens behind the user's view and cannot pass flags.
-- **Default flags** (`set_claude_default_flags`, user-only, off by default: Settings' "Claude Code
-  (global)" group and the palette's **Skip permissions in new tabs**). Turning it on
-  is confirmed. It adds `--dangerously-skip-permissions` after the tab's flags at each start the
+- **Default flags** (`set_claude_default_flags`, off by default: **Skip permissions in new tabs**
+  under Settings › Coding agents › Claude Code, and the palette). `User_Here`: only the user at
+  this Mac changes it, never an agent, a script or a machine allowed to connect. Turning it on is
+  confirmed. It adds `--dangerously-skip-permissions` after the tab's flags at each start the
   USER makes (`new_claude_tab`, `new_claude_session`, `claude_resume` with caller `ui`, a
   restored tab shown, the user's restart). It is never saved into a tab's or a record's flags, so
   turning it off takes it from every later start. Not when the flags name it or set
-  `--permission-mode`, nor past `CLAUDE_ARGS_MAX`. Agents, scripts, panels and apps never get it.
+  `--permission-mode` or `--allow-dangerously-skip-permissions`, nor past `CLAUDE_ARGS_MAX`.
+  Agents, scripts, panels and apps never get it.
+- **On another machine.** A Claude tab there runs on that machine's core: its `claude`, plugin,
+  accounts and default flags, never this Mac's. A start this Mac forwards as the user's is the
+  user's there (that machine's default flags apply). Only the tab's kind and status come back
+  (`machine_mirror.odin`): that core's bars are not shown here. The shared rules: CODEX.md §8.
 - **Claude Code not installed.** `claude_installed()` looks for an executable `claude` (stat and
   `access(X_OK)`, never run) on the PATH new tabs get and in `~/.local/bin` and `~/.claude/local`.
   Cached; looked up again after **Refresh shell environment**, after a Claude tab exits 127, and at
@@ -212,7 +219,7 @@ log or the workspace file.
   `pi.attached` (`who` `Report`/`Bridge` are refused for a claude caller, and a claude connection
   never counts as the session's bridge: no `pi.attach`/`pi.prompt` is routed to it);
 - **plus** `claude.session`, `claude.turn`, `claude.comments`, `claude.attached`,
-  `claude.todos`, `claude.task`, `claude.subagent`, `claude.model` (`who` `Claude`) for **its own tab only** (the tab id is filled from the token; another id is
+  `claude.todos`, `claude.task`, `claude.subagent`, `claude.background`, `claude.model` (`who` `Claude`; `claude.readonly_ack` is always refused, §1a) for **its own tab only** (the tab id is filled from the token; another id is
   refused). A pi tab's token cannot send these.
 - Not valid for anything of the control set: no `send_text`, `pi_prompt`, `claude_prompt`, `claude_wait_idle`,
   `new_claude_tab`, `claude_restart`, `close_tab`, settings, Home, jobs, confirmations, Take over/Stop or Allow
@@ -226,8 +233,9 @@ are a new process per call and have nowhere private to keep a second token. So t
 stays valid until the tab exits or closes, and Deckhand adds a process check: at `hello` it reads
 the connecting process's pid (`getsockopt(LOCAL_PEERPID)` on the Unix socket) and walks its
 parents (`proc_pidinfo` `PROC_PIDTBSDINFO`, at most 64 steps) until it reaches the tab's own
-process (the login shell that execs claude, recorded at start). Anything else gets `"this token
-works only from its Claude tab's own processes"`. Off macOS the check fails closed.
+process (the login shell that execs claude, recorded at start). On a Linux core the same walk uses
+`SO_PEERCRED` and `/proc/<pid>/stat` (`proc_linux.odin`). Anything else gets `"this token works
+only from its Claude tab's own processes"`; a pid that cannot be read fails closed.
 
 **What the check is worth.** It stops naive reuse of a token read from outside the tab (`ps
 eww`, a log, a crash report → connect from another program). It does **not** stop a same-user
@@ -657,4 +665,7 @@ snapshot` before the turn's idle, and a background Bash's launch at once (`bash-
 
 - Secret redaction of tool output for Claude (pi-kit's guardrails redact; a sync PostToolUse
   `updatedToolOutput` hook could): not built.
-- The process check on Linux (`SO_PEERCRED` and `/proc`) and Windows.
+- **Continue this conversation on <machine>** is pi only: a Claude Code conversation cannot be
+  moved to another machine yet ([#115](https://github.com/McFalljb/deckhand/issues/115)).
+- A Claude-only session whose claude exits before SessionStart reported an id is not saved
+  ([#146](https://github.com/McFalljb/deckhand/issues/146)).

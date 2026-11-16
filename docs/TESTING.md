@@ -80,8 +80,10 @@ All of these run in `./build.sh test`.
 | `integrations/pi` tests (`node --test`) | the bundled pi integration, without running pi | ~1 s |
 | `src/holderwire`, `src/corewire`, `src/trust` | the holder wire and the window/core wire (golden vectors, fuzz, transports); who may talk to whom | seconds |
 | `src/holder` | the holder in process with a fake core, and the upgrade with real processes (`build/deckhand-core-hooks`: re-execs under load, refusals, the keeper adopting) | seconds |
-| `scripts/check-core-boundary.sh` and its test | the core and holder link no window code | <1 s |
-| `src/*_test.odin`, `src/core/*_test.odin` (`tests/unit.py`) | the command layer: every command, callers, confirmations, persistence, the socket, the replica, quit routes, idle exit, Claude and pi launches, jobs, the editor, the layout audit, the docs listing every action and command; other machines (`machines*_test`, `machine_install_test`, `machine_page_test`, `machine_route_test`, `machine_mirror_test`, `remote_view_test`, `machine_rows_test`, `machine_header_test`); what needs you and the views over it (`needing_you_test`, `attention_view_test`, `fleet_test`, `deck_view_test`, `deck_modal_test`, `peek_test`, `status_marks_test`, `flash_test`); `keyboard_pack_test`, `pane_motion_test`, `border_draw_test`, `handoff_test` | ~30–40 s on 6 processes |
+| `scripts/check-core-boundary.sh` and its test, `tests/core-move-verify-test.sh` | the core and holder link no window code; the M2-B move's verifier refuses what it must | <1 s |
+| `odin check … -target:linux_amd64`, `odin check … -define:DECKHAND_TEST_HOOKS=false` | the Linux core and holder type-check; the release builds (Mac app and core, Linux core) compile without test hooks | ~1 s each |
+| `tests/scripts/install-test.sh` | `scripts/install.sh`'s checks before any download (fake `uname`, `sysctl`, `pgrep`; no network) | ~1 s |
+| `src/*_test.odin`, `src/core/*_test.odin` (`tests/unit.py`) | the command layer: every command, callers, confirmations, persistence, the socket, the replica, quit routes, idle exit, Claude and pi launches, jobs, the editor, the layout audit, the docs listing every action and command; other machines (`machines*_test`, `machine_install_test`, `machine_page_test`, `machine_route_test`, `machine_mirror_test`, `remote_view_test`, `machine_rows_test`, `machine_header_test`); what needs you and the views over it (`needing_you_test`, `attention_view_test`, `fleet_test`, `deck_view_test`, `deck_modal_test`, `peek_test`, `status_marks_test`, `flash_test`); `keyboard_pack_test`, `pane_motion_test`, `border_draw_test`, `handoff_test`; Codex tabs (`codex_test`), Continue on another machine (`pi_handoff_test`), the Settings page and registry (`settings_page_test`, `settings_registry_test`, `settings_user_here_test`), the Linux unit (`systemd_unit_test`) | ~30–40 s on 6 processes |
 | `tests/scenes_test.py`, `scripts/check-env-reads.py` | the `--changed` selection; every environment read names a known variable | <1 s |
 | `tools/deckhand-cli` tests | the `deckhand` CLI: arguments, hooks, the MCP server | <1 s |
 | the fake app (`tests/fake-app`) | builds the app-tab stand-in the scenes need | ~5 s |
@@ -91,6 +93,8 @@ process per source file, at most half the CPUs (max 6; `UNIT_JOBS=1` for one at 
 its own short `TMPDIR`. It fails when a test fails, and when the number of tests that ran differs
 from the number of `@(test)` procs, so a test can't silently drop out. Logs: `build/unit/`. Every
 test process makes and removes its own temp folder (`src/core/tmpdir_test.odin`).
+`--only NAME,…` runs named tests (`python3 tests/unit.py --only docs_cover_actions_and_commands`:
+the docs check, after one `./build.sh`); `--no-build` skips the test build.
 
 ## Scenes
 
@@ -204,7 +208,7 @@ kept as `build/scenes/<scene>.1.log`); it doesn't fail the run unless `--strict`
 `ASSERT FAILED (stopped at line N of SCRIPT…)` (or `TIMEOUT` for a wait) and exits 1
 (`DECKHAND_SCRIPT_FAIL_FAST=1`, set by the runner and `fresh-build.sh`; `--no-fail-fast` runs every
 line, to see all of a new script's failures at once). The runner kills a scene after 3× its typical
-time, at least 120 s (`--timeout` for all), and doesn't retry it. `--max-minutes`
+time (`SCENE_TIMEOUT_X`; CI uses 5), at least 120 s (`--timeout` for all), and doesn't retry it. `--max-minutes`
 (`SCENE_MAX_MINUTES`) is the whole run's budget: past it no scene starts (**NOT RUN**, a failure),
 so the summary always prints. Each script line goes to `build/scenes/<scene>.step` as it starts, so
 a killed scene's row says where it was.
@@ -275,7 +279,8 @@ The causes seen so far, and the rule each one taught:
   executables under `fork_lock`.
 
 A failure seen once and not reproduced (`browser-slots`' stray UDP socket, `browser-rlz`'s access
-times) is left to the runner's **FLAKY** report.
+times) is left to the runner's **FLAKY** report. Still open under heavy load: `menus` (near line
+40) and `files` (`files-1.txt:100`), tracked in [#146](https://github.com/McFalljb/deckhand/issues/146).
 
 ## Open clean-ups
 

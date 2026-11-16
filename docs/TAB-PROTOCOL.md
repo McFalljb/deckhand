@@ -6,9 +6,14 @@ the markdown viewer, game engines and browsers all meet the same contract in dif
 Programs that do not implement it still run, in a native view or their own window, with less
 integration.
 
-Status: app tabs ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)) and browser tabs ([BROWSER.md](BROWSER.md))
-implement the texture path and the control pass-through; the native-view and own-window modes are
-not built.
+**Status: draft; part of it is built, macOS only.** Built: the texture path over IOSurface for app
+tabs ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)) and browser tabs (CEF off-screen,
+[BROWSER.md](BROWSER.md)); `input` messages and the `app_call` pass-through for app tabs; the
+tabs Deckhand draws itself. Browser tabs are driven by Deckhand's own `browser_*` commands
+(PROTOCOL.md "Browser tabs"), not by `tab.*`. Not built: the native-view and own-window modes,
+the Windows and Linux surfaces, the `resize` message (an app tab gets a new ring instead), and a
+connection to an address the program announces. The `tab.*` requests below are a suggested
+vocabulary: an app answers what it chooses.
 
 ## 1. Display
 
@@ -25,8 +30,8 @@ annotation boxes, focus rings) and shortcuts keep working on top.
 sokol_gfx supports wrapping native textures ("ADVANCED TOPIC: Injecting native 3D-API textures"
 in `vendor/sokol-odin/sokol/c/sokol_gfx.h`). Frame handshake: the program signals "frame ready"
 (control channel event or a shared fence); Deckhand redraws on it, so idle tabs cost nothing. The
-size follows the tab's pane: Deckhand sends `resize{w, h, scale}`; the program reallocates or
-Deckhand hands it a new surface.
+size follows the tab's pane: Deckhand hands the program new surfaces (app tabs: a new ring,
+ENGINE-BRIDGE.md §2), or (planned, other programs) sends `resize{w, h, scale}`.
 
 Fallback: **native child view.** The program's own view is attached to the window's native
 handle (`sapp_macos_get_window`, `sapp_win32_get_hwnd`, `sapp_x11_get_window`) and positioned
@@ -47,8 +52,9 @@ mouse and scroll go to the focused tab only, after Deckhand took its own shortcu
 Texture tabs receive events over the control channel in tab coordinates (logical px + scale):
 
 ```json
-{"type": "input", "event": "key", "action": "down", "key": "a", "text": "a", "mods": ["shift"]}
-{"type": "input", "event": "mouse", "action": "down", "button": "left", "x": 120, "y": 44}
+{"type": "input", "event": "key", "action": "down", "key": "a", "repeat": false, "mods": ["shift"]}
+{"type": "input", "event": "char", "text": "A"}
+{"type": "input", "event": "mouse", "action": "down", "button": "left", "x": 120, "y": 44, "clicks": 1, "mods": []}
 {"type": "input", "event": "scroll", "dx": 0, "dy": -3, "x": 120, "y": 44}
 {"type": "input", "event": "focus", "focused": true}
 ```
@@ -59,7 +65,8 @@ Native views get native events directly (degraded mode).
 
 The program exposes commands, state and events over the envelope in [PROTOCOL.md](PROTOCOL.md)
 (NDJSON, `{id, type, v, …}`, `hello` with version and token). Deckhand starts the program with
-`DECKHAND_SOCKET` and a per-tab `DECKHAND_TOKEN`, or connects to an address the program announces.
+`DECKHAND_SOCKET` and a per-tab `DECKHAND_TOKEN` (connecting to an address the program announces
+is not built).
 The program speaks first (`hello`); Deckhand's hello reply is the first line it gets, and nothing
 (requests, `input`) is sent before that reply. The token and the socket are the core's; the
 program itself is a child of the window, which draws its frames, so it stops when the window
@@ -86,10 +93,10 @@ in logical px) for Deckhand's Inspect overlay.
 
 | Tab | Display | Input | Control |
 |---|---|---|---|
-| terminal (pi, shell, Claude) | drawn by the window from its own libghostty-vt copy, fed by the core (PROTOCOL.md §5a) | encoded by the window, sent to the core, which writes it to the PTY | pi tabs: the bridge (PROTOCOL.md §4); Claude tabs: the plugin's hooks and `deckhand` CLI (CLAUDE.md) |
+| terminal (pi, shell, Claude, Codex) | drawn by the window from its own libghostty-vt copy, fed by the core (PROTOCOL.md §5a) | encoded by the window, sent to the core, which writes it to the PTY | pi tabs: the bridge (PROTOCOL.md §4); Claude tabs: the plugin's hooks and `deckhand` CLI (CLAUDE.md); Codex tabs: hooks and a per-run MCP server (CODEX.md) |
 | markdown | drawn by Deckhand (own parser, `src/markdown.odin`) | Deckhand | Deckhand commands (open, scroll, find) |
 | game engine | texture, via a small Odin package linked into the engine | forwarded input events | the package implements `tab.*`: this **is** the engine bridge ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)): inspect/set state, pause/step, capture, inject input, hit test |
-| browser | CEF off-screen rendering into the texture | forwarded to CEF | Chrome DevTools Protocol behind an adapter that answers `tab.*` (hit test, capture, act) |
+| browser | CEF off-screen rendering into the texture | forwarded to CEF | Deckhand's `browser_*` commands over the Chrome DevTools Protocol (BROWSER.md); no `tab.*` adapter |
 | any other app | native view or own window | native | none, or whatever it implements |
 
 ## 5. In code

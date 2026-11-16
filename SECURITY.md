@@ -20,9 +20,10 @@ published once the fix is out.
 
 ## Supported versions
 
-Only the latest release gets security fixes. Deckhand updates itself from GitHub Releases; the
-earlier pi-desk 0.1.x builds do not, so install Deckhand fresh (see the
-[README](README.md#coming-from-pi-desk)).
+Only the latest release gets security fixes, for the macOS app and the Linux core it installs
+on other machines. Deckhand updates itself from GitHub Releases (it asks first), and updates other
+machines' cores from Settings › Machines. pi-desk 0.1.x builds do not update to Deckhand: install
+it fresh ([From pi-desk to Deckhand](docs/GUIDE.md#from-pi-desk-to-deckhand)).
 
 ## Scope
 
@@ -36,16 +37,20 @@ limits Deckhand sets, for example:
   [docs/PROTOCOL.md](docs/PROTOCOL.md));
 - the updater, or an install or update of another machine's core, installing something other
   than a signed Deckhand release;
-- secrets (keys, tokens, Claude credentials) leaking into logs, saved state or other processes;
+- secrets (keys, tokens, Claude or Codex credentials) leaking into logs, saved state or other processes;
 - other machines (Machines over SSH): a machine connecting to this one while *Allow other machines
-  to connect* is off, or other than over ssh as you; a connected machine running this machine's
-  own-user-only commands (`machine_*`, notification settings); this core forwarding a connected
-  machine's commands on to a third machine; another machine's text (titles, errors, job output) acting as anything but
-  data here.
+  to connect* is off, or other than over ssh as you; a connected machine running the commands
+  only the user at this Mac may run (`machine_*`, `pi_handoff`, `holder_recover`, and the settings
+  that bound other machines and agents: letting machines connect, the machine list, pi extensions,
+  Claude's default flags, notifications); this core forwarding a connected machine's commands on
+  to a third machine; another machine's text (titles, errors, job output) acting as anything but
+  data here;
+- **Continue this conversation on <machine>** moving a conversation *into* this Mac, or started by
+  anyone but the user at this Mac's window.
 
 By design, a machine you allow to connect acts as you on this one: it can see and drive its
 sessions, as you can, and through Atlas or a shell here reach the machines this one reaches.
 Allow only machines you trust as yourself ([docs/ATLAS.md](docs/ATLAS.md) §7.1).
 
-The design notes in [docs/BROWSER.md](docs/BROWSER.md), [docs/CLAUDE.md](docs/CLAUDE.md) and
-[docs/PROTOCOL.md](docs/PROTOCOL.md) (§5a, the hub) describe the intended boundaries.
+The design notes in [docs/BROWSER.md](docs/BROWSER.md), [docs/CLAUDE.md](docs/CLAUDE.md),
+[docs/CODEX.md](docs/CODEX.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md) (§5a, the hub) describe the intended boundaries.

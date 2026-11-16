@@ -1,7 +1,7 @@
 # Codex tabs
 
-How Deckhand runs the [Codex CLI](https://github.com/openai/codex) as a tab, phases 1 and 2 (issue #112):
-what works, what does not yet, and the rules that keep it safe. The user's view is in
+How Deckhand runs the [Codex CLI](https://github.com/openai/codex) as a tab (new in 0.4.0; built
+in #112): what works, what does not yet, how it was tested, and the rules that keep it safe. The user's view is in
 [GUIDE.md](GUIDE.md#codex-tabs); the wire in [PROTOCOL.md](PROTOCOL.md) ("Claude Code tabs":
 `harness`). Code: `src/core/codex.odin`, and the Claude tab's code it shares
 ([CLAUDE.md](CLAUDE.md)): `src/core/claude.odin`, `claude_status.odin`, `dead_tab.odin`,
@@ -27,7 +27,8 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   so its SessionStart hook, lazily: before that the tab has no session id and no row), titled by
   that prompt; **Resume** from the row runs `codex resume <id>`; a restored tab resumes when shown.
 - **Held prompts** (`claude_prompt`, Atlas, scripts), with a stricter rule than Claude's (below).
-- **Bars**: signed out, hooks not running; a Codex too old is not started; not installed.
+- **Bars**: signed out, hooks not running; a Codex older than 0.163.0 is not started (§5); not
+  installed.
 - **Dead tab**: Restart resumes the conversation (no "Restart with model…").
 - **Comments** (§2a): pending comments go with the user's next message as UserPromptSubmit's
   `additionalContext`, as for Claude; **Send now**, **Send and close** and Changes' **Ask Codex to
@@ -44,7 +45,7 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 - **Accounts** (§6a): Codex homes (`CODEX_HOME`) the user adds; a tab of one runs with
   `CODEX_HOME=<home>`, set again after the login profile.
 
-## What does not yet (phase 2 and later)
+## What does not yet
 
 - No profiles per tab (`-p`, `-c profile…` are refused): where a profile layers against Deckhand's
   trailing `-c` overrides is unchecked, and a profile may carry `features.hooks`, `hooks.*` or
@@ -54,6 +55,30 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
 - No hot-reload bars (Claude Code's file watching does not apply), no todos, subagents or
   background panels.
+- **Continue this conversation on <machine>** is pi only: a Codex conversation cannot be moved to
+  another machine yet ([#115](https://github.com/McFalljb/deckhand/issues/115)).
+- A Codex-only session whose codex exits before its first prompt (no session id yet) is not saved
+  ([#146](https://github.com/McFalljb/deckhand/issues/146)).
+
+## How it was tested
+
+Codex tabs were built and are tested against a stand-in for Codex
+(`tests/scripts/fake-codex.py`: it parses Deckhand's real argv with `tomllib`, checks every hook's
+trust hash, runs the hooks lazily as Codex 0.167.2 does, starts the MCP server as Codex does, and
+checks that nothing is written under `~/.codex`). Unit tests and test mode never find a real
+`codex`. Checked against a real Codex 0.167.2, outside a Deckhand tab:
+
+- `codex app-server` `hooks/list` given Deckhand's exact argv lists its four hooks as `trusted`
+  and the user's own hooks unchanged (the pinned hash vectors come from it, §2);
+- `codex mcp list --json` under a throwaway `CODEX_HOME` parses Deckhand's `mcp_servers.deckhand`
+  override (§7);
+- the flag allowlist follows its `--help` (§1a); a phase-0 spike showed UserPromptSubmit's
+  `additionalContext` reaching the model and tool annotations working.
+
+Not checked yet: a real Codex turn in a Deckhand tab and a real Codex tab on another machine (a
+Linux core's `codex`, hook trust there), both tracked in
+[#146](https://github.com/McFalljb/deckhand/issues/146); whether Codex shows the model the MCP server's `instructions`, how "Always allow" for a tool
+persists, and `codex login status` and Codex's sign-in screen under an added account's home.
 
 ## 1. The command
 
@@ -103,8 +128,9 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   others bear on the daemon and MCP); `-p`/`--profile` and a `-c` of `profile` or `profiles` (not
   per tab yet); a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
   `hooks`, is `mcp_servers` or under `mcp_servers.deckhand`.
-- **Full access in new Codex tabs** (`set_claude_default_flags` with `"harness": "codex"`,
-  `User_Here`, off by default; Settings › Coding agents › Codex and the palette): turning it on is
+- **Full access in new Codex tabs** (`set_claude_default_flags` with `"harness": "codex"`, off by
+  default; Settings › Coding agents › Codex and the palette): `User_Here`, so only the user at this
+  Mac changes it (never an agent, a script or a machine allowed to connect). Turning it on is
   confirmed (`CODEX_FULL_ACCESS_CONFIRM`). It adds `--dangerously-bypass-approvals-and-sandbox` after
   the tab's flags at each start the user makes (as Claude's skip-permissions: new tab or session,
   the user's resume, a restored tab shown, the user's restart), never saved into a tab's flags.

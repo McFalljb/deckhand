@@ -1,10 +1,22 @@
 # Harnesses: what Deckhand ships, what it needs, what is optional
 
-Deckhand runs three agent harnesses, **pi**, **Claude Code** and **Codex** (phase 1:
-[CODEX.md](CODEX.md)). For each it ships its own integration and loads it per tab, for that run
-only, so a user installs the harness and nothing else. This document covers what each integration does, how it is loaded, how it steps back when
-the user has something of their own, and how setup checks and installs the harnesses. §9 lists
-what still needs a check against a real pi.
+Deckhand runs three agent harnesses: **pi**, **Claude Code** and **Codex**. For each it brings its
+own integration and passes it per run, so the user installs only the harness and Deckhand itself
+writes nothing into the harness's config (setup's **Install** runs the harness's own installer, §7). This document covers what each integration does, how it is
+loaded, how it steps back when the user has something of their own, and how setup checks and
+installs the harnesses. The Claude and Codex tabs themselves: [CLAUDE.md](CLAUDE.md),
+[CODEX.md](CODEX.md).
+
+| | pi | Claude Code | Codex |
+|---|---|---|---|
+| Deckhand's part | `integrations/pi`: extensions, Atlas's skill (§3) | `integrations/claude-code`: a plugin (hooks, the `deckhand` command, a skill) (§5) | none on disk: hooks and an MCP server, both the bundled CLI (§5a) |
+| Loaded with | `-e <dir>` per extension | `--plugin-dir <dir>` | `-c hooks.…`, `-c hooks.state=…`, `-c mcp_servers.deckhand=…` |
+| Minimum | 1.4.0 (`PI_MIN_VERSION`) | 2.1.295 (`CLAUDE_MIN_VERSION`) | 0.163.0 (`CODEX_MIN_VERSION`) |
+| Older than that | starts without the integration; a bar with the update command | starts; status from the hooks only; a bar saying how to update | not started; the tab says how to update |
+| Version read from | its `package.json`, never run | where `claude` links, never run | its install's files; else `codex --version` under a throwaway `CODEX_HOME` |
+| Accounts | — | config folders ([CLAUDE.md §1b](CLAUDE.md#1b-accounts)) | Codex homes ([CODEX.md §6a](CODEX.md#6a-accounts)) |
+| On another machine | yes | yes | when that machine's core starts Codex tabs (§6) |
+| Continue this conversation on <machine> | yes, pi 1.4.0 or later there | not yet ([#115](https://github.com/McFalljb/deckhand/issues/115)) | not yet (#115) |
 
 Contents: 1. [Origin](#1-origin-pi-kit) ·
 2. [pi: loading from a path](#2-pi-loading-from-a-path) ·
@@ -16,9 +28,10 @@ Contents: 1. [Origin](#1-origin-pi-kit) ·
 7. [Install and update](#7-install-and-update) ·
 8. [pi-kit](#8-pi-kit) · 9. [Not verified](#9-not-verified-without-a-real-pi)
 
-**Where the integrations live.** Both are in the app bundle: `Contents/Resources/pi` and
+**Where the integrations live.** In the app bundle: `Contents/Resources/pi` and
 `Contents/Resources/claude-code` in `Deckhand.app`, and `Contents/Resources/integrations/{pi,claude-code}`
-in the nested `Deckhand Core.app`. The core uses its own copy. A separate core runs from its
+in the nested `Deckhand Core.app`. Codex's hooks and MCP server are the bundled CLI, by its
+absolute path ([CLAUDE.md](CLAUDE.md) §1, "Plugin and CLI paths"). The core uses its own copy. A separate core runs from its
 installed copy under `<data>/core/<version>-<sha12>/`, which is kept while any process (a pi
 with one of its `-e` paths, a holder, a core) still runs from it, so live tabs keep their paths
 across an update (`src/core/core_versions.odin`).
@@ -53,8 +66,9 @@ names each extension's pi-kit source. The Claude integration was always Deckhand
   `pi.prompt` and `pi.attach` (prompts and comments sent twice). §4 is how that is avoided.
 - **Minimum pi: 1.4.0** (`PI_MIN_VERSION`, `src/core/pi_integration.odin`). Deckhand's code relies on
   pi 1.4 behaviour (`--tools` allowlists, image prompts) and pi-kit, where this code was proven,
-  pins 1.5.0 (recommended). `-e` itself is much older. **Still to confirm with one real-pi run on
-  1.4.0** (§9).
+  pins 1.5.0 (recommended). `-e` itself is much older. Another machine needs it too to take a
+  conversation continued from this Mac (`pi --fork` there). **Still to confirm with one real-pi run
+  on 1.4.0** (§9).
 
 ## 3. The pi integration
 
@@ -86,8 +100,8 @@ does, in load order.
 **Loading** (`src/core/pi_integration.odin`). Every pi start (`start_pi`: a new tab, session or chat,
 Atlas, a restore, Restart, a dead tab's restart, a hot-reload restart) gets one
 `-e <dir>/extensions/<name>` per required extension, and per optional one turned on
-(`pi_extension_on`: the user's choice on the Settings page (Coding agents › pi), `set_pi_extension`,
-else the manifest's `default`), in the manifest's order, before pi's own arguments. Each pi tab
+(`pi_extension_on`: the user's choice on the Settings page (Coding agents › pi; `set_pi_extension`,
+this Mac's user only), else the manifest's `default`), in the manifest's order, before pi's own arguments. Each pi tab
 records which optional ones it started with; a later change marks it for the restart bar ("pi
 extensions changed — Restart N idle tabs"), since `-e` is fixed for a process's life. Atlas also
 gets `--skill <dir>/skills/deckhand-desk`. pi 1.5.0 lists `--skill` paths after the user's and
@@ -104,8 +118,9 @@ build, pi starts without it.
 **Read-only.** Read-only jobs (`access: read`) pass `--tools read,grep,find,ls --exclude-tools
 mcp__* --no-mcp`, which keeps every extension tool from the model. `PI_KIT_READONLY=1` also keeps
 `shell` from registering at all, and turns the optional `guardrails` read-only (blocks `edit`,
-`write` and mutating `bash`, plus secret redaction of what `read` returns). Chats are full pi: what
-a chat's agent may do is the chats folder's `AGENTS.md`'s to say.
+`write` and mutating `bash`, plus secret redaction of what `read` returns). Chats are full pi (the
+former **Start chats read-only** is gone): what a chat's agent may do is the chats folder's
+`AGENTS.md`'s to say.
 
 ## 4. Overlap: how Deckhand steps back
 
@@ -127,7 +142,7 @@ a chat's agent may do is the chats folder's `AGENTS.md`'s to say.
    again after every extension's `session_start` and on `kit:desk:mode?` (PROTOCOL.md §4), since
    the bridge loads first (`-e`) and pi-kit's sidebar listens only once its own `session_start` ran.
 3. **Capability claims.** At session start `panels` emits `deckhand:capabilities?`
-   `{from: "deckhand", capabilities: ["panels:todos", "panels:subagents"]}`. An extension that
+   `{from: "deckhand", capabilities: ["panels:todos", "panels:subagents", "panels:shells"]}`. An extension that
    provides one itself answers `deckhand:capabilities` `{capability, owner, version}` (then or any
    time later), and Deckhand's producer leaves that panel to it, first publishing it once empty
    (the bridge keeps one copy per panel name, the last one any producer published, and the claimant
@@ -170,7 +185,9 @@ described in [CLAUDE.md](CLAUDE.md).
   Outside Deckhand the installed copy is inert (its hooks exit 0 without `DECKHAND_*`).
 - It can fail to load: managed settings that name the plugin id win; an admin can turn the flag
   off; `"<name>@inline": false` disables it. Deckhand's "hooks silent" bar catches all of these.
-- **Minimum Claude Code 2.1.295** (`CLAUDE_MIN_VERSION`): OSC 7501 and hook `onFailure`.
+- **Minimum Claude Code 2.1.295** (`CLAUDE_MIN_VERSION`): OSC 7501 and hook `onFailure`. An older
+  one still starts; its status comes from the hooks only and a bar says how to update
+  ([CLAUDE.md §5a](CLAUDE.md#5a-any-setup-older-claude-code-hooks-that-do-not-run)).
 
 ## 5a. Codex: hooks per run
 
@@ -186,10 +203,14 @@ recipe shows its review dialog for Deckhand's hooks; status still works from its
 tab's bar explains. The details: [CODEX.md](CODEX.md).
 
 - **Minimum Codex 0.163.0** (`CODEX_MIN_VERSION`): OSC 7501 program status. Older ones are not
-  started.
+  started. The version is read from the install's files; only an install that gives none runs
+  `codex --version`, with `CODEX_HOME` at a new empty temp folder, so nothing is written under
+  `~/.codex` ([CODEX.md §5](CODEX.md#5-installed-version-signed-in)).
 - Codex starts its session at the first prompt: SessionStart (the session id, the row) comes then.
 - Deckhand's tools: a per-run stdio MCP server (`-c mcp_servers.deckhand={…}`, `deckhand-cli mcp`),
   the tab's token passed by name in `env_vars` ([CODEX.md §7](CODEX.md#7-deckhands-tools-a-per-run-mcp-server)).
+- Built and tested against a stand-in for Codex; checked against a real Codex 0.167.2 only for
+  its argv, hook trust and MCP config ([CODEX.md](CODEX.md), "How it was tested").
 
 ## 6. The harness manifest
 
@@ -217,7 +238,7 @@ or `Third_Party`); `need` (`Required` or `Recommended`); `min_version`; `detect`
 | `rpiv-btw` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-btw…` in `packages` | `pi install npm:@juicesharp/rpiv-btw@2.15.0` | npmjs.com/package/@juicesharp/rpiv-btw; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
 | `claude` | Claude Code | harness | required | 2.1.295 (`CLAUDE_MIN_VERSION`) | `claude` on the tabs' PATH or in `~/.local/bin`, `~/.claude/local`; version from where it links (`claude_version_of`) | `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh \| bash` | code.claude.com/docs/en/setup, "Native Install (Recommended)" |
 | `claude-plugin` | Claude Code | built in | required | (Claude 2.1.295) | `integrations/claude-code` in the build | — | §5 |
-| `codex` | Codex | harness | required | 0.163.0 (`CODEX_MIN_VERSION`) | `codex` on the tabs' PATH (npm's global bin); version from the npm package's `package.json` next to where it links, or Homebrew's `Caskroom/codex/<v>/`; signed in: `codex login status` (exit 1 = signed out, a note), run on a worker | `npm install -g @openai/codex@latest` | github.com/openai/codex README |
+| `codex` | Codex | harness | required | 0.163.0 (`CODEX_MIN_VERSION`) | `codex` on the tabs' PATH; version from where it links (the npm package's `package.json`, Homebrew's `Caskroom/codex/<v>/`, Codex's installer's `releases/<v>-<target>/`), else `codex --version` under a throwaway `CODEX_HOME` (`codex_version_of`); signed in: `codex login status` per Codex home (exit 1 = signed out, a note), run on a worker | `npm install -g @openai/codex@latest` | github.com/openai/codex README |
 
 Why these: pi-subagents and rpiv-todo feed the bundled `panels` extension's Subagents and Todos
 panels (§3); without them those panels stay empty. pi-ask-user (an `ask_user` tool), pi-web-access
@@ -242,39 +263,38 @@ either: its hooks are Deckhand's own CLI, passed per run (§5a).
 | `needs_harness` | a third-party item whose harness is missing or too old | Needs pi first |
 
 The checklist is looked at again when the sheet opens, on Settings' **Refresh**, after Refresh
-shell environment, and when a run ends (then the cached `pi_installed` and `claude_installed`
-answers are dropped too, and pi's version probed again). Test mode never looks at PATH
+shell environment, and when a run ends (then the cached `pi_installed`, `claude_installed` and
+`codex_installed` answers are dropped too, and pi's version probed again). Test mode never looks at PATH
 (`detect_path`), only the fake HOME's install folders.
 
 **Other machines** (Machines over SSH, [GUIDE.md](GUIDE.md)). Each machine's core checks its own
 harnesses with this manifest. This Mac shows that machine's checklist read-only under Settings ›
-Machines (`<machine>: <item>`, its state and the command to run there, with **Copy**; at most 16
-rows, the text cleaned: `machines[].checklist` in the state snapshot, PROTOCOL.md §5a). No harness is
-installed on another machine from here (`machine_install` installs only Deckhand's core). A new session on another machine offers only the
-harnesses its checklist lists as found (`ok`, `too_old` or `unchecked`; pi alone before its
-checklist arrives) and runs with that machine's own accounts and folders, never this Mac's
-(`machine_harnesses` in `src/core/harness.odin`).
+Machines (`<machine>: <item>`, its state, the version found there and the command to run there,
+with **Copy**; at most 16 rows, the text cleaned: `machines[].checklist` in the state snapshot,
+PROTOCOL.md §5a). No harness is installed on another machine from here (`machine_install` installs
+only Deckhand's core). A new session on another machine offers only the harnesses its checklist
+lists as found (`ok`, `too_old` or `unchecked`; pi alone before its checklist arrives), Codex only
+when that core's hello lists `codex_tabs` (CODEX.md §8), and runs with that machine's own
+accounts, folders and default flags, never this Mac's (`machine_harnesses` in
+`src/core/harness.odin`). **Continue this conversation on <machine>** moves pi conversations only,
+from this Mac outward (GUIDE.md, [Projects, sessions and chats](GUIDE.md#projects-sessions-and-chats)).
 
 ## 7. Install and update
 
 `src/core/harness_install.odin`. Deckhand works out a harness's
 layout from where its binary links to, without running it (`install_layout`).
 
-| Layout (by real path) | pi | Claude Code | Runs after a click? |
-|---|---|---|---|
-| official installer (pi: under `~/.pi/agent`; Claude: `…/claude/versions/`) | `pi update --self` | `claude update` | yes |
-| npm global (`/node_modules/`, Homebrew's node too) | `pi update --self` | `npm install -g @anthropic-ai/claude-code@latest` | yes, when its `node_modules` is writable (no `sudo`) |
-| Homebrew (`/Caskroom/`, `/Cellar/`) | none named (no pi formula is known) | `brew upgrade --cask claude-code` (or `claude-code@latest`) | Claude: yes; pi: shown only |
-| bun (`/.bun/`, `/install/global/node_modules/`) | `pi update --self` | `bun add -g @anthropic-ai/claude-code@latest` | yes |
-| pnpm (`/pnpm/`, `/.pnpm/`) | `pi update --self` | `pnpm add -g @anthropic-ai/claude-code@latest` | yes |
-| yarn (`/yarn/`, `/.yarn/`) | `pi update --self` | none named | shown only |
-| nix (`/nix/store/`) | `nix profile upgrade pi` (pi `docs/quickstart.md`) | none named | shown only |
-| mise (`/mise/installs/`) | none named | none named | shown only |
-| unknown | `pi update --self` | `claude update` | shown only |
-
-Codex (`install_layout(.Codex, …)`): npm global `npm install -g --prefix <prefix> @openai/codex@latest`,
-Homebrew `brew upgrade --cask codex`, bun and pnpm `add -g @openai/codex@latest`, all after a click
-as above; anything else (yarn, nix, mise, unknown) none named, shown only.
+| Layout (by real path) | pi | Claude Code | Codex | Runs after a click? |
+|---|---|---|---|---|
+| official installer (pi: under `~/.pi/agent`; Claude: `…/claude/versions/`; Codex: `…/packages/standalone/releases/`) | `pi update --self` | `claude update` | its installer again, `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` | pi, Claude: yes; Codex: shown only (to copy) |
+| npm global (`/node_modules/`, Homebrew's node too) | `pi update --self` | `npm install -g @anthropic-ai/claude-code@latest` | `npm install -g @openai/codex@latest` | yes, when its `node_modules` is writable (no `sudo`) |
+| Homebrew (`/Caskroom/`, `/Cellar/`) | none named (no pi formula is known) | `brew upgrade --cask claude-code` (or `claude-code@latest`) | `brew upgrade --cask codex` | Claude, Codex: yes; pi: shown only |
+| bun (`/.bun/`, `/install/global/node_modules/`) | `pi update --self` | `bun add -g @anthropic-ai/claude-code@latest` | `bun add -g @openai/codex@latest` | yes |
+| pnpm (`/pnpm/`, `/.pnpm/`) | `pi update --self` | `pnpm add -g @anthropic-ai/claude-code@latest` | `pnpm add -g @openai/codex@latest` | yes |
+| yarn (`/yarn/`, `/.yarn/`) | `pi update --self` | none named | none named | shown only |
+| nix (`/nix/store/`) | `nix profile upgrade pi` (pi `docs/quickstart.md`) | none named | none named | shown only |
+| mise (`/mise/installs/`) | none named | none named | none named | shown only |
+| unknown | `pi update --self` | `claude update` | none named | shown only |
 
 The table gives the command's shape; the one shown and run is aimed at the copy Deckhand detected
 (`harness_plan`): the detected binary by absolute path (`/Users/me/.pi/agent/bin/pi update
@@ -329,7 +349,8 @@ part of Deckhand.
 
 ## 9. Not verified without a real pi
 
-The integration's tests never start pi. These still need a check against a real pi:
+The integration's tests never start pi. These still need a check against a real pi (Codex's
+open checks are in [CODEX.md](CODEX.md), "How it was tested"):
 
 - the bundled extensions loading from `-e <dir>` (a folder with `index.ts`, next to a
   `package.json` with `"type": "module"`), on pi 1.5.0 and on 1.4.0 (the minimum);

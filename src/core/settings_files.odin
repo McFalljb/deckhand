@@ -213,12 +213,12 @@ web_settings_rows :: proc(out: ^[dynamic]Settings_File_Row) {
 	w := state.live.web
 	detail := "off · a browser you pair acts as you on this machine"
 	if on do detail = w.listening ? fmt.tprintf("ON · listening on %s", w.address) : w.error != "" ? fmt.tprintf("ON · cannot listen: %s", w.error) : "ON"
-	append(out, Settings_File_Row{group = "machines", label = "Web access", detail = detail, path = WEB_ACCESS_ROW, button = on ? "Turn off" : "Turn on…"})
-	append(out, Settings_File_Row{group = "machines", label = "Listen address", detail = fmt.tprintf("%s · %s", web_listen_address(), WEB_PLAIN_HTTP_NOTE), path = WEB_LISTEN_ROW, button = "Change…"})
+	append(out, Settings_File_Row{group = "machines", exists = true, label = "Web access", detail = detail, path = WEB_ACCESS_ROW, button = on ? "Turn off" : "Turn on…"})
+	append(out, Settings_File_Row{group = "machines", exists = true, label = "Listen address", detail = fmt.tprintf("%s · %s", web_listen_address(), WEB_PLAIN_HTTP_NOTE), path = WEB_LISTEN_ROW, button = "Change…"})
 	if !on do return
-	append(out, Settings_File_Row{group = "machines", label = "Pair a browser…", detail = "A one-time code to type in the browser", path = WEB_PAIR_ROW, button = "Pair…"})
+	append(out, Settings_File_Row{group = "machines", exists = true, label = "Pair a browser…", detail = "A one-time code to type in the browser", path = WEB_PAIR_ROW, button = "Pair…"})
 	for d in w.devices {
-		append(out, Settings_File_Row{group = "machines", label = d.name, detail = fmt.tprintf("paired %s · last seen %s%s", web_day(d.paired), web_day(d.last_seen), d.linked ? " · viewing now" : ""), path = strings.concatenate({WEB_DEVICE_ROW, d.id}, context.temp_allocator), button = "Revoke"})
+		append(out, Settings_File_Row{group = "machines", exists = true, label = d.name, detail = fmt.tprintf("paired %s · last seen %s%s", web_day(d.paired), web_day(d.last_seen), d.linked ? " · viewing now" : ""), path = strings.concatenate({WEB_DEVICE_ROW, d.id}, context.temp_allocator), button = "Revoke"})
 	}
 }
 

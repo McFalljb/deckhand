@@ -543,3 +543,23 @@ pi_handoff_targets_filter :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(pi_handoff_targets(f.local, "src-1")), 0)
 }
 }
+
+// Review 2: fd_real_path is the opened file's own path (an ancestor link resolved, a rename
+// followed), which pi_handoff checks against pi's sessions folder after opening.
+@(test)
+fd_real_path_is_the_opened_file :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	root := strings.clone(real_path(fmt.tprintf("%s/dh-fdp-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)))
+	os.make_directory_all(fmt.tprintf("%s/real", root))
+	defer os.remove_all(root)
+	root = strings.clone(real_path(root))
+	_ = os.write_entire_file(fmt.tprintf("%s/real/f.jsonl", root), transmute([]u8)string("x\n"))
+	posix.symlink(strings.clone_to_cstring(fmt.tprintf("%s/real", root), context.temp_allocator), strings.clone_to_cstring(fmt.tprintf("%s/link", root), context.temp_allocator))
+	fd := posix.open(strings.clone_to_cstring(fmt.tprintf("%s/link/f.jsonl", root), context.temp_allocator), {.NOFOLLOW, .CLOEXEC})
+	testing.expect(t, fd >= 0)
+	defer posix.close(fd)
+	testing.expect_value(t, fd_real_path(fd), fmt.tprintf("%s/real/f.jsonl", root))
+	os.rename(fmt.tprintf("%s/real", root), fmt.tprintf("%s/moved", root))
+	testing.expect_value(t, fd_real_path(fd), fmt.tprintf("%s/moved/f.jsonl", root))
+	testing.expect_value(t, fd_real_path(-1), "")
+}

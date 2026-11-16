@@ -1393,7 +1393,7 @@ the mirror has it; nothing is added on this Mac. A refusal from there is a toast
 runs here, never forwarded (one naming another machine's `project_id` is refused: a conversation
 goes only from this Mac outward). It needs the user at this window (`ui`, `User_Here`: never
 Atlas, a script or a hub), a pi session of this Mac's project with its transcript file in pi's
-store here (opened without following a link, its real path inside pi's sessions folder, its first line a pi session header: checked before anything is sent), and the remote project as its row showed it: `to_project_id` (packed), `run` (that
+store here (opened without following a link, the opened file's own real path (F_GETPATH, /proc/self/fd) inside pi's sessions folder, its first line a pi session header: checked before anything is sent), and the remote project as its row showed it: `to_project_id` (packed), `run` (that
 machine's core run) and `folder` (that project's folder), checked again here along with the
 machine being online and the folder names matching; and a core whose last hello listed
 `pi_handoff` (else refused here, nothing sent: "its Deckhand is too old to take a conversation

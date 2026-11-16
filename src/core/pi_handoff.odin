@@ -134,15 +134,18 @@ pi_handoff_apply :: proc(c: Pi_Handoff, caller: Caller, request_id: u64) -> Resu
 	if !m.pi_handoff do return fail(fmt.tprintf("on %s: %s", m.name, PI_HANDOFF_OLD))
 	if !machine_link_up(no) do return {error = fmt.tprintf("%s is not connected", m.name), data = `{"code":"machine_offline"}`}
 	// pi's own file in its sessions folder: never through a link to another file (O_NOFOLLOW), nor a
-	// session folder that leads out of that folder (review 1)
-	root := real_path(sessions_root(context.temp_allocator))
-	if rp := real_path(path); root == "" || !strings.has_prefix(rp, strings.concatenate({strings.trim_right(root, "/"), "/"}, context.temp_allocator)) do return fail("this session's transcript is not in pi's sessions folder")
+	// session folder that leads out of that folder: the file opened is checked, by its fd (review 1, 2)
 	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NOFOLLOW, .CLOEXEC})
 	if fd < 0 do return fail("cannot read this session's transcript (it must be a file, not a link)")
 	st: posix.stat_t
 	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) {
 		posix.close(fd)
 		return fail("this session's transcript is not a file")
+	}
+	root := real_path(sessions_root(context.temp_allocator))
+	if at := fd_real_path(fd); root == "" || !strings.has_prefix(at, strings.concatenate({strings.trim_right(root, "/"), "/"}, context.temp_allocator)) {
+		posix.close(fd)
+		return fail("this session's transcript is not in pi's sessions folder")
 	}
 	if i64(st.st_size) > PI_HANDOFF_MAX {
 		posix.close(fd)

@@ -1291,136 +1291,154 @@ holder_rx_on_the_heap :: proc(t: ^testing.T) {
 	testing.expect(t, core.hc.rx.buf.allocator.procedure == runtime.heap_allocator_proc, "hc.rx took the caller's allocator")
 }
 
-@(private = "file")
-busy_tab: u64
+
+// ---- #135: is a held shell tab at its prompt? ----
 
 @(private = "file")
-busy_is :: proc(want: core.Foreground) -> bool {
-	x := core.term_of(busy_tab)
-	return x != nil && core.pty_foreground(&x.pty) == want
-}
+FG_UNKNOWN :: "this tab's state is not known yet (the session holder has not answered); try again in a moment"
+@(private = "file")
+FG_BUSY :: "a program is running in this tab; control callers type only at a shell prompt"
 
 @(private = "file")
-spawned_id: u32
-
-@(private = "file")
-spawned_known :: proc() -> bool {
+fg_held :: proc(id: u32) -> ^core.Held {
 	sync.lock(&core.hc.mu)
 	defer sync.unlock(&core.hc.mu)
-	h := core.hc.held[spawned_id]
-	return h != nil && h.fg > 0
+	return core.hc.held[id]
+}
+
+// A session with a held shell tab (term 3) and a held Log in… tab (term 4, started as a command:
+// tokens.json says so), adopted from the fake.
+@(private = "file")
+fg_adopt :: proc(t: ^testing.T, f: ^core.Fake_Holder, proj: string) -> ^core.Open_Session {
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Shell}
+	binds[4] = {kind = .Shell, command = true}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"ffff-nopi","no_file":true,"cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}},{{"kind":"shell","title":"Log in to x","cwd":"%s","held":4}}],"active_tab":1}}]}}`, f.instance, proj, proj, proj, proj, proj)
+	adopt_run(t, f, text, binds)
+	s := &state.open_sessions[len(state.open_sessions) - 1]
+	testing.expect(t, len(s.tabs) == 3 && s.tabs[1].status == .Running && s.tabs[2].status == .Running, "adopted")
+	return s
 }
 
 @(private = "file")
-fg_asked_ago :: proc(id: u32, ago: time.Duration) {
+fg_unhold :: proc(s: ^core.Open_Session) {
+	for tab in s.tabs do if x := core.term_of(tab.id); x != nil do x.pty.held, x.running = 0, false // never a RELEASE from a test
+}
+
+@(private = "file")
+reattach_soon :: proc() {
+	time.sleep(50 * time.Millisecond)
 	sync.lock(&core.hc.mu)
-	core.hc.held[id].fg_asked = time.tick_add(time.tick_now(), -ago)
+	core.hc.epoch += 1 // as holder_reattach_on
+	for _, h in core.hc.held do h.fg_out = false
+	sync.cond_broadcast(&core.hc.cond)
 	sync.unlock(&core.hc.mu)
 }
 
-// #135: a held shell tab's busy check. A close under auto and a control caller's send_text read a
-// cached foreground group nothing had asked for (first close of a running sleep 600: no prompt)
-// or one up to a poll old (ssh started just after an "at the prompt" answer). Now both ask the
-// holder and wait briefly for the answer to that very question; no answer in time, or a holder
-// that can't be asked (upgrading), is unknown, not idle: closing asks, control is refused. The tick
-// keeps one question at most unanswered per terminal. A new terminal is asked at once; Log in…'s
-// ssh tab is always busy; an ended terminal never is.
+// A close under auto and a control send_text ask the holder each time and take only the answer to
+// that question, on the same connection, within one 200 ms deadline: no answer, a late one (to an
+// earlier question, saying "at the prompt"), a reattach meanwhile, a lost holder: not idle (close
+// asks, control is refused). A Log in… tab (ssh in place) stays busy after an adoption. Only an
+// exit the holder reported ends it.
 @(test)
 holder_shell_busy_check :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}}
+	pid := i64(os.get_pid()) // the shell's own group: at its prompt
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), fake_term(4, "")}, fg_pgid = pid}
 	core.fake_holder_start(t, &f)
 	defer core.fake_holder_stop(&f)
 	proj := adopt_proj()
 	defer os.remove(proj)
-	binds := make(map[u32]core.Held_Start, context.temp_allocator)
-	binds[3] = {kind = .Shell}
-	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"ffff-nopi","no_file":true,"cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":1}}]}}`, f.instance, proj, proj, proj, proj)
-	adopt_run(t, &f, text, binds)
-	s := &state.open_sessions[len(state.open_sessions) - 1]
-	if !testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Running) do return
-	busy_tab = s.tabs[1].id
-	defer if x := core.term_of(busy_tab); x != nil do x.pty.held, x.running = 0, false // never a RELEASE from a test
-	control := core.Caller{kind = .Control}
-	pid := i64(os.get_pid()) // the shell's own group: at its prompt
-	UNKNOWN :: "this tab's state is not known yet (the session holder has not answered); try again in a moment"
-	BUSY :: "a program is running in this tab; control callers type only at a shell prompt"
+	s := fg_adopt(t, &f, proj)
+	if len(s.tabs) != 3 do return
+	defer fg_unhold(s)
+	sh, login := s.tabs[1].id, s.tabs[2].id
+	send :: proc(tab: u64) -> string {return core.run_command(core.Send_Text{tab_id = tab, text = "y"}, {kind = .Control}).error}
 
-	// no answer in time: closing asks, control is refused
-	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "unknown: closing asks")
-	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, UNKNOWN)
-
-	// the tick: no second question while one is unanswered, until HOLDER_FG_UNANSWERED
-	n := core.fake_holder_count(&f, .Foreground, 3)
-	fg_asked_ago(3, 1500 * time.Millisecond)
-	core.holder_foreground_tick()
-	core.wait_until(50, proc() -> bool {return false})
-	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n)
-	fg_asked_ago(3, 3500 * time.Millisecond)
-	core.holder_foreground_tick()
-	core.wait_until(100, proc() -> bool {return false})
-	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n + 1)
-
-	// a program in the foreground: the late answers ("at the prompt") come first and don't count
-	sync.atomic_store(&f.fg_pgid, 424242)
-	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "busy: closing asks")
-	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, BUSY)
-
-	// at the prompt, then ssh starts at once: the cached "at the prompt" is not used
-	sync.atomic_store(&f.fg_pgid, pid)
-	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "at the prompt: closes")
-	testing.expect(t, busy_is(.Idle), "cached: idle")
-	sync.atomic_store(&f.fg_pgid, 424242)
-	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "ssh just started: closing asks")
-	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, BUSY)
+	// Log in…'s ssh (adopted: tokens.json said it was a command) is never at a prompt
+	testing.expect(t, core.close_needs_confirm(s.tabs[2]), "login: closing asks")
+	testing.expect_value(t, send(login), FG_BUSY)
 
 	// at the prompt: both go through
-	sync.atomic_store(&f.fg_pgid, pid)
 	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "at the prompt: closes")
-	testing.expect(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).ok, "control types at a prompt")
+	testing.expect_value(t, send(sh), "")
 
-	// the holder upgrading (FOREGROUND would be dropped): unknown, and the tick asks nothing
-	sync.lock(&core.hc.wmu)
-	core.hc.upgrading = true
-	sync.unlock(&core.hc.wmu)
-	n = core.fake_holder_count(&f, .Foreground, 3)
-	fg_asked_ago(3, 10 * time.Second)
-	core.holder_foreground_tick()
-	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "upgrading: closing asks")
-	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, UNKNOWN)
-	sync.lock(&core.hc.wmu)
-	core.hc.upgrading = false
-	clear(&core.hc.pending)
-	sync.unlock(&core.hc.wmu)
-	core.wait_until(50, proc() -> bool {return false})
-	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n)
+	// no answer in time: closing asks, control is refused
+	sync.atomic_store(&f.fg_pgid, 0)
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "no answer: closing asks")
+	testing.expect_value(t, send(sh), FG_UNKNOWN)
 
-	// a new terminal is asked at SPAWNED: known within milliseconds, no tick
-	p, ok := core.holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
-	testing.expect(t, ok, "spawned")
-	spawned_id = p.held
-	testing.expect(t, core.wait_until(1000, spawned_known), "the SPAWNED question answered")
-	testing.expect_value(t, core.pty_foreground(&p), core.Foreground.Idle)
+	// ssh started: the late answer to the earlier question ("at the prompt") is not this check's
+	sync.atomic_store(&f.fg_pgid, 424242)
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "busy: closing asks")
+	testing.expect_value(t, send(sh), FG_BUSY)
 
-	// Log in…'s tab runs ssh in place (its own group): never at a prompt
-	login, err := core.shell_tab_start(s, proj, argv = {"/bin/sh", "-c", "exec sleep 5"}, title = "Log in to x")
-	testing.expect_value(t, err, "")
-	if x := core.term_of(login); x != nil {
-		testing.expect(t, x.pty.held != 0 && x.pty.command, "held, a command")
-		_, lt, _ := core.find_tab(login)
-		testing.expect(t, core.close_needs_confirm(lt^), "login: closing asks")
-		testing.expect_value(t, core.run_command(core.Send_Text{tab_id = login, text = "pw"}, control).error, BUSY)
-		x.pty.held, x.running = 0, false
+	// a reattach while a check waits: unknown, never the old connection's "at the prompt"
+	sync.atomic_store(&f.fg_pgid, pid)
+	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "at the prompt again")
+	sync.atomic_store(&f.fg_pgid, 0)
+	th := thread.create_and_start(reattach_soon)
+	x := core.term_of(sh)
+	testing.expect_value(t, core.pty_foreground(&x.pty), core.Foreground.Unknown)
+	thread.join(th)
+	thread.destroy(th)
+
+	// a session's close: many unanswered terminals, one deadline (not 200 ms each)
+	ids := make([dynamic]u32, context.temp_allocator)
+	pids := make([dynamic]i32, context.temp_allocator)
+	for _ in 0 ..< 8 {
+		p, ok := core.holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
+		testing.expect(t, ok, "spawned")
+		append(&ids, p.held)
+		append(&pids, p.pid)
 	}
+	start := time.tick_now()
+	testing.expect_value(t, core.holder_foreground_check(ids[:], pids[:]), core.Foreground.Unknown)
+	took := time.tick_since(start)
+	testing.expectf(t, took < 500 * time.Millisecond, "8 unanswered took %v", took)
 
-	// ended: never busy, and the tick asks nothing more
+	// the holder went away (EOF without an exit): it may run on, so not idle
+	h := fg_held(3)
 	sync.lock(&core.hc.mu)
-	core.hc.held[3].eof, core.hc.held[3].fg, core.hc.held[3].fg_asked = true, 424242, {}
+	h.eof, h.lost = true, true
 	sync.unlock(&core.hc.mu)
-	n = core.fake_holder_count(&f, .Foreground, 3)
-	core.holder_foreground_tick()
-	testing.expect(t, busy_is(.Idle), "ended: idle")
-	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "ended: closes")
-	core.wait_until(100, proc() -> bool {return false})
-	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n)
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "lost: closing asks")
+	testing.expect_value(t, send(sh), FG_UNKNOWN)
+
+	// it exited (EXITED): idle
+	sync.lock(&core.hc.mu)
+	h.lost = false
+	sync.unlock(&core.hc.mu)
+	testing.expect_value(t, core.pty_foreground(&x.pty), core.Foreground.Idle)
+	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "exited: closes")
+}
+
+// A FOREGROUND that can't go out at once (the socket full: a holder that does not read) is never
+// waited behind: unknown at once.
+@(test)
+holder_busy_check_full_socket :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), fake_term(4, "")}, fg_pgid = i64(os.get_pid()), no_read = true}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	was := core.holder_send_timeout
+	core.holder_send_timeout = 200 * time.Millisecond // the teardown's GOODBYE gives up soon
+	defer core.holder_send_timeout = was
+	proj := adopt_proj()
+	defer os.remove(proj)
+	s := fg_adopt(t, &f, proj)
+	if len(s.tabs) != 3 do return
+	defer fg_unhold(s)
+	// fill the socket without blocking (what goes in is never read)
+	fd := posix.FD(core.hc.fd)
+	fl := posix.fcntl(fd, .GETFL)
+	posix.fcntl(fd, .SETFL, fl | i32(posix.O_Flags{.NONBLOCK}))
+	junk := make([]u8, 64 * 1024, context.temp_allocator)
+	for posix.write(fd, raw_data(junk), len(junk)) > 0 {}
+	posix.fcntl(fd, .SETFL, fl)
+	start := time.tick_now()
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "full: closing asks")
+	took := time.tick_since(start)
+	testing.expectf(t, took < 100 * time.Millisecond, "waited %v", took)
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = s.tabs[1].id, text = "y"}, {kind = .Control}).error, FG_UNKNOWN)
 }

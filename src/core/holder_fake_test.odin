@@ -65,8 +65,8 @@ Fake_Holder :: struct {
 	deaf:            bool, // (atomic) the fake reads nothing more until it drops: what the app sends stays unread, as with a holder that drops a core
 	upgrade_drops:   bool, // UPGRADE: the fake closes as a pong-timeout drop does (no upgrade: the next WELCOME says crash)
 	fg_pgid:         i64, // (atomic) FOREGROUND is answered with this foreground group; 0: not yet (late:
-	                      // its answer comes before the next one answered, saying "at the prompt", an old state)
-	fg_owed:         int, // the fake thread's: FOREGROUNDs not answered yet
+	                      // once it is set, each held-back one is answered first, saying "at the prompt", an old state)
+	fg_owed:         [dynamic]u32, // the fake thread's: the terminals of FOREGROUNDs not answered yet
 	hellos:    int, // HELLOs so far (atomic)
 	helloed:   bool, // a HELLO came (atomic)
 	key:       [32]u8,
@@ -128,6 +128,7 @@ fake_holder_stop :: proc(f: ^Fake_Holder) {
 	state.settings.keep_sessions = false
 	for g in f.got do delete(g.payload, runtime.heap_allocator())
 	delete(f.got)
+	delete(f.fg_owed)
 }
 
 // The frames the app sent so far (after HELLO), copied.
@@ -212,6 +213,10 @@ fake_serve :: proc(f: ^Fake_Holder) {
 			time.sleep(10 * time.Millisecond)
 			continue
 		}
+		if len(f.fg_owed) > 0 && sync.atomic_load(&f.fg_pgid) != 0 {
+			for id in f.fg_owed do fake_send(f, .Foreground_Is, id, hw.Foreground_Is{pgid = i64(posix.getpid())}) // late, and old
+			clear(&f.fg_owed)
+		}
 		if !sock_wait_readable(f.cfd, 50) do continue
 		n := sock_read(f.cfd, buf)
 		if n <= 0 do return
@@ -269,13 +274,8 @@ fake_serve :: proc(f: ^Fake_Holder) {
 			case .Ping:
 				if !f.upgraded do fake_send(f, .Pong, 0, hw.Empty{})
 			case .Foreground:
-				pg := sync.atomic_load(&f.fg_pgid)
-				if pg == 0 {
-					f.fg_owed += 1
-				} else {
-					for ; f.fg_owed > 0; f.fg_owed -= 1 do fake_send(f, .Foreground_Is, fr.terminal, hw.Foreground_Is{pgid = i64(posix.getpid())})
-					fake_send(f, .Foreground_Is, fr.terminal, hw.Foreground_Is{pgid = pg})
-				}
+				if pg := sync.atomic_load(&f.fg_pgid); pg == 0 do append(&f.fg_owed, fr.terminal)
+				else do fake_send(f, .Foreground_Is, fr.terminal, hw.Foreground_Is{pgid = pg})
 			case .Upgrade:
 				if f.upgrade_drops {
 					sync.lock(&f.mu)

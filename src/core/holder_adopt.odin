@@ -470,7 +470,7 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 	}
 	if autotest_active && adopted && tail_start == 0 do adopt_ref_check(t, id, tail, cols, rows)
 	t.inexact = !exact
-	t.pty = Pty{fd = -1, held = id, pid = pid}
+	t.pty = Pty{fd = -1, held = id, pid = pid, command = known && saved.command} // Log in…'s ssh stays busy
 	t.running = true
 	t.reader.eof = false
 	t.changed = true

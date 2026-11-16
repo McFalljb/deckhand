@@ -270,6 +270,7 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 		t.running = false
 	} else {
 		t.pty = p
+		t.pty.command = start.command
 		t.running = true
 		if p.held == 0 {
 			reader_start(t)

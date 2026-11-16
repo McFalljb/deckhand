@@ -46,9 +46,8 @@ import "../trust"
 
 HOLDER_WAIT :: 5 * time.Second // the socket after a launch, WELCOME + TAILs, SPAWNED, GOODBYE_ACK
 HOLDER_MAX_TERMS :: 4096
-HOLDER_FG_POLL :: time.Second // FOREGROUND about this often per live tab's terminal (holder_foreground_tick)
-HOLDER_FG_UNANSWERED :: 3 * time.Second // ...but not again while one is unanswered, for this long
-HOLDER_FG_WAIT :: 200 * time.Millisecond // a close or a control send_text waits this long for a fresh answer
+HOLDER_FG_EVERY :: 250 * time.Millisecond // FOREGROUND at most this often per terminal (agent_status's cached read)
+HOLDER_FG_WAIT :: 200 * time.Millisecond // a close or a control send_text waits this long for its answers
 // A refused connect is tried again after each of these (macOS refuses on a full listen backlog
 // too: a busy live holder); 750 ms in all before its socket is taken for a dead one's.
 HOLDER_RECHECKS := [?]time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
@@ -68,9 +67,8 @@ Held :: struct {
 	lost:        bool, // the holder went away (or listed it with a bad size)
 	gap:         bool, // OUTPUT did not continue where the last one ended (a holder bug): inexact
 	fg:          i32, // FOREGROUND_IS (0 unknown)
-	fg_asked:    time.Tick, // the last FOREGROUND sent
-	fg_sent:     u64, // FOREGROUNDs sent on this connection, and
-	fg_got:      u64, // FOREGROUND_ISes received: the holder answers in order, so the n-th answers the n-th
+	fg_asked:    time.Tick,
+	fg_out:      bool, // a FOREGROUND is unanswered on this connection (never more than one)
 	spawn:       enum u8 {Waiting, Spawned, Failed},
 	welcomed:    bool, // listed in this connection's WELCOME (the adopt candidates)
 	claimed:     bool, // a restored tab adopted it
@@ -131,6 +129,7 @@ Holder_Client :: struct {
 	upgrading: bool, // UPGRADE sent, no outcome yet: frames wait in pending (wmu)
 	rejoining: bool, // the holder dropped us and the reader attaches again: frames wait in pending (wmu)
 	released:  map[u32]bool, // terminals this core RELEASEd (or gave up spawning): sent again to a holder that still lists them after a reattach (mu)
+	epoch:     u64, // bumped at each reattach (hc.mu): an answer awaited on the old connection never comes
 	stuck:     bool, // a send blocked for SO_SNDTIMEO: the holder does not read (hung), so the end is no drop to rejoin after
 	upgrade_told: bool, // the user was told a tab opened meanwhile is not kept (holder_wanted)
 	pending:   [dynamic]u8, // whole frames held back during an upgrade (wmu), sent after it
@@ -677,9 +676,8 @@ holder_frame :: proc(f: hw.Frame) {
 	case .Foreground_Is:
 		m: hw.Foreground_Is
 		if h == nil || hw.decode(f, .Foreground_Is, &m, context.temp_allocator) != .None do return
-		h.fg = i32(clamp(m.pgid, 0, i64(max(i32))))
-		h.fg_got += 1
-		sync.cond_broadcast(&hc.cond) // holder_foreground_fresh waits for it
+		h.fg, h.fg_out = i32(clamp(m.pgid, 0, i64(max(i32)))), false
+		sync.cond_broadcast(&hc.cond) // holder_foreground_check waits for it
 	case .Goodbye_Ack:
 		if !hc.handed || hc.acked {
 			trust.wipe(f.payload)
@@ -846,7 +844,6 @@ holder_spawn :: proc(argv: []string, cwd: string, env: []string, cols, rows: u16
 	}
 	sync.unlock(&hc.mu)
 	if sent && !ok do holder_send(.Release, id, hw.Empty{}) // a late SPAWNED: nothing keeps it
-	if ok do holder_ask_foreground(id) // unknown until answered (shell init may start a program): known within milliseconds
 	return
 }
 
@@ -916,78 +913,86 @@ holder_release :: proc(id: u32) {
 	if !handed do holder_send(.Release, id, hw.Empty{})
 }
 
-// The cached foreground process group (the tick keeps it about a second old); known once the
-// holder answered with one (an ended terminal: 0, known). Never sends: agent_status reads it.
-holder_foreground :: proc(id: u32) -> (pg: i32, known: bool) {
+// The cached foreground process group (0 unknown); asks again at most every HOLDER_FG_EVERY.
+holder_foreground :: proc(id: u32) -> i32 {
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
 	h := hc.held[id]
-	if h == nil || h.eof do return 0, true
-	return h.fg, h.fg > 0 // the holder says 0 when it can't tell
+	if h == nil || h.eof do return 0
+	if !h.fg_out && time.tick_since(h.fg_asked) >= HOLDER_FG_EVERY {
+		h.fg_asked = time.tick_now()
+		fg_send_locked(h)
+	}
+	return h.fg
 }
 
-// A fresh answer, for the two checks it gates (a close under auto, a control caller's send_text):
-// FOREGROUND now, then up to HOLDER_FG_WAIT for the reply to this one (an earlier reply still on
-// its way does not count). Unknown when none comes in time or the holder can't be asked now
-// (lost, stuck, upgrading, rejoining). Waits on hc.cond, which releases hc.mu: the reader thread
-// takes it to deliver the reply.
-holder_foreground_fresh :: proc(id: u32) -> (pg: i32, known: bool) {
-	n, sent, ended := holder_ask_foreground(id)
-	if ended do return 0, true
-	if !sent do return 0, false
-	sync.lock(&hc.mu)
-	defer sync.unlock(&hc.mu)
+// For a close under auto and a control send_text: Idle only when, for every terminal, a FOREGROUND
+// sent for this check was answered on the same connection within HOLDER_FG_WAIT with the child's
+// own group (pids), or the holder said it exited. Busy when one names another group. Anything else
+// (no answer in time, a holder lost, stuck, upgrading or rejoining, a reattach meanwhile, a send
+// that can't go out at once) is Unknown. All asked first, then one deadline. Waits on hc.cond,
+// which releases hc.mu for the reader thread that delivers the answers.
+holder_foreground_check :: proc(ids: []u32, pids: []i32) -> Foreground {
+	sent := make([]bool, len(ids), context.temp_allocator)
 	deadline := time.tick_add(time.tick_now(), HOLDER_FG_WAIT)
-	for {
-		h := hc.held[id]
-		if h == nil || h.eof do return 0, true
-		if h.fg_got >= n do return h.fg, h.fg > 0
-		left := time.tick_diff(time.tick_now(), deadline)
-		if left <= 0 do return 0, false
-		sync.cond_wait_with_timeout(&hc.cond, &hc.mu, left)
-	}
-}
-
-// Sends FOREGROUND for id; n: its number on this connection. Not sent while the holder can't be
-// asked (the frame would be dropped: holder_write), so every one counted gets its answer unless
-// the connection ends (holder_reattach_on starts the count again). ended: no process to ask about.
-@(private = "file")
-holder_ask_foreground :: proc(id: u32) -> (n: u64, sent, ended: bool) {
-	sync.lock(&hc.wmu) // wmu, then mu (upgrade_release's order)
-	defer sync.unlock(&hc.wmu)
 	sync.lock(&hc.mu)
-	h := hc.held[id]
-	if h == nil || h.eof {
-		sync.unlock(&hc.mu)
-		return 0, false, true
+	defer sync.unlock(&hc.mu)
+	epoch := hc.epoch
+	for {
+		if sync.atomic_load(&hc.lost) || hc.epoch != epoch do return .Unknown
+		all_idle, later := true, false
+		for id, i in ids {
+			h := hc.held[id]
+			if h == nil do return .Unknown
+			if h.eof {
+				if !h.lost do continue // it exited (EXITED): nothing runs there
+				return .Unknown // the holder went away: it may run on
+			}
+			if !sent[i] {
+				all_idle = false
+				if h.fg_out do continue // an earlier question's answer first: it is not this check's
+				switch fg_send_locked(h) {
+				case .Sent:  sent[i] = true
+				case .Later: later = true
+				case .Never: return .Unknown
+				}
+			} else if h.fg_out {
+				all_idle = false
+			} else if h.fg <= 0 {
+				return .Unknown // the holder can't tell
+			} else if h.fg != pids[i] {
+				return .Busy
+			}
+		}
+		if all_idle do return .Idle
+		left := time.tick_diff(time.tick_now(), deadline)
+		if left <= 0 do return .Unknown
+		sync.cond_wait_with_timeout(&hc.cond, &hc.mu, later ? min(left, 5 * time.Millisecond) : left)
 	}
-	if sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) || sync.atomic_load(&hc.stuck) || hc.upgrading || hc.rejoining || hc.fd < 0 {
-		sync.unlock(&hc.mu)
-		return 0, false, false
-	}
-	h.fg_sent += 1
-	n, h.fg_asked = h.fg_sent, time.tick_now()
-	sync.unlock(&hc.mu)
-	out := make([dynamic]u8, context.temp_allocator)
-	hw.encode(&out, .Foreground, id, hw.Empty{})
-	if sock_write_all(hc.fd, out[:]) do return n, true, false
-	send_failed() // as holder_write: nothing more can follow on the wire, the reader loses the holder
-	sock_shutdown(hc.fd)
-	return n, false, false
 }
 
-// Main thread, every tick: each live tab's held terminal is asked its foreground about once a
-// second, at most one question unanswered per terminal (a holder that stops reading gets a few
-// frames, never one a tick), none while the holder can't be asked.
-holder_foreground_tick :: proc() {
-	if !hc.on || sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.stuck) do return
-	for _, t in terms do if t.pty.held != 0 && t.pty.pid > 0 && t.running {
-		sync.lock(&hc.mu)
-		h := hc.held[t.pty.held]
-		due := h != nil && !h.eof && time.tick_since(h.fg_asked) >= (h.fg_got >= h.fg_sent ? HOLDER_FG_POLL : HOLDER_FG_UNANSWERED)
-		sync.unlock(&hc.mu)
-		if due do holder_ask_foreground(t.pty.held)
+@(private = "file")
+Fg_Send :: enum u8 {Sent, Later, Never}
+
+// FOREGROUND for h (hc.mu held), never blocking: Later while another thread writes (wmu taken),
+// Never when it can't go out at once (the holder lost, stuck, upgrading or rejoining, the socket
+// full: a holder that does not read).
+@(private = "file")
+fg_send_locked :: proc(h: ^Held) -> Fg_Send {
+	if !sync.try_lock(&hc.wmu) do return .Later // try: wmu comes before hc.mu
+	defer sync.unlock(&hc.wmu)
+	if sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) || sync.atomic_load(&hc.stuck) || hc.upgrading || hc.rejoining || hc.fd < 0 do return .Never
+	pfd := posix.pollfd{fd = hc.fd, events = {.OUT}}
+	if posix.poll(&pfd, 1, 0) <= 0 || .OUT not_in pfd.revents do return .Never // room for a few bytes at least: the frame goes at once
+	out := make([dynamic]u8, context.temp_allocator)
+	hw.encode(&out, .Foreground, h.id, hw.Empty{})
+	if !sock_write_all(hc.fd, out[:]) {
+		send_failed() // as holder_write: nothing more can follow on the wire, the reader loses the holder
+		sock_shutdown(hc.fd)
+		return .Never
 	}
+	h.fg_out, h.fg_asked = true, time.tick_now()
+	return .Sent
 }
 
 // How it ended once it did: reaped = no more process (exit unknown when the holder was lost).
@@ -1403,7 +1408,8 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 	}
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	for _, h in hc.held do h.fg_got = h.fg_sent // the old connection's questions are never answered
+	hc.epoch += 1 // a check waiting on the old connection is unknown (holder_foreground_check)
+	for _, h in hc.held do h.fg_out = false // its questions are never answered
 	for wt, i in w.terminals {
 		h := hc.held[u32(wt.id)]
 		if h == nil do continue // released while it upgraded: its RELEASE waits in pending

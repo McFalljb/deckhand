@@ -2,9 +2,10 @@
 """Web access end to end (docs/PROTOCOL.md §5b): starts `deckhand-core-serve serve` in test mode in a
 temp dir with web access on, listening on 127.0.0.1 at a free port, then: the page and its headers,
 whoami (401), a code from `deckhand-core-serve web pair`, /api/pair (wrong origin, wrong code, the
-right one), whoami (200), the WebSocket upgrade (refused without Origin or cookie), the hello,
+right one, its key), whoami (200), the WebSocket upgrade (refused without Origin or cookie), a hello
+without the key closed with 4401, the hello,
 state.subscribe -> state.full, a command, a User_Here command refused, `web list` showing the link,
-a text message closing it, `web revoke`, then SIGTERM. Test mode only (fake HOME); no network beyond
+a text message closing it, `web revoke`, unpair (refused without the key), then SIGTERM. Test mode only (fake HOME); no network beyond
 127.0.0.1.
 
 Usage: tests/web-smoke.py [build/deckhand-core-serve]
@@ -112,6 +113,17 @@ class WS:
         p, self.buf = self.buf[at:at + n], self.buf[at + n:]
         return op, p
 
+    def close_code(self, limit=50):
+        """The close's code, skipping anything else (None: the socket ended without one)."""
+        for _ in range(limit):
+            try:
+                op, p = self.recv()
+            except (EOFError, OSError):
+                return None
+            if op == 8:
+                return struct.unpack(">H", p[:2])[0] if len(p) >= 2 else None
+        return None
+
     def recv_json(self, want=None, limit=200):
         for _ in range(limit):
             op, p = self.recv()
@@ -184,6 +196,8 @@ def main():
         assert http(port, "POST", "/api/pair", origin, json.dumps({"code": "AAAA-AAAA", "name": "t"}).encode())[0] == 403
         st, h, body = http(port, "POST", "/api/pair", origin, json.dumps({"code": code.lower(), "name": "Smoke browser"}).encode())
         assert st == 200, (st, body)
+        key = json.loads(body)["key"]
+        assert re.fullmatch(r"[0-9a-f]{64}", key), body
         sc = h["set-cookie"][0]
         assert "HttpOnly" in sc and "SameSite=Strict" in sc and "Max-Age=5184000" in sc, sc
         cookie = sc.split(";")[0]
@@ -194,9 +208,20 @@ def main():
         assert st == 200 and w["paired"] and w["name"] == "Smoke browser" and len(w["core"]) == 64, body
         assert WS(port, cookie, origin=False).status == 403
         assert WS(port, "").status == 401
+        # the cookie alone (another service on this host name gets it): no key, a wrong one, or not
+        # a hello first, and the link closes with 4401 before anything is attached or sent
+        for hello in ({"v": 1, "id": "hello", "type": "hello", "peer": "web"},
+                      {"v": 1, "id": "hello", "type": "hello", "peer": "web", "key": "0" * 64},
+                      {"v": 1, "type": "state.subscribe", "key": key}):
+            bad = WS(port, cookie)
+            assert bad.status == 101, bad.status
+            bad.send_json(hello)
+            assert bad.close_code() == 4401, hello
+        rc, out = cli(env, "list")
+        assert rc == 0 and "viewing now" not in out, out
         ws = WS(port, cookie)
         assert ws.status == 101, ws.status
-        ws.send_json({"v": 1, "id": "hello", "type": "hello", "framed": True, "peer": "web", "snapshot": ["vt"]})
+        ws.send_json({"v": 1, "id": "hello", "type": "hello", "framed": True, "peer": "web", "snapshot": ["vt"], "key": key})
         m = ws.recv_json(lambda m: m.get("type") == "result" and m.get("id") == "hello")
         hd = m["result"]["data"]
         assert m["result"]["ok"] and hd["core"] == w["core"] and hd["snapshot"] == ["vt"], m
@@ -226,6 +251,16 @@ def main():
         rc, out = cli(env, "revoke", dev)
         assert rc == 0, out
         assert http(port, "GET", "/api/whoami", {"Cookie": cookie})[0] == 401
+        # unpair needs the key as well as the cookie
+        rc, out = cli(env, "pair")
+        code = re.search(r"code: ([A-Z0-9]{4}-[A-Z0-9]{4})", out).group(1)
+        st, h, body = http(port, "POST", "/api/pair", origin, json.dumps({"code": code, "name": "second"}).encode())
+        cookie2, key2 = h["set-cookie"][0].split(";")[0], json.loads(body)["key"]
+        assert http(port, "POST", "/api/unpair", {**origin, "Cookie": cookie2})[0] == 403, "no key"
+        assert http(port, "POST", "/api/unpair", {**origin, "Cookie": cookie2, "X-Deckhand-Key": key})[0] == 403, "another browser's key"
+        assert http(port, "GET", "/api/whoami", {"Cookie": cookie2})[0] == 200
+        assert http(port, "POST", "/api/unpair", {**origin, "Cookie": cookie2, "X-Deckhand-Key": key2})[0] == 200
+        assert http(port, "GET", "/api/whoami", {"Cookie": cookie2})[0] == 401
         rc, out = cli(env, "off")
         assert rc == 0, out
         ok = True

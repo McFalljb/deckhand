@@ -35,6 +35,7 @@ import "core:thread"
 import "core:time"
 
 import jg "../jsonguard"
+import "../trust"
 
 WEB_LISTEN_DEFAULT :: "0.0.0.0:7433"
 WEB_DEVICES_FILE :: "web-devices.json"
@@ -69,7 +70,8 @@ Web_Revoke :: struct {
 Web_Device :: struct {
 	id:        string, // heap: 12 hex digits, random
 	name:      string, // heap: what the browser called itself (text_clean)
-	hash:      [32]u8, // SHA-256 of its token
+	hash:      [32]u8, // SHA-256 of its token (the cookie)
+	key_hash:  [32]u8, // SHA-256 of its key (the page's own storage; said in the hello)
 	paired:    i64, // unix seconds
 	last_seen: i64,
 }
@@ -199,13 +201,17 @@ web_devices_decode :: proc(text: string, allocator := context.allocator) -> []We
 		id, _ := o["id"].(json.String)
 		name, _ := o["name"].(json.String)
 		h, _ := o["hash"].(json.String)
+		k, _ := o["key"].(json.String)
 		paired, _ := o["paired"].(json.Integer)
 		seen, _ := o["last_seen"].(json.Integer)
-		if len(id) != 12 || !hex64_ok(h) do continue
+		if len(id) != 12 || !hex64_ok(h) || !hex64_ok(k) do continue // no key: paired before keys, pair again
 		d := Web_Device{paired = paired, last_seen = seen}
 		raw, hok := hex.decode(transmute([]u8)h, context.temp_allocator)
 		if !hok || len(raw) != 32 do continue
 		copy(d.hash[:], raw)
+		rawk, kok := hex.decode(transmute([]u8)k, context.temp_allocator)
+		if !kok || len(rawk) != 32 do continue
+		copy(d.key_hash[:], rawk)
 		d.id = strings.clone(id, allocator)
 		d.name = strings.clone(text_clean(name, WEB_NAME_MAX), allocator)
 		append(&out, d)
@@ -222,7 +228,7 @@ web_devices_encode :: proc(list: []Web_Device) -> string {
 		json_quote(&b, d.id)
 		strings.write_string(&b, `,"name":`)
 		json_quote(&b, d.name)
-		fmt.sbprintf(&b, `,"hash":"%s","paired":%d,"last_seen":%d}}`, hex32(d.hash), d.paired, d.last_seen)
+		fmt.sbprintf(&b, `,"hash":"%s","key":"%s","paired":%d,"last_seen":%d}}`, hex32(d.hash), hex32(d.key_hash), d.paired, d.last_seen)
 	}
 	strings.write_string(&b, "]}\n")
 	return strings.to_string(b)
@@ -298,6 +304,28 @@ web_token_device :: proc(tok: string, now: i64) -> (id, name: string, ok: bool) 
 	return strings.clone(d.id, context.temp_allocator), strings.clone(d.name, context.temp_allocator), true
 }
 
+// Whether key is the paired browser id's key (any thread; constant time): the hello's, and an
+// unpair's X-Deckhand-Key. The cookie alone is not enough: another service on the same host name
+// (another port) is sent it too, but never this page's storage.
+web_key_ok :: proc(id, key: string) -> bool {
+	if id == "" || !hex64_ok(key) do return false
+	h := token_hash(key)
+	sync.guard(&web.mu)
+	web_load_locked()
+	for &d in web.devices do if d.id == id do return crypto.compare_constant_time(h[:], d.key_hash[:]) == 1
+	return false
+}
+
+// Whether the paired browser id is still paired and not expired (any thread): the main thread
+// asks again just before it attaches a link checked on its connection's thread.
+web_device_live :: proc(id: string, now: i64) -> bool {
+	if id == "" do return false
+	sync.guard(&web.mu)
+	web_load_locked()
+	for d in web.devices do if d.id == id do return now - max(d.last_seen, d.paired) <= WEB_DEVICE_IDLE_S
+	return false
+}
+
 // Forgets the browser of tok (an unpair over HTTP, any thread): its live link closes at the next
 // tick. False: no such token.
 web_token_forget :: proc(tok: string) -> bool {
@@ -369,37 +397,41 @@ Web_Pair_Answer :: enum u8 {
 	Full, // WEB_DEVICES_MAX browsers paired
 }
 
-// A browser's try at the code (any thread). Paired: token is its new cookie (temp), name kept.
-// The code is compared in constant time; a right one is used up, a wrong one counts.
-web_pair_try :: proc(typed, name: string, now: i64) -> (a: Web_Pair_Answer, token: string) {
+// A browser's try at the code (any thread). Paired: token is its new cookie and key the secret its
+// page keeps in its own storage (both temp), name kept. The code is compared in constant time; a
+// right one is used up, a wrong one counts.
+web_pair_try :: proc(typed, name: string, now: i64) -> (a: Web_Pair_Answer, token, key: string) {
 	got := web_code_normal(typed)
 	sync.guard(&web.mu)
 	web_load_locked()
 	c := &web.code
 	if c.until == 0 || now > c.until || c.tries >= WEB_CODE_TRIES {
 		c^ = {}
-		return .None, ""
+		return .None, "", ""
 	}
 	want := c.code
 	right := len(got) == WEB_CODE_LEN && crypto.compare_constant_time(transmute([]u8)got, want[:]) == 1
 	if !right {
 		c.tries += 1
 		if c.tries >= WEB_CODE_TRIES do c^ = {}
-		return .Wrong, ""
+		return .Wrong, "", ""
 	}
 	c^ = {} // single use
-	if len(web.devices) >= WEB_DEVICES_MAX do return .Full, ""
+	if len(web.devices) >= WEB_DEVICES_MAX do return .Full, "", ""
 	raw: [32]u8
 	crypto.rand_bytes(raw[:])
 	token = hex32(raw)
+	crypto.rand_bytes(raw[:])
+	key = hex32(raw)
+	trust.wipe(raw[:])
 	idb: [6]u8
 	crypto.rand_bytes(idb[:])
 	heap := runtime.heap_allocator()
 	nm := text_clean(strings.trim_space(name), WEB_NAME_MAX)
 	if nm == "" do nm = "Browser"
-	append(&web.devices, Web_Device{id = string(hex.encode(idb[:], heap)), name = strings.clone(nm, heap), hash = token_hash(token), paired = now, last_seen = now})
+	append(&web.devices, Web_Device{id = string(hex.encode(idb[:], heap)), name = strings.clone(nm, heap), hash = token_hash(token), key_hash = token_hash(key), paired = now, last_seen = now})
 	web.dirty = true
-	return .Paired, token
+	return .Paired, token, key
 }
 
 // ---- commands (main thread) ----

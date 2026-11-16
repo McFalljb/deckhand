@@ -5,17 +5,21 @@
 
 import { decodeFrame, encodeFrame, JSON_CHANNEL, jsonFrame, Kind, text, type Frame } from "./wire.ts";
 import { Store } from "./state.ts";
-import { whoami } from "./api.ts";
+import { forgetKey, pairKey, whoami } from "./api.ts";
 
 export const PROTOCOL_VERSION = 1;
 
-// The hello a browser says on the socket (docs/PROTOCOL.md §5b). The cookie already proved the
-// browser (a bad one is refused at the upgrade, 401 or 403), so it carries no token. The reply is a
+// The hello a browser says on the socket (docs/PROTOCOL.md §5b). The cookie got it through the
+// upgrade (a bad one is refused there, 401 or 403); the hello carries this page's key, which the
+// core checks before it attaches the link (a wrong one: close code CLOSE_KEY). The reply is a
 // `result` with this id: data {core, version, generation, features, methods, name, machine,
 // snapshot, build, web, framed}.
-function helloMessage(): object {
-  return { v: PROTOCOL_VERSION, id: "hello", type: "hello", framed: true, peer: "web", snapshot: ["vt"] };
+export function helloMessage(key: string): object {
+  return { v: PROTOCOL_VERSION, id: "hello", type: "hello", framed: true, peer: "web", snapshot: ["vt"], key };
 }
+
+// The core's close code for a hello without this browser's key: pair again.
+export const CLOSE_KEY = 4401;
 
 export interface Result {
   ok: boolean;
@@ -155,7 +159,12 @@ export class Link {
     this.helloDone = false;
     ws.onopen = () => {
       if (this.ws !== ws) return;
-      ws.send(jsonFrame(helloMessage()));
+      const key = pairKey();
+      if (!key) {
+        this.unpaired();
+        return;
+      }
+      ws.send(jsonFrame(helloMessage(key)));
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws || !(ev.data instanceof ArrayBuffer)) return;
@@ -170,8 +179,12 @@ export class Link {
       }
       this.channels.get(f.channel)?.(f);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.ws !== ws) return;
+      if (ev.code === CLOSE_KEY) {
+        this.unpaired();
+        return;
+      }
       const wasUp = this.helloDone;
       this.ws = null;
       this.helloDone = false;
@@ -189,6 +202,14 @@ export class Link {
       }
       this.retry("the connection dropped");
     };
+  }
+
+  // Not paired (revoked, or no key here or the wrong one): the key goes, the pairing screen shows.
+  private unpaired(): void {
+    forgetKey();
+    this.hold = true;
+    this.dropSocket();
+    this.setStatus({ kind: "unpaired" });
   }
 
   private dropSocket(): void {
@@ -309,9 +330,7 @@ export class Link {
       }
       case "web.revoked":
         // this browser was unpaired at the Mac: pair again
-        this.hold = true;
-        this.dropSocket();
-        this.setStatus({ kind: "unpaired" });
+        this.unpaired();
         return;
       case "web.closed":
         this.hold = true;

@@ -61,7 +61,9 @@ export function pairScreen(onPaired: () => void): HTMLElement {
           msg.textContent =
             r === "refused"
               ? "That code did not work. Codes last 2 minutes and work once: make a new one at the Mac."
-              : "Deckhand did not answer. Is web access still on at the Mac?";
+              : r === "nostorage"
+                ? "This browser does not keep site data here (a private window?), so it cannot stay paired. Revoke it at the Mac and use a normal window."
+                : "Deckhand did not answer. Is web access still on at the Mac?";
         },
       },
     },

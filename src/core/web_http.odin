@@ -8,12 +8,17 @@ package core
 //   GET  /                the web client (web/dist/index.html)
 //   GET  /assets/<file>   its files (web/dist/assets/)
 //   GET  /api/whoami      200 {"paired":true,"name","core","version"} (the cookie renewed), or 401
-//   POST /api/pair        {"code","name"} -> 200 and the cookie, or 403
-//   POST /api/unpair      the caller's own token forgotten (its link closes)
+//   POST /api/pair        {"code","name"} -> 200 {"paired":true,"key"} and the cookie, or 403
+//   POST /api/unpair      the cookie and X-Deckhand-Key: that browser forgotten (its link closes)
 //   GET  /ws              the WebSocket: each binary message exactly one framed-wire frame
 //
 // Every POST and the upgrade need an Origin whose host:port is the Host header (no CORS headers at
-// all), so another site's page cannot drive them. The upgrade and whoami need the cookie.
+// all), so another site's page cannot drive them. The upgrade and whoami need the cookie. A cookie
+// is a host name's, not a port's: another service on the same name (an agent's dev server the
+// user opens) is sent it too. So pairing also returns a key the page keeps in its own (per-port)
+// storage, and the link needs both: the first WebSocket message is the hello with "key", checked
+// (web_key_ok) before anything is attached or sent; unpair needs it as X-Deckhand-Key. whoami
+// stays cookie-only and says only the browser's own name, the core's id and its version.
 //
 // The relay (one thread per WebSocket): the browser's messages go to one end of a socketpair as
 // frames, the other end is the window's link over the socket transport (window_sock.odin's
@@ -48,6 +53,8 @@ WEB_MSG_MAX :: cw.HEADER_SIZE + cw.MAX_PAYLOAD // a browser's message: one frame
 WEB_PING :: 30 * time.Second
 WEB_SILENT :: 90 * time.Second
 WEB_COOKIE :: "deckhand_web"
+WEB_HELLO_MAX :: 16 * 1024 // the first message, before the key is checked
+WEB_CLOSE_KEY :: 4401 // the close code of a hello without this browser's key: the page pairs again
 WS_GUID :: "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 // ---- the request (pure) ----
@@ -56,6 +63,7 @@ Http_Request :: struct {
 	method, target:       string,
 	http11:               bool,
 	host, origin, cookie: string,
+	key:                  string, // X-Deckhand-Key (an unpair)
 	content_length:       int, // -1: none
 	upgrade, connection:  string,
 	ws_key, ws_version:   string,
@@ -70,7 +78,7 @@ Http_Parse :: enum u8 {
 }
 
 // The request line and headers in buf (strings point into it). used: their bytes with the blank
-// line. Duplicate Host, Origin, Cookie or Content-Length, folded lines, control characters, a
+// line. Duplicate Host, Origin, Cookie, Content-Length or X-Deckhand-Key, folded lines, control characters, a
 // target that is not origin-form, and anything past WEB_HEAD_MAX are refused.
 http_parse :: proc(buf: []u8) -> (r: Http_Request, used: int, st: Http_Parse) {
 	text := string(buf)
@@ -95,7 +103,7 @@ http_parse :: proc(buf: []u8) -> (r: Http_Request, used: int, st: Http_Parse) {
 	for ch in transmute([]u8)r.method do if ch < 'A' || ch > 'Z' do return {}, 0, .Bad
 	if len(r.target) == 0 || len(r.target) > WEB_TARGET_MAX || r.target[0] != '/' do return {}, 0, .Bad
 	for ch in transmute([]u8)r.target do if ch <= 0x20 || ch >= 0x7f do return {}, 0, .Bad
-	seen: bit_set[0 ..< 4]
+	seen: bit_set[0 ..< 5]
 	for line in lines[1:] {
 		if len(line) == 0 || line[0] == ' ' || line[0] == '\t' do return {}, 0, .Bad // obsolete folding
 		colon := strings.index_byte(line, ':')
@@ -104,7 +112,7 @@ http_parse :: proc(buf: []u8) -> (r: Http_Request, used: int, st: Http_Parse) {
 		for ch in transmute([]u8)name do if ch <= 0x20 || ch >= 0x7f do return {}, 0, .Bad
 		value := strings.trim(line[colon + 1:], " \t")
 		for ch in transmute([]u8)value do if (ch < 0x20 && ch != '\t') || ch == 0x7f do return {}, 0, .Bad
-		one :: proc(seen: ^bit_set[0 ..< 4], i: int) -> bool {
+		one :: proc(seen: ^bit_set[0 ..< 5], i: int) -> bool {
 			if i in seen^ do return false
 			seen^ += {i}
 			return true
@@ -128,6 +136,9 @@ http_parse :: proc(buf: []u8) -> (r: Http_Request, used: int, st: Http_Parse) {
 				n = n * 10 + int(ch - '0')
 			}
 			r.content_length = n
+		case strings.equal_fold(name, "x-deckhand-key"):
+			if !one(&seen, 4) do return {}, 0, .Bad
+			r.key = value
 		case strings.equal_fold(name, "transfer-encoding"):
 			r.chunked = true
 		case strings.equal_fold(name, "upgrade"):
@@ -450,10 +461,10 @@ web_conn :: proc(fd: Sock_Fd, epoch: u64) {
 			return
 		}
 		code, name := web_pair_body(string(body))
-		a, tok := web_pair_try(code, name, now)
+		a, tok, key := web_pair_try(code, name, now)
 		switch a {
 		case .Paired:
-			web_send(fd, 200, "application/json", `{"paired":true}`, cookie = tok)
+			web_send(fd, 200, "application/json", fmt.tprintf(`{{"paired":true,"key":"%s"}}`, key), cookie = tok)
 		case .Full:
 			web_send(fd, 403, "application/json", `{"paired":false,"error":"too many paired browsers: revoke one in Settings first"}`)
 		case .Wrong, .None:
@@ -466,7 +477,12 @@ web_conn :: proc(fd: Sock_Fd, epoch: u64) {
 			web_send(fd, 403, "application/json", `{"error":"wrong origin"}`)
 			return
 		}
-		web_token_forget(web_cookie_value(req.cookie))
+		tok := web_cookie_value(req.cookie)
+		if id, _, ok := web_token_device(tok, now); ok && web_key_ok(id, req.key) do web_token_forget(tok)
+		else if ok {
+			web_send(fd, 403, "application/json", `{"error":"not this browser's key"}`)
+			return
+		}
 		web_send(fd, 200, "application/json", `{"paired":false}`, clear_cookie = true)
 		return
 	case "/ws":
@@ -589,12 +605,51 @@ web_relay :: proc(fd: Sock_Fd, epoch: u64, key: string, early: []u8, id, name: s
 		posix.close(sp[1])
 		return
 	}
-	web_arrived(sp[1], id, name) // the main thread attaches it as the window's link (window_sock.odin)
 	defer posix.close(sp[0])
 	heap := runtime.heap_allocator()
 	inb := make([dynamic]u8, heap) // from the browser
 	defer delete(inb)
 	append(&inb, ..early)
+	// the hello first, with this browser's key: refused, nothing was attached or sent
+	{
+		deadline := time.tick_add(time.tick_now(), WEB_READ_MS * time.Millisecond)
+		f: Ws_Frame
+		used: int
+		for {
+			st: Ws_Parse
+			why: string
+			f, used, st, why = ws_parse(inb[:], WEB_HELLO_MAX)
+			if st == .Ok do break
+			if st == .Bad {
+				log_ln("Deckhand: a browser's first WebSocket frame refused:", why)
+				posix.close(sp[1])
+				web_refuse(fd, 1002)
+				return
+			}
+			if !web_read_more(fd, &inb, deadline, WEB_HELLO_MAX + 14) {
+				posix.close(sp[1])
+				web_refuse(fd, 1008)
+				return
+			}
+		}
+		key: string
+		hello: []u8
+		why := "the first message is not a binary hello"
+		if f.op == .Binary do key, hello, why = web_hello_key(f.payload, context.temp_allocator)
+		if why == "" && !web_key_ok(id, key) do why = "not this browser's key"
+		if why != "" {
+			log_ln("Deckhand: a browser's link refused:", why) // never the key
+			posix.close(sp[1])
+			web_refuse(fd, WEB_CLOSE_KEY)
+			return
+		}
+		remove_range(&inb, 0, used)
+		if !sock_write_all(sp[0], hello) {
+			posix.close(sp[1])
+			return
+		}
+	}
+	web_arrived(sp[1], id, name) // the main thread attaches it as the window's link (window_sock.odin)
 	outb := make([dynamic]u8, heap) // from the core
 	defer delete(outb)
 	chunk := make([]u8, 64 << 10, heap)
@@ -676,6 +731,35 @@ web_relay :: proc(fd: Sock_Fd, epoch: u64, key: string, early: []u8, id, name: s
 	cb: [2]u8
 	endian.unchecked_put_u16be(cb[:], close_code)
 	ws_send(fd, .Close, cb[:])
+}
+
+// A link refused before it was attached: only the close, with code.
+@(private = "file")
+web_refuse :: proc(fd: Sock_Fd, code: u16) {
+	cb: [2]u8
+	endian.unchecked_put_u16be(cb[:], code)
+	ws_send(fd, .Close, cb[:])
+}
+
+// The browser's first message (pure): one frame on channel 0, a JSON hello with "key". out: the
+// same hello without the key, framed, for the core (allocator); why: refused.
+web_hello_key :: proc(msg: []u8, allocator := context.allocator) -> (key: string, out: []u8, why: string) {
+	if p := ws_frame_problem(msg); p != "" do return "", nil, p
+	f, _, _ := cw.next_frame(msg)
+	if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do return "", nil, "the first message is not the hello"
+	v, err := jg.parse_string(string(f.payload), .JSON, true, context.temp_allocator)
+	if err != nil do return "", nil, "the hello is not JSON"
+	o, ok := v.(json.Object)
+	if !ok do return "", nil, "the hello is not an object"
+	if t, _ := o["type"].(json.String); t != "hello" do return "", nil, "the first message is not the hello"
+	k, kok := o["key"].(json.String)
+	if !kok || k == "" do return "", nil, "the hello has no key"
+	delete_key(&o, "key")
+	body, merr := json.marshal(o, allocator = context.temp_allocator)
+	if merr != nil do return "", nil, "the hello could not be passed on"
+	buf := make([dynamic]u8, allocator)
+	cw.encode(&buf, cw.JSON_CHANNEL, .Data, body)
+	return strings.clone(k, allocator), buf[:], ""
 }
 
 // One unmasked message to the browser. False: the socket failed.

@@ -1605,7 +1605,9 @@ Mac's window.
   interface's address alone (for Tailscale `100.x.y.z:7433`). Firewalls are yours to set.
 - **Pair a browser…** shows a code such as `ABCD-EFGH`. Open `http://<this machine's
   address>:7433/` in the browser and type it: it works once, for 2 minutes, and five wrong tries
-  void it. The browser keeps a cookie for 60 days from its last use.
+  void it. The browser keeps a cookie for 60 days from its last use, and a key in the page's own
+  storage: a private window, or clearing the site's data, means pairing again (so does Safari
+  after 7 days without a visit, unless the page is on the Home Screen).
 - **Paired browsers** lists each one, when it was paired and last seen; **Revoke** signs it out
   and closes its view.
 - One view at a time, as with another machine: a browser that opens takes the view from this

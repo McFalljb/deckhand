@@ -1578,9 +1578,9 @@ all within 10 s; at most 16 connections before an upgrade and 4 WebSockets. Stat
 |---|---|
 | `GET /` | the web client (`web/dist/index.html`, embedded at build; a placeholder page when the core was built without it) |
 | `GET /assets/<name>` | `web/dist/<name>` (flat; `[A-Za-z0-9._-]`, not starting with `.`) |
-| `GET /api/whoami` | `200 {"paired":true,"name","core","version"}` and the cookie again (60 days from now), or `401 {"paired":false}` |
-| `POST /api/pair` `{"code","name"}` | `200 {"paired":true}` and `Set-Cookie: deckhand_web=<64 hex>; HttpOnly; SameSite=Strict; Path=/; Max-Age=5184000`; a wrong, used or expired code `403` |
-| `POST /api/unpair` | the caller's own token forgotten (its live link closes); `200`, the cookie cleared |
+| `GET /api/whoami` | `200 {"paired":true,"name","core","version"}` and the cookie again (60 days from now), or `401 {"paired":false}`. The cookie alone: it says only that browser's own name, this core's id and its version |
+| `POST /api/pair` `{"code","name"}` | `200 {"paired":true,"key":<64 hex>}` and `Set-Cookie: deckhand_web=<64 hex>; HttpOnly; SameSite=Strict; Path=/; Max-Age=5184000`; a wrong, used or expired code `403` |
+| `POST /api/unpair` | with the cookie and `X-Deckhand-Key: <key>`: that browser forgotten (its live link closes), `200`, the cookie cleared; the cookie with no key or another's `403` |
 | `GET /ws` | the WebSocket upgrade (RFC 6455, version 13, no extensions or subprotocols) |
 
 Every response: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none';
@@ -1590,26 +1590,41 @@ form-action 'self'; frame-ancestors 'none'; connect-src 'self' ws://<Host> wss:/
 and the upgrade need an `Origin` of `http://` or `https://` plus exactly the `Host` header's
 `host:port`; the upgrade and `whoami` need the cookie.
 
+**The key.** A cookie belongs to a host name, not a port: the browser also sends `deckhand_web` to
+any other service on the same name (an agent's dev server on another port that the user opens),
+which could replay it with a matching `Host` and `Origin`. So pairing also returns a second
+256-bit key in the response body. The page keeps it in `localStorage`, which is per origin and so
+per port, and says it in the hello (`"key"`). Unpair sends it as `X-Deckhand-Key`. The core keeps
+only its SHA-256 beside the token's and compares in constant time. A link whose first message is
+not a hello with this browser's key closes with code `4401` before it is attached or anything is
+sent. The page treats `4401`, or no key in its storage, as unpaired and shows pairing. The key is
+taken out of the hello before it goes on to the link. A browser that clears site data (a private
+window, Safari's 7-day limit on script storage for a site not added to the Home Screen) pairs again.
+
 **Pairing.** `web_pair` (this machine's user: Settings › Machines › **Pair a browser…**, or
 `deckhand-core-serve web pair` in a terminal there) opens a code of 8 characters from
 `ABCDEFGHJKMNPQRSTUVWXYZ23456789`, shown `ABCD-EFGH`; typed with or without the dash, in either
 case. One code at a time; it lasts 2 minutes, works once and is void after 5 wrong tries;
-compared in constant time. A right code makes a 256-bit token. `<data>/web-devices.json` (0600)
-keeps each browser's id (12 hex), name (printable, at most 64 bytes), the token's SHA-256, paired
-and last seen (unix s); at most 32 browsers. A token unused for 60 days expires. `web_revoke`
-forgets one and closes its link. The code and tokens are never logged, never in State, never in
+compared in constant time. A right code makes a 256-bit token and a 256-bit key.
+`<data>/web-devices.json` (0600) keeps each browser's id (12 hex), name (printable, at most 64
+bytes), the token's and the key's SHA-256, paired and last seen (unix s); at most 32 browsers. A
+token unused for 60 days expires. `web_revoke` forgets one and closes its link; a link checked on
+its connection's thread is checked again (still paired, not expired) on the main thread just
+before it is attached. The code and tokens are never logged, never in State, never in
 an event: `web_pair`'s result goes to its caller only.
 
 **The handshake a browser performs.**
 
-1. `GET /api/whoami`: `401` → pair (`POST /api/pair`), then again.
+1. `GET /api/whoami`: `401`, or no key in this page's storage → pair (`POST /api/pair`, keep its
+   `key`), then again.
 2. `GET /ws` with the cookie and `Origin`. A refused upgrade is an HTTP status (`400` bad upgrade,
    `401` not paired, `403` wrong `Origin`, `503` too many), never a WebSocket.
 3. Every message either way is one binary WebSocket message holding exactly one frame:
    `[channel u32 LE][kind u8][len u32 LE][payload]`, channel 0 DATA a JSON message. A text
    message, a fragment, an unmasked frame, RSV bits, a message that is not exactly one frame or
    over 9 B + 16 MiB closes the link. The core pings every 30 s and closes a browser silent for 90 s.
-4. The browser's first message: `{"v":1,"id":"hello","type":"hello"}` (other fields ignored). The
+4. The browser's first message: `{"v":1,"id":"hello","type":"hello","key":<its key>}` (other
+   fields ignored), at most 16 KiB; anything else, or a wrong key, closes with `4401`. The
    core answers `{"type":"result","id":"hello","result":{"ok":true,"data":{"app":"deckhand",
    "caller":"ui","web":true,"framed":true,"name","generation","version","core","features",
    "methods","machine":{"name","os","arch"},"snapshot":["vt"],"build"}}}`; `methods` are the

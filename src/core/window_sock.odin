@@ -378,8 +378,11 @@ window_door_tick :: proc() {
 	door.arrived = nil
 	sync.unlock(&door.mu)
 	heap := runtime.heap_allocator()
+	now := time.to_unix_seconds(time.now())
 	for a, i in got {
-		if i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device) {
+		// a browser checked on its connection's thread: revoked or expired since, it is not attached
+		live := !a.web || web_device_live(a.device, now)
+		if live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device) {
 			if !a.hub && !a.web { // a window's version raises the floor; a hub's is a core's, a browser has none
 				sync.lock(&door.mu)
 				was := door.floor

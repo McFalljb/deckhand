@@ -2,8 +2,12 @@ package core
 
 import "base:runtime"
 import "core:encoding/endian"
+import "core:encoding/json"
+import "core:fmt"
 import "core:strings"
 import "core:testing"
+
+import cw "../corewire"
 
 @(private = "file")
 req :: proc(s: string) -> (Http_Request, int, Http_Parse) {
@@ -35,6 +39,7 @@ web_http_parse_limits :: proc(t: ^testing.T) {
 		"get / HTTP/1.1\r\nHost: x\r\n\r\n",
 		"GET / HTTP/1.1\r\nHost: x\r\nHost: y\r\n\r\n", // a second Host
 		"GET / HTTP/1.1\r\nHost: x\r\nOrigin: a\r\nOrigin: b\r\n\r\n",
+		"POST /api/unpair HTTP/1.1\r\nHost: x\r\nX-Deckhand-Key: a\r\nx-deckhand-key: b\r\n\r\n",
 		"GET / HTTP/1.1\r\nHost: x\r\nX: a\r\n folded\r\n\r\n",
 		"GET / HTTP/1.1\r\nHost: x\r\nNoColon\r\n\r\n",
 		"GET / HTTP/1.1\r\nHost: x\x01\r\n\r\n",
@@ -138,17 +143,17 @@ web_pairing :: proc(t: ^testing.T) {
 	web_reset_for_test()
 	defer web_reset_for_test()
 	now: i64 = 1_800_000_000
-	a, tok := web_pair_try("ABCDEFGH", "x", now)
+	a, tok, _ := web_pair_try("ABCDEFGH", "x", now)
 	testing.expect_value(t, a, Web_Pair_Answer.None) // no code open
 	code, until := web_code_open(now)
 	testing.expect_value(t, until, now + 120)
 	testing.expect_value(t, len(code), WEB_CODE_LEN)
 	for ch in transmute([]u8)code do testing.expect(t, strings.index_byte(WEB_CODE_ALPHABET, ch) >= 0)
 	// typed with a dash, in lower case: the same code
-	a, tok = web_pair_try(strings.to_lower(web_code_shown(code), context.temp_allocator), "  My phone \x1b[31m ", now + 10)
+	a, tok, _ = web_pair_try(strings.to_lower(web_code_shown(code), context.temp_allocator), "  My phone \x1b[31m ", now + 10)
 	testing.expect_value(t, a, Web_Pair_Answer.Paired)
 	testing.expect(t, hex64_ok(tok), "a 256-bit token, hex")
-	a, _ = web_pair_try(code, "again", now + 11)
+	a, _, _ = web_pair_try(code, "again", now + 11)
 	testing.expect_value(t, a, Web_Pair_Answer.None) // single use
 	id, name, ok := web_token_device(tok, now + 20)
 	testing.expect(t, ok && len(id) == 12 && !strings.contains(name, "\x1b"), "the token names the browser (its name cleaned)")
@@ -158,16 +163,16 @@ web_pairing :: proc(t: ^testing.T) {
 	testing.expect(t, !ok, "not a token")
 	// expiry: two minutes
 	code, _ = web_code_open(now)
-	a, _ = web_pair_try(code, "late", now + 121)
+	a, _, _ = web_pair_try(code, "late", now + 121)
 	testing.expect_value(t, a, Web_Pair_Answer.None)
 	// five wrong tries void it, even for the right code after
 	code, _ = web_code_open(now)
 	wrong := code[0] == 'A' ? "BBBBBBBB" : "AAAAAAAA"
 	for i in 0 ..< WEB_CODE_TRIES {
-		a, _ = web_pair_try(wrong, "x", now + 1)
+		a, _, _ = web_pair_try(wrong, "x", now + 1)
 		testing.expectf(t, a == .Wrong, "try %d", i)
 	}
-	a, _ = web_pair_try(code, "x", now + 2)
+	a, _, _ = web_pair_try(code, "x", now + 2)
 	testing.expect_value(t, a, Web_Pair_Answer.None)
 	// a token unused for 60 days no longer works
 	_, _, ok = web_token_device(tok, now + WEB_DEVICE_IDLE_S + 100)
@@ -180,12 +185,62 @@ web_pairing :: proc(t: ^testing.T) {
 	testing.expect_value(t, web_code_normal("abcd efgh"), "ABCDEFGH")
 	// the file holds hashes, never a token; it reads back
 	code, _ = web_code_open(now)
-	_, tok = web_pair_try(code, "file", now)
+	_, tok, _ = web_pair_try(code, "file", now)
 	sync_text := web_devices_encode(web_devices_for_test())
 	testing.expect(t, !strings.contains(sync_text, tok), "no token in the file")
 	back := web_devices_decode(sync_text, context.temp_allocator)
 	testing.expect(t, len(back) == 1 && back[0].name == "file" && back[0].hash == token_hash(tok), "it reads back")
 	testing.expect_value(t, len(web_devices_decode(`{"devices":[{"id":"x","hash":"zz"}]}`, context.temp_allocator)), 0)
+}
+
+// A cookie is a host's, not a port's: another service on the same name gets it. So pairing also
+// hands the browser a key that only its own origin's storage keeps, and the link wants both.
+@(test)
+web_pair_key :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	web_reset_for_test()
+	defer web_reset_for_test()
+	now: i64 = 1_800_000_000
+	code, _ := web_code_open(now)
+	a, tok, key := web_pair_try(code, "phone", now)
+	testing.expect_value(t, a, Web_Pair_Answer.Paired)
+	testing.expect(t, hex64_ok(key) && key != tok, "a second 256-bit secret")
+	id, _, ok := web_token_device(tok, now)
+	testing.expect(t, ok, "paired")
+	testing.expect(t, web_key_ok(id, key), "its key")
+	testing.expect(t, !web_key_ok(id, tok), "the token is not the key")
+	testing.expect(t, !web_key_ok(id, strings.repeat("0", 64, context.temp_allocator)), "a wrong key")
+	testing.expect(t, !web_key_ok(id, ""), "no key")
+	code, _ = web_code_open(now)
+	_, tok2, key2 := web_pair_try(code, "laptop", now)
+	id2, _, _ := web_token_device(tok2, now)
+	testing.expect(t, !web_key_ok(id, key2) && !web_key_ok(id2, key), "another browser's key")
+	// the file holds its hash, never the key; an entry without one is dropped
+	text := web_devices_encode(web_devices_for_test())
+	testing.expect(t, !strings.contains(text, key) && !strings.contains(text, tok), "no secret in the file")
+	back := web_devices_decode(text, context.temp_allocator)
+	testing.expect(t, len(back) == 2 && back[0].key_hash == token_hash(key), "the key's hash reads back")
+	h := hex32(token_hash("x"))
+	old := fmt.tprintf(`{{"devices":[{{"id":"aabbccddeeff","hash":"%s","paired":1,"last_seen":1}}]}}`, h)
+	testing.expect_value(t, len(web_devices_decode(old, context.temp_allocator)), 0)
+}
+
+// Item 3 of round 1: a connection checked on its thread may reach the main thread after its
+// browser was revoked or expired; the attach checks again.
+@(test)
+web_device_live_check :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	web_reset_for_test()
+	defer web_reset_for_test()
+	now: i64 = 1_800_000_000
+	code, _ := web_code_open(now)
+	_, tok, _ := web_pair_try(code, "phone", now)
+	id, _, _ := web_token_device(tok, now)
+	testing.expect(t, web_device_live(id, now + 5), "still paired")
+	testing.expect(t, !web_device_live(id, now + WEB_DEVICE_IDLE_S + 100), "expired")
+	testing.expect(t, !web_device_live("", now), "no id")
+	testing.expect(t, web_token_forget(tok), "revoked")
+	testing.expect(t, !web_device_live(id, now + 5), "revoked: not attached")
 }
 } // when TEST_HOOKS
 
@@ -242,4 +297,48 @@ web_caller_gate :: proc(t: ^testing.T) {
 	r := run_command(Set_Web_Access{on = true}, {kind = .UI})
 	testing.expect(t, r.error == "needs_confirmation" && r.confirm_token != "" && !state.settings.web_access, "turning it on asks the user at this Mac")
 	testing.expect(t, run_command(Set_Web_Access{on = true}, {kind = .Internal}).ok && state.settings.web_access, "the terminal's yes")
+}
+
+@(private = "file")
+hello_frame :: proc(channel: u32, json_text: string) -> []u8 {
+	out := make([dynamic]u8, context.temp_allocator)
+	cw.encode(&out, channel, .Data, transmute([]u8)json_text)
+	return out[:]
+}
+
+// The hello's key (web_hello_key): taken out before the hello goes on to the core, and anything
+// but one hello frame on channel 0 with a key is refused.
+@(test)
+web_hello_key_taken :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	k := strings.repeat("ab", 32, context.temp_allocator)
+	msg := hello_frame(0, fmt.tprintf(`{{"v":1,"id":"hello","type":"hello","framed":true,"peer":"web","snapshot":["vt"],"key":"%s"}}`, k))
+	key, out, why := web_hello_key(msg, context.temp_allocator)
+	testing.expect_value(t, why, "")
+	testing.expect_value(t, key, k)
+	testing.expect_value(t, ws_frame_problem(out), "")
+	f, _, _ := cw.next_frame(out)
+	testing.expect(t, f.channel == 0 && f.kind == u8(cw.Kind.Data), "one JSON frame")
+	body := string(f.payload)
+	testing.expect(t, !strings.contains(body, k) && !strings.contains(body, `"key"`), "the key stays at the door")
+	v, err := json.parse_string(body, .JSON, true, context.temp_allocator)
+	testing.expect(t, err == nil, "JSON")
+	o, _ := v.(json.Object)
+	testing.expect(t, o["type"].(json.String) == "hello" && o["peer"].(json.String) == "web" && o["framed"].(json.Boolean), "the rest kept")
+	sn, _ := o["snapshot"].(json.Array)
+	testing.expect(t, len(sn) == 1, "the snapshot list kept")
+	for bad in ([]string{
+		`{"v":1,"type":"hello"}`, // no key
+		`{"v":1,"type":"state.subscribe","key":"` + "x" + `"}`, // not a hello
+		`{"v":1,"type":"hello","key":7}`, // not a string
+		`not json`,
+		`[1,2]`,
+	}) {
+		_, _, why = web_hello_key(hello_frame(0, bad), context.temp_allocator)
+		testing.expectf(t, why != "", "%s refused", bad)
+	}
+	_, _, why = web_hello_key(hello_frame(3, `{"type":"hello","key":"x"}`), context.temp_allocator)
+	testing.expect(t, why != "", "not channel 0")
+	_, _, why = web_hello_key(msg[:len(msg) - 1], context.temp_allocator)
+	testing.expect(t, why != "", "not one whole frame")
 }

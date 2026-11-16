@@ -245,7 +245,7 @@ and `release.sh` run `--timing-only --perf-strict` as a report.
 | `markdown_parse_1mb` | CPU time, best of 5 | 50 ms (150 on CI); gate 3× |
 | `markdown_layout_pathological` | CPU time | 50 ms per 16 KB case, 1 s per 200 KB |
 | `markdown_html_pathological`, `markdown_pathological` | CPU time | 1 s; 2 s per case |
-| `reload_burst` | CPU time | 20 ms (20k events), 5 ms (the report) |
+| `reload_burst` | CPU time, best of 5 | 25 ms (20k events; 40 on CI), 5 ms (the report) |
 | `editor_perf_50k` | CPU time | 2 s open, 50 ms a key; gate 3× |
 | `syntax_large_parse` | CPU time | 50 ms reparse |
 | `buffer_large_file` | CPU time | 200 ms index, 500 ms edits |

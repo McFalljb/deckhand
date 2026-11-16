@@ -174,8 +174,8 @@ package main
 // says where it was (tests/scenes.py prints it).
 //
 // Variables in command/assert lines: $last (last created_id), $token (last
-// confirmation token), $project (selected project), $session (current open
-// session), $tab (its active tab), $pitab (its pi tab), $pisession (its pi
+// confirmation token), $project (selected project), $session (the open session on
+// screen, another machine's too), $tab (its active tab), $pitab (its pi tab), $pisession (its pi
 // session id), $hometab (Home's pi tab), $chats (the Chats entry's project
 // id), $homedir ($HOME), $notesdir (the main folder, home_dir), $datadir (the data dir), $cwd (Deckhand's working directory), $pane0…$pane7 (the
 // current session's panes by slot), $ptab0…$ptab7 (the tab each shows). assert_screen, waitfor and dump read
@@ -1551,13 +1551,13 @@ autotest_on_event :: proc(ev: core.Event) {
 	}
 }
 
-@(private = "file")
+@(private) // and autotest_test.odin
 expand_vars :: proc(s: string) -> string {
 	at := &autotest
-	cs := core.cur()
+	cs := core.cur_view() // the session on screen, as $session: another machine's too (a hub's window script)
 	tab, pitab: u64
 	pisession: string
-	if cs != nil {
+	if cs != nil && len(cs.tabs) > 0 {
 		tab = cs.active_tab
 		pitab = cs.tabs[0].id
 		pisession = cs.pi_session_id

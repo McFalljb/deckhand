@@ -1651,7 +1651,9 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				if k > 0 do strings.write_byte(b, ',')
 				strings.write_string(b, `{"id":`)
 				json_quote(b, c.id)
-				fmt.sbprintf(b, `,"state":"%s","command":`, HARNESS_STATE_NAMES[c.state])
+				fmt.sbprintf(b, `,"state":"%s","version":`, HARNESS_STATE_NAMES[c.state])
+				json_quote(b, c.version)
+				strings.write_string(b, `,"command":`)
 				json_quote(b, c.command)
 				strings.write_byte(b, '}')
 			}

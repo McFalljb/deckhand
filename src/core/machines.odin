@@ -149,11 +149,13 @@ Machine_View :: struct {
 Machine_Check :: struct {
 	id:      string, // a HARNESS_MANIFEST id this build knows
 	state:   Harness_Item_State,
+	version: string, // the version it found there ("" = not known; an older core sends none)
 	command: string, // what the user runs there (Copy; "" = nothing to do)
 }
 
 MACHINE_CHECKS_MAX :: 16
 MACHINE_CHECK_COMMAND_MAX :: 512
+MACHINE_CHECK_VERSION_MAX :: 64
 
 // One registry entry (machines.json).
 Machine :: struct {
@@ -855,7 +857,7 @@ machine_checks_of :: proc(r: ^State, a: runtime.Allocator) -> []Machine_Check {
 	for c in r.live.checklist {
 		if len(out) >= MACHINE_CHECKS_MAX do break
 		if _, known := harness_row(c.id); !known do continue
-		append(&out, Machine_Check{id = strings.clone(c.id, a), state = c.state, command = strings.clone(text_clean(c.command, MACHINE_CHECK_COMMAND_MAX), a)})
+		append(&out, Machine_Check{id = strings.clone(c.id, a), state = c.state, version = strings.clone(text_clean(c.version, MACHINE_CHECK_VERSION_MAX), a), command = strings.clone(text_clean(c.command, MACHINE_CHECK_COMMAND_MAX), a)})
 	}
 	return out[:]
 }
@@ -1304,7 +1306,7 @@ mlink_state :: proc(l: ^Mach_Link, text: string, full: bool) {
 @(private = "file")
 checks_key :: proc(r: ^State) -> string {
 	b := strings.builder_make(context.temp_allocator)
-	for c in r.live.checklist do fmt.sbprintf(&b, "%s|%v|%s;", c.id, c.state, c.command)
+	for c in r.live.checklist do fmt.sbprintf(&b, "%s|%v|%s|%s;", c.id, c.state, c.version, c.command)
 	return strings.to_string(b)
 }
 

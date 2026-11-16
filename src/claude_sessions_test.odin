@@ -47,7 +47,8 @@ cs_reset :: proc() -> runtime.Allocator {
 @(private = "file")
 cs_dir :: proc(tag: string) -> string {
 	// not "deckhand-": its e-c-n-d plus an s in TMPDIR's random part made the "secnd" filter
-	// below match every row by its path (claude_session_rows, a flake after the rename)
+	// below match every row by its path (claude_session_rows, a flake after the rename; the
+	// rest of the path could still match, so that test names its project)
 	d := fmt.aprintf("%s/dhx-cs-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
@@ -150,6 +151,10 @@ claude_session_new :: proc(t: ^testing.T) {
 claude_session_rows :: proc(t: ^testing.T) {
 	context.allocator = cs_reset()
 	_, pid := cs_project("rows")
+	// a name of its own: an unnamed project's label is its whole path, and the "secnd" filter
+	// below fuzzy-matched TMPDIR's random part on CI (s-e-c-n-d scattered), so the project
+	// matched and every row showed (a flake, #116)
+	testing.expect(t, core.run_command(core.Rename_Project{project_id = pid, name = "rows"}, CS_UI).ok)
 	_, other := cs_project("rows-other")
 	cs_claude_session(t, other, "c2c2c2c2-0000-4000-8000-000000000009", "elsewhere")
 	core.run_command(core.Select_Project{project_id = pid}, CS_UI)

@@ -404,7 +404,7 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 			add(&out, {group = "machines", label = m.name, detail = detail, path = fmt.tprintf("%s%d", MACHINE_ROW, m.no), button = machine_action_label(m), remove = true})
 			for c in m.checklist {
 				r, _ := harness_row(c.id)
-				add(&out, {group = "machines", label = fmt.tprintf("%s: %s", m.name, r.name), detail = fmt.tprintf("%s%s%s", MACHINE_CHECK_WORDS[c.state], c.command != "" ? " · " : "", c.command), path = fmt.tprintf("%s%d:%s", MACHINE_CHECK_ROW, m.no, c.id), button = c.command != "" ? "Copy" : ""})
+				add(&out, {group = "machines", label = fmt.tprintf("%s: %s", m.name, r.name), detail = fmt.tprintf("%s%s%s%s%s", MACHINE_CHECK_WORDS[c.state], c.version != "" ? " · " : "", c.version, c.command != "" ? " · " : "", c.command), path = fmt.tprintf("%s%d:%s", MACHINE_CHECK_ROW, m.no, c.id), button = c.command != "" ? "Copy" : ""})
 			}
 		}
 		if state.settings.remote_machines do add(&out, {group = "machines", label = "Add a machine…", detail = "user@host or an ~/.ssh/config name", path = MACHINE_ADD_ROW, button = "Add…"})
@@ -1068,10 +1068,12 @@ sf_look :: proc(record_only: bool) -> bool {
 	return changed
 }
 
-// The palette's direct entries: a listed file by label in a group, opened.
-settings_file_action :: proc(group, label: string) -> (Command, bool) {
+// The palette's direct entries: a listed file by label in a group, opened in SESSION (0: the
+// current one, and none without one).
+settings_file_action :: proc(group, label: string, session: u64 = 0) -> (Command, bool) {
+	if session == 0 && cur() == nil do return nil, false
 	for r in settings_file_rows() {
-		if r.label == label && r.group == group && r.exists && r.kind == .File && cur() != nil do return Open_File{path = r.path}, true
+		if r.label == label && r.group == group && r.exists && r.kind == .File do return Open_File{path = r.path, session = session}, true
 	}
 	return nil, false
 }

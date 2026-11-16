@@ -279,6 +279,34 @@ machines_get_state_codex_and_empty :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(gs, `"codex":false`), "mini: no codex")
 }
 
+// #135: a machine's checklist rows carry each agent's version (it was only in a refusal's text):
+// read from its core's live.checklist (cleaned, capped), in get_state's machines[].checklist and
+// on its Settings row.
+@(test)
+machines_checklist_version :: proc(t: ^testing.T) {
+	saved, saved_on := state.machines, state.settings.remote_machines
+	defer state.machines, state.settings.remote_machines = saved, saved_on
+	r: State
+	long := strings.repeat("9", 200, context.temp_allocator)
+	r.live.checklist = []Harness_Check_Live{{id = "codex", state = .Too_Old, version = "0.135.0", command = "npm i -g @openai/codex"}, {id = "pi", state = .Ok, version = long}, {id = "claude", state = .Ok, version = "2.1.3\x1b[31m"}}
+	checks := machine_checks_of(&r, context.temp_allocator)
+	testing.expect_value(t, len(checks), 3)
+	if len(checks) != 3 do return
+	testing.expect_value(t, checks[0].version, "0.135.0")
+	testing.expect(t, len(checks[1].version) <= MACHINE_CHECK_VERSION_MAX, "capped")
+	testing.expect(t, !strings.contains(checks[2].version, "\x1b"), "cleaned")
+	state.machines = []Machine_View{{no = 3, name = "nuc", status = .Online, checklist = checks}}
+	gs := state_json()
+	testing.expectf(t, strings.contains(gs, `{"id":"codex","state":"too_old","version":"0.135.0","command":"npm i -g @openai/codex"}`), "get_state: %s", gs)
+	state.settings.remote_machines = true
+	found := false
+	for row in settings_file_rows() do if row.label == "nuc: Codex" {
+		found = true
+		testing.expectf(t, strings.contains(row.detail, "0.135.0"), "its row: %q", row.detail)
+	}
+	testing.expect(t, found, "the Codex row")
+}
+
 // #135: a removed machine's ssh master ends: `ssh -S <its ctl> -O exit -- <target>`, never a prompt.
 @(test)
 machines_master_exit_argv :: proc(t: ^testing.T) {

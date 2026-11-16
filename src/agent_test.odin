@@ -180,6 +180,16 @@ agent_prompt_migrates_unedited_starter :: proc(t: ^testing.T) {
 	testing.expect(t, !core.agent_prompt_migrate("2026-11-03"), "edited")
 	testing.expect_value(t, read(path), edited)
 	testing.expect(t, !os.exists(fmt.tprintf("%s.bak-2026-11-03", path)), "no backup of an edited file")
+	// the starter names the Settings page's section (there is no Settings tab since the redesign,
+	// #116), and every earlier starter, the one that said so too, is updated
+	testing.expect(t, strings.contains(core.ATLAS_PROMPT_STARTER, "Settings › Atlas & jobs"), "the page's wording")
+	testing.expect(t, !strings.contains(core.ATLAS_PROMPT_STARTER, "Settings tab"), "no Settings tab")
+	for x, i in core.ATLAS_PROMPT_OLD_STARTERS {
+		testing.expectf(t, x != core.ATLAS_PROMPT_STARTER, "old starter %d is the current one", i)
+		_ = os.write_entire_file(path, transmute([]u8)string(x))
+		testing.expectf(t, core.agent_prompt_migrate(fmt.tprintf("2026-12-%02d", i + 1)), "old starter %d migrated", i)
+		testing.expect_value(t, read(path), core.ATLAS_PROMPT_STARTER)
+	}
 }
 
 // The guide built into the binary is written to the data dir when it

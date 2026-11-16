@@ -131,6 +131,38 @@ settings_page_opens_runs_and_goes_back :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.focus_widget, "")
 }
 
+// The palette's Edit … settings entries while the page shows (#116): no session is current there,
+// so they open in the session the page was opened from, shown again first, as the page's own rows
+// do; they were not listed at all.
+@(test)
+settings_page_palette_file_entries :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sp_test_setup()
+	defer sp_test_setup()
+	home := os.get_env("HOME", context.temp_allocator)
+	os.make_directory_all(fmt.tprintf("%s/.claude", home))
+	_ = os.write_entire_file(fmt.tprintf("%s/.claude/CLAUDE.md", home), transmute([]u8)string("# mine\n"))
+	_ = os.write_entire_file(fmt.tprintf("%s/.claude/settings.json", home), transmute([]u8)string("{}\n"))
+	action_run("settings")
+	core.inbox_drain()
+	testing.expect(t, settings_page_shown(), "shown")
+	for id in ([]string{"edit_pi_settings", "edit_claude_settings", "edit_claude_md"}) {
+		c, ok := action_by_id(id).make()
+		testing.expectf(t, ok, "%s listed under the page", id)
+		of, _ := c.(core.Open_File)
+		testing.expectf(t, of.session == 10, "%s opens in the page's session: %v", id, c)
+	}
+	action_run("edit_claude_md")
+	core.inbox_drain()
+	testing.expect(t, !settings_page_shown(), "the page goes")
+	testing.expect_value(t, state.current_session, u64(10))
+	cs := core.cur()
+	testing.expect(t, cs != nil && len(cs.tabs) == 2 && cs.tabs[1].title == "CLAUDE.md", "CLAUDE.md opened in it")
+	// with the session on screen: its own entries as before (no session named)
+	c, ok := action_by_id("edit_claude_md").make()
+	testing.expect(t, ok && c.(core.Open_File).session == 0, "the current session's")
+}
+
 @(private = "file")
 sp_key :: proc(k: sapp.Keycode) -> sapp.Event {
 	return {type = .KEY_DOWN, key_code = k}

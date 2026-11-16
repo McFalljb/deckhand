@@ -38,6 +38,19 @@ Action :: struct {
 @(private = "file")
 turns :: proc(what: string, on_now: bool) -> string {return fmt.tprintf("%s %s", what, on_now ? "off" : "on")}
 
+// The palette's Edit … settings entries (settings_files.odin): in the current session; while the
+// Settings page shows (no session is current there) in the one it was opened from, shown again
+// first, as the page's own rows do (sp_open_file) (#116).
+@(private = "file")
+settings_file_entry :: proc(group, label: string) -> (core.Command, bool) {
+	return core.settings_file_action(group, label, settings_page_shown() ? settings_page_session() : 0)
+}
+
+@(private = "file")
+settings_file_prepare :: proc() {
+	if settings_page_shown() do if s := settings_page_session(); s != 0 do ui_do(core.Focus_Session{session = s})
+}
+
 // The folder a pick_folder action got (valid while its make runs).
 action_folder: string
 // The subfolder the "folder_change" action sets (the row clicked).
@@ -359,14 +372,14 @@ ACTIONS := [?]Action {
 	{id = "quick_settings", label = "Quick settings", no_palette = true, make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"settings"}, true // the gear's popover (ui_toolbar.odin)
 	}},
-	{id = "edit_pi_settings", label = "Edit pi settings (settings.json)", make = proc() -> (core.Command, bool) {return core.settings_file_action("pi", "settings.json")}},
-	{id = "edit_pi_models", label = "Edit pi models (models.json)", make = proc() -> (core.Command, bool) {return core.settings_file_action("pi", "models.json")}},
-	{id = "edit_pi_agents_md", label = "Edit global AGENTS.md", make = proc() -> (core.Command, bool) {return core.settings_file_action("pi", "AGENTS.md")}},
-	{id = "edit_project_settings", label = "Edit project pi settings (.pi/settings.json)", make = proc() -> (core.Command, bool) {return core.settings_file_action("project", ".pi/settings.json")}},
+	{id = "edit_pi_settings", label = "Edit pi settings (settings.json)", make = proc() -> (core.Command, bool) {return settings_file_entry("pi", "settings.json")}, prepare = settings_file_prepare},
+	{id = "edit_pi_models", label = "Edit pi models (models.json)", make = proc() -> (core.Command, bool) {return settings_file_entry("pi", "models.json")}, prepare = settings_file_prepare},
+	{id = "edit_pi_agents_md", label = "Edit global AGENTS.md", make = proc() -> (core.Command, bool) {return settings_file_entry("pi", "AGENTS.md")}, prepare = settings_file_prepare},
+	{id = "edit_project_settings", label = "Edit project pi settings (.pi/settings.json)", make = proc() -> (core.Command, bool) {return settings_file_entry("project", ".pi/settings.json")}, prepare = settings_file_prepare},
 	// Claude Code's (settings_files.odin: the Settings tab's Claude groups; listed once Claude Code has its folder)
-	{id = "edit_claude_settings", label = "Edit Claude settings (settings.json)", make = proc() -> (core.Command, bool) {return core.settings_file_action("claude", "settings.json")}},
-	{id = "edit_claude_md", label = "Edit global CLAUDE.md", make = proc() -> (core.Command, bool) {return core.settings_file_action("claude", "CLAUDE.md")}},
-	{id = "edit_claude_project_settings", label = "Edit project Claude settings", make = proc() -> (core.Command, bool) {return core.settings_file_action("claude-project", ".claude/settings.json")}, detail = proc() -> string {return ".claude/settings.json"}},
+	{id = "edit_claude_settings", label = "Edit Claude settings (settings.json)", make = proc() -> (core.Command, bool) {return settings_file_entry("claude", "settings.json")}, prepare = settings_file_prepare},
+	{id = "edit_claude_md", label = "Edit global CLAUDE.md", make = proc() -> (core.Command, bool) {return settings_file_entry("claude", "CLAUDE.md")}, prepare = settings_file_prepare},
+	{id = "edit_claude_project_settings", label = "Edit project Claude settings", make = proc() -> (core.Command, bool) {return settings_file_entry("claude-project", ".claude/settings.json")}, prepare = settings_file_prepare, detail = proc() -> string {return ".claude/settings.json"}},
 	{id = "shortcuts", keys = "⌘/", make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"shortcuts"}, true // the shortcuts sheet (ui_toolbar.odin)
 	}},

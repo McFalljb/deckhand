@@ -262,6 +262,24 @@ files_preview_tabs :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.run_command(core.Keep_Tab{tab_id = s.tabs[0].id}, {kind = .Script}).error, "no such editor tab")
 }
 
+// Keep_Tab for edited previews, per tab (#116): two at once are each sent once, not every frame;
+// one still a preview after KEEP_RESEND (the send was lost: a separate core was down) is sent
+// again; a kept one is forgotten, so a later preview with its id would be sent at once.
+@(test)
+files_keep_previews_per_tab :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	keep_previews_due({}, time.tick_now()) // nothing remembered from another test
+	ids :: proc(a: []u64) -> string {return fmt.tprint(a)}
+	t0 := time.tick_now()
+	testing.expect_value(t, ids(keep_previews_due({7, 9}, t0)), "[7, 9]")
+	for i in 1 ..< 5 do testing.expect_value(t, ids(keep_previews_due({7, 9}, time.tick_add(t0, time.Duration(i) * 100 * time.Millisecond))), "[]")
+	// 9 was kept; 7's send was lost: past KEEP_RESEND, 7 again
+	testing.expect_value(t, ids(keep_previews_due({7}, time.tick_add(t0, KEEP_RESEND))), "[7]")
+	testing.expect_value(t, ids(keep_previews_due({7}, time.tick_add(t0, KEEP_RESEND + 100 * time.Millisecond))), "[]")
+	testing.expect_value(t, ids(keep_previews_due({7, 9}, time.tick_add(t0, KEEP_RESEND + 200 * time.Millisecond))), "[9]")
+	keep_previews_due({}, t0)
+}
+
 @(test)
 files_virtualisation_bounds :: proc(t: ^testing.T) {
 	// 10,000 rows of 24 px in a 600 px list: 26 rows laid out at most

@@ -10,6 +10,7 @@ package main
 
 import "base:runtime"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:time"
@@ -166,11 +167,43 @@ editor_path_changed :: proc(path: string, flags: u32 = 0) {
 }
 
 // An edited preview tab is kept, as a double-click does: Keep_Tab goes to the core (a separate
-// core's too: never run on the window's replica). Once per tab until its preview flag is gone.
+// core's too: never run on the window's replica). Per tab: once, and again while it is still a
+// preview after KEEP_RESEND (#116: one remembered tab resent two previews every frame, and a
+// send lost while the core was down was never repeated).
 editor_keep_edited_previews :: proc() {
-	@(static) sent: u64
-	for id in core.files_edited_previews() do if id != sent {
-		sent = id
-		ui_do(core.Keep_Tab{tab_id = id})
+	for id in keep_previews_due(core.files_edited_previews(), time.tick_now()) do ui_do(core.Keep_Tab{tab_id = id})
+}
+
+// How long a Keep_Tab may go unanswered (the tab still an edited preview) before it is sent again:
+// a send lost while a separate core was down or restarting.
+KEEP_RESEND :: 2 * time.Second
+
+@(private = "file")
+Keep_Sent :: struct {
+	tab: u64,
+	at:  time.Tick,
+}
+
+// Per tab: when its Keep_Tab was sent (heap); a tab no longer an edited preview is forgotten.
+@(private = "file")
+keep_sent: [dynamic]Keep_Sent
+
+// Of the edited previews IDS, the ones to send Keep_Tab for at NOW (temp allocator): each once,
+// again after KEEP_RESEND while it is still one.
+keep_previews_due :: proc(ids: []u64, now: time.Tick) -> []u64 {
+	if keep_sent.allocator.procedure == nil do keep_sent.allocator = runtime.heap_allocator()
+	for i := len(keep_sent) - 1; i >= 0; i -= 1 do if !slice.contains(ids, keep_sent[i].tab) do unordered_remove(&keep_sent, i)
+	due := make([dynamic]u64, context.temp_allocator)
+	next: for id in ids {
+		for &k in keep_sent do if k.tab == id {
+			if time.tick_diff(k.at, now) >= KEEP_RESEND {
+				k.at = now
+				append(&due, id)
+			}
+			continue next
+		}
+		append(&keep_sent, Keep_Sent{tab = id, at = now})
+		append(&due, id)
 	}
+	return due[:]
 }

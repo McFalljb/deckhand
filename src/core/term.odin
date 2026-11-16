@@ -454,15 +454,34 @@ mode_on :: proc(t: ^Term, n: u16) -> bool {
 	return mc.value
 }
 
-term_paste :: proc(t: ^Term, text: string) {
+term_paste :: proc(t: ^Term, text: string, submit := false) {
 	if !t.running || len(text) == 0 do return
-	data := transmute([]u8)strings.clone(text, context.temp_allocator)
-	out := make([]u8, len(data) + 16, context.temp_allocator)
-	n: uint
-	if gh.paste_encode(raw_data(data), len(data), mode_on(t, 2004), raw_data(out), len(out), &n) == .Success {
-		pty_write(&t.pty, out[:n])
+	if out := term_paste_bytes(t, text, submit); len(out) > 0 {
+		pty_write(&t.pty, out)
 		term_scroll_to_bottom(t)
 	}
+}
+
+// What term_paste writes (temp; nil if it can't be encoded). submit: with bracketed paste on, the
+// text's trailing newlines are left out of the paste and one Enter follows it as a key, so a
+// shell runs the line (inside the paste it would only be text).
+term_paste_bytes :: proc(t: ^Term, text: string, submit := false) -> []u8 {
+	body, enter := text, false
+	bracketed := mode_on(t, 2004)
+	if submit && bracketed {
+		trimmed := strings.trim_right(text, "\r\n")
+		body, enter = trimmed, len(trimmed) < len(text)
+	}
+	out := make([dynamic]u8, context.temp_allocator)
+	if len(body) > 0 {
+		data := transmute([]u8)strings.clone(body, context.temp_allocator)
+		buf := make([]u8, len(data) + 16, context.temp_allocator)
+		n: uint
+		if gh.paste_encode(raw_data(data), len(data), bracketed, raw_data(buf), len(buf), &n) != .Success do return nil
+		append(&out, ..buf[:n])
+	}
+	if enter do append(&out, '\r')
+	return out[:]
 }
 
 // Selected text as a string (temp allocator), "" without a selection.

@@ -1484,3 +1484,83 @@ holder_busy_check_no_record :: proc(t: ^testing.T) {
 	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "no record: closing asks")
 	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = s.tabs[1].id, text = "y"}, {kind = .Control}).error, FG_BUSY)
 }
+
+// ---- #141: the holder checks a control send_text as it writes it ----
+
+@(private = "file")
+BRACKETED :: "\x1b[?2004h" // the shell turned bracketed paste on
+
+@(private = "file")
+got_payload :: proc(f: ^core.Fake_Holder, kind: hw.Kind, term: u32) -> string {
+	last := ""
+	for g in core.fake_holder_got(f) do if g.kind == kind && g.terminal == term do last = g.payload
+	return last
+}
+
+// A holder that checks input itself (holder_rev 8): a control send_text into a held shell tab is
+// one INPUT_IF_IDLE, ok only on its "written"; busy, gone or no answer is refused, with no
+// FOREGROUND asked and no plain INPUT sent. Its Enter lands after the bracketed paste, as a key.
+@(test)
+holder_input_guarded :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	pid := i64(os.get_pid())
+	f := core.Fake_Holder{mode = .Welcome, holder_rev = 8, terms = {fake_term(3, ""), fake_term(4, "")}, fg_pgid = pid}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	s := fg_adopt(t, &f, proj)
+	if len(s.tabs) != 3 do return
+	defer fg_unhold(s)
+	sh, login := s.tabs[1].id, s.tabs[2].id
+	core.term_feed_replayed(core.term_of(sh), transmute([]u8)string(BRACKETED))
+	send :: proc(tab: u64, text := "ls\n") -> string {return core.run_command(core.Send_Text{tab_id = tab, text = text}, {kind = .Control}).error}
+
+	testing.expect_value(t, send(sh), "")
+	time.sleep(100 * time.Millisecond) // the fake records a frame after it answers
+	testing.expect_value(t, got_payload(&f, .Input_If_Idle, 3), "\x1b[200~ls\x1b[201~\r")
+	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), 0)
+	testing.expect_value(t, core.fake_holder_count(&f, .Input, 3), 0)
+
+	// Log in…'s ssh: refused in the core, nothing sent
+	testing.expect_value(t, send(login), FG_BUSY)
+	testing.expect_value(t, core.fake_holder_count(&f, .Input_If_Idle, 4), 0)
+
+	sync.atomic_store(&f.fg_pgid, 424242)
+	testing.expect_value(t, send(sh), FG_BUSY)
+	sync.atomic_store(&f.fg_pgid, 0)
+	testing.expect_value(t, send(sh), FG_UNKNOWN)
+	sync.atomic_store(&f.input_gone, true)
+	testing.expect_value(t, send(sh), "the tab's process has exited")
+	time.sleep(100 * time.Millisecond)
+	testing.expect_value(t, core.fake_holder_count(&f, .Input_If_Idle, 3), 4)
+	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), 0)
+	testing.expect_value(t, core.fake_holder_count(&f, .Input, 3), 0)
+
+	// the user's own paste is unchanged: plain INPUT, its newline kept inside the paste
+	core.run_command(core.Send_Text{tab_id = sh, text = "ls\n"}, {kind = .UI})
+	time.sleep(100 * time.Millisecond)
+	ui := got_payload(&f, .Input, 3)
+	testing.expectf(t, strings.has_suffix(ui, "\x1b[201~"), "the user's paste: %q", ui)
+}
+
+// An older holder (no INPUT_IF_IDLE): #140's check, FOREGROUND then INPUT; the Enter after the
+// paste all the same.
+@(test)
+holder_input_old_holder :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, holder_rev = 7, terms = {fake_term(3, ""), fake_term(4, "")}, fg_pgid = i64(os.get_pid())}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	s := fg_adopt(t, &f, proj)
+	if len(s.tabs) != 3 do return
+	defer fg_unhold(s)
+	core.term_feed_replayed(core.term_of(s.tabs[1].id), transmute([]u8)string(BRACKETED))
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = s.tabs[1].id, text = "ls\r\n"}, {kind = .Control}).error, "")
+	testing.expect_value(t, core.fake_holder_count(&f, .Input_If_Idle), 0)
+	testing.expect(t, core.fake_holder_count(&f, .Foreground, 3) >= 1, "asked FOREGROUND")
+	time.sleep(100 * time.Millisecond)
+	testing.expect_value(t, got_payload(&f, .Input, 3), "\x1b[200~ls\x1b[201~\r")
+}

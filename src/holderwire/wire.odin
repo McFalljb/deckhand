@@ -72,6 +72,8 @@ Kind :: enum u8 {
 	Unknown        = 32,
 	Supervise      = 33, // the supervisor (§7.7): a separate core's path after WELCOME; a window's status or use_previous as its first frame
 	Supervise_Status = 34,
+	Input_If_Idle  = 35, // u64 request id + bytes: written only while the shell's own group has the terminal (holder_rev 8)
+	Input_Result   = 36, // INPUT_IF_IDLE's answer
 }
 
 Header :: struct {
@@ -253,6 +255,14 @@ Unknown :: struct {
 	kind: i64,
 }
 
+// INPUT_IF_IDLE's answer: result "written" (the terminal's foreground group was the child's own
+// when the holder took the bytes), "busy" (another group had it, or it could not tell: nothing
+// written) or "gone" (no such running terminal: nothing written).
+Input_Result :: struct {
+	id:     i64, // the request id INPUT_IF_IDLE carried
+	result: string,
+}
+
 Empty :: struct {} // RELEASE, FOREGROUND, PING, PONG
 
 // ---- header and frames ----
@@ -345,6 +355,17 @@ encode_input :: proc(out: ^[dynamic]u8, terminal: u32, bytes: []u8) -> bool {
 	return true
 }
 
+// INPUT_IF_IDLE: the request id, then the bytes.
+encode_input_if_idle :: proc(out: ^[dynamic]u8, terminal: u32, id: u64, bytes: []u8) -> bool {
+	if len(bytes) + 8 > MAX_PAYLOAD do return false
+	put_header(out, u8(Kind.Input_If_Idle), terminal, len(bytes) + 8)
+	o: [8]u8
+	endian.put_u64(o[:], .Little, id)
+	append(out, ..o[:])
+	append(out, ..bytes)
+	return true
+}
+
 // OUTPUT or TAIL: the stream offset of bytes[0], then the bytes.
 encode_output :: proc(out: ^[dynamic]u8, kind: Kind, terminal: u32, start: u64, bytes: []u8) -> bool {
 	assert(kind == .Output || kind == .Tail)
@@ -403,6 +424,14 @@ decode_output :: proc(f: Frame) -> (start: u64, bytes: []u8, err: Msg_Error) {
 	if len(f.payload) < 8 do return 0, nil, .Short_Payload
 	start, _ = endian.get_u64(f.payload[:8], .Little)
 	return start, f.payload[8:], .None
+}
+
+// INPUT_IF_IDLE: the request id and the bytes (borrowed).
+decode_input_if_idle :: proc(f: Frame) -> (id: u64, bytes: []u8, err: Msg_Error) {
+	if f.kind != u8(Kind.Input_If_Idle) do return 0, nil, .Wrong_Kind
+	if len(f.payload) < 8 do return 0, nil, .Short_Payload
+	id, _ = endian.get_u64(f.payload[:8], .Little)
+	return id, f.payload[8:], .None
 }
 
 check_fields :: proc(obj: json.Object, fields: []Field_Spec) -> Msg_Error {

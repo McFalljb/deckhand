@@ -1270,3 +1270,50 @@ reap_strays_skips_tracked :: proc(t: ^testing.T) {
 		testing.expect_value(t, waitpid(l, &st, WNOHANG), l)
 	}
 }
+
+// INPUT_IF_IDLE (#141): the holder writes the bytes only while the child's own group has the
+// terminal, checked as it takes them, and answers each request id: written, busy (nothing written)
+// or gone.
+@(test)
+input_if_idle :: proc(t: ^testing.T) {
+	h := new_test_holder(t)
+	defer holder_free(h, true)
+	f := fake_connect(t, h)
+	defer fake_free(f)
+	hello(t, h, f)
+	result :: proc(t: ^testing.T, h: ^Holder, f: ^Fake, term: u32) -> holderwire.Input_Result {
+		g, ok := wait_for(h, f, .Input_Result, term)
+		r: holderwire.Input_Result
+		testing.expectf(t, ok && decode_got(g, .Input_Result, &r), "terminal %d: no INPUT_RESULT", term)
+		return r
+	}
+	send :: proc(f: ^Fake, term: u32, id: u64, s: string) {
+		out := make([dynamic]u8, context.temp_allocator)
+		holderwire.encode_input_if_idle(&out, term, id, transmute([]u8)s)
+		fake_write(f, out[:])
+	}
+	// at its prompt: written
+	spawn_ok(t, h, f, 7, `printf 'ready\n'; read x; printf 'got:%s\n' "$x"; read y`)
+	testing.expect(t, wait_output(t, h, f, 7, "ready"))
+	send(f, 7, 41, "hello\n")
+	r := result(t, h, f, 7)
+	testing.expect_value(t, r.id, 41)
+	testing.expect_value(t, r.result, "written")
+	testing.expect(t, wait_output(t, h, f, 7, "got:hello"))
+	// a job in the foreground (its own group): busy, nothing written
+	spawn_ok(t, h, f, 8, `set -m; printf 'ready\n'; /bin/sleep 3; printf 'after\n'; read x; printf 'got:%s\n' "$x"`)
+	testing.expect(t, wait_output(t, h, f, 8, "ready"))
+	pump(h, 300 * time.Millisecond, f) // the sleep takes the terminal
+	send(f, 8, 42, "nope\n")
+	r = result(t, h, f, 8)
+	testing.expect_value(t, r.id, 42)
+	testing.expect_value(t, r.result, "busy")
+	testing.expect(t, wait_output(t, h, f, 8, "after", 6 * time.Second))
+	fake_input(f, 8, "late\n")
+	testing.expect(t, wait_output(t, h, f, 8, "got:late"), "the shell read what came after, not the refused bytes")
+	// no such terminal: gone
+	send(f, 99, 43, "x\n")
+	r = result(t, h, f, 99)
+	testing.expect_value(t, r.id, 43)
+	testing.expect_value(t, r.result, "gone")
+}

@@ -67,6 +67,9 @@ Fake_Holder :: struct {
 	fg_pgid:         i64, // (atomic) FOREGROUND is answered with this foreground group; 0: not yet (late:
 	                      // once it is set, each held-back one is answered first, saying "at the prompt", an old state)
 	fg_owed:         [dynamic]u32, // the fake thread's: the terminals of FOREGROUNDs not answered yet
+	holder_rev:      i64, // WELCOME's (0: 1, an old holder that knows no INPUT_IF_IDLE)
+	input_gone:      bool, // (atomic) INPUT_IF_IDLE is answered "gone"; else by fg_pgid: written (the
+	                       // shell's own group), busy (another), no answer (0)
 	hellos:    int, // HELLOs so far (atomic)
 	helloed:   bool, // a HELLO came (atomic)
 	key:       [32]u8,
@@ -244,7 +247,7 @@ fake_serve :: proc(f: ^Fake_Holder) {
 				case .Welcome:
 					rejoin := sync.atomic_load(&f.hellos) > 1
 					if rejoin && f.rejoin_delay > 0 do time.sleep(f.rejoin_delay)
-					w := hw.Welcome{wire = hw.WIRE, instance = rejoin && f.rejoin_instance != "" ? f.rejoin_instance : f.instance, pid = i64(posix.getpid()), holder_rev = 1, previous = f.upgraded ? "upgrade" : rejoin ? "crash" : f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
+					w := hw.Welcome{wire = hw.WIRE, instance = rejoin && f.rejoin_instance != "" ? f.rejoin_instance : f.instance, pid = i64(posix.getpid()), holder_rev = max(f.holder_rev, 1), previous = f.upgraded ? "upgrade" : rejoin ? "crash" : f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
 					out := make([dynamic]u8, context.temp_allocator)
 					hw.encode(&out, .Welcome, 0, w)
 					for wt, i in f.terms {
@@ -268,6 +271,8 @@ fake_serve :: proc(f: ^Fake_Holder) {
 			}
 			g := Fake_Got{kind = kind, terminal = fr.terminal, conn = sync.atomic_load(&f.hellos)}
 			if kind == .Input do g.payload = strings.clone(string(fr.payload), runtime.heap_allocator()) // freed by fake_holder_stop
+			rid, rbytes, re := hw.decode_input_if_idle(fr)
+			if kind == .Input_If_Idle && re == .None do g.payload = strings.clone(string(rbytes), runtime.heap_allocator())
 			#partial switch kind {
 			case .Spawn:
 				fake_send(f, .Spawned, fr.terminal, hw.Spawned{pid = i64(posix.getpid()), pgid = i64(posix.getpid())})
@@ -276,6 +281,10 @@ fake_serve :: proc(f: ^Fake_Holder) {
 			case .Foreground:
 				if pg := sync.atomic_load(&f.fg_pgid); pg == 0 do append(&f.fg_owed, fr.terminal)
 				else do fake_send(f, .Foreground_Is, fr.terminal, hw.Foreground_Is{pgid = pg})
+			case .Input_If_Idle:
+				pg := sync.atomic_load(&f.fg_pgid)
+				res := sync.atomic_load(&f.input_gone) ? "gone" : pg == i64(posix.getpid()) ? "written" : "busy"
+				if re == .None && (pg != 0 || res == "gone") do fake_send(f, .Input_Result, fr.terminal, hw.Input_Result{id = i64(rid), result = res})
 			case .Upgrade:
 				if f.upgrade_drops {
 					sync.lock(&f.mu)

@@ -378,3 +378,40 @@ web_hello_key_taken :: proc(t: ^testing.T) {
 	_, _, why = web_hello_key(msg[:len(msg) - 1], context.temp_allocator)
 	testing.expect(t, why != "", "not one whole frame")
 }
+
+// Assets (#148 performance): a hashed name cached for good and its .gz copy to a browser that
+// takes gzip; index.html revalidated by its ETag (304); .gz names and unhashed names as before.
+@(test)
+web_asset_caching :: proc(t: ^testing.T) {
+	r, _, st := req("GET / HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip, deflate, br\r\nIf-None-Match: \"abc\"\r\n\r\n")
+	testing.expect_value(t, st, Http_Parse.Ok)
+	testing.expect_value(t, r.accept_encoding, "gzip, deflate, br")
+	testing.expect_value(t, r.if_none_match, `"abc"`)
+	testing.expect(t, http_accepts_gzip("gzip, deflate, br") && http_accepts_gzip("br;q=1, GZIP;q=0.5") && http_accepts_gzip("*"), "gzip taken")
+	testing.expect(t, !http_accepts_gzip("") && !http_accepts_gzip("br, deflate") && !http_accepts_gzip("gzip;q=0") && !http_accepts_gzip("gzipx"), "gzip not taken")
+	testing.expect(t, http_etag_match(`"a", W/"b"`, `"b"`) && http_etag_match("*", `"x"`) && !http_etag_match(`"a"`, `"b"`) && !http_etag_match("", `"b"`), "If-None-Match")
+	testing.expect(t, web_asset_hashed("app.a717027bc4.js") && !web_asset_hashed("app.js") && !web_asset_hashed("app.A717027BC4.js") && !web_asset_hashed("app.12345.js"), "hashed names")
+	_, ok := web_asset_reply("/assets/.hidden", "", "")
+	testing.expect(t, !ok, "a dot name")
+	_, ok = web_asset_reply("/assets/../x", "", "")
+	testing.expect(t, !ok, "a path")
+	when WEB_CLIENT_BUILT {
+		page, pok := web_asset_reply("/", "gzip", "")
+		testing.expect(t, pok && page.status == 200 && page.cache == "no-cache" && page.etag != "" && page.encoding == "", fmt.tprint(page.status, page.cache, page.etag))
+		again, _ := web_asset_reply("/", "gzip", page.etag)
+		testing.expect(t, again.status == 304 && len(again.data) == 0 && again.etag == page.etag, "304 on its ETag")
+		// the script index.html names: hashed, immutable, gzip when taken, Vary either way
+		html := string(page.data)
+		at := strings.index(html, "/assets/app.")
+		testing.expect(t, at > 0, html)
+		if at < 0 do return
+		end := strings.index_byte(html[at:], '"')
+		js := html[at:at + end]
+		gz, gok := web_asset_reply(js, "gzip, br", "")
+		testing.expect(t, gok && gz.status == 200 && gz.cache == WEB_CACHE_IMMUTABLE && gz.encoding == "gzip" && gz.vary, fmt.tprint(js, gz.cache, gz.encoding))
+		plain, _ := web_asset_reply(js, "br", "")
+		testing.expect(t, plain.encoding == "" && plain.vary && len(plain.data) > len(gz.data), "no gzip: the plain bytes")
+		_, gzname := web_asset_reply(strings.concatenate({js, ".gz"}, context.temp_allocator), "", "")
+		testing.expect(t, !gzname, "a .gz name is not served")
+	}
+}

@@ -11,7 +11,7 @@ a text message closing it, `web revoke`, unpair (refused without the key), then 
 Usage: tests/web-smoke.py [build/deckhand-core-serve]
 """
 import base64
-import json
+import gzip, json
 import os
 import re
 import socket
@@ -176,11 +176,22 @@ def main():
         assert h["x-content-type-options"] == ["nosniff"] and h["referrer-policy"] == ["no-referrer"], h
         assert "access-control-allow-origin" not in h
         assert "'unsafe-inline'" not in csp and "style-src 'self';" in csp, csp
-        if b"app.js" in body:  # the real client embedded (scripts/build-web.sh ran), not the placeholder
-            for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css")):
+        names = re.findall(rb'/assets/((?:app|icon)\.[0-9a-f]{10}\.(?:js|css|svg))"', body)
+        if names:  # the real client embedded (scripts/build-web.sh ran), not the placeholder
+            assert h["cache-control"] == ["no-cache"] and h["etag"][0].startswith('"'), h
+            etag = h["etag"][0]
+            st, h304, b304 = http(port, "GET", "/", {"If-None-Match": etag})
+            assert st == 304 and b304 == b"" and h304["etag"] == [etag] and h304["content-security-policy"] == [csp], (st, h304)
+            for name in (n.decode() for n in names):
+                ctype = {"js": "text/javascript", "css": "text/css", "svg": "image/svg+xml"}[name.rsplit(".", 1)[1]]
                 st, h, b = http(port, "GET", f"/assets/{name}")
                 assert st == 200 and h["content-type"][0].startswith(ctype) and len(b) > 1000, (name, st, h.get("content-type"))
-            print("web-smoke: the real web client is embedded")
+                assert h["cache-control"] == ["public, max-age=31536000, immutable"] and "content-encoding" not in h, (name, h)
+                assert h["content-security-policy"] == [csp] and h["x-content-type-options"] == ["nosniff"], (name, h)
+                st, hz, z = http(port, "GET", f"/assets/{name}", {"Accept-Encoding": "gzip, deflate, br"})
+                assert st == 200 and hz["content-encoding"] == ["gzip"] and hz["vary"] == ["Accept-Encoding"] and gzip.decompress(z) == b, (name, st, hz)
+                assert http(port, "GET", f"/assets/{name}.gz")[0] == 404
+            print("web-smoke: the real web client is embedded (hashed, immutable, gzip, 304)")
         else:
             print("web-smoke: the placeholder page is embedded (no web/dist at build time)")
         assert http(port, "GET", "/nope")[0] == 404

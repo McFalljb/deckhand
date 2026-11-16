@@ -5,8 +5,8 @@ package core
 // request line and headers and WEB_BODY_MAX of body, all within WEB_READ_MS; at most
 // WEB_CONNS_MAX connections at once before an upgrade, WEB_RELAYS_MAX WebSockets.
 //
-//   GET  /                the web client (web/dist/index.html)
-//   GET  /assets/<file>   its files (web/dist/assets/)
+//   GET  /                the web client (web/dist/index.html: no-cache, an ETag, 304 on a match)
+//   GET  /assets/<file>   its files (web/dist/<file>: a hashed name immutable, gzip when taken)
 //   GET  /api/whoami      200 {"paired":true,"name","core","version"} (the cookie renewed), or 401
 //   POST /api/pair        {"code","name"} -> 200 {"paired":true,"key"} and the cookie, or 403
 //   POST /api/unpair      the cookie and X-Deckhand-Key: that browser forgotten (its link closes)
@@ -68,6 +68,8 @@ Http_Request :: struct {
 	upgrade, connection:  string,
 	ws_key, ws_version:   string,
 	chunked:              bool, // a Transfer-Encoding header (refused)
+	accept_encoding:      string, // an asset's .gz copy (web_asset_reply)
+	if_none_match:        string, // index.html's ETag (web_asset_reply)
 }
 
 Http_Parse :: enum u8 {
@@ -149,6 +151,10 @@ http_parse :: proc(buf: []u8) -> (r: Http_Request, used: int, st: Http_Parse) {
 			r.ws_key = value
 		case strings.equal_fold(name, "sec-websocket-version"):
 			r.ws_version = value
+		case strings.equal_fold(name, "accept-encoding"):
+			r.accept_encoding = value
+		case strings.equal_fold(name, "if-none-match"):
+			r.if_none_match = value
 		}
 	}
 	if r.http11 && r.host == "" do return {}, 0, .Bad
@@ -512,7 +518,7 @@ web_conn :: proc(fd: Sock_Fd, epoch: u64) {
 		return
 	case:
 		if req.method != "GET" do break
-		if web_asset_send(fd, path, req.host) do return
+		if web_asset_send(fd, path, req) do return
 		web_send(fd, 404, "text/plain; charset=utf-8", "not found")
 		return
 	}
@@ -579,6 +585,22 @@ web_security_headers :: proc(b: ^strings.Builder, host: string) {
 	if web_host_safe(host) do fmt.sbprintf(b, "; connect-src 'self' ws://%s wss://%s", host, host)
 	else do strings.write_string(b, "; connect-src 'self'")
 	strings.write_string(b, "\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: DENY\r\n")
+}
+
+// An asset's response (web_asset_reply), Connection: close: the same security headers as every
+// response; its Cache-Control, ETag, Content-Encoding and Vary; a 304 has no body.
+web_send_asset :: proc(fd: Sock_Fd, a: Web_Asset, host: string) {
+	b := strings.builder_make(context.temp_allocator)
+	if a.status == 304 do strings.write_string(&b, "HTTP/1.1 304 Not Modified\r\n")
+	else do fmt.sbprintf(&b, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nContent-Length: %d\r\n", a.ctype, len(a.data))
+	web_security_headers(&b, host)
+	fmt.sbprintf(&b, "Cache-Control: %s\r\n", a.cache)
+	if a.etag != "" do fmt.sbprintf(&b, "ETag: %s\r\n", a.etag)
+	if a.encoding != "" do fmt.sbprintf(&b, "Content-Encoding: %s\r\n", a.encoding)
+	if a.vary do strings.write_string(&b, "Vary: Accept-Encoding\r\n")
+	strings.write_string(&b, "Connection: close\r\n\r\n")
+	if a.status != 304 do strings.write_bytes(&b, a.data)
+	sock_write_all(fd, b.buf[:])
 }
 
 // ---- the relay ----

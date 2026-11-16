@@ -1582,8 +1582,8 @@ all within 10 s; at most 16 connections before an upgrade and 4 WebSockets. Stat
 
 | Request | Answer |
 |---|---|
-| `GET /` | the web client (`web/dist/index.html`, embedded at build; a placeholder page when the core was built without it) |
-| `GET /assets/<name>` | `web/dist/<name>` (flat; `[A-Za-z0-9._-]`, not starting with `.`) |
+| `GET /` | the web client (`web/dist/index.html`, embedded at build; a placeholder page when the core was built without it): `Cache-Control: no-cache`, an `ETag`, `304` with no body when `If-None-Match` names it |
+| `GET /assets/<name>` | `web/dist/<name>` (flat; `[A-Za-z0-9._-]`, not starting with `.`, not a `.gz` name). The build names each file by its content's hash (`app.<10 hex>.js`, `app.<10 hex>.css`, `icon.<10 hex>.svg`): such a name is `Cache-Control: public, max-age=31536000, immutable`; its gzip copy is sent (`Content-Encoding: gzip`) when `Accept-Encoding` takes gzip, `Vary: Accept-Encoding` either way |
 | `GET /api/whoami` | `200 {"paired":true,"name","core","version"}` and the cookie again (60 days from now), or `401 {"paired":false}`. The cookie alone: it says only that browser's own name, this core's id and its version |
 | `POST /api/pair` `{"code","name"}` | `200 {"paired":true,"key":<64 hex>}` and `Set-Cookie: deckhand_web=<64 hex>; HttpOnly; SameSite=Strict; Path=/; Max-Age=5184000`; a wrong, used or expired code `403` |
 | `POST /api/unpair` | with the cookie and `X-Deckhand-Key: <key>`: that browser forgotten (its live link closes), `200`, the cookie cleared; the cookie with no key or another's `403` |
@@ -1592,7 +1592,7 @@ all within 10 s; at most 16 connections before an upgrade and 4 WebSockets. Stat
 Every response: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none';
 form-action 'self'; frame-ancestors 'none'; connect-src 'self' ws://<Host> wss://<Host>`,
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
-`Cache-Control: no-cache` (files) or `no-store` (`/api/`). No CORS headers at all. Every `POST`
+`Cache-Control` as above (files; others `no-cache`) or `no-store` (`/api/`). No CORS headers at all. Every `POST`
 and the upgrade need an `Origin` of `http://` or `https://` plus exactly the `Host` header's
 `host:port`; the upgrade and `whoami` need the cookie.
 

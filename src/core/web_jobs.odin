@@ -14,9 +14,9 @@ package core
 
 import "base:runtime"
 import "core:fmt"
-import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:sys/posix"
 
 JOB_DRAFT_OWNERS_MAX :: 40 // projects listed in the picker, as the window's
 
@@ -64,8 +64,8 @@ job_draft_apply :: proc(c: Job_Draft) -> Result {
 		if c.job != "" {
 			for r in state.jobs do if r.id == c.job do path = r.path
 			if path == "" do return fail("no such job")
-			data, rerr := os.read_entire_file(path, context.temp_allocator)
-			if rerr != nil || len(data) > JOB_NOTE_MAX do return fail(fmt.tprintf("could not read %s", fs_display(path)))
+			data, ok := job_note_read_no_link(path)
+			if !ok do return fail(fmt.tprintf("could not read %s", fs_display(path)))
 			text = string(data)
 			ferr: string
 			f, ferr = job_form_from_note(text)
@@ -285,3 +285,28 @@ job_draft_strings :: proc(c: ^Job_Draft) -> []^string {
 	return slice.clone([]^string{&c.op, &c.job, &c.for_project, &c.folder, &c.name, &c.preset, &c.every_n, &c.at, &c.custom, &c.prompt, &c.access, &c.notify, &c.model, &c.hours, &c.max_cost, &c.timeout, &c.max_turns, &c.base, &c.id, &c.date, &c.path, &c.text}, context.temp_allocator)
 }
 
+
+// A job's note: a regular file, never through a link put in its place (as file_read), at most
+// JOB_NOTE_MAX.
+@(private = "file")
+job_note_read_no_link :: proc(path: string) -> ([]u8, bool) {
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NOFOLLOW, .CLOEXEC, .NONBLOCK})
+	if fd < 0 do return nil, false
+	defer posix.close(fd)
+	st: posix.stat_t
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) || i64(st.st_size) > JOB_NOTE_MAX do return nil, false
+	buf := make([]u8, int(st.st_size) + 1, context.temp_allocator)
+	n := 0
+	for n < len(buf) {
+		rem := len(buf) - n
+		k := posix.read(fd, raw_data(buf[n:]), uint(rem))
+		if k < 0 {
+			if posix.errno() == .EINTR do continue
+			return nil, false
+		}
+		if k == 0 do break
+		n += int(k)
+	}
+	if n > JOB_NOTE_MAX do return nil, false
+	return buf[:n], true
+}

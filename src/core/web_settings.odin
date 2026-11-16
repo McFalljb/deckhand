@@ -16,17 +16,16 @@ package core
 // (settings_file_rows), with the actions a browser may take on each (acts: connect, rename,
 // remove, default, add, scan, change, reset).
 //
-// Built on the main thread when the page opens, when a section it reads changed (a flush), and
-// every WEB_SETTINGS_RESCAN while it shows (the files and folders behind the lists).
+// Built on the main thread when the page opens and when a section it reads changed (a flush); never
+// on a timer, so a list changed on disk alone (a file, a folder) shows when the page opens again.
+// Sent only to the link that opened it (window_link_serial): a takeover does not inherit it.
 
 import "base:runtime"
 import "core:fmt"
 import "core:hash"
 import "core:strings"
-import "core:time"
 
 WEB_SETTINGS_SECTION :: "webset"
-WEB_SETTINGS_RESCAN :: 2 * time.Second
 
 // The settings a browser cannot use even though their command is not this Mac's user's only:
 // they open the window's own sheets (the setup sheet, the shortcuts list).
@@ -43,23 +42,33 @@ Web_Settings :: struct {
 
 @(private = "file")
 web_set: struct {
-	on:   bool,
-	json: string, // heap: the last build
-	key:  u64, // the inputs it was built from
-	at:   time.Tick,
+	link:   u64, // the link (window_link_serial) whose page shows; 0: none
+	json:   string, // heap: the last build
+	key:    u64, // the inputs it was built from
+	builds: int, // how many builds (tests)
 }
 
 web_settings_apply :: proc(c: Web_Settings, caller: Caller) -> Result {
 	if !caller_from_web(caller) do return fail("only a browser's Settings page")
-	web_set.on = c.open
-	web_set.key = 0 // built at the next flush
+	web_set_open_for(c.open, window_link_serial())
 	window_state_changed()
 	return {ok = true}
 }
 
-// state_sections: webset while the page shows.
+// Opened (or closed) by the link with this serial; opening builds anew at the next flush (the
+// files and folders behind the lists are read then: on open, not on a timer).
+web_set_open_for :: proc(open: bool, serial: u64) {
+	web_set.link = open && serial != 0 ? serial : 0
+	web_set.key = 0
+}
+
+// state_sections: webset while the page shows, to the link that opened it.
 web_settings_sections :: proc(out: ^[dynamic][2]string) {
-	if !web_set.on do return
+	web_settings_sections_for(out, window_link_serial())
+}
+
+web_settings_sections_for :: proc(out: ^[dynamic][2]string, serial: u64) {
+	if web_set.link == 0 || web_set.link != serial do return
 	h := hash.fnv64a(transmute([]u8)string("set"))
 	for x in out do for name in WEB_SETTINGS_INPUTS do if x[0] == name {
 		h = hash.fnv64a(transmute([]u8)x[1], h)
@@ -69,26 +78,33 @@ web_settings_sections :: proc(out: ^[dynamic][2]string) {
 	append(out, [2]string{WEB_SETTINGS_SECTION, web_set.json})
 }
 
-// web_view_tick: the lists' files and folders looked at again now and then while it shows.
+// web_view_tick: the flag goes with its link (a takeover, a detach). No rebuild here: the page is
+// built on open and when a section it reads changes, so no disk work runs on a timer.
 web_settings_tick :: proc() {
-	if !web_set.on do return
-	if !window_link_web() {
-		web_set.on = false
-		return
-	}
-	if time.tick_since(web_set.at) < WEB_SETTINGS_RESCAN do return
-	before := web_set.json
-	web_settings_rebuild(web_set.key)
-	if web_set.json != before do window_state_changed()
+	if web_set.link != 0 && (!window_link_web() || window_link_serial() != web_set.link) do web_settings_reset()
 }
 
+web_settings_reset :: proc() {
+	delete(web_set.json, runtime.heap_allocator())
+	web_set = {}
+}
+
+web_settings_builds :: proc() -> int {return web_set.builds}
+
+// The new build made and compared before the old one is freed; true: it differs.
 @(private = "file")
-web_settings_rebuild :: proc(key: u64) {
+web_settings_rebuild :: proc(key: u64) -> bool {
 	heap := runtime.heap_allocator()
-	delete(web_set.json, heap)
-	web_set.json = strings.clone(web_settings_json(), heap)
+	next := web_settings_json()
+	changed := next != web_set.json
+	if changed {
+		old := web_set.json
+		web_set.json = strings.clone(next, heap)
+		delete(old, heap)
+	}
 	web_set.key = key
-	web_set.at = time.tick_now()
+	web_set.builds += 1
+	return changed
 }
 
 // The page's data (temp allocator).

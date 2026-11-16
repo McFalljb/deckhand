@@ -4,8 +4,11 @@ package core
 
 import "base:runtime"
 import "core:encoding/json"
+import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 @(private = "file")
 obj_of :: proc(v: json.Value) -> json.Object {o, _ := v.(json.Object); return o}
@@ -101,4 +104,82 @@ web_job_draft :: proc(t: ^testing.T) {
 	testing.expect(t, len(owners) >= 2 && str_of(obj_of(owners[len(owners) - 1]), "value") == "none", "the owners end with None")
 	testing.expect_value(t, job_draft_apply({op = "open", job = "nope"}).error, "no such job")
 	testing.expect_value(t, job_draft_apply({op = "x"}).error, "op: open, write or read")
+}
+
+@(private = "file")
+ws_dir :: proc(tag: string) -> string {
+	d := fmt.tprintf("%s/dh-webset-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	os.make_directory_all(d)
+	return d
+}
+
+// A draft is its caller's only: no command event carries it and commands.log keeps none of it, as
+// file_read (a control subscriber may not call job_draft).
+@(test)
+web_job_draft_not_in_events :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	dir := ws_dir("log")
+	event_log_open(dir)
+	r := run_command(Job_Draft{op = "write", id = "abc123", date = "2026-11-16", name = "Secret job", prompt = "PROMPT-TEXT-XYZ", preset = "manual"}, {kind = .UI, web = true})
+	run_command(Job_Draft{op = "read", text = "---\ntype: job\n---\n# NOTE-TEXT-XYZ\n"}, {kind = .UI, web = true})
+	event_log_close()
+	testing.expect(t, r.ok && strings.contains(r.data, "PROMPT-TEXT-XYZ"), "its caller has it")
+	data, _ := os.read_entire_file(fmt.tprintf("%s/commands.log", dir), context.temp_allocator)
+	testing.expectf(t, !strings.contains(string(data), "XYZ") && !strings.contains(string(data), "Secret"), "nothing of it logged: %s", string(data))
+}
+
+// webset: built when the page opens and when a section it reads changes, never on a timer (no
+// disk work on the main thread while it just shows); a replacement link does not inherit it.
+@(test)
+web_settings_open_bound :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer {
+		state = State{}
+		web_settings_reset()
+	}
+	web_settings_reset()
+	web_set_open_for(true, 7)
+	out := make([dynamic][2]string, context.temp_allocator)
+	web_settings_sections_for(&out, 7)
+	testing.expect(t, len(out) == 1 && out[0][0] == WEB_SETTINGS_SECTION, "sent to the link that opened it")
+	first := out[0][1]
+	builds := web_settings_builds()
+	clear(&out)
+	web_settings_sections_for(&out, 7)
+	testing.expect_value(t, web_settings_builds(), builds) // nothing changed: not built again
+	testing.expect_value(t, out[0][1], first)
+	// a section it reads changed: built again, and the old one compared before it is freed
+	state.settings.reduce_motion = !state.settings.reduce_motion
+	clear(&out)
+	append(&out, [2]string{"settings", "changed"})
+	web_settings_sections_for(&out, 7)
+	testing.expect_value(t, web_settings_builds(), builds + 1)
+	testing.expect(t, strings.contains(out[1][1], `"id":"reduce_motion"`), "the new build")
+	// another link (a takeover): no webset until it opens its own page
+	clear(&out)
+	web_settings_sections_for(&out, 8)
+	testing.expect_value(t, len(out), 0)
+}
+
+// job_draft open reads the job's note without following a link put in its place.
+@(test)
+web_job_draft_no_link :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	dir := ws_dir("link")
+	secret := fmt.tprintf("%s/secret.txt", dir)
+	_ = os.write_entire_file(secret, transmute([]u8)string("SECRET-BYTES"))
+	note := fmt.tprintf("%s/job.md", dir)
+	_ = os.symlink(secret, note)
+	state.settings.home_dir = dir
+	append(&state.jobs, Job_Row{id = "j1", path = note})
+	r := job_draft_apply({op = "open", job = "j1"})
+	testing.expect(t, !r.ok && !strings.contains(r.data, "SECRET"), "a link is not read")
 }

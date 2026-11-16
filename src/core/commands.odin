@@ -920,6 +920,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	case Pi_Handoff_Part:      q3 = true // a conversation's bytes: never in an event (pi_handoff.odin)
 	case Web_Watch:            q3 = true // a browser's own view (web_view.odin): which projects it lists
 	case File_Read:            q3 = true // a file's text: its caller's only, never in an event (web_files.odin)
+	case Job_Draft:            q3 = true // a job note's text: its caller's only, never in an event or the log (web_jobs.odin)
 	case Web_Pair, Web_Devices: q3 = true // a pairing code: its caller's only, never in an event or the log (web.odin)
 	case Focus_Release:        q3 = !changed // nothing had the keyboard (test mode's barrier: client_barrier)
 	}

@@ -940,6 +940,8 @@ holder_foreground_check :: proc(ids: []u32, pids: []i32) -> Foreground {
 	epoch := hc.epoch
 	for {
 		if sync.atomic_load(&hc.lost) || hc.epoch != epoch do return .Unknown
+		left := time.tick_diff(time.tick_now(), deadline)
+		if left <= 0 do return .Unknown // first: an answer taken in after the deadline does not count
 		all_idle, later := true, false
 		for id, i in ids {
 			h := hc.held[id]
@@ -965,8 +967,6 @@ holder_foreground_check :: proc(ids: []u32, pids: []i32) -> Foreground {
 			}
 		}
 		if all_idle do return .Idle
-		left := time.tick_diff(time.tick_now(), deadline)
-		if left <= 0 do return .Unknown
 		sync.cond_wait_with_timeout(&hc.cond, &hc.mu, later ? min(left, 5 * time.Millisecond) : left)
 	}
 }

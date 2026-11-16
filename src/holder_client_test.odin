@@ -1335,6 +1335,17 @@ reattach_soon :: proc() {
 	sync.unlock(&core.hc.mu)
 }
 
+@(private = "file")
+answer_late :: proc() {
+	time.sleep(50 * time.Millisecond)
+	sync.lock(&core.hc.mu)
+	h := core.hc.held[3]
+	h.fg, h.fg_out = i32(os.get_pid()), false // "at the prompt", taken in now
+	sync.cond_broadcast(&core.hc.cond)
+	time.sleep(250 * time.Millisecond) // the waiter gets hc.mu back past its deadline
+	sync.unlock(&core.hc.mu)
+}
+
 // A close under auto and a control send_text ask the holder each time and take only the answer to
 // that question, on the same connection, within one 200 ms deadline: no answer, a late one (to an
 // earlier question, saying "at the prompt"), a reattach meanwhile, a lost holder: not idle (close
@@ -1355,9 +1366,13 @@ holder_shell_busy_check :: proc(t: ^testing.T) {
 	sh, login := s.tabs[1].id, s.tabs[2].id
 	send :: proc(tab: u64) -> string {return core.run_command(core.Send_Text{tab_id = tab, text = "y"}, {kind = .Control}).error}
 
-	// Log in…'s ssh (adopted: tokens.json said it was a command) is never at a prompt
+	// Log in…'s ssh (adopted: tokens.json said it was a command) is never at a prompt, and its
+	// record still says so for the next relaunch; the shell's record (no key: 0.4.0's) is a shell
 	testing.expect(t, core.close_needs_confirm(s.tabs[2]), "login: closing asks")
 	testing.expect_value(t, send(login), FG_BUSY)
+	st4, _ := core.socket_tokens_start_of(4)
+	st3, _ := core.socket_tokens_start_of(3)
+	testing.expect(t, st4.command && !st3.command, "the records after the adoption")
 
 	// at the prompt: both go through
 	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "at the prompt: closes")
@@ -1379,6 +1394,12 @@ holder_shell_busy_check :: proc(t: ^testing.T) {
 	sync.atomic_store(&f.fg_pgid, 0)
 	th := thread.create_and_start(reattach_soon)
 	x := core.term_of(sh)
+	testing.expect_value(t, core.pty_foreground(&x.pty), core.Foreground.Unknown)
+	thread.join(th)
+	thread.destroy(th)
+
+	// an answer taken in only after the deadline does not count
+	th = thread.create_and_start(answer_late)
 	testing.expect_value(t, core.pty_foreground(&x.pty), core.Foreground.Unknown)
 	thread.join(th)
 	thread.destroy(th)
@@ -1441,4 +1462,25 @@ holder_busy_check_full_socket :: proc(t: ^testing.T) {
 	took := time.tick_since(start)
 	testing.expectf(t, took < 100 * time.Millisecond, "waited %v", took)
 	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = s.tabs[1].id, text = "y"}, {kind = .Control}).error, FG_UNKNOWN)
+}
+
+// A shell tab adopted with no record of how it started (tokens.json missing or rejected) may be
+// Log in…'s ssh: busy until it exits (fails closed).
+@(test)
+holder_busy_check_no_record :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}, fg_pgid = i64(os.get_pid())}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Shell}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"ffff-nopi","no_file":true,"cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":1}}]}}`, f.instance, proj, proj, proj, proj)
+	adopt_run(t, &f, text, binds, tokens = false)
+	s := &state.open_sessions[len(state.open_sessions) - 1]
+	if !testing.expect(t, len(s.tabs) == 2 && s.tabs[1].status == .Running, "adopted") do return
+	defer fg_unhold(s)
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "no record: closing asks")
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = s.tabs[1].id, text = "y"}, {kind = .Control}).error, FG_BUSY)
 }

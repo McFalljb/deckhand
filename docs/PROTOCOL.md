@@ -716,6 +716,15 @@ asks even once it shows exited; and a pi tab asks while its bridge reports it bu
 also while its status is unknown (no bridge yet, `agent: unknown`); `idle` and `error` close
 without asking. Exited tabs never ask.
 
+Limits of this check (the core asks; the holder does not check again when the input or the close
+arrives): `exec ssh …` typed in an ordinary shell tab keeps the shell's process and group, so the tab
+reads as at its prompt; between the answer and the write, an exit or a reattach can make a control
+`send_text` report success for input that is dropped or arrives late; and while an output flood
+holds back the holder's reader, idle held tabs ask on close and refuse control input until it
+drains. A held shell tab adopted with no record of how it was started (`tokens.json` missing or
+rejected) is taken for a Log in… tab until it exits; a record without the `command` key (0.4.0's)
+is an ordinary shell.
+
 ### State snapshot
 
 `get_state` → `data`:

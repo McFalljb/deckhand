@@ -296,7 +296,8 @@ hub_door_round1 :: proc(t: ^testing.T) {
 
 // `deckhand-core-serve web …` (web_admin_check): the window token and this user are not enough. A
 // tab's program can fork, let its parent exit (reparented: no longer a tab's descendant) and read
-// window.token, so the terminal must come in from outside: a root-owned sshd or login above it.
+// window.token, so the terminal must come in from outside: a root-owned sshd above it. Not login:
+// macOS's `/usr/bin/login -f $USER` is setuid root and asks the same user for no password.
 @(test)
 web_admin_from_outside :: proc(t: ^testing.T) {
 	dir := fmt.tprintf("%s/dkwa-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
@@ -311,7 +312,7 @@ web_admin_from_outside :: proc(t: ^testing.T) {
 	peer := trust.peer_read(fds[0])
 	window_door_pids_for_test(0, 0) // not a tab's descendant: the reparented case
 	testing.expect_value(t, web_admin_check(fds[0], peer, "nope"), "web: not this core's window token")
-	// this test binary has no root-owned sshd or login above it (as a reparented tab program)
+	// this test binary has no root-owned sshd above it (as a reparented tab program)
 	if !pid_from_outside(i32(posix.getpid())) {
 		testing.expect_value(t, web_admin_check(fds[0], peer, token), WEB_ADMIN_NOT_OUTSIDE)
 	}
@@ -324,7 +325,7 @@ web_admin_from_outside :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(web_admin_check(fds[0], peer, token), "a Deckhand tab"), "a tab's program")
 	window_door_web_admin_anywhere_for_test(false)
 	window_door_pids_for_test(0, 0)
-	// the walk: root's sshd, sshd-session or login; not a user's, not launchd's child
+	// the walk: root's sshd or sshd-session; not login (a tab can start one), not a user's, not launchd's child
 	look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {
 		switch pid {
 		case 100: return 101, 501, "zsh"
@@ -340,7 +341,7 @@ web_admin_from_outside :: proc(t: ^testing.T) {
 		}
 		return 0, 0, ""
 	}
-	testing.expect(t, pid_from_outside(100, look), "under root's login")
+	testing.expect(t, !pid_from_outside(100, look), "under root's login: `login -f $USER` needs no password")
 	testing.expect(t, !pid_from_outside(200, look), "reparented")
 	testing.expect(t, !pid_from_outside(300, look), "a user-owned login")
 	testing.expect(t, pid_from_outside(400, look), "under root's sshd-session")

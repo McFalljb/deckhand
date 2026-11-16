@@ -174,13 +174,13 @@ window_hello_refusal :: proc(h: Window_Hello) -> string {
 // line hello with "peer":"web-admin", the window token, and op and arg. Its checks, as a window's
 // minus the code check: the token (a file only this user reads); this user, still the process
 // that connected; not a program in a Deckhand tab (an agent there is not the user at this
-// machine); and come in from outside (pid_from_outside: a root-owned sshd, sshd-session or login
-// above it), since a tab's program can fork, let its parent exit and so stop being a tab's
+// machine); and come in over ssh (pid_from_outside: a root-owned sshd or sshd-session above it),
+// since a tab's program can fork, let its parent exit and so stop being a tab's
 // descendant. What it does not stop: a program that can itself ssh into this machine (a key
 // without a passphrase, an agent socket) passes as the user would.
 WEB_ADMIN_PEER :: "web-admin"
 
-WEB_ADMIN_NOT_OUTSIDE :: "web: run it in a terminal you came into this machine with: ssh in, or a terminal app at its own screen (not a program in a Deckhand tab, nor one started from it)"
+WEB_ADMIN_NOT_OUTSIDE :: "web: ssh into this machine and run it there (at its own screen too: ssh localhost); on a Mac, Settings › Machines › Web access"
 
 web_admin_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, token: string) -> string {
 	sync.lock(&door.mu)
@@ -291,11 +291,11 @@ pid_via_sshd :: proc(pid: i32, look: Proc_Look = proc_look) -> bool {
 	return pid_root_ancestor(pid, {"sshd", "sshd-session"}, look)
 }
 
-// Whether pid came into this machine from outside: a root-owned sshd, sshd-session or login among
-// its ancestors. login is what Terminal.app, iTerm2 and a Linux console start a shell under (as
-// root); Deckhand never runs it, and a user can't make a root-owned one without a password.
+// Whether pid came into this machine from outside: a root-owned sshd or sshd-session among its
+// ancestors (as the hub's). Not login: macOS's `/usr/bin/login -f $USER` is setuid root and asks
+// the same user for no password, so a tab's detached program could start one above itself.
 pid_from_outside :: proc(pid: i32, look: Proc_Look = proc_look) -> bool {
-	return pid_root_ancestor(pid, {"sshd", "sshd-session", "login"}, look)
+	return pid_via_sshd(pid, look)
 }
 
 @(private = "file")
@@ -380,9 +380,13 @@ window_door_tick :: proc() {
 	heap := runtime.heap_allocator()
 	now := time.to_unix_seconds(time.now())
 	for a, i in got {
-		// a browser checked on its connection's thread: revoked or expired since, it is not attached
-		live := !a.web || web_device_live(a.device, now)
-		if live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device) {
+		// a browser checked on its connection's thread: revoked or expired since, it is not attached.
+		// Checked and attached as one step (web_device_hold): an unpair waits, then kicks it.
+		live := true
+		if a.web do live = web_device_hold(a.device, now)
+		attached := live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device)
+		if a.web do web_device_release()
+		if attached {
 			if !a.hub && !a.web { // a window's version raises the floor; a hub's is a core's, a browser has none
 				sync.lock(&door.mu)
 				was := door.floor

@@ -1655,11 +1655,12 @@ was turned off. The link closes after each.
 line hello on `core.sock`: `{"type":"hello","peer":"web-admin","token":<window token>,"op","arg"}`;
 one result, then the end. Checked as a window's hello minus the code check: the window token
 (0600, this user's), this user and still that process, never a program in a Deckhand tab, and
-come in from outside: a root-owned `sshd`, `sshd-session` or `login` among its ancestors
-(`web_admin_check`, `pid_from_outside`), since a tab's program can fork and let its parent exit to
-stop being a tab's descendant (it is then launchd's or init's child, with no such ancestor).
-`login` is what Terminal.app, iTerm2 and a Linux console start a shell under; Deckhand never runs
-it. Not stopped: a program that can itself ssh into this machine (a key without a passphrase, a
+come in over ssh: a root-owned `sshd` or `sshd-session` among its ancestors (`web_admin_check`,
+`pid_from_outside`), since a tab's program can fork and let its parent exit to stop being a tab's
+descendant (it is then launchd's or init's child, with no such ancestor). Not a root-owned `login`:
+macOS's `/usr/bin/login -f $USER` is setuid root and asks the same user for no password, so a
+tab's program could start one above itself. At the machine's own screen: `ssh localhost`; on a Mac,
+Settings. Not stopped: a program that can itself ssh into this machine (a key without a passphrase, a
 forwarded agent) passes as the user would. It runs with the internal caller, so `on` does not ask
 again.
 

@@ -316,14 +316,28 @@ web_key_ok :: proc(id, key: string) -> bool {
 	return false
 }
 
-// Whether the paired browser id is still paired and not expired (any thread): the main thread
-// asks again just before it attaches a link checked on its connection's thread.
+// Whether the paired browser id is still paired and not expired (any thread).
 web_device_live :: proc(id: string, now: i64) -> bool {
-	if id == "" do return false
-	sync.guard(&web.mu)
+	live := web_device_hold(id, now)
+	web_device_release()
+	return live
+}
+
+// The main thread's recheck and attach as one step: web.mu is held from here to
+// web_device_release (always called, live or not), so a browser's own unpair (its connection's
+// thread, web_token_forget) waits for the attach and then kicks the link; revoke and expiry run on
+// the main thread already. Between the two, nothing may call into web.odin (it would deadlock):
+// core_attach_window_sock does not.
+web_device_hold :: proc(id: string, now: i64) -> (live: bool) {
+	sync.lock(&web.mu)
 	web_load_locked()
+	if id == "" do return false
 	for d in web.devices do if d.id == id do return now - max(d.last_seen, d.paired) <= WEB_DEVICE_IDLE_S
 	return false
+}
+
+web_device_release :: proc() {
+	sync.unlock(&web.mu)
 }
 
 // Forgets the browser of tok (an unpair over HTTP, any thread): its live link closes at the next

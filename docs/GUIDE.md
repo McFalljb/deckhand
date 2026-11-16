@@ -1617,10 +1617,10 @@ Mac's window.
   as an app, no notifications and no clipboard reading there.
 - On a machine with no window (Linux), ssh in and run, there: `deckhand-core-serve web on`,
   `web pair`, `web list`, `web revoke ID`, `web listen ADDRESS`, `web off`. (Find the binary as
-  `~/.local/share/deckhand/core/current/deckhand-core-serve`.) It also works in a terminal app at
-  the machine's own screen, but never from a Deckhand tab or a program started from one: the core
-  wants an ssh login or a console `login` above it. A program that can itself ssh into the machine
-  (a key without a passphrase) could still run it.
+  `~/.local/share/deckhand/core/current/deckhand-core-serve`.) The core wants an ssh login above
+  it, never a Deckhand tab or a program started from one; at the machine's own screen, `ssh
+  localhost` first. A program that can itself ssh into the machine (a key without a passphrase)
+  could still run it.
 
 A Linux machine (x86_64) runs its core as your systemd user service `deckhand-core`, started when
 needed. Unless lingering is on for you there, it stops when you log out of that machine, and its

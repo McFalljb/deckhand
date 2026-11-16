@@ -5,7 +5,10 @@ import "core:encoding/endian"
 import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
+import "core:sync"
 import "core:testing"
+import "core:thread"
+import "core:time"
 
 import cw "../corewire"
 
@@ -241,6 +244,39 @@ web_device_live_check :: proc(t: ^testing.T) {
 	testing.expect(t, !web_device_live("", now), "no id")
 	testing.expect(t, web_token_forget(tok), "revoked")
 	testing.expect(t, !web_device_live(id, now + 5), "revoked: not attached")
+}
+
+// Round 2: the recheck and the attach are one step for a browser's own unpair (its connection's
+// thread): web_device_hold keeps the devices as they are until web_device_release.
+@(test)
+web_device_hold_blocks_unpair :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	web_reset_for_test()
+	defer web_reset_for_test()
+	now := time.to_unix_seconds(time.now())
+	code, _ := web_code_open(now)
+	_, tok, _ := web_pair_try(code, "phone", now)
+	id, _, _ := web_token_device(tok, now)
+	Unpair :: struct {
+		tok:  string,
+		done: bool,
+	}
+	u := Unpair{tok = strings.clone(tok)}
+	defer delete(u.tok)
+	testing.expect(t, web_device_hold(id, now), "live, and held")
+	th := thread.create_and_start_with_data(&u, proc(p: rawptr) {
+		u := (^Unpair)(p)
+		web_token_forget(u.tok)
+		sync.atomic_store(&u.done, true)
+	})
+	time.sleep(100 * time.Millisecond)
+	testing.expect(t, !sync.atomic_load(&u.done), "the unpair waits for the attach")
+	web_device_release()
+	thread.join(th)
+	thread.destroy(th)
+	testing.expect(t, sync.atomic_load(&u.done), "then it runs")
+	testing.expect(t, !web_device_hold(id, now), "gone")
+	web_device_release()
 }
 } // when TEST_HOOKS
 

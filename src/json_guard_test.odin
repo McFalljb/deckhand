@@ -659,7 +659,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/reload.odin", "add_local", "jg.parse", "", ""},
 		{"src/core/session_info.odin", "session_facts_read", "jg.parse_string", "", ""},
 		{"src/core/sessions.odin", "header_cwd", "jg.parse", "", ""},
-		{"src/core/pi_handoff.odin", "handoff_header", "jg.parse", "", ""}, // another machine's copy: its first line, at most PI_HANDOFF_HEADER_MAX
+		{"src/core/pi_handoff.odin", "handoff_header_fd", "jg.parse", "", ""}, // a transcript sent or taken: its first line, at most PI_HANDOFF_HEADER_MAX
 		{"src/core/settings_files.odin", "settings_packages", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
 		{"src/core/snapshot.odin", "snapshot_unpack", "json.parse", "json_shape_ok", ""},
 		{"src/core/snapshot.odin", "snapshot_unpack", "json.unmarshal", "json_shape_ok", ""},

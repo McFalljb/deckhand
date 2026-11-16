@@ -20,6 +20,7 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+import cw "../corewire"
 
 when TEST_HOOKS {
 
@@ -72,7 +73,7 @@ ph_begin :: proc(tag: string, body := "", handoff := true) -> Ph {
 	os.set_env("PI_CODING_AGENT_DIR", fmt.tprintf("%s/pi-agent", f.root))
 	cwd := fmt.aprintf("%s/work/api", f.root)
 	os.make_directory_all(cwd)
-	f.store = fmt.aprintf("%s/store", f.root)
+	f.store = fmt.aprintf("%s/pi-agent/sessions/--work-api--", f.root) // in pi's store (the sender checks its real path)
 	os.make_directory_all(f.store)
 	f.local = new_id()
 	append(&state.projects, Project{id = f.local, cwd = cwd, dir = f.store, group = .Projects, label = "api"})
@@ -95,6 +96,7 @@ ph_begin :: proc(tag: string, body := "", handoff := true) -> Ph {
 
 @(private = "file")
 ph_end :: proc(f: Ph) {
+	core_detach_window()
 	machine_route_down(3, gone = true)
 	pi_handoff_reset_for_test()
 	window.test_event = nil
@@ -114,6 +116,22 @@ ph_end :: proc(f: Ph) {
 	home_root = ""
 	os.unset_env("PI_CODING_AGENT_DIR")
 	os.remove_all(f.root)
+}
+
+// B's side: a hub link attached (a window link marked hub), as one machine viewing this one.
+@(private = "file")
+ph_end_win: cw.Mem_End
+@(private = "file")
+ph_hub_attach :: proc() {
+	ok: bool
+	ph_end_win, ok = core_attach_window(proc() {
+		for {
+			_, err := cw.mem_recv(ph_end_win, context.temp_allocator)
+			if err != .None do return
+		}
+	})
+	assert(ok)
+	window_link_for_test().hub = true
 }
 
 @(private = "file")
@@ -272,6 +290,7 @@ pi_handoff_part_checks :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	f := ph_begin("in")
 	defer ph_end(f)
+	ph_hub_attach()
 	hdr := ph_header("abc", "/Users/me/api")
 	// never this machine's own window, Atlas, a script, nor a hub's Atlas
 	for c in ([]Caller{{kind = .UI}, {kind = .Control}, {kind = .Script}, {kind = .Control, hub = true}, {kind = .Internal}}) {
@@ -356,6 +375,7 @@ pi_handoff_part_forks :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	f := ph_begin("fork")
 	defer ph_end(f)
+	ph_hub_attach()
 	os.set_env("SHELL", "/bin/sh")
 	args := fmt.tprintf("%s/args", f.root)
 	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, args, args, args))
@@ -426,6 +446,77 @@ pi_handoff_part_forks :: proc(t: ^testing.T) {
 	pi_handoff_tick(time.tick_add(time.tick_now(), 4 * time.Second))
 	testing.expect(t, !os.exists(temp), "gone once its tab exited")
 	testing.expect_value(t, len(pi_handoff_forks_for_test()), 0)
+}
+
+// Review 1 (P1): the sender opens the transcript itself, never a link to another file, inside pi's
+// sessions folder (a session folder that is a link out of it is refused), and checks its first line
+// is a pi session header before anything is sent. (P2) Its last newline is looked for in at most
+// PI_HANDOFF_TAIL_MAX from the end.
+@(test)
+pi_handoff_sender_reads_only_a_pi_transcript :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := ph_begin("send", body = ph_lines(100))
+	defer ph_end(f)
+	other := fmt.tprintf("%s/secret.txt", f.store) // inside pi's sessions folder: only O_NOFOLLOW refuses it
+	_ = os.write_entire_file(other, transmute([]u8)string("{\"type\":\"session\",\"id\":\"x\",\"cwd\":\"/\"}\nnot a transcript\n"))
+	kept := fmt.tprintf("%s/kept.jsonl", f.root)
+	os.rename(f.file, kept)
+	posix.symlink(strings.clone_to_cstring(other, context.temp_allocator), strings.clone_to_cstring(f.file, context.temp_allocator))
+	r := run_command(ph_cmd(f), {kind = .UI}, 1)
+	testing.expect(t, !r.ok && !r.pending, "a link: refused")
+	os.remove(f.file)
+	// a first line that is not a pi session header
+	_ = os.write_entire_file(f.file, transmute([]u8)string("hello\nworld\n"))
+	r = run_command(ph_cmd(f), {kind = .UI}, 1)
+	testing.expect(t, !r.ok && strings.contains(r.error, "not a pi conversation"), r.error)
+	// no newline in the last PI_HANDOFF_TAIL_MAX: refused, without reading the rest
+	big := strings.concatenate({ph_header("src-1", "/a"), strings.repeat("y", PI_HANDOFF_TAIL_MAX + 10, context.temp_allocator)}, context.temp_allocator)
+	_ = os.write_entire_file(f.file, transmute([]u8)big)
+	r = run_command(ph_cmd(f), {kind = .UI}, 1)
+	testing.expect(t, !r.ok && !r.pending, r.error)
+	// the session folder a link out of pi's sessions folder
+	os.remove(f.file)
+	os.rename(kept, f.file)
+	outside := fmt.tprintf("%s/outside", f.root)
+	os.rename(f.store, outside)
+	posix.symlink(strings.clone_to_cstring(outside, context.temp_allocator), strings.clone_to_cstring(f.store, context.temp_allocator))
+	r = run_command(ph_cmd(f), {kind = .UI}, 1)
+	testing.expect(t, !r.ok && !r.pending, "out of pi's sessions folder: refused")
+	testing.expect_value(t, len(machine_test_links.texts), 0)
+	// back in place: it goes
+	os.remove(f.store)
+	os.rename(outside, f.store)
+	r = run_command(ph_cmd(f), {kind = .UI}, 1)
+	testing.expect(t, r.pending, r.error)
+}
+
+// Review 1 (P2): a copy coming in belongs to the hub connection it came on: a part on another one
+// is refused, and the copy goes when its connection does.
+@(test)
+pi_handoff_part_bound_to_its_link :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := ph_begin("conn")
+	defer ph_end(f)
+	hdr := ph_header("abc", "/Users/me/api")
+	// no hub link at all: refused
+	testing.expect(t, !ph_part(f, 0, hdr).ok, "no hub link")
+	ph_hub_attach()
+	testing.expect(t, ph_part(f, 0, hdr).ok)
+	path, _ := pi_handoff_in_for_test()
+	// that hub goes: the partial copy goes with it
+	core_detach_window()
+	testing.expect(t, !os.exists(path), "dropped with its connection")
+	// another hub connection cannot finish it at the offset it expected
+	ph_hub_attach()
+	r := ph_part(f, len(hdr), "{}\n", last = true)
+	testing.expect(t, !r.ok && len(state.open_sessions) == 0, r.error)
+	// a part on another connection while one comes is refused, the first kept
+	testing.expect(t, ph_part(f, 0, hdr).ok)
+	path, _ = pi_handoff_in_for_test()
+	core_detach_window()
+	ph_hub_attach()
+	window_link_for_test().hub = true
+	testing.expect(t, !os.exists(path), "the first went with its link")
 }
 
 } // when TEST_HOOKS

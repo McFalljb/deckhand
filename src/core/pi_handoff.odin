@@ -51,6 +51,7 @@ PI_HANDOFF_PART :: 1 << 20 // bytes of it per pi_handoff_part (base64 on the wir
 PI_HANDOFF_PART_B64 :: (4 * PI_HANDOFF_PART / 3 + 3) &~ 3 // its base64, at most
 PI_HANDOFF_IDLE :: 60 * time.Second // a copy coming in with no part for this long is dropped
 PI_HANDOFF_HEADER_MAX :: 64 << 10 // its first line, the header, is at most this long
+PI_HANDOFF_TAIL_MAX :: 16 << 20 // its last newline is looked for this far back from its end, at most
 PI_HANDOFF_DIR :: "pi-handoff" // in the data dir
 
 PI_HANDOFF_OLD :: "its Deckhand is too old to take a conversation from here: update Deckhand there (Update in its row's menu in the sidebar), then try again"
@@ -132,8 +133,12 @@ pi_handoff_apply :: proc(c: Pi_Handoff, caller: Caller, request_id: u64) -> Resu
 	if name == "" || handoff_name(rp.cwd) != name do return fail(fmt.tprintf("that project on %s is not called %s", m.name, name))
 	if !m.pi_handoff do return fail(fmt.tprintf("on %s: %s", m.name, PI_HANDOFF_OLD))
 	if !machine_link_up(no) do return {error = fmt.tprintf("%s is not connected", m.name), data = `{"code":"machine_offline"}`}
-	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.CLOEXEC})
-	if fd < 0 do return fail("cannot read this session's transcript")
+	// pi's own file in its sessions folder: never through a link to another file (O_NOFOLLOW), nor a
+	// session folder that leads out of that folder (review 1)
+	root := real_path(sessions_root(context.temp_allocator))
+	if rp := real_path(path); root == "" || !strings.has_prefix(rp, strings.concatenate({strings.trim_right(root, "/"), "/"}, context.temp_allocator)) do return fail("this session's transcript is not in pi's sessions folder")
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NOFOLLOW, .CLOEXEC})
+	if fd < 0 do return fail("cannot read this session's transcript (it must be a file, not a link)")
 	st: posix.stat_t
 	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) {
 		posix.close(fd)
@@ -146,7 +151,12 @@ pi_handoff_apply :: proc(c: Pi_Handoff, caller: Caller, request_id: u64) -> Resu
 	size := whole_lines(fd, u64(max(i64(st.st_size), 0)))
 	if size == 0 {
 		posix.close(fd)
-		return fail("this session's transcript is empty")
+		return fail(fmt.tprintf("this session's transcript has no whole line in its last %d MB", PI_HANDOFF_TAIL_MAX >> 20))
+	}
+	// the same check the other machine makes, before anything is sent
+	if _, why := handoff_header_fd(fd); why != "" {
+		posix.close(fd)
+		return fail(why)
 	}
 	handoff_out.next += 1
 	handoff_out = {id = handoff_out.next, next = handoff_out.next, request_id = request_id, machine = no, to_project = c.to_project_id, fd = fd, size = size, what = fmt.aprintf("%s in %s", m.name, name, allocator = runtime.heap_allocator())}
@@ -158,12 +168,12 @@ pi_handoff_apply :: proc(c: Pi_Handoff, caller: Caller, request_id: u64) -> Resu
 }
 
 // The bytes of a transcript up to its last newline (size: its size now): pi may be writing its
-// next line. 0: none.
+// next line. Read backwards from the end, at most PI_HANDOFF_TAIL_MAX of it. 0: none there.
 @(private = "file")
 whole_lines :: proc(fd: posix.FD, size: u64) -> u64 {
 	buf: [64 << 10]u8
 	end := size
-	for end > 0 {
+	for end > 0 && size - end < PI_HANDOFF_TAIL_MAX {
 		n := min(end, u64(len(buf)))
 		if !read_full(fd, buf[:n], end - n) do return 0
 		for i := int(n) - 1; i >= 0; i -= 1 do if buf[i] == '\n' do return end - n + u64(i) + 1
@@ -241,6 +251,7 @@ handoff_out_end :: proc() {
 @(private = "file")
 handoff_in: struct {
 	active:     bool,
+	conn:       u64, // the hub connection it comes on (window_link_hub_serial): only its parts are taken
 	project_id: u64,
 	path:       string, // heap: in handoff_dir, named here
 	fd:         posix.FD,
@@ -272,7 +283,8 @@ PI_HANDOFF_HUB_ONLY :: "a conversation comes here only from the machine viewing 
 // One part of a copy from the hub's user: taken (ok), or why not (the copy so far is dropped).
 // The last one forks it: created_id = the new session.
 pi_handoff_part_apply :: proc(c: Pi_Handoff_Part, caller: Caller) -> (Result, bool) {
-	if caller.kind != .UI || !caller.hub do return fail(PI_HANDOFF_HUB_ONLY), false
+	conn := window_link_hub_serial() // the hub connection this part came on (one at a time)
+	if caller.kind != .UI || !caller.hub || conn == 0 do return fail(PI_HANDOFF_HUB_ONLY), false
 	now := time.tick_now()
 	in_ := &handoff_in
 	if c.offset == 0 {
@@ -283,7 +295,10 @@ pi_handoff_part_apply :: proc(c: Pi_Handoff_Part, caller: Caller) -> (Result, bo
 		p := find_project(c.project_id)
 		if p == nil || p.machine != 0 || id_machine(c.project_id) != 0 || p.group != .Projects do return fail("no such project here"), false
 		if pi_fork_too_old() do return fail(fmt.tprintf("pi here is %s: a conversation from another machine needs pi %s or later", state.reload.pi_version, PI_FORK_MIN_PI)), false
-		if why := handoff_in_open(c.project_id, now); why != "" do return fail(why), false
+		if why := handoff_in_open(c.project_id, conn, now); why != "" do return fail(why), false
+	} else if in_.active && in_.conn != conn {
+		// another connection's copy: never continued from this one (review 1)
+		return fail("another conversation is being copied here: try again once it is done"), false
 	} else if !in_.active || c.project_id != in_.project_id || c.offset != in_.written {
 		handoff_in_drop()
 		return fail("the copy came out of order: try again"), false
@@ -332,7 +347,7 @@ handoff_dir :: proc() -> string {
 }
 
 @(private = "file")
-handoff_in_open :: proc(project_id: u64, now: time.Tick) -> string {
+handoff_in_open :: proc(project_id, conn: u64, now: time.Tick) -> string {
 	dir := handoff_dir()
 	if dir == "" do return "this machine has no folder for a copy"
 	r: [16]u8
@@ -343,9 +358,14 @@ handoff_in_open :: proc(project_id: u64, now: time.Tick) -> string {
 		delete(path, runtime.heap_allocator())
 		return "cannot make the copy here"
 	}
-	handoff_in = {active = true, project_id = project_id, path = path, fd = fd, last_at = now}
+	handoff_in = {active = true, conn = conn, project_id = project_id, path = path, fd = fd, last_at = now}
 	hash.init(&handoff_in.sha, .SHA256)
 	return ""
+}
+
+// Hub connection conn went (window_link.odin): the copy it was sending goes with it (review 1).
+pi_handoff_link_gone :: proc(conn: u64) {
+	if handoff_in.active && handoff_in.conn == conn do handoff_in_drop()
 }
 
 // The copy coming in goes (closed, deleted).
@@ -415,10 +435,18 @@ handoff_in_fork :: proc() -> (Result, bool) {
 // The copy's first line, a pi session header ({"type":"session", "id": …}): its id, or why not.
 @(private = "file")
 handoff_header :: proc(path: string) -> (id: string, why: string) {
-	NOT :: "what came is not a pi conversation (its first line is not a pi session header)"
 	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NOFOLLOW, .CLOEXEC})
-	if fd < 0 do return "", NOT
+	if fd < 0 do return "", PI_HANDOFF_NOT_PI
 	defer posix.close(fd)
+	return handoff_header_fd(fd)
+}
+
+PI_HANDOFF_NOT_PI :: "it is not a pi conversation (its first line is not a pi session header)"
+
+// The same, of an open file (this Mac checks its own before sending: review 1).
+@(private = "file")
+handoff_header_fd :: proc(fd: posix.FD) -> (id: string, why: string) {
+	NOT :: PI_HANDOFF_NOT_PI
 	buf := make([]u8, PI_HANDOFF_HEADER_MAX, context.temp_allocator)
 	got := 0
 	for got < len(buf) {

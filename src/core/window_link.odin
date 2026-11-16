@@ -132,6 +132,7 @@ Window_Link :: struct {
 	following:  map[u64]bool, // over core.sock: its commands answered pending, whose finished it is sent (window_link_finished)
 	hub:        bool, // another machine's core, not a window (window_sock.odin's hub door; §10.4 M6-A)
 	hub_from:   string, // heap: that machine's name
+	serial:     u64, // this connection's number in this run (link_serials): a hub's pi_handoff copy is bound to it
 }
 
 @(private = "file")
@@ -164,6 +165,8 @@ core_attach_window :: proc(on_frames: proc(), on_drain: proc() = nil) -> (end: c
 	}
 	heap := runtime.heap_allocator()
 	link = new(Window_Link, heap)
+	link_serials += 1
+	link.serial = link_serials
 	link.t = new(cw.Mem_Transport, heap)
 	link.core_end, link.win_end = cw.mem_open(link.t, allocator = heap)
 	link.on_frames = on_frames
@@ -235,6 +238,7 @@ core_detach_window :: proc(keep_transport := false) {
 			free(link.t, heap)
 		}
 	}
+	if link.hub do pi_handoff_link_gone(link.serial) // a copy it was sending goes (pi_handoff.odin)
 	delete(link.hub_from, heap)
 	free(link, heap)
 	link = nil
@@ -1285,6 +1289,8 @@ core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, h
 	heap := runtime.heap_allocator()
 	link = new(Window_Link, heap)
 	link.hub = hub
+	link_serials += 1
+	link.serial = link_serials
 	link.hub_from = strings.clone(from, heap)
 	link.sock = new(cw.Sock_Transport, heap)
 	link.sock_peer = peer
@@ -1413,3 +1419,9 @@ window_link_is_sock :: proc() -> bool {return link != nil && link.sock != nil}
 // The attached link is another machine's core (the hub), not a window: it drops what a window
 // would show (notifications among them), so the core keeps its own.
 window_link_hub :: proc() -> bool {return link != nil && link.hub}
+
+// The attached hub connection's number in this run (0: none, or a window).
+window_link_hub_serial :: proc() -> u64 {return link != nil && link.hub ? link.serial : 0}
+
+@(private = "file")
+link_serials: u64

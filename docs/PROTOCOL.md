@@ -1393,18 +1393,18 @@ the mirror has it; nothing is added on this Mac. A refusal from there is a toast
 runs here, never forwarded (one naming another machine's `project_id` is refused: a conversation
 goes only from this Mac outward). It needs the user at this window (`ui`, `User_Here`: never
 Atlas, a script or a hub), a pi session of this Mac's project with its transcript file in pi's
-store here, and the remote project as its row showed it: `to_project_id` (packed), `run` (that
+store here (opened without following a link, its real path inside pi's sessions folder, its first line a pi session header: checked before anything is sent), and the remote project as its row showed it: `to_project_id` (packed), `run` (that
 machine's core run) and `folder` (that project's folder), checked again here along with the
 machine being online and the folder names matching; and a core whose last hello listed
 `pi_handoff` (else refused here, nothing sent: "its Deckhand is too old to take a conversation
 from here…"). One at a time; at most 256 MB. The file's whole lines (up to its last newline when
-it was opened) go as `pi_handoff_part` commands on that machine's link, as the user's
+it was opened, looked for in its last 16 MiB) go as `pi_handoff_part` commands on that machine's link, as the user's
 (`"on_behalf":{"kind":"ui"}`), `project_id` unpacked: `{"type":"pi_handoff_part","project_id":…,
 "offset":…,"data":"<base64>","last":true?}`, 1 MiB per part, each sent after the last one's
 answer (each waits up to 30 s); a refusal, a timeout or the link going down ends it. The last
 answer's `created_id` (packed) finishes the request and its session is shown here. Only this
 side sends `pi_handoff_part`: anyone's here is refused. **On the machine that takes it**,
-`pi_handoff_part` is accepted only over a hub link on behalf of its user (`on_behalf` `ui`; this
+`pi_handoff_part` is accepted only over a hub link on behalf of its user, and a copy belongs to the hub connection it started on (a part on another connection is refused; the copy is deleted when that connection closes) (`on_behalf` `ui`; this
 machine's own window, Atlas, scripts and a hub's `control` are refused), and its bytes are
 untrusted: one copy at a time (another's offset 0 is refused while one comes, unless that one
 had no part for 60 s), parts in order from offset 0 (else the copy is dropped), each at most

@@ -143,7 +143,7 @@ def main():
     port = free_port()
     with open(f"{data}/workspace.json", "w") as f:
         json.dump({"v": 1, "settings": {"web_access": True, "web_listen": f"127.0.0.1:{port}", "setup_seen": True}}, f)
-    env = {"HOME": home, "PATH": "/usr/bin:/bin", "DECKHAND_SCRIPT": "smoke", "DECKHAND_CMD": "sleep 60", "DECKHAND_DATA_DIR": data, "DECKHAND_RUNTIME_DIR": run}
+    env = {"HOME": home, "PATH": "/usr/bin:/bin", "DECKHAND_SCRIPT": "smoke", "DECKHAND_CMD": "sleep 60", "DECKHAND_DATA_DIR": data, "DECKHAND_RUNTIME_DIR": run, "DECKHAND_WEB_ADMIN_ANYWHERE": "1"}
     p = subprocess.Popen([BIN, "serve", "--run", run, "--data", data], env=env, stdout=subprocess.PIPE, stderr=open(f"{d}/core.err", "w"), text=True)
     ok = False
     try:

@@ -83,6 +83,7 @@ door: struct {
 	hub_ok:     bool, // Settings › Machines › Allow other machines to connect (main thread keeps it current)
 	hub_known:  bool, // ...from the saved settings: the loop's first turn (a hub hello waits for it, ≤ 5 s)
 	hub_no_sshd: bool, // test builds: DECKHAND_HUB_WITHOUT_SSHD=1 (the --via scenes have no sshd)
+	web_admin_anywhere: bool, // test builds: DECKHAND_WEB_ADMIN_ANYWHERE=1 (tests/web-smoke.py has no sshd or login)
 	arrived:    [dynamic]Window_Arrival,
 }
 
@@ -111,6 +112,7 @@ window_token_publish :: proc(run_dir: string) -> bool {
 	copy(door.token[:], hex)
 	copy(door.core_id[:], id)
 	when TEST_HOOKS do door.hub_no_sshd = hook_env(.Hub_Without_Sshd) == "1"
+	when TEST_HOOKS do door.web_admin_anywhere = hook_env(.Web_Admin_Anywhere) == "1"
 	delete(door.path, runtime.heap_allocator())
 	door.path = strings.clone(path, runtime.heap_allocator())
 	door.own_pid = i32(posix.getpid())
@@ -171,18 +173,24 @@ window_hello_refusal :: proc(h: Window_Hello) -> string {
 // The hello of `deckhand-core-serve web on|off|pair|list|revoke|listen` (coremain/web_cli.odin): a
 // line hello with "peer":"web-admin", the window token, and op and arg. Its checks, as a window's
 // minus the code check: the token (a file only this user reads); this user, still the process
-// that connected; and not a program in a Deckhand tab (an agent there is not the user at this
-// machine). Running it in a terminal on the machine is the proof of being there.
+// that connected; not a program in a Deckhand tab (an agent there is not the user at this
+// machine); and come in from outside (pid_from_outside: a root-owned sshd, sshd-session or login
+// above it), since a tab's program can fork, let its parent exit and so stop being a tab's
+// descendant. What it does not stop: a program that can itself ssh into this machine (a key
+// without a passphrase, an agent socket) passes as the user would.
 WEB_ADMIN_PEER :: "web-admin"
+
+WEB_ADMIN_NOT_OUTSIDE :: "web: run it in a terminal you came into this machine with: ssh in, or a terminal app at its own screen (not a program in a Deckhand tab, nor one started from it)"
 
 web_admin_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, token: string) -> string {
 	sync.lock(&door.mu)
-	on, want, holder, own := door.on, door.token, door.holder_pid, door.own_pid
+	on, want, holder, own, anywhere := door.on, door.token, door.holder_pid, door.own_pid, door.web_admin_anywhere
 	sync.unlock(&door.mu)
 	if !on || !hex64_equal(string(want[:]), token) do return "web: not this core's window token"
 	if trust.peer_allowed(.Adhoc, trust.own_uid(), at_accept) != .Allow do return "web: must run as this user"
 	if trust.peer_still(at_accept, trust.peer_read(fd)) != .Allow do return "web: the process changed since it connected"
 	if pid_descends_from(at_accept.pid, {own, holder}) do return "web: not from a program in a Deckhand tab: run it in a terminal of your own on this machine (ssh in, or the machine's own console)"
+	if !anywhere && !pid_from_outside(at_accept.pid) do return WEB_ADMIN_NOT_OUTSIDE
 	return ""
 }
 
@@ -280,13 +288,25 @@ Proc_Look :: #type proc(pid: i32) -> (parent: i32, uid: u32, name: string)
 // 64 steps: the peer came in through ssh. Only root makes a root-owned process, so a same-user
 // process can't fake one; one a tab detached (nohup, setsid, launchctl) is launchd's.
 pid_via_sshd :: proc(pid: i32, look: Proc_Look = proc_look) -> bool {
+	return pid_root_ancestor(pid, {"sshd", "sshd-session"}, look)
+}
+
+// Whether pid came into this machine from outside: a root-owned sshd, sshd-session or login among
+// its ancestors. login is what Terminal.app, iTerm2 and a Linux console start a shell under (as
+// root); Deckhand never runs it, and a user can't make a root-owned one without a password.
+pid_from_outside :: proc(pid: i32, look: Proc_Look = proc_look) -> bool {
+	return pid_root_ancestor(pid, {"sshd", "sshd-session", "login"}, look)
+}
+
+@(private = "file")
+pid_root_ancestor :: proc(pid: i32, names: []string, look: Proc_Look) -> bool {
 	p := pid
 	for _ in 0 ..< 64 {
 		if p <= 1 do return false
 		parent, _, _ := look(p)
 		if parent <= 1 || parent == p do return false
 		_, uid, name := look(parent)
-		if uid == 0 && (name == "sshd" || name == "sshd-session") do return true
+		if uid == 0 do for n in names do if name == n do return true
 		p = parent
 	}
 	return false
@@ -474,6 +494,14 @@ when TEST_HOOKS {
 	window_door_hub_for_test :: proc(allowed, without_sshd: bool) {
 		sync.guard(&door.mu)
 		door.hub_ok, door.hub_no_sshd, door.hub_known = allowed, without_sshd, true
+	}
+}
+
+when TEST_HOOKS {
+	// Tests: web_admin_check's from-outside check off (as DECKHAND_WEB_ADMIN_ANYWHERE).
+	window_door_web_admin_anywhere_for_test :: proc(on: bool) {
+		sync.guard(&door.mu)
+		door.web_admin_anywhere = on
 	}
 }
 

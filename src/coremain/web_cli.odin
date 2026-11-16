@@ -4,8 +4,8 @@ package main
 // web access from a terminal on this machine, the way to it on a machine with no window (Linux).
 // It dials core.sock (a core is started when none answers, as `connect` does), checks the process
 // there is this user's core, and says a line hello with "peer":"web-admin" and the window token,
-// which only this user can read. The core refuses it from a program in a Deckhand tab
-// (core.web_admin_check). It prints the result: the code to type in the browser, the list, or why
+// which only this user can read. The core refuses it from a program in a Deckhand tab and wants
+// an sshd or login above it (core.web_admin_check: ssh in, or a terminal app at the screen). It prints the result: the code to type in the browser, the list, or why
 // not. The code goes to this terminal only.
 
 import "core:fmt"

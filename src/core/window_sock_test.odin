@@ -294,6 +294,60 @@ hub_door_round1 :: proc(t: ^testing.T) {
 	window_door_hub_for_test(allowed = false, without_sshd = false)
 }
 
+// `deckhand-core-serve web …` (web_admin_check): the window token and this user are not enough. A
+// tab's program can fork, let its parent exit (reparented: no longer a tab's descendant) and read
+// window.token, so the terminal must come in from outside: a root-owned sshd or login above it.
+@(test)
+web_admin_from_outside :: proc(t: ^testing.T) {
+	dir := fmt.tprintf("%s/dkwa-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	os.make_directory(dir)
+	defer os.remove_all(dir)
+	testing.expect(t, window_token_publish(dir), "publish")
+	defer {window_door_stop(); socket_framed_handler = nil}
+	token := window_token_read(dir)
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer {posix.close(fds[0]); posix.close(fds[1])}
+	peer := trust.peer_read(fds[0])
+	window_door_pids_for_test(0, 0) // not a tab's descendant: the reparented case
+	testing.expect_value(t, web_admin_check(fds[0], peer, "nope"), "web: not this core's window token")
+	// this test binary has no root-owned sshd or login above it (as a reparented tab program)
+	if !pid_from_outside(i32(posix.getpid())) {
+		testing.expect_value(t, web_admin_check(fds[0], peer, token), WEB_ADMIN_NOT_OUTSIDE)
+	}
+	window_door_web_admin_anywhere_for_test(true)
+	testing.expect_value(t, web_admin_check(fds[0], peer, token), "")
+	window_door_web_admin_anywhere_for_test(false)
+	// a tab's descendant: refused whatever is above it
+	window_door_pids_for_test(i32(posix.getpid()), 0)
+	window_door_web_admin_anywhere_for_test(true)
+	testing.expect(t, strings.contains(web_admin_check(fds[0], peer, token), "a Deckhand tab"), "a tab's program")
+	window_door_web_admin_anywhere_for_test(false)
+	window_door_pids_for_test(0, 0)
+	// the walk: root's sshd, sshd-session or login; not a user's, not launchd's child
+	look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {
+		switch pid {
+		case 100: return 101, 501, "zsh"
+		case 101: return 102, 0, "login" // Terminal.app, iTerm2, a Linux console
+		case 102: return 1, 0, "Terminal"
+		case 200: return 1, 501, "sh" // reparented: launchd's (or init's) child
+		case 300: return 301, 501, "sh"
+		case 301: return 1, 501, "login" // a login the user started is not root's
+		case 400: return 401, 501, "sh"
+		case 401: return 1, 0, "sshd-session"
+		case 500: return 501, 501, "sh"
+		case 501: return 1, 0, "sudo" // root-owned, but not a way in
+		}
+		return 0, 0, ""
+	}
+	testing.expect(t, pid_from_outside(100, look), "under root's login")
+	testing.expect(t, !pid_from_outside(200, look), "reparented")
+	testing.expect(t, !pid_from_outside(300, look), "a user-owned login")
+	testing.expect(t, pid_from_outside(400, look), "under root's sshd-session")
+	testing.expect(t, !pid_from_outside(500, look), "sudo is not a way in")
+	testing.expect(t, !pid_via_sshd(100, look), "the hub still needs sshd")
+}
+
 // Text from another machine is shown only cleaned: printable, no bidi controls, bounded.
 @(test)
 hub_text_cleaned :: proc(t: ^testing.T) {

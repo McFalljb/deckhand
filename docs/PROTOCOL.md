@@ -1639,8 +1639,14 @@ was turned off. The link closes after each.
 **From a terminal.** `deckhand-core-serve web on|off|pair|list|revoke ID|listen ADDRESS` says a
 line hello on `core.sock`: `{"type":"hello","peer":"web-admin","token":<window token>,"op","arg"}`;
 one result, then the end. Checked as a window's hello minus the code check: the window token
-(0600, this user's), this user and still that process, and never a program in a Deckhand tab
-(`web_admin_check`). It runs with the internal caller, so `on` does not ask again.
+(0600, this user's), this user and still that process, never a program in a Deckhand tab, and
+come in from outside: a root-owned `sshd`, `sshd-session` or `login` among its ancestors
+(`web_admin_check`, `pid_from_outside`), since a tab's program can fork and let its parent exit to
+stop being a tab's descendant (it is then launchd's or init's child, with no such ancestor).
+`login` is what Terminal.app, iTerm2 and a Linux console start a shell under; Deckhand never runs
+it. Not stopped: a program that can itself ssh into this machine (a key without a passphrase, a
+forwarded agent) passes as the user would. It runs with the internal caller, so `on` does not ask
+again.
 
 **Plain HTTP: what follows.** Anyone who can see the traffic reads every terminal and command and
 can copy the cookie, which is then as good as the user's. Use it over a network that encrypts

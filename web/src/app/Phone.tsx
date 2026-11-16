@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { isTerminalTab, tabKind, type OpenSession } from "../state.ts";
 import { stripView, tabView } from "../status.ts";
-import { menuAt, useApp } from "./ctx.ts";
+import { menuAt, useApp, wished } from "./ctx.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { IconButton, Sidebar } from "./Sidebar.tsx";
 import { ChangesView } from "./Changes.tsx";
@@ -90,7 +90,9 @@ export function PhoneSession({ id }: { id: number }) {
     );
   }
   const tabs = store.tabs(s.id);
-  const tab = tabs.find((t) => t.id === s.active_tab) ?? tabs[0];
+  // a tapped tab shows at once (wished), as the desktop strip's; the core's focus_tab confirms it
+  const shownTab = wished(`ptab:${s.id}`, s.active_tab);
+  const tab = tabs.find((t) => t.id === shownTab) ?? tabs[0];
   const w = store.webTitle(s.id);
   const waiting = !!tab && tabView(tab).dot === "waiting";
 
@@ -277,7 +279,10 @@ function PhoneStrip({ s, active }: { s: OpenSession; active: number }) {
           const v = stripView(t);
           const h = tabHarness(t);
           return (
-            <button type="button" role="tab" aria-selected={t.id === active ? "true" : "false"} class={"tab" + (t.id === active ? " on" : "")} onClick={() => app.run({ type: "focus_tab", tab_id: t.id })}>
+            <button type="button" role="tab" aria-selected={t.id === active ? "true" : "false"} class={"tab" + (t.id === active ? " on" : "")} onClick={() => {
+                app.wish(`ptab:${s.id}`, t.id);
+                app.run({ type: "focus_tab", tab_id: t.id });
+              }}>
               {v.dot !== "none" ? <StatusMark mark={v.mark} progress={v.progress} /> : null}
               {h && h !== "shell" ? <HarnessIcon harness={h} size={13} /> : null}
               <span class="tab-title">{tabTitle(t)}</span>

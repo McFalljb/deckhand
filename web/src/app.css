@@ -443,6 +443,7 @@ a { color: inherit; }
 
 .term-host { position: absolute; inset: 0; background: var(--bg-app); }
 .term { position: absolute; inset: 8px 4px 4px 12px; }
+.term-fill { position: absolute; inset: 0; }
 .term-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--text-secondary); background: var(--bg-app); text-align: center; }
 .exited-bar {
   position: absolute;

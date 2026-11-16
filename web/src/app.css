@@ -503,8 +503,6 @@ a { color: inherit; }
 .drawer.phone { position: fixed; inset: env(safe-area-inset-top) 0 0 0; width: 100%; z-index: 15; }
 @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } }
 
-.not-here { padding: 16px 8px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; }
-.not-here p { margin: 0; line-height: 1.45; }
 
 /* ---- jobs ---- */
 

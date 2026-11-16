@@ -10,7 +10,6 @@ import { ago, keysLabel, menuAt, useApp, type App, type MenuItem, shownSession, 
 import { narrowTree } from "./treefilter.ts";
 import { HarnessIcon, Icon, StatusMark, dotMark } from "./icons.tsx";
 import { JobsPanel } from "./Jobs.tsx";
-import { NotHere } from "./Bars.tsx";
 import { fold } from "./fold.ts";
 import { FilesPanel } from "./Files.tsx";
 import { Windowed, type WItem } from "./Windowed.tsx";
@@ -47,7 +46,7 @@ export function Sidebar({ width, onResize, forceSessions }: { width: number; onR
           </button>
         ))}
       </div>
-      {tab === "jobs" ? <JobsPanel /> : tab === "files" ? <FilesPanel /> : tab === "settings" ? <NotHere what="settings" /> : <SessionsTab />}
+      {tab === "jobs" ? <JobsPanel /> : tab === "files" ? <FilesPanel /> : <SessionsTab />}
       <Divider width={width} onResize={onResize} />
     </aside>
   );
@@ -76,7 +75,7 @@ function Divider({ width, onResize }: { width: number; onResize: (w: number, don
 
 export function IconButton(props: { icon: Parameters<typeof Icon>[0]["name"]; label: string; run: (e: MouseEvent) => void; on?: boolean; small?: boolean; badge?: number }) {
   return (
-    <button type="button" class={"icon-btn" + (props.small ? " small" : "")} title={props.label} aria-label={props.label} onClick={(e) => { e.stopPropagation(); props.run(e as MouseEvent); }}>
+    <button type="button" class={"icon-btn" + (props.small ? " small" : "") + (props.on ? " on" : "")} title={props.label} aria-label={props.label} aria-pressed={props.on === undefined ? undefined : props.on ? "true" : "false"} onClick={(e) => { e.stopPropagation(); props.run(e as MouseEvent); }}>
       <Icon name={props.icon} size={props.small ? 14 : 16} />
       {props.badge ? <span class="badge">{props.badge}</span> : null}
     </button>

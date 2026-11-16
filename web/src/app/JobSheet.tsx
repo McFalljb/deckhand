@@ -11,7 +11,7 @@
 // nothing; with changes it asks first ("Discard your changes?").
 
 import { useEffect, useRef, useState } from "preact/hooks";
-import { useApp } from "./ctx.ts";
+import { useApp, type App } from "./ctx.ts";
 import { Icon } from "./icons.tsx";
 
 interface Form {
@@ -79,6 +79,17 @@ const ADVANCED: [keyof Form, string][] = [
 ];
 const STALE = "the note changed on disk since you opened it";
 
+// New job / Edit…: the core reads it first, and the sheet opens only with it; a refusal (no main
+// folder, no such job) is the window's own message, with no sheet shown and gone.
+export async function openJobSheet(app: App, job: string, for_project = "") {
+  const r = await app.link.run({ type: "job_draft", op: "open", job, for_project });
+  if (!r.ok) {
+    app.toast(r.error || "Could not open the job", true);
+    return;
+  }
+  app.setOverlay({ job: { job, for_project, data: r.data } });
+}
+
 export function JobSheet() {
   const app = useApp();
   const want = app.overlay.job!;
@@ -102,14 +113,17 @@ export function JobSheet() {
   const close = () => app.setOverlay({ job: null });
 
   // open: the job's note read into the form, or a new one
-  async function load() {
-    const r = await app.link.run({ type: "job_draft", op: "open", job: want.job, for_project: want.for_project });
-    if (!r.ok) {
-      app.toast(r.error || "Could not open the job", true);
-      close();
-      return;
+  async function load(first = false) {
+    let d = first ? want.data : null;
+    if (!d) {
+      const r = await app.link.run({ type: "job_draft", op: "open", job: want.job, for_project: want.for_project });
+      if (!r.ok) {
+        app.toast(r.error || "Could not open the job", true);
+        close();
+        return;
+      }
+      d = r.data;
     }
-    const d = r.data;
     setOpened({ path: d.path, shown: d.shown, text: d.text, based_on: d.based_on, id: d.id, date: d.date });
     setForm(d.form);
     setOwners(d.owners ?? []);
@@ -123,7 +137,7 @@ export function JobSheet() {
     start.current = null;
   }
   useEffect(() => {
-    load();
+    load(true);
   }, [want.job, want.for_project]);
 
   // the form → the note (preview, what Save would refuse, the next run), after each change

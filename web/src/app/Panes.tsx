@@ -1,6 +1,6 @@
 // A session's panes (src/ui_panes.odin): the layout tree from its panes:<id> section, each leaf a
-// pane with its own tab strip and the tab it shows. Terminal tabs stream into xterm.js; other
-// kinds (editor, Markdown, browser, app, Changes) say where they can be seen.
+// pane with its own tab strip and the tab it shows. Terminal tabs stream into xterm.js, Changes
+// and file tabs have their own views; browser and app tabs say they are at the Mac only.
 
 import { useRef } from "preact/hooks";
 import { isTerminalTab, tabKind, type LayoutNode, type OpenSession, type Panes, type Tab } from "../state.ts";
@@ -140,7 +140,7 @@ function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: 
           <div class="pane-note">
             <Icon name={KIND_ICON[tabKind(tab)] ?? "file"} size={20} />
             <div>This is {KIND_WORDS[tabKind(tab)] ?? "a"} tab.</div>
-            <div class="muted small">It shows in the Deckhand window; the browser has terminals only for now.</div>
+            <div class="muted small">{tabKind(tab) === "browser_tab" || tabKind(tab) === "app_tab" ? "Browser and app tabs show only in the Deckhand window, at the Mac." : "It shows only in the Deckhand window, at the Mac."}</div>
           </div>
         )}
       </div>

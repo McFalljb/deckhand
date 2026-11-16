@@ -1,6 +1,5 @@
 // The top bar (src/ui_toolbar.odin), the right column's panels (the focused tab's, published by
-// its bridge), the Atlas drawer (the Home session's pi tab), and the left column's tabs a browser
-// cannot show yet.
+// its bridge) and the Atlas drawer (the Home session's pi tab).
 
 import { useApp, shownSession } from "./ctx.ts";
 import { keysLabel, menuAt } from "./ctx.ts";
@@ -139,19 +138,5 @@ export function AgentDrawer() {
         {tab ? <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused keyboard={!app.phone} /> : <p class="empty">Starting {name}…</p>}
       </div>
     </aside>
-  );
-}
-
-export function NotHere({ what }: { what: "files" | "settings" }) {
-  const words =
-    what === "files"
-      ? { title: "Files are not in the browser yet", text: "The file tree, the editor and Changes stay in the Deckhand window for now. They need the core to send directory listings and file contents (list_dir, editor_state) to a browser." }
-      : { title: "Settings are not in the browser yet", text: "Change settings in the Deckhand window. The palette here has the look, appearance and filters." };
-  return (
-    <div class="not-here">
-      <Icon name={what === "files" ? "folder" : "sliders"} size={20} />
-      <div>{words.title}</div>
-      <p class="muted small">{words.text}</p>
-    </div>
   );
 }

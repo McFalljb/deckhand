@@ -5,6 +5,7 @@
 import { menuAt, useApp, type App, type MenuItem } from "./ctx.ts";
 import { Icon, StatusMark } from "./icons.tsx";
 import { IconButton } from "./Sidebar.tsx";
+import { openJobSheet } from "./JobSheet.tsx";
 import type { Mark } from "../status.ts";
 
 function rel(sec: number): string {
@@ -35,7 +36,7 @@ export function JobsPanel() {
       <div class="nav-header">
         <span class="nav-title static">JOBS</span>
         <span class="spacer" />
-        <IconButton small icon="plus" label="New job" run={() => app.setOverlay({ job: { job: "", for_project: "" } })} />
+        <IconButton small icon="plus" label="New job" run={() => openJobSheet(app, "")} />
         <IconButton small icon="pause" label="Pause all jobs" run={() => app.run({ type: "jobs_pause" })} />
         <IconButton small icon="play" label="Resume all jobs" run={() => app.run({ type: "jobs_resume" })} />
       </div>
@@ -119,7 +120,7 @@ function jobItems(app: App, j: any): MenuItem[] {
   items.push(j.paused ? { label: "Resume", run: () => app.run({ type: "jobs_resume", job: j.id }) } : { label: "Pause", run: () => app.run({ type: "jobs_pause", job: j.id }) });
   if (!j.err) items.push({ label: j.enabled ? "Disable" : "Enable", run: () => app.run({ type: "job_set_enabled", job: j.id, on: !j.enabled }) });
   items.push({ sep: true });
-  items.push({ label: "Edit…", run: () => app.setOverlay({ job: { job: j.id, for_project: "" } }) });
+  items.push({ label: "Edit…", run: () => openJobSheet(app, j.id) });
   if (j.unread > 0) items.push({ label: "Mark read", run: () => app.run({ type: "job_mark_read", job: j.id }) });
   items.push({ sep: true });
   items.push({ label: "Delete…", danger: true, run: () => app.run({ type: "job_delete", job: j.id }) });

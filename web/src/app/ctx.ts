@@ -23,7 +23,7 @@ export interface Overlay {
   sheet: { title: string; body?: string; items: MenuItem[] } | null;
   link: string | null; // a URL waiting for a tap
   copy: string | null; // text to copy by hand (no async clipboard here)
-  job: { job: string; for_project: string } | null; // the job sheet (JobSheet.tsx): a job to edit, or "" new
+  job: { job: string; for_project: string; data?: any } | null; // the job sheet (JobSheet.tsx): a job to edit, or "" new; data: its job_draft open, read before it shows
   peek: { session: number; tab: number; x: number; y: number } | null; // a look at another session (Peek.tsx)
 }
 

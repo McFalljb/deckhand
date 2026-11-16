@@ -154,7 +154,7 @@ test("filter at once: the tree the page holds, narrowed the core's way, parents 
   const big = Array.from({ length: 5000 }, (_, i) => row("k" + i, 0, i + 1, `p${i}-name`, `/h/big/p${i}-name`));
   const t0 = performance.now();
   narrowTree(big, "p12");
-  assert.ok(performance.now() - t0 < 50, "5,000 rows in under 50 ms");
+  assert.ok(performance.now() - t0 < 250, "5,000 rows in well under a keystroke (about 5 ms here; loose for a busy machine)");
 });
 
 import { knowFile, knownFile } from "../src/app/filecache.ts";
@@ -168,4 +168,22 @@ test("file tabs: the files read last are kept by path, at most 8 and 16 MB of te
   knowFile("/p/big2", f("/p/big2", 9 << 20)); // over 16 MB: the older big one goes, not the newest
   assert.equal(knownFile("/p/big1"), undefined);
   assert.equal(knownFile("/p/big2")?.hash, "/p/big2");
+});
+
+import { FileReads } from "../src/app/filecache.ts";
+
+test("file tabs: a read belongs to the path it was made for (#148 review)", () => {
+  const reads = new FileReads();
+  reads.show(); // file A
+  const a = reads.begin(false);
+  assert.notEqual(a, null);
+  assert.equal(reads.begin(false), null, "A's poll waits for A's read");
+  reads.show(); // file B (known: its first read is not forced)
+  const b = reads.begin(false);
+  assert.notEqual(b, null, "B's read is not held up by A's");
+  assert.equal(reads.end(a!), false, "A's reply is dropped under B");
+  assert.equal(reads.begin(false), null, "B's poll waits for B's read");
+  assert.equal(reads.end(b!), true);
+  assert.notEqual(reads.begin(false), null);
+  assert.equal(reads.current(a!), false);
 });

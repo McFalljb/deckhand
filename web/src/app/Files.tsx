@@ -13,7 +13,7 @@ import { IS_MAC, shownSession, useApp, type App } from "./ctx.ts";
 import { Icon } from "./icons.tsx";
 import { parseMarkdown, safeHref, type Block, type Inline } from "./markdown.ts";
 import { Windowed, type WItem } from "./Windowed.tsx";
-import { knowFile, knownFile } from "./filecache.ts";
+import { FileReads, knowFile, knownFile } from "./filecache.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -139,11 +139,15 @@ function useFile(app: App, path: string) {
   const cur = useRef<FileData | null>(null);
   const editing = useRef(false);
   editing.current = draft !== null;
-  const reading = useRef(0); // reads on their way: a poll waits for them (a big file on a slow link: no second copy)
+  // reads on their way, by the file shown: a poll waits for this file's (a big file on a slow link:
+  // no second copy); a reply for the file shown before is dropped
+  const reads = useRef(new FileReads()).current;
   const read = async (force = false) => {
-    if (reading.current && !force) return;
-    reading.current++;
-    const r = await app.link.run({ type: "file_read", path, since: force ? "" : cur.current?.hash ?? "" }).finally(() => reading.current--);
+    const ticket = reads.begin(force);
+    if (ticket === null) return;
+    let mine = false;
+    const r = await app.link.run({ type: "file_read", path, since: force ? "" : cur.current?.hash ?? "" }).finally(() => (mine = reads.end(ticket)));
+    if (!mine) return;
     if (!r.ok) {
       setErr(r.error || "cannot read it");
       return;
@@ -158,6 +162,7 @@ function useFile(app: App, path: string) {
     setChanged(false);
   };
   useEffect(() => {
+    reads.show();
     const had = knownFile(path) ?? null;
     cur.current = had;
     setFile(had);
@@ -168,7 +173,9 @@ function useFile(app: App, path: string) {
   }, [path]);
   const save = async (force = false) => {
     if (draft === null || !cur.current) return;
+    const ticket = reads.ticket;
     const r = await app.link.run({ type: "file_save", path, text: draft, base: cur.current.hash, force });
+    if (!reads.current(ticket)) return; // another file shows now
     if (!r.ok) {
       if (json(r.data)?.code === "changed") setChanged(true);
       else app.toast(r.error || "Could not save it", true);

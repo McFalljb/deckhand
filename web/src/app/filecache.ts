@@ -30,3 +30,31 @@ export function knownFile(path: string): KnownFile | undefined {
   return known.get(path);
 }
 
+
+// A file tab's reads, tied to the file it shows: show() starts a new file (a generation); begin()
+// gives a read its ticket (null: a poll while this file's read is on its way); end() and current()
+// say whether a reply or a save's answer is still for the file shown (another file's: dropped).
+export class FileReads {
+  private gen = 0;
+  private busy = 0; // this generation's reads on their way
+  show(): void {
+    this.gen++;
+    this.busy = 0;
+  }
+  begin(force: boolean): number | null {
+    if (this.busy && !force) return null;
+    this.busy++;
+    return this.gen;
+  }
+  end(ticket: number): boolean {
+    if (ticket !== this.gen) return false;
+    this.busy = Math.max(0, this.busy - 1);
+    return true;
+  }
+  current(ticket: number): boolean {
+    return ticket === this.gen;
+  }
+  get ticket(): number {
+    return this.gen;
+  }
+}

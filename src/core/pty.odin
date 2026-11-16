@@ -13,8 +13,10 @@ import "core:sync"
 //   pty_resize(&p, cols, rows, w_px, h_px)
 //   pty_close(&p)                         hang up the child and release the pty
 //   pty_reap()                            collect exited children (call each frame)
-//   pty_foreground_busy(&p) -> bool       a program other than the child itself is in
-//                                         the foreground (e.g. a shell running a command)
+//   pty_foreground(&p) -> Foreground      Busy: a program other than the child itself is in
+//                                         the foreground (e.g. a shell running a command);
+//                                         Unknown: a held one the holder has not answered for
+//   pty_foreground_busy(&p) -> bool       pty_foreground == .Busy
 //   pty_foreground_pgrp(&p) -> i32        the foreground process group (0 = unknown)
 //   pty_open(&p) -> bool                  a pty to read and write (ours, or the holder's)
 //

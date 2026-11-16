@@ -1290,3 +1290,83 @@ holder_rx_on_the_heap :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "not attached")
 	testing.expect(t, core.hc.rx.buf.allocator.procedure == runtime.heap_allocator_proc, "hc.rx took the caller's allocator")
 }
+
+@(private = "file")
+busy_tab: u64
+
+@(private = "file")
+busy_is :: proc(want: core.Foreground) -> bool {
+	x := core.term_of(busy_tab)
+	return x != nil && core.pty_foreground(&x.pty) == want
+}
+
+@(private = "file")
+fg_answered :: proc() -> bool {
+	sync.lock(&core.hc.mu)
+	defer sync.unlock(&core.hc.mu)
+	h := core.hc.held[3]
+	return h != nil && h.fg > 0
+}
+
+// #135: a held shell tab's busy check. Nothing asked the holder before the first check, so it
+// said "at the prompt" and a close (rule auto) killed a running program without asking, and a
+// control caller could type into it. Now the tick asks each live held terminal, and not known yet
+// is not idle: closing asks, a control send_text is refused. An ended terminal is never busy.
+@(test)
+holder_shell_busy_check :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Shell}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"ffff-nopi","no_file":true,"cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":1}}]}}`, f.instance, proj, proj, proj, proj)
+	adopt_run(t, &f, text, binds)
+	s := &state.open_sessions[len(state.open_sessions) - 1]
+	if !testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Running) do return
+	busy_tab = s.tabs[1].id
+	defer if x := core.term_of(busy_tab); x != nil do x.pty.held, x.running = 0, false // never a RELEASE from a test
+	control := core.Caller{kind = .Control}
+	UNKNOWN :: "this tab's state is not known yet (the session holder has not answered); try again in a moment"
+	BUSY :: "a program is running in this tab; control callers type only at a shell prompt"
+
+	// the holder has not answered: closing asks, control is refused
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "unknown: closing asks")
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, UNKNOWN)
+
+	// a program in the foreground (sleep 600): the tick's question makes it known
+	sync.atomic_store(&f.fg_pgid, 424242)
+	sync.lock(&core.hc.mu)
+	core.hc.held[3].fg_asked = {} // as a tab that just started
+	sync.unlock(&core.hc.mu)
+	core.holder_foreground_tick()
+	testing.expect(t, core.wait_until(1000, fg_answered), "the first tick asked")
+	testing.expect(t, busy_is(.Busy), "busy")
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "busy: closing asks")
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, BUSY)
+
+	// back at the prompt (the shell's own group): both go through
+	sync.atomic_store(&f.fg_pgid, i64(os.get_pid()))
+	testing.expect(t, core.wait_until(2000, proc() -> bool {return busy_is(.Idle)}), "idle")
+	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "at the prompt: closes")
+	testing.expect(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).ok, "control types at a prompt")
+
+	// ended: never busy, and the tick asks nothing more
+	sync.lock(&core.hc.mu)
+	core.hc.held[3].eof, core.hc.held[3].fg, core.hc.held[3].fg_asked = true, 424242, {}
+	sync.unlock(&core.hc.mu)
+	n := core.fake_holder_count(&f, .Foreground, 3)
+	core.holder_foreground_tick()
+	testing.expect(t, busy_is(.Idle), "ended: idle")
+	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "ended: closes")
+	core.wait_until(100, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n)
+
+	// a tab that just started (SPAWNED, no FOREGROUND answered): at its prompt, no needless ask
+	sync.atomic_store(&f.fg_pgid, 0)
+	p, ok := core.holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
+	testing.expect(t, ok, "spawned")
+	testing.expect_value(t, core.pty_foreground(&p), core.Foreground.Idle)
+}

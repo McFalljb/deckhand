@@ -47,6 +47,7 @@ import "../trust"
 HOLDER_WAIT :: 5 * time.Second // the socket after a launch, WELCOME + TAILs, SPAWNED, GOODBYE_ACK
 HOLDER_MAX_TERMS :: 4096
 HOLDER_FG_EVERY :: 250 * time.Millisecond // FOREGROUND at most this often per terminal
+HOLDER_FG_POLL :: time.Second // ...and at least this often per live tab's terminal (holder_foreground_tick)
 // A refused connect is tried again after each of these (macOS refuses on a full listen backlog
 // too: a busy live holder); 750 ms in all before its socket is taken for a dead one's.
 HOLDER_RECHECKS := [?]time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
@@ -662,6 +663,7 @@ holder_frame :: proc(f: hw.Frame) {
 			h.spawn = .Failed
 		} else {
 			h.pid, h.pgid, h.spawn = i32(m.pid), i32(clamp(m.pgid, 0, i64(max(i32)))), .Spawned
+			h.fg = h.pgid // a new session leader holds its terminal's foreground: known from the start (FOREGROUND keeps it current)
 		}
 		sync.cond_broadcast(&hc.cond)
 	case .Spawn_Failed:
@@ -909,20 +911,28 @@ holder_release :: proc(id: u32) {
 	if !handed do holder_send(.Release, id, hw.Empty{})
 }
 
-// The cached foreground process group (0 unknown); asks again at most every HOLDER_FG_EVERY.
-holder_foreground :: proc(id: u32) -> i32 {
+// The cached foreground process group; known once the holder answered with one (an ended
+// terminal: 0, known). Asks again at most every `every` (never more often than HOLDER_FG_EVERY).
+holder_foreground :: proc(id: u32, every := HOLDER_FG_EVERY) -> (pg: i32, known: bool) {
 	sync.lock(&hc.mu)
 	h := hc.held[id]
 	if h == nil || h.eof {
 		sync.unlock(&hc.mu)
-		return 0
+		return 0, true
 	}
-	fg := h.fg
-	ask := time.tick_since(h.fg_asked) >= HOLDER_FG_EVERY
+	pg, known = h.fg, h.fg > 0 // the holder says 0 when it can't tell
+	ask := time.tick_since(h.fg_asked) >= max(every, HOLDER_FG_EVERY)
 	if ask do h.fg_asked = time.tick_now()
 	sync.unlock(&hc.mu)
 	if ask do holder_send(.Foreground, id, hw.Empty{})
-	return fg
+	return
+}
+
+// Main thread, every tick: each live tab's held terminal is asked its foreground about once a
+// second (a new one at its first tick), so a close or a control caller's send_text right after
+// a command started sees it busy (nothing else asks until then; the answer is at most this old).
+holder_foreground_tick :: proc() {
+	for _, t in terms do if t.pty.held != 0 && t.pty.pid > 0 && t.running do holder_foreground(t.pty.held, HOLDER_FG_POLL)
 }
 
 // How it ended once it did: reaped = no more process (exit unknown when the holder was lost).

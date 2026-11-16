@@ -3,7 +3,7 @@ package core
 // A fake session holder for the app side's tests (holder_client_test.odin): one listening
 // socket in a temp runtime dir, served by a thread that answers HELLO as told (WELCOME with
 // the given terminals and TAILs, REFUSED, or nothing), then records every frame the app sends
-// and answers SPAWN, PING and GOODBYE. It runs in this process, so the peer checks pass (same
+// and answers SPAWN, PING, FOREGROUND (fg_pgid) and GOODBYE. It runs in this process, so the peer checks pass (same
 // pid at both ends). Never the real holder, never launchd (DECKHAND_HOLDER_DIRECT=1 in case a
 // start falls through to a launch).
 
@@ -64,6 +64,7 @@ Fake_Holder :: struct {
 	relisten_delay:  time.Duration, // after the drop the socket is gone this long (connects fail: the core waits with no connection)
 	deaf:            bool, // (atomic) the fake reads nothing more until it drops: what the app sends stays unread, as with a holder that drops a core
 	upgrade_drops:   bool, // UPGRADE: the fake closes as a pong-timeout drop does (no upgrade: the next WELCOME says crash)
+	fg_pgid:         i64, // (atomic) FOREGROUND is answered with this foreground group; 0: not answered
 	hellos:    int, // HELLOs so far (atomic)
 	helloed:   bool, // a HELLO came (atomic)
 	key:       [32]u8,
@@ -265,6 +266,8 @@ fake_serve :: proc(f: ^Fake_Holder) {
 				fake_send(f, .Spawned, fr.terminal, hw.Spawned{pid = i64(posix.getpid()), pgid = i64(posix.getpid())})
 			case .Ping:
 				if !f.upgraded do fake_send(f, .Pong, 0, hw.Empty{})
+			case .Foreground:
+				if pg := sync.atomic_load(&f.fg_pgid); pg != 0 do fake_send(f, .Foreground_Is, fr.terminal, hw.Foreground_Is{pgid = pg})
 			case .Upgrade:
 				if f.upgrade_drops {
 					sync.lock(&f.mu)

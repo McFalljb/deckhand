@@ -1526,6 +1526,11 @@ holder_input_guarded :: proc(t: ^testing.T) {
 	testing.expect_value(t, send(login), FG_BUSY)
 	testing.expect_value(t, core.fake_holder_count(&f, .Input_If_Idle, 4), 0)
 
+	// more than a prompt takes: refused before anything is sent (a big frame could block the main
+	// thread on a holder that does not read)
+	testing.expect_value(t, send(sh, strings.repeat("x", 65 * 1024, context.temp_allocator)), "text too long for a shell prompt: a control caller sends at most 64 KB")
+	testing.expect_value(t, core.fake_holder_count(&f, .Input_If_Idle, 3), 1)
+
 	sync.atomic_store(&f.fg_pgid, 424242)
 	testing.expect_value(t, send(sh), FG_BUSY)
 	sync.atomic_store(&f.fg_pgid, 0)

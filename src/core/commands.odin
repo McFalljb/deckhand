@@ -1261,7 +1261,11 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			return {ok = true}, false // the child's screen changes, not State
 		}
 		if !t.running || len(c.text) == 0 do return {ok = true}, false // as term_paste
-		switch holder_input_if_idle(t.pty.held, term_paste_bytes(t, c.text, submit)) {
+		// a bound on the one frame: it is written from the main thread, which a large one could
+		// block for the socket's timeout on a holder that does not read
+		data := term_paste_bytes(t, c.text, submit)
+		if len(data) > HOLDER_GUARD_MAX do return fail("text too long for a shell prompt: a control caller sends at most 64 KB"), false
+		switch holder_input_if_idle(t.pty.held, data) {
 		case .Written: term_scroll_to_bottom(t)
 		case .Busy:    return fail(FG_BUSY), false
 		case .Gone:    return fail("the tab's process has exited"), false

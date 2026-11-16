@@ -729,12 +729,15 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 		term_flush(t)
 	case .Input_If_Idle:
 		// written only while the child's own group has the terminal, checked as the bytes are
-		// taken (#141): a control caller types only at a shell prompt, never into a running program
+		// taken (#141): a control caller types only at a shell prompt, never into a running program.
+		// "written" means taken now: what the pty does not take at once follows without a new check.
+		// Earlier input still queued: busy (it is on its way, so what it starts is not known yet).
 		rid, bytes, e := holderwire.decode_input_if_idle(f)
 		if e != .None do return
 		t := live_term(h, id)
 		result := "written"
 		if t == nil || t.pending || t.master < 0 || t.eof || t.reaped do result = "gone"
+		else if len(t.input) > 0 do result = "busy"
 		else if pg := tcgetpgrp(t.master); pg <= 0 || pg != t.pgid do result = "busy"
 		else {
 			append(&t.input, ..bytes)

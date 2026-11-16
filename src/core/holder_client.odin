@@ -49,6 +49,7 @@ HOLDER_MAX_TERMS :: 4096
 HOLDER_FG_EVERY :: 250 * time.Millisecond // FOREGROUND at most this often per terminal (agent_status's cached read)
 HOLDER_FG_WAIT :: 200 * time.Millisecond // a close or a control send_text waits this long for its answers
 HOLDER_GUARD_REV :: 8 // the first holder_rev that answers INPUT_IF_IDLE (#141); an older one gets FOREGROUND, then INPUT
+HOLDER_GUARD_MAX :: 64 * 1024 // the most a control send_text writes through INPUT_IF_IDLE (one frame, from the main thread)
 // A refused connect is tried again after each of these (macOS refuses on a full listen backlog
 // too: a busy live holder); 750 ms in all before its socket is taken for a dead one's.
 HOLDER_RECHECKS := [?]time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
@@ -1035,9 +1036,11 @@ holder_guards_input :: proc() -> bool {
 }
 
 // INPUT_IF_IDLE (main thread): the holder writes data only while the terminal's foreground group
-// is the child's own, checked as it takes the bytes (#141). Written only on its answer to this
-// request id, on the same connection, within HOLDER_FG_WAIT; anything else is Unknown. Waits on
-// hc.cond, which releases hc.mu for the reader thread that delivers the answer.
+// is the child's own, checked as it takes the bytes (#141). The reader records only the answer
+// whose id is this request's (hc.guard_id, never 0) for this terminal. Written only on that answer;
+// anything else is Unknown: no answer within HOLDER_FG_WAIT, a lost holder, a reattach. A
+// "written" already recorded counts even if this thread gets hc.mu back past the deadline or after
+// a reattach: the holder wrote it, a fact. Waits on hc.cond, which releases hc.mu for the reader.
 holder_input_if_idle :: proc(id: u32, data: []u8) -> Input_Guard {
 	if len(data) + 8 > hw.MAX_PAYLOAD do return .Unknown
 	deadline := time.tick_add(time.tick_now(), HOLDER_FG_WAIT)
@@ -1055,7 +1058,7 @@ holder_input_if_idle :: proc(id: u32, data: []u8) -> Input_Guard {
 	sent := false
 	for {
 		// the answer first: a "written" is a fact whenever it was taken in (the reader holds
-		// hc.mu to record it, so it came while this waited)
+		// hc.mu to record it, so it came while this waited), past the deadline or a reattach too
 		if hc.guard_done do return hc.guard_res
 		if sync.atomic_load(&hc.lost) || hc.epoch != epoch do return .Unknown
 		left := time.tick_diff(time.tick_now(), deadline)

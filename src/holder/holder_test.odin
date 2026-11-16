@@ -1287,7 +1287,7 @@ input_if_idle :: proc(t: ^testing.T) {
 		testing.expectf(t, ok && decode_got(g, .Input_Result, &r), "terminal %d: no INPUT_RESULT", term)
 		return r
 	}
-	send :: proc(f: ^Fake, term: u32, id: u64, s: string) {
+	guarded :: proc(f: ^Fake, term: u32, id: u64, s: string) {
 		out := make([dynamic]u8, context.temp_allocator)
 		holderwire.encode_input_if_idle(&out, term, id, transmute([]u8)s)
 		fake_write(f, out[:])
@@ -1295,7 +1295,7 @@ input_if_idle :: proc(t: ^testing.T) {
 	// at its prompt: written
 	spawn_ok(t, h, f, 7, `printf 'ready\n'; read x; printf 'got:%s\n' "$x"; read y`)
 	testing.expect(t, wait_output(t, h, f, 7, "ready"))
-	send(f, 7, 41, "hello\n")
+	guarded(f, 7, 41, "hello\n")
 	r := result(t, h, f, 7)
 	testing.expect_value(t, r.id, 41)
 	testing.expect_value(t, r.result, "written")
@@ -1304,15 +1304,36 @@ input_if_idle :: proc(t: ^testing.T) {
 	spawn_ok(t, h, f, 8, `set -m; printf 'ready\n'; /bin/sleep 3; printf 'after\n'; read x; printf 'got:%s\n' "$x"`)
 	testing.expect(t, wait_output(t, h, f, 8, "ready"))
 	pump(h, 300 * time.Millisecond, f) // the sleep takes the terminal
-	send(f, 8, 42, "nope\n")
+	guarded(f, 8, 42, "nope\n")
 	r = result(t, h, f, 8)
 	testing.expect_value(t, r.id, 42)
 	testing.expect_value(t, r.result, "busy")
 	testing.expect(t, wait_output(t, h, f, 8, "after", 6 * time.Second))
 	fake_input(f, 8, "late\n")
 	testing.expect(t, wait_output(t, h, f, 8, "got:late"), "the shell read what came after, not the refused bytes")
+	// earlier input still queued (the pty did not take it all): busy, nothing more written
+	spawn_ok(t, h, f, 9, `stty -icanon -echo; printf 'ready\n'; exec /bin/sleep 5`) // never reads its terminal (raw: the pty's input buffer fills)
+	testing.expect(t, wait_output(t, h, f, 9, "ready"))
+	big := make([dynamic]u8, context.temp_allocator)
+	holderwire.encode_input(&big, 9, transmute([]u8)strings.repeat("x", 256 * 1024, context.temp_allocator))
+	for rest := big[:]; len(rest) > 0; { // the socket takes it a piece at a time while the holder reads
+		if n := send(f.fd, raw_data(rest), len(rest), MSG_NOSIGNAL); n > 0 do rest = rest[n:]
+		holder_step(h, 2)
+		fake_read(f)
+	}
+	pump(h, 200 * time.Millisecond, f)
+	queued := 0
+	for tm in h.terms do if tm.id == 9 do queued = len(tm.input)
+	testing.expect(t, queued > 0, "the pty took 256 KB at once")
+	guarded(f, 9, 44, "nope\n")
+	r = result(t, h, f, 9)
+	testing.expect_value(t, r.id, 44)
+	testing.expect_value(t, r.result, "busy")
+	after := 0
+	for tm in h.terms do if tm.id == 9 do after = len(tm.input)
+	testing.expectf(t, after <= queued, "queued %d, then %d: the refused bytes went in", queued, after)
 	// no such terminal: gone
-	send(f, 99, 43, "x\n")
+	guarded(f, 99, 43, "x\n")
 	r = result(t, h, f, 99)
 	testing.expect_value(t, r.id, 43)
 	testing.expect_value(t, r.result, "gone")

@@ -4,7 +4,7 @@
 
 import { render } from "preact";
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks";
-import { unpair, whoami } from "../api.ts";
+import { pairKey, unpair, whoami } from "../api.ts";
 import { Link, type LinkStatus, type Result, type WindowRequest } from "../link.ts";
 import { AppCtx, useApp, wishes, type App, type Overlay, shownSession } from "./ctx.ts";
 import { Sidebar } from "./Sidebar.tsx";
@@ -131,12 +131,15 @@ function Root() {
     };
   }, []);
 
-  // start: paired? then the link
+  // start: a page with its key opens the link at once (whoami alongside: it renews the cookie, and
+  // the link's refused hello asks it again); one without asks first (paired? else the pair screen)
   useEffect(() => {
+    const keyed = !!pairKey();
+    if (keyed) link.start();
     (async () => {
       const w = await whoami();
       if (w && !w.paired) setScreen({ kind: "pair" });
-      else link.start(); // unreachable: the link keeps trying and says so
+      else if (!keyed) link.start(); // unreachable: the link keeps trying and says so
     })();
   }, []);
 

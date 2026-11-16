@@ -1697,12 +1697,20 @@ holder_replace :: proc(stop: bool) -> Result {
 }
 
 // SIGTERM to a holder the user asked to stop (the caller checked it runs a holder binary), SIGKILL
-// after HOLDER_STOP_WAIT, then up to a second for it to go. Main thread.
-holder_stop_pid :: proc(pid: i32) {
+// after HOLDER_STOP_WAIT, then up to a second for it to go. start (the attached holder's start
+// time, holder_recover): checked again right before each signal (holder_stop_ours), so a pid
+// reused while it waited (it exited on the SIGTERM) is never signalled. Main thread.
+holder_stop_pid :: proc(pid: i32, start: i64 = 0) {
+	ours :: proc(pid: i32, start: i64) -> bool {
+		if start == 0 do return pid_running(pid)
+		now, ok := lock_proc_ident(pid)
+		return holder_stop_ours(start, now, ok)
+	}
+	if !ours(pid, start) do return
 	posix.kill(posix.pid_t(pid), .SIGTERM)
 	deadline := time.tick_add(time.tick_now(), HOLDER_STOP_WAIT)
-	for pid_running(pid) && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
-	if pid_running(pid) {
+	for ours(pid, start) && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
+	if ours(pid, start) {
 		posix.kill(posix.pid_t(pid), .SIGKILL)
 		for _ in 0 ..< 50 {
 			if !pid_running(pid) do break

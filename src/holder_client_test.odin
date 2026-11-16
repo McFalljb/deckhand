@@ -896,6 +896,23 @@ holder_stop_identity_rule :: proc(t: ^testing.T) {
 	other = ours
 	other.exe = "/x/zsh"
 	testing.expect(t, !core.holder_stop_ours(1000, other, true), "not a holder binary")
+	// the stop itself checks again right before each signal (round 2): a process at that pid that
+	// is not the holder (here a sleep, as a pid reused during the wait would be) gets none
+	pid := posix.fork()
+	if pid == 0 {
+		posix.execv("/bin/sleep", raw_data([]cstring{"/bin/sleep", "30", nil}))
+		posix._exit(1)
+	}
+	if !testing.expect(t, pid > 0, "fork") do return
+	defer {
+		posix.kill(pid, .SIGKILL)
+		st: c.int
+		posix.waitpid(pid, &st, {})
+	}
+	time.sleep(100 * time.Millisecond) // exec'd
+	core.holder_stop_pid(i32(pid), core.holder_pid_start(i32(pid)))
+	st: c.int
+	testing.expect(t, posix.waitpid(pid, &st, {.NOHANG}) == 0, "a process that is not the holder was signalled")
 }
 
 // The old holder still runs but does not answer: no second holder beside it. The action then

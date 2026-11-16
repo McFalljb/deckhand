@@ -60,7 +60,7 @@ holder_recover :: proc(stop: bool) -> Result {
 		now, ok := lock_proc_ident(old_pid)
 		if !holder_stop_ours(hc.pid_start, now, ok) do return fail("that process is not a session holder this Deckhand started: nothing was stopped")
 		log_ln("Deckhand: session holder: stopping the one that stopped answering (pid", old_pid, ") as the user asked; its sessions end")
-		holder_stop_pid(old_pid)
+		holder_stop_pid(old_pid, hc.pid_start) // checked again before each signal
 		if hc.path != "" do sock_unlink(hc.path)
 		alive = false
 	}

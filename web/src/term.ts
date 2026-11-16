@@ -1,0 +1,280 @@
+// The terminal emulator behind a small interface, so xterm.js (or its key encoder) can be swapped
+// later (the plan's escape hatch: libghostty-vt's WASM key encoder, then its parser).
+//
+// The copy here only draws: it never answers a program's queries (the core does, from its own
+// terminal: docs/PROTOCOL.md §5a "Terminal streams") and never sizes itself (the core sends
+// RESIZE). Input leaves through onInput as bytes for the terminal's channel.
+
+import { Terminal, type IDisposable, type ITheme } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { TERM_DARK, TERM_LIGHT, type TermColors } from "./theme.gen.ts";
+
+export interface Fit {
+  cols: number;
+  rows: number;
+  cellW: number;
+  cellH: number;
+}
+
+export interface TermView {
+  mount(el: HTMLElement): void;
+  reset(): void;
+  resize(cols: number, rows: number): void;
+  write(data: Uint8Array, done?: () => void): void;
+  // the grid the element fits now (the core is asked for it; the copy does not change)
+  fit(): Fit | null;
+  scrollToBottom(): void;
+  focus(): void;
+  blur(): void;
+  // raw keys: the terminal takes the keyboard itself (else the text field under it does)
+  setKeyboard(on: boolean): void;
+  // the rows on screen as text (Copy, where selecting is awkward)
+  screenText(): string;
+  // pasted text, bracketed when the program asked for it, out through onInput
+  paste(text: string): void;
+  appCursor(): boolean;
+  setLight(light: boolean): void;
+  setFontSize(px: number): void;
+  onInput(fn: (bytes: Uint8Array) => void): void;
+  onLink(fn: (url: string) => void): void;
+  dispose(): void;
+}
+
+const enc = new TextEncoder();
+
+function xtermTheme(c: TermColors): ITheme {
+  const names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"] as const;
+  const t: ITheme = { foreground: c.fg, background: c.bg, cursor: c.cursor, cursorAccent: c.bg, selectionBackground: c.selection };
+  names.forEach((n, i) => {
+    (t as any)[n] = c.ansi[i];
+    (t as any)["bright" + n[0].toUpperCase() + n.slice(1)] = c.ansi[i + 8];
+  });
+  return t;
+}
+
+// The OSCs whose payload may be a colour query ("?"): 4 (palette), 10-19 (dynamic colours).
+const COLOUR_OSCS = [4, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+
+export function createTerm(opts: { light: boolean; fontSize: number }): TermView {
+  installCspStyleShim();
+  const term = new Terminal({
+    allowProposedApi: true,
+    convertEol: false,
+    cursorBlink: false,
+    disableStdin: true,
+    fontFamily: 'Menlo, "SF Mono", ui-monospace, "JetBrains Mono", Consolas, monospace',
+    fontSize: opts.fontSize,
+    scrollback: 5000,
+    theme: xtermTheme(opts.light ? TERM_LIGHT : TERM_DARK),
+    windowOptions: {},
+    linkHandler: {
+      activate: (_e, uri) => linkFn?.(uri),
+      allowNonHttpProtocols: false,
+    },
+  });
+  const fit = new FitAddon();
+  term.loadAddon(fit);
+
+  let inputFn: ((b: Uint8Array) => void) | null = null;
+  let linkFn: ((url: string) => void) | null = null;
+  const subs: IDisposable[] = [];
+
+  // ---- never answer: the core does ----
+  const swallow = () => true;
+  const P = term.parser;
+  subs.push(
+    P.registerCsiHandler({ final: "c" }, swallow), // DA1
+    P.registerCsiHandler({ prefix: ">", final: "c" }, swallow), // DA2
+    P.registerCsiHandler({ prefix: "=", final: "c" }, swallow), // DA3
+    P.registerCsiHandler({ final: "n" }, swallow), // DSR: status, cursor position
+    P.registerCsiHandler({ prefix: "?", final: "n" }, swallow), // DEC DSR, colour scheme (996)
+    P.registerCsiHandler({ intermediates: "$", final: "p" }, swallow), // DECRQM
+    P.registerCsiHandler({ prefix: "?", intermediates: "$", final: "p" }, swallow),
+    P.registerCsiHandler({ final: "t" }, swallow), // window reports (and title stack)
+    P.registerCsiHandler({ prefix: ">", final: "q" }, swallow), // XTVERSION
+    P.registerCsiHandler({ prefix: "?", final: "u" }, swallow), // kitty keyboard flags query
+    P.registerCsiHandler({ final: "x" }, swallow), // DECREQTPARM
+    P.registerDcsHandler({ intermediates: "$", final: "q" }, swallow), // DECRQSS
+    P.registerDcsHandler({ intermediates: "+", final: "q" }, swallow), // XTGETTCAP
+    P.registerEscHandler({ final: "Z" }, swallow), // DECID
+    P.registerOscHandler(52, swallow), // clipboard: never from a program
+  );
+  for (const n of COLOUR_OSCS) subs.push(P.registerOscHandler(n, (data) => data.includes("?")));
+
+  subs.push(
+    term.onData((d) => {
+      // focus reports go as FOCUS frames (the core reports them if the program asked)
+      if (d === "\x1b[I" || d === "\x1b[O") return;
+      inputFn?.(enc.encode(d));
+    }),
+    term.onBinary((d) => {
+      const b = new Uint8Array(d.length);
+      for (let i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 0xff;
+      inputFn?.(b);
+    }),
+  );
+
+  // plain URLs in the output: a tap shows the address first (no web-links addon)
+  subs.push(
+    term.registerLinkProvider({
+      provideLinks(y, cb) {
+        const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+        const out: any[] = [];
+        const re = /https?:\/\/[^\s"'<>`\u0000-\u001f]+/g;
+        for (let m = re.exec(line); m; m = re.exec(line)) {
+          const url = m[0].replace(/[.,;:!?)\]]+$/, "");
+          out.push({
+            range: { start: { x: m.index + 1, y }, end: { x: m.index + url.length, y } },
+            text: url,
+            activate: () => linkFn?.(url),
+          });
+        }
+        cb(out.length ? out : undefined);
+      },
+    }),
+  );
+
+  return {
+    mount(el) {
+      term.open(el);
+      if (term.textarea && term.options.disableStdin) term.textarea.inputMode = "none";
+    },
+    reset() {
+      term.reset();
+    },
+    resize(cols, rows) {
+      if (cols >= 2 && rows >= 2 && (cols !== term.cols || rows !== term.rows)) term.resize(cols, rows);
+    },
+    write(data, done) {
+      term.write(data, done);
+    },
+    fit() {
+      const d = fit.proposeDimensions();
+      if (!d || !isFinite(d.cols) || !isFinite(d.rows) || d.cols < 2 || d.rows < 2) return null;
+      const el = term.element;
+      const dims = (term as any)._core?._renderService?.dimensions?.css?.cell;
+      const cellW = dims?.width || (el ? el.clientWidth / d.cols : 8);
+      const cellH = dims?.height || (el ? el.clientHeight / d.rows : 16);
+      return { cols: Math.min(d.cols, 500), rows: Math.min(d.rows, 500), cellW, cellH };
+    },
+    scrollToBottom() {
+      term.scrollToBottom();
+    },
+    focus() {
+      term.focus();
+    },
+    blur() {
+      term.blur();
+    },
+    setKeyboard(on) {
+      term.options.disableStdin = !on;
+      // off: a tap on the terminal must not bring up a phone's keyboard for input it drops
+      if (term.textarea) term.textarea.inputMode = on ? "text" : "none";
+      if (on) term.focus();
+      else term.blur();
+    },
+    screenText() {
+      const b = term.buffer.active;
+      const lines: string[] = [];
+      for (let y = b.viewportY; y < b.viewportY + term.rows; y++) lines.push(b.getLine(y)?.translateToString(true) ?? "");
+      return lines.join("\n").replace(/\s+$/, "");
+    },
+    paste(text) {
+      // xterm wraps it in ESC[200~ … ESC[201~ when the program turned bracketed paste on
+      const was = term.options.disableStdin;
+      term.options.disableStdin = false;
+      term.paste(text);
+      term.options.disableStdin = was;
+    },
+    appCursor() {
+      return term.modes.applicationCursorKeysMode;
+    },
+    setLight(light) {
+      term.options.theme = xtermTheme(light ? TERM_LIGHT : TERM_DARK);
+    },
+    setFontSize(px) {
+      term.options.fontSize = px;
+    },
+    onInput(fn) {
+      inputFn = fn;
+    },
+    onLink(fn) {
+      linkFn = fn;
+    },
+    dispose() {
+      for (const s of subs) s.dispose();
+      term.dispose();
+    },
+  };
+}
+
+// ---- CSP ----
+// The page's CSP has no 'unsafe-inline' for styles. xterm.js's DOM renderer writes its theme and
+// cell sizes into <style> elements and true colours into style attributes; the browser drops
+// both. This moves them to what CSP allows (CSSOM is not inline style):
+// - a style attribute becomes el.style.cssText;
+// - a <style> element (only xterm.js makes them: this page has none of its own) gets a type the
+//   browser does not parse, so it is inert, and its text is mirrored into a constructed
+//   stylesheet in document.adoptedStyleSheets while it is in the document.
+
+let shimmed = false;
+
+function installCspStyleShim(): void {
+  if (shimmed) return;
+  shimmed = true;
+  const setAttr = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (this: Element, name: string, value: string) {
+    if (name.toLowerCase() === "style" && (this as HTMLElement).style) {
+      (this as HTMLElement).style.cssText = String(value);
+      return;
+    }
+    return setAttr.call(this, name, value);
+  };
+  if (!("adoptedStyleSheets" in Document.prototype) || typeof CSSStyleSheet === "undefined") return;
+
+  const sheets = new Map<HTMLStyleElement, CSSStyleSheet>();
+  const sync = (el: HTMLStyleElement) => {
+    if (!el.isConnected) return drop(el);
+    let sheet = sheets.get(el);
+    if (!sheet) {
+      sheet = new CSSStyleSheet();
+      sheets.set(el, sheet);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }
+    try {
+      sheet.replaceSync(el.textContent ?? "");
+    } catch {
+      /* a rule the browser does not take */
+    }
+  };
+  const drop = (el: HTMLStyleElement) => {
+    const sheet = sheets.get(el);
+    if (!sheet) return;
+    sheets.delete(el);
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);
+  };
+
+  const create = Document.prototype.createElement;
+  Document.prototype.createElement = function (this: Document, tag: string, options?: ElementCreationOptions) {
+    const el = create.call(this, tag, options);
+    if (el instanceof HTMLStyleElement) {
+      el.type = "text/x-deckhand-mirrored"; // not text/css: never parsed, so CSP has nothing to refuse
+      new MutationObserver(() => sync(el)).observe(el, { childList: true, characterData: true, subtree: true });
+    }
+    return el;
+  } as typeof Document.prototype.createElement;
+
+  // in and out of the document
+  new MutationObserver((records) => {
+    for (const r of records) {
+      r.addedNodes.forEach((n) => {
+        if (n instanceof HTMLStyleElement) sync(n);
+        else if (n instanceof Element) n.querySelectorAll("style").forEach(sync);
+      });
+      r.removedNodes.forEach((n) => {
+        if (n instanceof HTMLStyleElement) drop(n);
+        else if (n instanceof Element) n.querySelectorAll("style").forEach(drop);
+      });
+    }
+  }).observe(document.documentElement, { subtree: true, childList: true });
+}

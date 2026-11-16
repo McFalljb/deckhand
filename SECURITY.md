@@ -47,9 +47,11 @@ limits Deckhand sets, for example:
   data here;
 - web access ([docs/PROTOCOL.md](docs/PROTOCOL.md) §5b): a browser using this machine without a
   code typed while one is open, a page of another site driving the pairing or the WebSocket, a
-  paired browser running what only the user at this Mac may run, or the code or a token reaching
-  a log, State or another process. Reading plain-HTTP traffic on the network is not in scope: it
-  is the documented cost of the setting;
+  paired browser running what only the user at this Mac may run, a paired browser reading or
+  writing a file outside a project folder, or a credentials file (`file_read`, `file_save`), text
+  from an agent, a terminal or a file running as script in the page, or the code or a token
+  reaching a log, State or another process. Reading plain-HTTP traffic on the network is not in
+  scope: it is the documented cost of the setting;
 - **Continue this conversation on <machine>** moving a conversation *into* this Mac, or started by
   anyone but the user at this Mac's window.
 

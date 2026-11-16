@@ -24,6 +24,7 @@ merge, so don't run the whole suite locally to stand in for CI.
 | When | Command | Time (dev Mac) |
 |---|---|---|
 | Every change | `./build.sh test`, and `./build.sh scenes --changed` if it touches the app or a scene | test ~1 min; scenes ~0.5–2 min |
+| A change in `web/` (the browser client) | `cd web && npm run check`; `tests/web-smoke.py` after `./build.sh` if it touches the core's web side | seconds |
 | A scene failed | that scene by name: `./build.sh scenes NAME` (the log says the script line it stopped at) | its own time |
 | A change to an `@all` file (the build, `vendor/`, the runner) or a large refactor | `./build.sh scenes --all` | ~3 min + the build |
 | Release | `./build.sh test`, `./build.sh scenes --all`, then [Releases](DEVELOPING.md#releases) | ~4–5 min |
@@ -52,6 +53,7 @@ setting's opt-out). `--separate-core` forces a separate core and leaves out scen
 `docs/GUIDE.md` and `docs/PROTOCOL.md`, which the build reads):
 - `holder-rev`: the holder's code changed only with a `HOLDER_REV` bump;
 - `core-boundary`: the core and holder link no window code;
+- `web`: the browser client's `npm run check` in `web/` (typecheck, unit tests, build; Node 22.18);
 - `unit`: `./build.sh test`;
 - `linux`: the core and the session holder built on Ubuntu, their wire, trust, holder and core unit
   tests, then `tests/linux-core-smoke.py` (also `--default-dirs`), `tests/linux-holder-smoke.py`
@@ -87,6 +89,15 @@ All of these run in `./build.sh test`.
 | `tests/scenes_test.py`, `scripts/check-env-reads.py` | the `--changed` selection; every environment read names a known variable | <1 s |
 | `tools/deckhand-cli` tests | the `deckhand` CLI: arguments, hooks, the MCP server | <1 s |
 | the fake app (`tests/fake-app`) | builds the app-tab stand-in the scenes need | ~5 s |
+
+Web access has two more layers outside `./build.sh test`. The core's side (`src/core/web*_test.odin`:
+pairing, the HTTP parser, the browser's views, `file_read`/`file_save`) runs in `tests/unit.py`
+with the rest.
+
+| Layer | What it protects | Run |
+|---|---|---|
+| `web/tests/*.test.ts` (`npm run check` in `web/`) | the browser client: the wire, pairing and its key, the state store, the app's helpers; then a typecheck and the bundle | CI's `web` job; by hand after a change in `web/` |
+| `tests/web-smoke.py [build/deckhand-core-serve]` | the listener end to end, in test mode on `127.0.0.1`: the page and its headers, whoami, `web pair`, `/api/pair` (wrong origin, wrong code, the right one), the WebSocket upgrade and hello, a command, a refused `User_Here` command, `web list`, `web revoke`, unpair | by hand after `./build.sh`, before a release that touches web access; not in CI |
 
 The unit tests share the global `State`, so each process runs one thread. `tests/unit.py` runs one
 process per source file, at most half the CPUs (max 6; `UNIT_JOBS=1` for one at a time), each with
@@ -169,6 +180,10 @@ Checked by a person before a release that touches them:
   still shows the core.
 - **Logout** and restart: everything saves and exits; the next launch restores.
 - **Force Quit** (⌥⌘⎋) of the window and of Deckhand Core; macOS 14 and 15.
+- **Web access on real devices:** a phone (Safari and Chrome), a desktop browser, over Tailscale,
+  and a Linux core serving the page: pairing, the key bar and raw keys, pi, Claude Code and Codex
+  keys in the browser's terminal (Shift+Enter, Esc, Ctrl), Take back both ways, Revoke. None of
+  these has been checked on real hardware yet.
 
 ### Paid (real pi, never from the runner)
 

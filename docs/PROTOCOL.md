@@ -1568,7 +1568,7 @@ number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every fram
 
 A paired browser is the user's window, over a WebSocket that carries the framed wire (§5a) one
 frame per message. Off by default; `src/core/web.odin`, `src/core/web_http.odin`,
-`src/core/web_assets.odin`. Users: [GUIDE.md](GUIDE.md#web-access).
+`src/core/web_assets.odin`. Users: [GUIDE.md](GUIDE.md#deckhand-in-a-browser).
 
 **Listening.** While `set_web_access` is on, a separate core (`deckhand-core-serve serve`) listens
 on `settings.web_listen` (`host:port`: IPv4, or `[IPv6]`; `""` = `0.0.0.0:7433`, every
@@ -1645,7 +1645,8 @@ state `show_no_session`, `set_sidebar_view` and `machine_connect`; never `copy_c
 web access's own commands. Its commands on other linked machines' ids are forwarded as the
 user's (unlike a hub's). Caps as a hub's: `window.facts`, `window.tab_facts`, `window.command`,
 `tab_host.event`, `finished` and `script.core` are refused; no `tab_host.call` (browser, app,
-Markdown and editor views: `no_window`; agents' browser commands `browser_not_here`); of the
+Markdown and editor views: `no_window`; agents' browser commands `browser_not_here`; the browser's own
+file tabs read and save with `file_read` and `file_save`); of the
 `window.request`s only `clipboard_set`, `term_fit`, `changes_diff`, `notify` and `open_url` are
 sent (the rest answer as if no window were attached); it answers them with `window.reply`. A
 notification also shows as the core's own banner. `open_url` should open only on the user's tap.

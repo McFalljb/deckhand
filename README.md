@@ -64,6 +64,12 @@ curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/inst
   there. **Continue this conversation on nuc** copies a pi conversation from this Mac to the other
   machine and forks it there.
 
+**In a browser**
+
+- A core can serve Deckhand to a browser on a desktop or phone: sessions, terminals, Files and
+  Changes. Off by default; pair with a one-time code
+  ([Deckhand in a browser](docs/GUIDE.md#deckhand-in-a-browser)).
+
 **Settings and keyboard**
 
 - A Settings page (⌘,) grouped by task, with a search; Quick settings in the gear.
@@ -133,6 +139,8 @@ and protocol between releases.
   ([#115](https://github.com/McFalljb/deckhand/issues/115)).
 - A machine you allow to connect to this Mac acts as you here
   ([Machines](docs/GUIDE.md#machines)).
+- Web access is plain HTTP (encrypt it with Tailscale, a VPN or an HTTPS proxy), shows the view
+  in one place at a time, and a paired browser acts as you; not yet tried on a real phone.
 
 ## Documentation
 

@@ -224,6 +224,11 @@ Design: [plans/background-core.md](plans/background-core.md) (G13, G14).
   user's input sent back, so that machine's agents drive their own browser and the user sees it.
   Until then, **Open web page…** forwards one of its ports to a plain local tab (issue #5's
   smaller step), and its agents have no browser while it is viewed from here (M6-D).
+- 🔨 **M9** Deckhand in a browser ([#148](https://github.com/McFalljb/deckhand/issues/148)): a
+  core serves a web client (TypeScript, xterm.js, embedded in the core) to a paired browser on a
+  desktop or phone, as the user's window with a hub's limits. Built: pairing, the layout, phone
+  screens, Files, Changes, Settings, jobs. Next: checks on real phones, Safari, Tailscale and a
+  Linux host; then maybe several links per core, so a browser no longer takes the Mac's view.
 - ⬜ **D0** An Apple Developer ID: notarized builds and the hardened runtime. One line in
   `scripts/sign.sh` switches the identity; the trust checks follow by themselves.
 
@@ -261,6 +266,7 @@ Decisions that still shape the code. Superseded ones are gone; their history is 
 | 2026-11-11 | Atlas on another machine's ids acts as `control` there, and only this machine's own user and Atlas are forwarded; a confirmation that machine wants for Atlas is refused, not asked here | No machine drives a third through this one; a remote token never reaches an agent. |
 | 2026-11-12 | Codex tabs: the user's own `codex` with Deckhand's hooks and MCP server passed per run, trusted for that run only; minimum 0.163.0 | Codex has no plugin folder; nothing is written under `~/.codex` or any Codex home. |
 | 2026-11-12 | **Start chats read-only** removed: chats start as full agents; what a chat's agent may do is the chats folder's `AGENTS.md` / `CLAUDE.md` | Its limits got in the way; the user's own instructions file is the simpler control. `set_chats_readonly` and `claude.readonly_ack` stay on the grow-only wire, always refused. |
+| 2026-11-16 | Web access: off by default, plain HTTP, a one-time code then a revocable token, one view per core; TLS, firewalls and proxies are the user's | Served like any backend service: nothing new to distribute, a small network-facing parser; encryption is the network's (Tailscale) or a proxy's ([#148](https://github.com/McFalljb/deckhand/issues/148)). |
 | 2026-11-15 | Moving a conversation: copy and fork with the other machine's own `pi --fork`; pi only, from this Mac outward only, started only by the user at this Mac's window | A transcript planted on another machine must never come into this one; Deckhand never writes into a harness's session store. |
 
 ## 7. Open questions

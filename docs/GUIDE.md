@@ -32,12 +32,13 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 12. [Jobs](#jobs)
 13. [Notifications](#notifications)
 14. [The palette and the gear](#the-palette-and-the-gear)
-15. [Updates](#updates)
-16. [Your data](#your-data) (and [your folders](#your-folders))
-17. [Troubleshooting](#troubleshooting)
-18. [All shortcuts](#all-shortcuts)
-19. [All palette actions](#all-palette-actions)
-20. [Coming soon](#coming-soon)
+15. [Deckhand in a browser](#deckhand-in-a-browser)
+16. [Updates](#updates)
+17. [Your data](#your-data) (and [your folders](#your-folders))
+18. [Troubleshooting](#troubleshooting)
+19. [All shortcuts](#all-shortcuts)
+20. [All palette actions](#all-palette-actions)
+21. [Coming soon](#coming-soon)
 
 ## The window
 
@@ -1592,38 +1593,18 @@ machines you trust as yourself.
 
 #### Web access
 
-**Web access** (off by default; it asks first) lets a browser on your phone or another computer
-show this machine's sessions: the sessions list, terminals, confirmations, new sessions and tabs,
-on this machine and on the machines it is linked to. A browser you pair acts as you here, as a
-machine you allow to connect does; it can't change the settings marked *Only you, at this Mac*,
-web access itself, or copy a control token. Browser, app, Markdown and editor tabs stay in the
-Mac's window. Its Settings page shows every setting, with the ones it can't change marked
-*Change this at the Mac* (a settings file opens in an editor tab, so files stay in the window
-too); its Jobs tab has **New job** and each job's **Edit…** (the same job sheet), and a hover on
-a Deck card, or a long press on a phone, peeks at that session.
+**Web access** (off by default; it asks first) lets a browser on a phone or another computer show
+this machine's sessions. How to use it: [Deckhand in a browser](#deckhand-in-a-browser).
 
-- **Listen address** (default `0.0.0.0:7433`: every network interface). Deckhand serves plain
-  HTTP, with no encryption of its own: anyone who can see the traffic can read your sessions and
-  take them over. Use it over Tailscale or another VPN, or behind an HTTPS proxy, and prefer that
-  interface's address alone (for Tailscale `100.x.y.z:7433`). Firewalls are yours to set.
-- **Pair a browser…** shows a code such as `ABCD-EFGH`. Open `http://<this machine's
-  address>:7433/` in the browser and type it: it works once, for 2 minutes, and five wrong tries
-  void it. The browser keeps a cookie for 60 days from its last use, and a key in the page's own
-  storage: a private window, or clearing the site's data, means pairing again (so does Safari
-  after 7 days without a visit, unless the page is on the Home Screen).
+- **Listen address…** (default `0.0.0.0:7433`: every network interface; an IP address and port,
+  not a host name). Deckhand serves plain HTTP: prefer the address of the network that encrypts
+  the traffic, for Tailscale `100.x.y.z:7433`. Firewalls are yours to set.
+- **Pair a browser…** shows a one-time code such as `ABCD-EFGH` and the address to open.
 - **Paired browsers** lists each one, when it was paired and last seen; **Revoke** signs it out
   and closes its view.
-- One view at a time, as with another machine: a browser that opens takes the view from this
-  Mac's window, which shows **Viewed in a browser** with **Take Back**. Your sessions keep running
-  either way. While web access is on, Deckhand's background core keeps running without a window.
-- Plain HTTP away from `localhost` is not a secure context for the browser: no installing the page
-  as an app, no notifications and no clipboard reading there.
-- On a machine with no window (Linux), ssh in and run, there: `deckhand-core-serve web on`,
-  `web pair`, `web list`, `web revoke ID`, `web listen ADDRESS`, `web off`. (Find the binary as
-  `~/.local/share/deckhand/core/current/deckhand-core-serve`.) The core wants an ssh login above
-  it, never a Deckhand tab or a program started from one; at the machine's own screen, `ssh
-  localhost` first. A program that can itself ssh into the machine (a key without a passphrase)
-  could still run it.
+
+While web access is on, Deckhand's background core keeps running without a window. Only you, at
+this Mac, change these settings; a paired browser can't.
 
 A Linux machine (x86_64) runs its core as your systemd user service `deckhand-core`, started when
 needed. Unless lingering is on for you there, it stops when you log out of that machine, and its
@@ -2175,6 +2156,125 @@ Then, under a line, **All settings…** (⌘,) opens [the Settings page](#the-se
 other setting lives there (Reduce motion, Dim inactive panes, the notifications, Atlas's model,
 chats, Machines over SSH, updates, Set up Deckhand…, Copy a control token and the rest), and in
 the palette.
+
+## Deckhand in a browser
+
+A Deckhand core can serve Deckhand to a browser, on a desktop or a phone: the same sessions,
+tabs and terminals as the window, on this machine and the machines it is linked to. It is off
+by default.
+
+**What a paired browser can do.** Everything you can do at the window except the settings marked
+*Only you, at this Mac* (and web access itself). That includes typing into shells and agents on
+this machine and on every machine it is linked to. Pair only browsers on devices you trust as
+yourself.
+
+### To turn it on and pair a browser
+
+1. On the Mac: Settings › Machines › **Web access** (it asks first). On Linux, see
+   [From a terminal](#from-a-terminal-linux).
+2. **Pair a browser…** shows an 8-character code, such as `ABCD-EFGH`.
+3. In the browser, open `http://<the machine's address>:7433/` and type the code. It works once,
+   for 2 minutes; five wrong tries void it.
+
+The browser stays paired for 60 days from its last visit. It pairs again after:
+
+- **Revoke** in Settings › Machines › **Paired browsers** (or **Unpair this browser** in the
+  browser's palette);
+- clearing the site's data, or a private window (it keeps nothing);
+- 7 days without a visit in Safari, which may clear a site's storage then;
+- opening it at another address. Pairing is per address: `http://192.0.2.10:7433/` and
+  `http://my-mac.example:7433/` are two pairings.
+
+### Plain HTTP
+
+Deckhand serves the page over plain HTTP, with no encryption of its own. Everything you see and
+type, and the cookie that keeps the browser paired, crosses the network as plain text unless the
+network encrypts it: Tailscale, WireGuard or another VPN, or an HTTPS proxy in front. On a network
+you don't control, anyone who can see the traffic can read your sessions and take them over.
+Set **Listen address…** to that network's address rather than every interface.
+
+Away from `localhost` the page is not a secure context for the browser, so:
+
+- it can't be installed as an app, and gives no system notifications: they show in the page
+  while it is open, and in the bell;
+- it can't use the clipboard directly: **Copy** (session info, a link) opens a box with the text
+  selected and a **Copy** button that tries the browser's older copy command; if that fails,
+  copy it by hand.
+
+### One view at a time
+
+A core shows its sessions in one place at a time. A browser that opens takes the view from the
+Mac's window, which then shows **Viewed in a browser** with **Take Back**; the same happens to a
+browser when the window, another machine or another browser takes the view, and the browser
+shows **Take back**. Your sessions keep running either way.
+
+While a browser has the view, an agent's commands on browser tabs fail, as when another machine
+views this one.
+
+### On a desktop
+
+The browser has the window's layout: the left column (Sessions, Files, Jobs), the session's tabs
+and terminals, split panes, the Deck, the palette, the bell, the right column's panels, Atlas's
+drawer, Jobs and the job sheet, the Changes tab, the Files tab, and file tabs (Markdown rendered,
+editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
+when you have not edited it, and asks when you have. The Settings page shows every setting; the
+ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
+peeks at that session.
+
+**Not in a browser:** browser tabs and app tabs (they show a note there; open them at the Mac),
+adding or removing machines, **Continue this conversation on <machine>**, the Settings page's
+*This project* section, and the window's pickers.
+
+**Keyboard.** On a Mac, the browser keeps ⌘T, ⌘W, ⌘N and ⌘1–⌘9 for itself, so:
+
+| Action | Window | Browser on a Mac |
+|---|---|---|
+| New chat | ⌘N | ⌥⌘N |
+| New shell tab | ⌘T | ⌥⌘T |
+| Close tab, Tab 1–9 | ⌘W, ⌘1–⌘9 | the palette, or the tab strip |
+| Open file… | ⌘P | the Files tab |
+| Bigger, smaller, actual terminal text | ⌘+, ⌘−, ⌘0 | the same (not the page's zoom) |
+
+The other shortcuts the browser has match the window's (⌘K, ⌘B, ⌥⌘B, ⌘J, ⌘,, ⌘D, ⇧⌘D, ⇧⌘↩,
+⇧⌘], ⇧⌘[, ⌥⌘↓, ⌥⌘↑, ⌥⌘A, ⇧⌘F). On Windows and Linux, ⌘ is Ctrl+Shift (⌥ is Alt): Ctrl+Shift+K
+opens the palette. Shortcuts that use ⇧ on a Mac have no key there; use the palette. Ctrl
+without Shift goes to the terminal (Ctrl+S in a file tab saves).
+
+### On a phone
+
+Below 760 pixels wide the page is the phone's: the left column full width (or the Deck), then a
+session one tab at a time. Under a terminal: a key bar (Esc, Tab, Ctrl and Alt that stay down
+for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you) and a
+text field that takes dictation and autocorrect, sent with Enter. The keyboard button switches
+to raw keys, sent to the terminal as you type. A long press on a Deck card peeks at that session.
+
+### From a terminal (Linux)
+
+A Linux machine has no window, so web access is set from a shell there, which must be an ssh
+login (`ssh localhost` at the machine's own screen). It is refused in a Deckhand tab or a program
+started from one. The binary is `~/.local/share/deckhand/core/current/deckhand-core-serve`:
+
+```sh
+deckhand-core-serve web on              # turn it on (does not ask)
+deckhand-core-serve web pair            # a pairing code
+deckhand-core-serve web list            # paired browsers, with their ids
+deckhand-core-serve web revoke ID
+deckhand-core-serve web listen 100.64.0.5:7433
+deckhand-core-serve web off
+```
+
+A program that can itself ssh into the machine (a key without a passphrase) can run these too.
+The same commands work over ssh on a Mac.
+
+### If it doesn't work
+
+- **The page doesn't load:** web access is on (Settings › Machines, or `web list`), the address
+  and port are the listen address's, and no firewall blocks the port.
+- **"That code did not work":** codes last 2 minutes and work once; make a new one.
+- **The page asks for a code every time:** the browser keeps no site data (a private window, or
+  storage blocked for the site).
+- **"Deckhand's web client is not in this build of its core":** it was built without Node
+  ([DEVELOPING.md](DEVELOPING.md#the-browser-client)); release builds always have it.
 
 ## Updates
 

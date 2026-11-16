@@ -45,6 +45,10 @@ export interface Tab {
   machine: number;
   kind: Record<string, Json> | null;
   title: string;
+  pane?: number;
+  exit?: { known: boolean; code: number; signal: number };
+  live?: Json;
+  reload?: Json;
   status: string; // running | exited | not_started
   agent: string; // unknown | idle | working | error
   waiting: boolean;
@@ -85,6 +89,77 @@ export interface MachineView {
   error?: string;
   version?: string;
   os?: string;
+}
+
+// The "web" section (src/core/web_view.odin): the views the core computes for a browser.
+export interface WebProjectRow {
+  id: number; // 0: a group row (its folder in path)
+  name: string;
+  path: string;
+  depth: number;
+  kids: number;
+  open: boolean;
+  forced: boolean;
+  pin: number;
+  hidden: boolean;
+  divider: boolean;
+}
+export interface WebSessionRow {
+  id: string;
+  label: string;
+  open: number;
+  pin: number;
+  hidden: boolean;
+  dot: string;
+  claude: boolean;
+  codex: boolean;
+  modified: number;
+}
+export interface WebAttention {
+  session: number;
+  group: "needs_you" | "finished" | "working" | "idle";
+  tab: number;
+}
+export interface WebView {
+  fleet: { waiting: number; errors: number; unseen: number; working: number };
+  next: number;
+  open: number[];
+  projects: WebProjectRow[];
+  sessions: WebSessionRow[];
+  chats: WebSessionRow[];
+  machines: { no: number; open: number[]; projects: WebProjectRow[] }[];
+  attention: WebAttention[];
+  deck: WebAttention[];
+  titles: Record<string, { title: string; place: string; chat: boolean; age: string }>;
+  filtered: number;
+}
+
+export interface PaneLeaf {
+  id: number;
+  active: number;
+  slot: number;
+}
+export interface LayoutNode {
+  id: number;
+  leaf: boolean;
+  pane: number;
+  dir: string; // right | down
+  ratio: number;
+  a: number;
+  b: number;
+  parent: number;
+}
+export interface Panes {
+  panes: PaneLeaf[];
+  nodes: LayoutNode[];
+  root: number;
+  focused_pane: number;
+  zoomed_pane: number;
+}
+export interface Panel {
+  id: string;
+  title: string;
+  rows: { text: string; tone: string; head: boolean }[];
 }
 
 export class Store {
@@ -172,6 +247,47 @@ export class Store {
     return this.sec("view").sidebar ?? {};
   }
 
+  get web(): WebView | null {
+    return this.sections.get("web") ?? null;
+  }
+  get layout(): Json {
+    return this.sec("view").layout ?? {};
+  }
+  get homeSession(): number {
+    return this.sec("sessions").home ?? 0;
+  }
+  get homeOpen(): boolean {
+    return !!this.sec("view").home_open;
+  }
+  get jobs(): Json[] {
+    return this.sec("jobs").jobs ?? [];
+  }
+  get machineJobs(): Json[] {
+    return this.sec("jobs").machine_jobs ?? [];
+  }
+  get notices(): Json {
+    return this.sec("notifications").notices ?? {};
+  }
+  get agent(): Json {
+    return this.sec("notifications").agent ?? {};
+  }
+  get live(): Json {
+    return this.sections.get("live")?.live ?? {};
+  }
+  get reload(): Json {
+    return this.sections.get("reload")?.reload ?? {};
+  }
+  get holderAsk(): Json {
+    return this.sec("confirmations").holder_ask ?? {};
+  }
+
+  panes(sessionId: number): Panes | null {
+    return this.sections.get("panes:" + sessionId) ?? null;
+  }
+  panels(tabId: number): Panel[] {
+    return this.sections.get("panels:" + tabId) ?? [];
+  }
+
   tabs(sessionId: number): Tab[] {
     return this.sections.get("tabs:" + sessionId) ?? [];
   }
@@ -216,6 +332,8 @@ export function isTerminalTab(t: Tab): boolean {
 }
 
 export function sessionTitle(store: Store, s: OpenSession): string {
+  const w = store.web?.titles[String(s.id)];
+  if (w?.title) return w.title;
   if (s.title) return s.title;
   const p = store.project(s.project_id);
   if (p) return p.name || p.label;

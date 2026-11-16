@@ -66,7 +66,7 @@ export class Link {
   private waiting = new Map<string, { resolve: (r: Result) => void; timer: number }>();
   private finishing = new Map<number, (r: Result) => void>();
   private channels = new Map<number, (f: Frame) => void>();
-  private jsonHandlers = new Map<string, (m: any) => void>();
+  private jsonHandlers = new Map<string, Set<(m: any) => void>>();
   private retryMs = RECONNECT_MIN;
   private retryTimer = 0;
   private hiddenAt = 0;
@@ -134,9 +134,13 @@ export class Link {
     else this.channels.delete(channel);
   }
 
-  // A JSON message type the link does not handle itself (term.attached, term.scroll).
-  onJson(type: string, fn: (m: any) => void): void {
-    this.jsonHandlers.set(type, fn);
+  // A JSON message type the link does not handle itself (term.attached, term.scroll): every
+  // listener gets it. Returns the way to stop listening.
+  onJson(type: string, fn: (m: any) => void): () => void {
+    let set = this.jsonHandlers.get(type);
+    if (!set) this.jsonHandlers.set(type, (set = new Set()));
+    set.add(fn);
+    return () => set!.delete(fn);
   }
 
   // ---- the socket ----
@@ -338,7 +342,7 @@ export class Link {
         this.setStatus({ kind: "stopped", why: "Web access was turned off at the Mac." });
         return;
     }
-    this.jsonHandlers.get(m.type)?.(m);
+    this.jsonHandlers.get(m.type)?.forEach((fn) => fn(m));
   }
 
   private onHello(r: any): void {

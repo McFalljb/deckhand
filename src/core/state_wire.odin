@@ -151,6 +151,8 @@ state_sections :: proc(s: ^State) -> [dynamic][2]string {
 		wire_write(&b, &t.panels, type_info_of(type_of(t.panels)))
 		append(&out, [2]string{section_name(SECTION_PANELS, t.id), strings.to_string(b)})
 	}
+	// a browser's views, computed from State (web_view.odin): only a web link gets them
+	if s == &state && window_link_web() do append(&out, [2]string{WEB_VIEW_SECTION, web_view_json()})
 	return out
 }
 

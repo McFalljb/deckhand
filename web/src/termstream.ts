@@ -32,15 +32,24 @@ export class TermStream {
   private fitTimer = 0;
   private sentFit: Fit | null = null;
   private onEvent: (e: StreamEvent) => void = () => {};
+  private off: (() => void)[];
 
   constructor(
     private link: Link,
     private view: TermView,
   ) {
-    link.onJson("term.attached", (m) => this.onAttached(m));
-    link.onJson("term.scroll", (m) => {
-      if (this.channel && Number(m.channel) === this.channel) view.scrollToBottom();
-    });
+    this.off = [
+      link.onJson("term.attached", (m) => this.onAttached(m)),
+      link.onJson("term.scroll", (m) => {
+        if (this.channel && Number(m.channel) === this.channel) view.scrollToBottom();
+      }),
+    ];
+  }
+
+  // Detached and deaf: the pane went.
+  dispose(): void {
+    this.detach();
+    for (const f of this.off) f();
   }
 
   events(fn: (e: StreamEvent) => void): void {

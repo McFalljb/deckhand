@@ -30,8 +30,10 @@ await build({
   legalComments: "none",
   charset: "utf8",
   logLevel: "warning",
+  jsx: "automatic",
+  jsxImportSource: "preact",
   banner: {
-    js: `/*! Deckhand browser client. Bundles xterm.js ${pkg("@xterm/xterm")} and @xterm/addon-fit ${pkg("@xterm/addon-fit")} (MIT, the xterm.js authors): see THIRD_PARTY_NOTICES.md */`,
+    js: `/*! Deckhand browser client. Bundles xterm.js ${pkg("@xterm/xterm")} and @xterm/addon-fit ${pkg("@xterm/addon-fit")} (MIT, the xterm.js authors) and Preact ${pkg("preact")} (MIT, Jason Miller): see THIRD_PARTY_NOTICES.md */`,
   },
 });
 

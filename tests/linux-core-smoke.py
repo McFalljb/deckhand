@@ -76,7 +76,12 @@ def main():
         r = ask({"id": "t", "v": 1, "type": "command", "command": {"type": "new_shell_tab", "session": r["result"]["created_id"]}})
         assert r["result"]["ok"], r
         mark = f"{home}/pty-ok"
-        r = ask({"id": "x", "v": 1, "type": "command", "command": {"type": "send_text", "tab_id": r["result"]["created_id"], "text": f"echo ok > {mark}\r"}})
+        tab = r["result"]["created_id"]
+        for _ in range(25):  # a held terminal is "not known yet" until the holder's first FOREGROUND answer
+            r = ask({"id": "x", "v": 1, "type": "command", "command": {"type": "send_text", "tab_id": tab, "text": f"echo ok > {mark}\r"}})
+            if r["result"]["ok"] or "not known yet" not in r["result"].get("error", ""):
+                break
+            time.sleep(0.2)
         assert r["result"]["ok"], r
         deadline = time.time() + 15
         while time.time() < deadline and not os.path.exists(mark):

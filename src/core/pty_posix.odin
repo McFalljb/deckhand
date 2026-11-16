@@ -202,16 +202,22 @@ pty_reap :: proc() {
 
 Foreground :: enum u8 {
 	Idle, // the child itself is in the foreground (a shell at its prompt), or it ended
-	Busy, // another program is (a shell running a command)
-	Unknown, // a held terminal whose holder has not answered yet: neither (callers ask or refuse)
+	Busy, // another program is (a shell running a command), or the child is a command (Pty.command)
+	Unknown, // a held terminal the holder has not answered for (in time): neither (callers ask or refuse)
 }
 
 // Busy: the terminal's foreground process group differs from the child's own
-// (the child is a session leader, so its group id is its pid).
-pty_foreground :: proc(p: ^Pty) -> Foreground {
+// (the child is a session leader, so its group id is its pid), or the child is a command
+// that is not a shell at a prompt at all. fresh (a close, a control send_text): a held
+// terminal's holder is asked now (holder_foreground_fresh), not the tick's cached answer.
+pty_foreground :: proc(p: ^Pty, fresh := false) -> Foreground {
 	if p.pid <= 0 do return .Idle
+	if p.command do return .Busy
 	if p.held != 0 {
-		pg, known := holder_foreground(p.held)
+		pg: i32
+		known: bool
+		if fresh do pg, known = holder_foreground_fresh(p.held)
+		else do pg, known = holder_foreground(p.held)
 		if !known do return .Unknown
 		return pg > 0 && pg != p.pid ? .Busy : .Idle
 	}

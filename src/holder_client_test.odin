@@ -1301,17 +1301,30 @@ busy_is :: proc(want: core.Foreground) -> bool {
 }
 
 @(private = "file")
-fg_answered :: proc() -> bool {
+spawned_id: u32
+
+@(private = "file")
+spawned_known :: proc() -> bool {
 	sync.lock(&core.hc.mu)
 	defer sync.unlock(&core.hc.mu)
-	h := core.hc.held[3]
+	h := core.hc.held[spawned_id]
 	return h != nil && h.fg > 0
 }
 
-// #135: a held shell tab's busy check. Nothing asked the holder before the first check, so it
-// said "at the prompt" and a close (rule auto) killed a running program without asking, and a
-// control caller could type into it. Now the tick asks each live held terminal, and not known yet
-// is not idle: closing asks, a control send_text is refused. An ended terminal is never busy.
+@(private = "file")
+fg_asked_ago :: proc(id: u32, ago: time.Duration) {
+	sync.lock(&core.hc.mu)
+	core.hc.held[id].fg_asked = time.tick_add(time.tick_now(), -ago)
+	sync.unlock(&core.hc.mu)
+}
+
+// #135: a held shell tab's busy check. A close under auto and a control caller's send_text read a
+// cached foreground group nothing had asked for (first close of a running sleep 600: no prompt)
+// or one up to a poll old (ssh started just after an "at the prompt" answer). Now both ask the
+// holder and wait briefly for the answer to that very question; no answer in time, or a holder
+// that can't be asked (upgrading), is unknown, not idle: closing asks, control is refused. The tick
+// keeps one question at most unanswered per terminal. A new terminal is asked at once; Log in…'s
+// ssh tab is always busy; an ended terminal never is.
 @(test)
 holder_shell_busy_check :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -1329,44 +1342,85 @@ holder_shell_busy_check :: proc(t: ^testing.T) {
 	busy_tab = s.tabs[1].id
 	defer if x := core.term_of(busy_tab); x != nil do x.pty.held, x.running = 0, false // never a RELEASE from a test
 	control := core.Caller{kind = .Control}
+	pid := i64(os.get_pid()) // the shell's own group: at its prompt
 	UNKNOWN :: "this tab's state is not known yet (the session holder has not answered); try again in a moment"
 	BUSY :: "a program is running in this tab; control callers type only at a shell prompt"
 
-	// the holder has not answered: closing asks, control is refused
+	// no answer in time: closing asks, control is refused
 	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "unknown: closing asks")
 	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, UNKNOWN)
 
-	// a program in the foreground (sleep 600): the tick's question makes it known
-	sync.atomic_store(&f.fg_pgid, 424242)
-	sync.lock(&core.hc.mu)
-	core.hc.held[3].fg_asked = {} // as a tab that just started
-	sync.unlock(&core.hc.mu)
+	// the tick: no second question while one is unanswered, until HOLDER_FG_UNANSWERED
+	n := core.fake_holder_count(&f, .Foreground, 3)
+	fg_asked_ago(3, 1500 * time.Millisecond)
 	core.holder_foreground_tick()
-	testing.expect(t, core.wait_until(1000, fg_answered), "the first tick asked")
-	testing.expect(t, busy_is(.Busy), "busy")
+	core.wait_until(50, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n)
+	fg_asked_ago(3, 3500 * time.Millisecond)
+	core.holder_foreground_tick()
+	core.wait_until(100, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n + 1)
+
+	// a program in the foreground: the late answers ("at the prompt") come first and don't count
+	sync.atomic_store(&f.fg_pgid, 424242)
 	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "busy: closing asks")
 	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, BUSY)
 
-	// back at the prompt (the shell's own group): both go through
-	sync.atomic_store(&f.fg_pgid, i64(os.get_pid()))
-	testing.expect(t, core.wait_until(2000, proc() -> bool {return busy_is(.Idle)}), "idle")
+	// at the prompt, then ssh starts at once: the cached "at the prompt" is not used
+	sync.atomic_store(&f.fg_pgid, pid)
+	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "at the prompt: closes")
+	testing.expect(t, busy_is(.Idle), "cached: idle")
+	sync.atomic_store(&f.fg_pgid, 424242)
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "ssh just started: closing asks")
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, BUSY)
+
+	// at the prompt: both go through
+	sync.atomic_store(&f.fg_pgid, pid)
 	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "at the prompt: closes")
 	testing.expect(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).ok, "control types at a prompt")
+
+	// the holder upgrading (FOREGROUND would be dropped): unknown, and the tick asks nothing
+	sync.lock(&core.hc.wmu)
+	core.hc.upgrading = true
+	sync.unlock(&core.hc.wmu)
+	n = core.fake_holder_count(&f, .Foreground, 3)
+	fg_asked_ago(3, 10 * time.Second)
+	core.holder_foreground_tick()
+	testing.expect(t, core.close_needs_confirm(s.tabs[1]), "upgrading: closing asks")
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = busy_tab, text = "y"}, control).error, UNKNOWN)
+	sync.lock(&core.hc.wmu)
+	core.hc.upgrading = false
+	clear(&core.hc.pending)
+	sync.unlock(&core.hc.wmu)
+	core.wait_until(50, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n)
+
+	// a new terminal is asked at SPAWNED: known within milliseconds, no tick
+	p, ok := core.holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
+	testing.expect(t, ok, "spawned")
+	spawned_id = p.held
+	testing.expect(t, core.wait_until(1000, spawned_known), "the SPAWNED question answered")
+	testing.expect_value(t, core.pty_foreground(&p), core.Foreground.Idle)
+
+	// Log in…'s tab runs ssh in place (its own group): never at a prompt
+	login, err := core.shell_tab_start(s, proj, argv = {"/bin/sh", "-c", "exec sleep 5"}, title = "Log in to x")
+	testing.expect_value(t, err, "")
+	if x := core.term_of(login); x != nil {
+		testing.expect(t, x.pty.held != 0 && x.pty.command, "held, a command")
+		_, lt, _ := core.find_tab(login)
+		testing.expect(t, core.close_needs_confirm(lt^), "login: closing asks")
+		testing.expect_value(t, core.run_command(core.Send_Text{tab_id = login, text = "pw"}, control).error, BUSY)
+		x.pty.held, x.running = 0, false
+	}
 
 	// ended: never busy, and the tick asks nothing more
 	sync.lock(&core.hc.mu)
 	core.hc.held[3].eof, core.hc.held[3].fg, core.hc.held[3].fg_asked = true, 424242, {}
 	sync.unlock(&core.hc.mu)
-	n := core.fake_holder_count(&f, .Foreground, 3)
+	n = core.fake_holder_count(&f, .Foreground, 3)
 	core.holder_foreground_tick()
 	testing.expect(t, busy_is(.Idle), "ended: idle")
 	testing.expect(t, !core.close_needs_confirm(s.tabs[1]), "ended: closes")
 	core.wait_until(100, proc() -> bool {return false})
 	testing.expect_value(t, core.fake_holder_count(&f, .Foreground, 3), n)
-
-	// a tab that just started (SPAWNED, no FOREGROUND answered): at its prompt, no needless ask
-	sync.atomic_store(&f.fg_pgid, 0)
-	p, ok := core.holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
-	testing.expect(t, ok, "spawned")
-	testing.expect_value(t, core.pty_foreground(&p), core.Foreground.Idle)
 }

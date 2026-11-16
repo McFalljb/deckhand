@@ -985,7 +985,7 @@ close_needs_confirm :: proc(tab: Tab) -> bool {
 		case Shell_Tab:
 			// a held terminal the holder has not answered for yet: ask to be safe
 			t := term_of(tab.id)
-			return t != nil && pty_foreground(&t.pty) != .Idle
+			return t != nil && pty_foreground(&t.pty, fresh = true) != .Idle
 		case Editor_Tab:
 			dirty, known := window_tab_dirty(tab.id)
 			return dirty || !known // unsaved changes (not known with no window: ask)
@@ -1215,7 +1215,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if _, is_cl := tab.kind.(Claude_Tab); is_cl do return fail("send prompts to a Claude tab with claude_prompt, not send_text"), false
 			if pt := session_pi_tab(s); pt != nil && pt.waiting do return fail("pi in this session is waiting for the user"), false
 			// only at a shell prompt: never into whatever runs there (ssh, sudo, rm -i, a pi)
-			switch pty_foreground(&t.pty) {
+			switch pty_foreground(&t.pty, fresh = true) {
 			case .Idle:
 			case .Busy:    return fail("a program is running in this tab; control callers type only at a shell prompt"), false
 			case .Unknown: return fail("this tab's state is not known yet (the session holder has not answered); try again in a moment"), false
@@ -2577,6 +2577,7 @@ shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0, argv: []st
 		}
 		return 0, "could not start the shell"
 	}
+	if argv != nil do t.pty.command = true // Log in…'s ssh, exec'd in place: never a prompt to type at
 	return id, ""
 }
 

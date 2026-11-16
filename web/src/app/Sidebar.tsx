@@ -6,7 +6,8 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { OpenSession, Store, WebProjectRow, WebSessionRow } from "../state.ts";
 import { sessionView, tabView, type Dot } from "../status.ts";
-import { ago, keysLabel, menuAt, useApp, type App, type MenuItem, shownSession } from "./ctx.ts";
+import { ago, keysLabel, menuAt, useApp, type App, type MenuItem, shownSession, wished } from "./ctx.ts";
+import { narrowTree } from "./treefilter.ts";
 import { HarnessIcon, Icon, StatusMark, dotMark } from "./icons.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { NotHere } from "./Bars.tsx";
@@ -143,19 +144,21 @@ function FilterField() {
         onInput={(e) => {
           const t = (e.target as HTMLInputElement).value;
           setV(t);
+          app.wish("filter", t); // the tree narrows at once (TreeList); the core's answer then fills in
           window.clearTimeout(timer.current);
           timer.current = window.setTimeout(() => app.run({ type: "set_filter", text: t }), 120);
         }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             setV("");
+            app.wish("filter", "");
             app.run({ type: "set_filter", text: "" });
             (e.target as HTMLInputElement).blur();
           }
         }}
       />
       {v ? (
-        <button type="button" class="icon-btn small" aria-label="Clear the filter" onClick={() => { setV(""); app.run({ type: "set_filter", text: "" }); }}>
+        <button type="button" class="icon-btn small" aria-label="Clear the filter" onClick={() => { setV(""); app.wish("filter", ""); app.run({ type: "set_filter", text: "" }); }}>
           <Icon name="close" size={12} />
         </button>
       ) : (
@@ -217,7 +220,10 @@ function TreeList() {
   const projFolded = !!sb.folded?.projects;
   const chatsFolded = !!sb.folded?.chats;
   const chats = store.chatsEntry;
-  const tree = store.webTree;
+  // a filter typed and not yet the core's: the rows the page holds, narrowed by it at once
+  const applied = String(sb.filter ?? "");
+  const typed = wished("filter", applied);
+  const tree = typed !== applied ? narrowTree(store.webTree, typed) : store.webTree;
   const localProjects = tree.length || store.projects.some((p) => p.group === "projects" && !p.machine);
   const rowH = app.phone ? 44 : 30;
   return (

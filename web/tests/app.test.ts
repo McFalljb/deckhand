@@ -134,3 +134,25 @@ test("markdown: review: fences, tables and images stay linear and bounded", () =
   assert.doesNotThrow(() => inlines("![".repeat(n) + "x" + "]()".repeat(n)));
   assert.deepEqual(inlines("![a *b*](u.png)"), [{ t: "img", alt: "a b" }]);
 });
+
+import { narrowTree } from "../src/app/treefilter.ts";
+
+test("filter at once: the tree the page holds, narrowed the core's way, parents kept", () => {
+  const row = (key: string, depth: number, id: number, name: string, path: string) => ({ key, depth, kids: 0, forced: false, id, name, path, pin: -1, hidden: false });
+  const tree = [
+    row("a", 0, 1, "recipe-box", "/h/code/recipe-box"),
+    row("g", 0, 0, "big", "/h/big"), // a group row (a folder)
+    row("b", 1, 2, "p120-fix", "/h/big/p120-fix"),
+    row("c", 1, 3, "p200-cache", "/h/big/p200-cache"),
+    row("d", 0, 4, "garden", "/h/garden-planner"),
+  ];
+  assert.deepEqual(narrowTree(tree, "").map((r) => r.key), ["a", "g", "b", "c", "d"]);
+  assert.deepEqual(narrowTree(tree, "p12").map((r) => r.key), ["g", "b"]); // the group row kept as its parent
+  assert.deepEqual(narrowTree(tree, "planner").map((r) => r.key), ["d"]); // the path, as a substring
+  assert.deepEqual(narrowTree(tree, "rcp bx").map((r) => r.key), ["a"]); // each word, the name fuzzily
+  assert.deepEqual(narrowTree(tree, "zzz").map((r) => r.key), []);
+  const big = Array.from({ length: 5000 }, (_, i) => row("k" + i, 0, i + 1, `p${i}-name`, `/h/big/p${i}-name`));
+  const t0 = performance.now();
+  narrowTree(big, "p12");
+  assert.ok(performance.now() - t0 < 50, "5,000 rows in under 50 ms");
+});

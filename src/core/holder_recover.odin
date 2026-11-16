@@ -52,6 +52,7 @@ holder_recover :: proc(stop: bool) -> Result {
 	for _, t in terms do if t.running && t.pty.held != 0 do return fail("the tabs of the lost session holder are still ending: try again in a moment")
 	old_pid := hc.pid
 	old_instance := strings.clone(hc.instance, context.temp_allocator)
+	old_path := strings.clone(hc.path, context.temp_allocator)
 	alive := holder_alive()
 	if stop && alive {
 		if exe := holder_pid_exe(old_pid); !strings.has_suffix(exe, "/" + HOLDER_BIN) do return fail("that process is not a session holder: nothing was stopped")
@@ -75,7 +76,8 @@ holder_recover :: proc(stop: bool) -> Result {
 	if !holder_client_start() {
 		// as it was: lost (the held ids and the old instance are saved for the next launch)
 		delete(hc.instance)
-		hc.instance = strings.clone(old_instance)
+		delete(hc.path)
+		hc.instance, hc.path = strings.clone(old_instance), strings.clone(old_path)
 		hc.pid = old_pid
 		sync.atomic_store(&hc.lost, true)
 		hc.recover_failed = alive

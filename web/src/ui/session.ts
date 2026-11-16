@@ -134,6 +134,9 @@ export class SessionScreen {
       this.stream.detach();
     }
     if (tabId) this.tabId = tabId;
+    // the keyboard mode as chosen: setRaw at construction ran while hidden (stdin off), and hide()
+    // blurred it. The text field is not focused here: a phone's keyboard would pop up at each open.
+    this.view.setKeyboard(this.raw);
     // makes it current at the core, which starts its restored tabs (again once the link is up)
     if (this.ctx.link.up) this.ctx.run({ type: "focus_session", session: sessionId });
     this.update();

@@ -162,6 +162,28 @@ get_todos :: proc(r: ^Rd, k: string) -> []Claude_Todo_In {
 
 // claude.background's snapshot lists (claude_panels.odin): absent = empty; at most
 // CLAUDE_BG_IN_MAX tasks and CLAUDE_CRONS_IN_MAX crons, each with an id string.
+// A list of ids (non-negative integers): at most max of them.
+@(private = "file")
+get_ids :: proc(r: ^Rd, k: string, max: int) -> []u64 {
+	v, ok := need(r, k)
+	if !ok do return nil
+	a, is := v.(json.Array)
+	if !is || len(a) > max {
+		if r.err == "" do r.err = fmt.tprintf("%s must be a list of at most %d ids", k, max)
+		return nil
+	}
+	out := make([]u64, len(a), r.a)
+	for x, i in a {
+		n, isn := x.(json.Integer)
+		if !isn || n < 0 {
+			if r.err == "" do r.err = strings.concatenate({k, " must be a list of ids"}, context.temp_allocator)
+			return out
+		}
+		out[i] = u64(n)
+	}
+	return out
+}
+
 @(private = "file")
 get_bg_tasks :: proc(r: ^Rd, k: string) -> []Claude_Bg_In {
 	v, ok := r.obj[k]
@@ -680,6 +702,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_web_listen":      cmd = Set_Web_Listen{address = get_str(&r, "address")}
 	case "web_pair":            cmd = Web_Pair{}
 	case "web_devices":         cmd = Web_Devices{}
+	case "web_watch":           cmd = Web_Watch{projects = get_ids(&r, "projects", WEB_WATCH_IN_MAX)}
 	case "web_revoke":          cmd = Web_Revoke{id = get_str(&r, "id")}
 	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name", optional = true), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}
 	case "machine_remove":      cmd = Machine_Remove{no = get_u64(&r, "no"), confirm = get_str(&r, "confirm", optional = true)}

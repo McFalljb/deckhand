@@ -83,7 +83,7 @@ export function PhoneSession({ id }: { id: number }) {
   }
   const tabs = store.tabs(s.id);
   const tab = tabs.find((t) => t.id === s.active_tab) ?? tabs[0];
-  const w = store.web?.titles[String(s.id)];
+  const w = store.webTitle(s.id);
   const waiting = !!tab && tabView(tab).dot === "waiting";
 
   const setRaw = (on: boolean) => {

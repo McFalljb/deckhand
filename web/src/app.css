@@ -753,3 +753,7 @@ a { color: inherit; }
 .term .xterm-scrollable-element > .scrollbar > .slider { background: var(--selected) !important; border-radius: 4px; }
 .phone-term .xterm-scrollable-element > .scrollbar.vertical { display: none; }
 .phone-body .filter .keys { display: none; }
+
+/* the windowed lists (Windowed.tsx): each item keeps its height, margins inside it */
+.windowed { position: relative; }
+.w-item { display: flow-root; overflow: hidden; }

@@ -225,7 +225,7 @@ export function Palette() {
     for (const id of store.web?.open ?? []) {
       const s = store.session(id);
       if (!s) continue;
-      const w = store.web?.titles[String(id)];
+      const w = store.webTitle(id);
       const label = w?.title || s.title;
       const place = w?.chat ? "Chats" : (w?.place ?? "");
       const sc = Math.max(score(label, query), score(place, query) * 0.8);

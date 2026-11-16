@@ -2,7 +2,7 @@
 // its bridge), the Atlas drawer (the Home session's pi tab), and the left column's tabs a browser
 // cannot show yet.
 
-import { useApp } from "./ctx.ts";
+import { useApp, shownSession } from "./ctx.ts";
 import { keysLabel, menuAt } from "./ctx.ts";
 import { Icon, Logo } from "./icons.tsx";
 import { IconButton, newSessionItems } from "./Sidebar.tsx";
@@ -18,7 +18,7 @@ export function agentName(app: ReturnType<typeof useApp>): string {
 export function TopBar() {
   const app = useApp();
   const { store } = app;
-  const cs = store.session(store.currentSession);
+  const cs = store.session(shownSession(app));
   const fleet = store.web?.fleet;
   const unread = unreadCount(app);
   const left = !!store.layout.left_open;
@@ -75,7 +75,7 @@ export function TopBar() {
 export function RightPanels() {
   const app = useApp();
   const { store } = app;
-  const cs = store.session(store.currentSession);
+  const cs = store.session(shownSession(app));
   const panels: Panel[] = [];
   const seen = new Set<string>();
   // the session's pi tab first, then the tab on screen: what their bridges publish

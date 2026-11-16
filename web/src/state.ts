@@ -91,18 +91,21 @@ export interface MachineView {
   os?: string;
 }
 
-// The "web" section (src/core/web_view.odin): the views the core computes for a browser.
+// The browser's sections (src/core/web_view.odin): the views the core computes for a browser,
+// keyed so a delta carries only the rows that changed.
+//   web: the small part; webo:<id> an open session's row; webm other machines; webtree the
+//   Projects tree's order [[key, depth, kids, forced]]; webp:<key> a tree row; websl:<p> a
+//   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats.
 export interface WebProjectRow {
+  key: string;
   id: number; // 0: a group row (its folder in path)
   name: string;
   path: string;
   depth: number;
-  kids: number;
-  open: boolean;
-  forced: boolean;
+  kids: number; // nested folders shown
+  forced: boolean; // open whatever the page folded (the filter, waiting work)
   pin: number;
   hidden: boolean;
-  divider: boolean;
 }
 export interface WebSessionRow {
   id: string;
@@ -120,18 +123,26 @@ export interface WebAttention {
   group: "needs_you" | "finished" | "working" | "idle";
   tab: number;
 }
+export interface WebTitle {
+  title: string;
+  place: string;
+  chat: boolean;
+  at: number; // Unix ns, 0 "new"
+}
+export interface WebMachine {
+  no: number;
+  open: number[];
+  projects: { id: number; depth: number; name: string }[];
+}
 export interface WebView {
   fleet: { waiting: number; errors: number; unseen: number; working: number };
   next: number;
   open: number[];
-  projects: WebProjectRow[];
-  sessions: WebSessionRow[];
-  chats: WebSessionRow[];
-  machines: { no: number; open: number[]; projects: WebProjectRow[] }[];
   attention: WebAttention[];
   deck: WebAttention[];
-  titles: Record<string, { title: string; place: string; chat: boolean; at: number }>; // at: Unix ns, 0 "new"
   filtered: number;
+  here: { name: string; label: string };
+  watch: number[];
 }
 
 export interface PaneLeaf {
@@ -171,6 +182,7 @@ export class Store {
   applyFull(msg: Json): boolean {
     if (!msg || typeof msg.state !== "object" || msg.state === null) return false;
     this.sections = new Map(Object.entries(msg.state));
+    this.rowsStamp++;
     this.version = Number(msg.version) || 0;
     this.changed();
     return true;
@@ -182,6 +194,7 @@ export class Store {
     if (!msg || typeof msg.sections !== "object" || msg.sections === null) return false;
     if (this.sections.size === 0) return false;
     for (const [k, v] of Object.entries(msg.sections)) {
+      if (k.startsWith("webp:")) this.rowsStamp++;
       if (v === null) this.sections.delete(k);
       else this.sections.set(k, v);
     }
@@ -250,6 +263,44 @@ export class Store {
   get web(): WebView | null {
     return this.sections.get("web") ?? null;
   }
+  webTitle(id: number): WebTitle | undefined {
+    return this.sections.get("webo:" + id);
+  }
+  get webMachines(): WebMachine[] {
+    return this.sections.get("webm") ?? [];
+  }
+  // The Projects tree in the core's order, every row that passes the filter (folding is the page's).
+  get webTree(): WebProjectRow[] {
+    const t = this.sections.get("webtree");
+    if (t !== this.treeOf) {
+      this.treeOf = t;
+      this.treeRowsAt = -1;
+    }
+    if (this.treeRowsAt !== this.rowsStamp) {
+      // the order or a row changed: the rows again from their sections (a key alone: depth 0)
+      this.treeRows = (Array.isArray(t) ? t : []).map((e: string | [string, number, number, number]) => {
+        const [key, depth, kids, forced] = typeof e === "string" ? [e, 0, 0, 0] : e;
+        return { key, depth, kids, forced: !!forced, id: 0, name: "", path: "", pin: -1, hidden: false, ...(this.sections.get("webp:" + key) ?? {}) };
+      });
+      this.treeRowsAt = this.rowsStamp;
+    }
+    return this.treeRows;
+  }
+  private treeOf: Json = undefined;
+  private treeRows: WebProjectRow[] = [];
+  private treeRowsAt = -1;
+  private rowsStamp = 0;
+  // A project's listed sessions (the ones the page opened: web_watch, and the selected one's).
+  webSessions(pid: number): WebSessionRow[] | null {
+    const ids = this.sections.get("websl:" + pid);
+    if (!Array.isArray(ids)) return null;
+    return ids.map((id: string) => ({ id, ...(this.sections.get(`webs:${pid}:${id}`) ?? {}) }));
+  }
+  get webChats(): WebSessionRow[] {
+    const ids = this.sections.get("webcl");
+    if (!Array.isArray(ids)) return [];
+    return ids.map((id: string) => ({ id, ...(this.sections.get("webc:" + id) ?? {}) }));
+  }
   get layout(): Json {
     return this.sec("view").layout ?? {};
   }
@@ -297,8 +348,15 @@ export class Store {
   }
 
   project(id: number): Project | undefined {
-    return this.projects.find((p) => p.id === id);
+    const ps = this.projects;
+    if (ps !== this.byIdOf) {
+      this.byIdOf = ps;
+      this.byId = new Map(ps.map((p) => [p.id, p]));
+    }
+    return this.byId.get(id);
   }
+  private byIdOf: Project[] | null = null;
+  private byId = new Map<number, Project>();
 
   tab(id: number): { session: OpenSession; tab: Tab } | undefined {
     for (const s of this.openSessions) {
@@ -332,7 +390,7 @@ export function isTerminalTab(t: Tab): boolean {
 }
 
 export function sessionTitle(store: Store, s: OpenSession): string {
-  const w = store.web?.titles[String(s.id)];
+  const w = store.webTitle(s.id);
   if (w?.title) return w.title;
   if (s.title) return s.title;
   const p = store.project(s.project_id);

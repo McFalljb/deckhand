@@ -6,7 +6,7 @@ import { render } from "preact";
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks";
 import { unpair, whoami } from "../api.ts";
 import { Link, type LinkStatus, type Result, type WindowRequest } from "../link.ts";
-import { AppCtx, useApp, type App, type Overlay } from "./ctx.ts";
+import { AppCtx, useApp, wishes, type App, type Overlay, shownSession } from "./ctx.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { SessionPanes } from "./Panes.tsx";
 import { Deck } from "./Deck.tsx";
@@ -160,6 +160,11 @@ function Root() {
       setRoute(next);
     },
     fit: focusedFit,
+    wish(key, value) {
+      wishes.set(key, { v: value, at: performance.now() });
+      tick(0);
+      window.setTimeout(() => tick(0), 3100); // the wish lapses: draw the state's value
+    },
     async unpair() {
       await unpair();
       location.hash = "";
@@ -264,7 +269,7 @@ function Main() {
   }
   const layout = store.layout;
   const width = leftW ?? Math.round(Number(layout.left_width) || 300);
-  const cs = store.session(store.currentSession);
+  const cs = store.session(shownSession(app));
   return (
     <div class={"window" + (layout.left_open ? "" : " no-left") + (layout.right_open ? "" : " no-right")} style={{ "--left-w": width + "px", "--right-w": Math.round(Number(layout.right_width) || 320) + "px" }}>
       {layout.left_open ? (

@@ -4,7 +4,7 @@
 
 import type { WebAttention } from "../state.ts";
 import { sessionView, tabView, type TabView } from "../status.ts";
-import { ago, menuAt, useApp } from "./ctx.ts";
+import { ago, menuAt, useApp, shownSession } from "./ctx.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { focusSession, newChat, openHarness, sessionItems } from "./Sidebar.tsx";
 
@@ -81,7 +81,7 @@ function Card({ r }: { r: WebAttention }) {
   const tabs = store.tabs(s.id);
   const from = r.tab ? tabs.find((t) => t.id === r.tab) : undefined;
   const v = from ? tabView(from) : sessionView(store, s);
-  const w = store.web?.titles[String(s.id)];
+  const w = store.webTitle(s.id);
   const need = r.group === "needs_you";
   const lines = r.group === "idle" ? 0 : need ? 3 : 1;
   const harness = openHarness(store, s);
@@ -90,7 +90,7 @@ function Card({ r }: { r: WebAttention }) {
   const dots = (["waiting", "error", "unseen", "working"] as const).filter((d) => others.includes(d));
   return (
     <div
-      class={"card g-" + r.group + (v.dot === "error" ? " err" : "") + (store.currentSession === s.id ? " current" : "")}
+      class={"card g-" + r.group + (v.dot === "error" ? " err" : "") + (shownSession(app) === s.id ? " current" : "")}
       role="button"
       tabIndex={0}
       onClick={() => focusSession(app, s.id, r.tab || undefined)}

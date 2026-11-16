@@ -5,7 +5,7 @@
 import { useRef } from "preact/hooks";
 import { isTerminalTab, tabKind, type LayoutNode, type OpenSession, type Panes, type Tab } from "../state.ts";
 import { stripView } from "../status.ts";
-import { keysLabel, menuAt, useApp, type App, type MenuItem } from "./ctx.ts";
+import { keysLabel, menuAt, useApp, wished, type App, type MenuItem } from "./ctx.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { TermPane } from "./Term.tsx";
 import { codexAvailable } from "./Sidebar.tsx";
@@ -104,7 +104,9 @@ function Split({ s, p, n, tabs }: { s: OpenSession; p: Panes; n: LayoutNode; tab
 function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: number; focused: boolean; only: boolean }) {
   const app = useApp();
   const { s, paneId, tabs } = props;
-  const tab = tabs.find((t) => t.id === props.active) ?? tabs[0];
+  // a clicked tab shows at once (wished), the core's focus_tab confirms it
+  const active = wished(`tab:${s.id}:${paneId}`, props.active);
+  const tab = tabs.find((t) => t.id === active) ?? tabs[0];
   const focusPane = () => {
     if (!props.focused && paneId) app.run({ type: "focus_pane", pane: paneId });
   };
@@ -171,7 +173,10 @@ function TabStrip({ s, paneId, tabs, active, only }: { s: OpenSession; paneId: n
               aria-selected={on ? "true" : "false"}
               tabIndex={0}
               title={tabTitle(t)}
-              onClick={() => app.run({ type: "focus_tab", tab_id: t.id })}
+              onClick={() => {
+                app.wish(`tab:${s.id}:${paneId}`, t.id);
+                app.run({ type: "focus_tab", tab_id: t.id });
+              }}
               onAuxClick={(e) => {
                 if ((e as MouseEvent).button === 1 && tabKind(t) !== "pi_tab") app.run({ type: "close_tab", tab_id: t.id });
               }}

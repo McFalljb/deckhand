@@ -39,6 +39,8 @@ export interface App {
   // the terminal pane that has the keyboard (desktop), for window.request term_fit and keys
   fit(): { cols: number; rows: number; cellW: number; cellH: number } | null;
   unpair(): void;
+  // Draws what a click asked for at once, before the core's state says it (wished).
+  wish(key: string, value: unknown): void;
 }
 
 export const AppCtx = createContext<App>(null as unknown as App);
@@ -87,4 +89,23 @@ export function ago(ns: number | undefined, now = Date.now()): string {
   if (s < 3600) return Math.floor(s / 60) + "m";
   if (s < 86400) return Math.floor(s / 3600) + "h";
   return Math.floor(s / 86400) + "d";
+}
+
+// A click's effect drawn before the core confirms it: the wished value until the core's state
+// equals it, or for WISH_MS at most (a refused command: the state's value comes back).
+const WISH_MS = 3000;
+export const wishes = new Map<string, { v: unknown; at: number }>();
+export function wished<T>(key: string, actual: T): T {
+  const w = wishes.get(key);
+  if (!w) return actual;
+  if (w.v === actual || performance.now() - w.at > WISH_MS) {
+    wishes.delete(key);
+    return actual;
+  }
+  return w.v as T;
+}
+
+// The session the page shows: the core's current one, or the one just clicked (focusSession).
+export function shownSession(app: App): number {
+  return wished("session", app.store.currentSession);
 }

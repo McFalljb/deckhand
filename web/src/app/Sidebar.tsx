@@ -6,10 +6,12 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { OpenSession, Store, WebProjectRow, WebSessionRow } from "../state.ts";
 import { sessionView, tabView, type Dot } from "../status.ts";
-import { ago, keysLabel, menuAt, useApp, type App, type MenuItem } from "./ctx.ts";
+import { ago, keysLabel, menuAt, useApp, type App, type MenuItem, shownSession } from "./ctx.ts";
 import { HarnessIcon, Icon, StatusMark, dotMark } from "./icons.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { NotHere } from "./Bars.tsx";
+import { fold } from "./fold.ts";
+import { Windowed, type WItem } from "./Windowed.tsx";
 
 const SORTS = [
   ["recent", "Recent activity", "Sessions by recent activity"],
@@ -203,60 +205,129 @@ function TreeList() {
   const { store } = app;
   const web = store.web!;
   const sb = store.sidebar;
+  useFold();
+  fold.seed(store);
+  useEffect(() => fold.syncWatch(store, app.link));
   const multi = store.machines.length > 0 && !!store.settings.remote_machines;
   const hereFolded = multi && !!sb.folded?.this_mac;
   const openFolded = !!sb.folded?.open;
   const projFolded = !!sb.folded?.projects;
   const chatsFolded = !!sb.folded?.chats;
   const chats = store.chatsEntry;
-  const localProjects = store.projects.filter((p) => p.group === "projects" && !p.machine).length;
+  const tree = store.webTree;
+  const localProjects = tree.length || store.projects.some((p) => p.group === "projects" && !p.machine);
+  const rowH = app.phone ? 44 : 30;
   return (
     <>
       {multi ? <MachineHeader no={0} /> : null}
       {hereFolded ? (
-        web.open.map((id) => store.session(id)).filter((s) => s && sessionView(store, s).dot === "waiting").map((s) => <OpenRow s={s!} />)
+        web.open.map((id) => store.session(id)).filter((s) => s && sessionView(store, s).dot === "waiting").map((s) => <OpenRow key={s!.id} s={s!} />)
       ) : (
         <>
           {web.open.length ? (
             <>
               <SectionHeader name="OPEN" fold="open" count={web.open.length} />
-              {openFolded ? null : web.open.map((id) => store.session(id)).map((s) => (s ? <OpenRow s={s} /> : null))}
+              {openFolded ? null : web.open.map((id) => store.session(id)).map((s) => (s ? <OpenRow key={s.id} s={s} /> : null))}
             </>
           ) : null}
           <SectionHeader name="PROJECTS" fold="projects" sort="projects" plus={{ label: "Add project…", run: () => addProject(app) }} />
-          {projFolded ? null : localProjects === 0 ? (
+          {projFolded ? null : !localProjects ? (
             <Empty title="No projects yet" text="+ adds a folder" />
-          ) : web.projects.length === 0 ? (
+          ) : tree.length === 0 ? (
             <Empty title="No matching projects" text="Clear the filter to see them all" />
           ) : (
-            web.projects.map((r) => (
-              <>
-                {r.divider ? <div class="pinned-divider" /> : null}
-                {r.id ? <ProjectRow r={r} /> : <GroupRow r={r} />}
-                {r.id && r.id === store.selectedProject ? <ProjectSessions projectId={r.id} depth={r.depth} /> : null}
-              </>
-            ))
+            <Windowed items={treeItems(app, tree, rowH)} />
           )}
           <div class="section-gap" />
           <SectionHeader name="CHATS" fold="chats" sort="chats" plus={{ label: `New chat (${keysLabel({ k: "n", alt: true })})`, run: () => newChat(app) }} />
-          {chatsFolded || !chats ? null : (
-            <>
-              {web.chats.map((r, i) => (
-                <>
-                  {i > 0 && web.chats[i - 1].pin >= 0 && r.pin < 0 ? <div class="pinned-divider" /> : null}
-                  <SessionRow r={r} projectId={chats.id} chat depth={0} />
-                </>
-              ))}
-              <ActionRow icon="plus" label="New chat" run={() => newChat(app)} depth={0} />
-            </>
-          )}
+          {chatsFolded || !chats ? null : <Windowed items={chatItems(app, chats.id, rowH)} />}
         </>
       )}
       {store.machines.map((m) => (
-        <MachineSection no={m.no} />
+        <MachineSection key={m.no} no={m.no} />
       ))}
     </>
   );
+}
+
+const DIVIDER_H = 13;
+
+// The Projects tree as the list draws it: the rows the page has not folded away, a project's
+// sessions under it when open, the pinned line.
+function treeItems(app: App, tree: WebProjectRow[], rowH: number): WItem[] {
+  const { store } = app;
+  const out: WItem[] = [];
+  const marks = projectMarks(store);
+  let hideBelow = Infinity;
+  let lastTop: WebProjectRow | null = null;
+  for (const r of tree) {
+    if (r.depth > hideBelow) continue;
+    hideBelow = Infinity;
+    if (r.depth === 0) {
+      if (lastTop && lastTop.pin >= 0 && r.pin < 0) out.push({ key: "div:" + r.key, h: DIVIDER_H, draw: () => <div class="pinned-divider" /> });
+      lastTop = r;
+    }
+    const kidsOpen = r.kids > 0 && (r.forced || fold.kids.has(r.key));
+    if (r.kids > 0 && !kidsOpen) hideBelow = r.depth;
+    if (!r.id) {
+      out.push({ key: r.key, h: rowH, draw: () => <GroupRow r={r} open={kidsOpen} /> });
+      continue;
+    }
+    const open = fold.open.has(r.key);
+    out.push({ key: r.key, h: rowH, draw: () => <ProjectRow r={r} expanded={open} kidsOpen={kidsOpen} mark={marks.get(r.id)} onToggle={() => fold.toggleOpen(r.key)} /> });
+    if (open) projectSessionItems(app, r.id, r.key, r.depth + 1, rowH, out);
+  }
+  return out;
+}
+
+// A project's session rows under it: the first few, "Show N more", "New session"; "Loading…"
+// until the core lists them (the first time the page opens it).
+const TREE_SHOW = 8;
+function projectSessionItems(app: App, pid: number, key: string, depth: number, rowH: number, out: WItem[]) {
+  const rows = app.store.webSessions(pid);
+  if (!rows) {
+    out.push({ key: "load:" + key, h: rowH, draw: () => <div class="row action-row muted-text" style={{ paddingLeft: 8 + depth * 20 + "px" }}><span class="title">Loading…</span></div> });
+    return;
+  }
+  const all = fold.all.has(key);
+  const shown = all ? rows : rows.slice(0, TREE_SHOW);
+  shown.forEach((r, i) => {
+    if (i > 0 && shown[i - 1].pin >= 0 && r.pin < 0) out.push({ key: `sdiv:${key}`, h: DIVIDER_H, draw: () => <div class="pinned-divider" /> });
+    out.push({ key: `s:${key}:${r.id}`, h: rowH, draw: () => <SessionRow r={r} projectId={pid} depth={depth} /> });
+  });
+  if (rows.length > shown.length) out.push({ key: "more:" + key, h: rowH, draw: () => <ActionRow icon="more" label={`Show ${rows.length - shown.length} more`} depth={depth} run={() => fold.showAll(key)} /> });
+  out.push({ key: "new:" + key, h: rowH, draw: () => <ActionRow icon="plus" label="New session" depth={depth} run={(e) => menuAt(app, e, newSessionItems(app, pid))} /> });
+}
+
+function chatItems(app: App, chatsId: number, rowH: number): WItem[] {
+  const rows = app.store.webChats;
+  const out: WItem[] = [];
+  rows.forEach((r, i) => {
+    if (i > 0 && rows[i - 1].pin >= 0 && r.pin < 0) out.push({ key: "cdiv", h: DIVIDER_H, draw: () => <div class="pinned-divider" /> });
+    out.push({ key: "c:" + r.id, h: rowH, draw: () => <SessionRow r={r} projectId={chatsId} chat depth={0} /> });
+  });
+  out.push({ key: "c:new", h: rowH, draw: () => <ActionRow icon="plus" label="New chat" run={() => newChat(app)} depth={0} /> });
+  return out;
+}
+
+// Each project's open sessions' strongest mark (once per render, not per row).
+function projectMarks(store: Store): Map<number, { n: number; v: ReturnType<typeof sessionView> | null }> {
+  const m = new Map<number, { n: number; v: ReturnType<typeof sessionView> | null }>();
+  for (const s of store.openSessions) {
+    if (s.home) continue;
+    const v = sessionView(store, s);
+    const e = m.get(s.project_id) ?? { n: 0, v: null };
+    e.n++;
+    if (!e.v || RANKS[v.dot] > RANKS[e.v.dot]) e.v = v;
+    m.set(s.project_id, e);
+  }
+  return m;
+}
+
+// Re-renders on a fold (the page's own: at once, no round trip).
+function useFold() {
+  const [, set] = useState(0);
+  useEffect(() => fold.subscribe(() => set((x) => x + 1)), []);
 }
 
 function Empty({ title, text }: { title: string; text: string }) {
@@ -282,10 +353,10 @@ function addProject(app: App) {
 export function OpenRow({ s, from, mach }: { s: OpenSession; from?: number; mach?: string }) {
   const app = useApp();
   const { store } = app;
-  const w = store.web?.titles[String(s.id)];
+  const w = store.webTitle(s.id);
   const fromTab = from ? store.tabs(s.id).find((t) => t.id === from) : undefined;
   const v = fromTab ? tabView(fromTab) : sessionView(store, s);
-  const current = store.currentSession === s.id;
+  const current = shownSession(app) === s.id;
   const age = v.dot !== "none" && v.dot !== "exited" ? ago(v.since) : "";
   let when = age || (w ? (w.at ? ago(w.at) : "new") : "");
   if (v.dot === "waiting") when = v.msg || "Waiting for you";
@@ -318,6 +389,7 @@ export function OpenRow({ s, from, mach }: { s: OpenSession; from?: number; mach
 }
 
 export function focusSession(app: App, id: number, tab?: number) {
+  app.wish("session", id);
   app.run({ type: "focus_session", session: id }).then(() => {
     if (tab) app.run({ type: "focus_tab", tab_id: tab });
   });
@@ -343,50 +415,30 @@ export function sessionItems(app: App, s: OpenSession): MenuItem[] {
   return items;
 }
 
-function ProjectRow({ r, remote }: { r: WebProjectRow; remote?: boolean }) {
+function ProjectRow({ r, expanded, kidsOpen, mark, onToggle, remote }: { r: WebProjectRow; expanded: boolean; kidsOpen: boolean; mark?: { n: number; v: ReturnType<typeof sessionView> | null }; onToggle: () => void; remote?: boolean }) {
   const app = useApp();
   const { store } = app;
   const p = store.project(r.id);
-  const [, force] = useState(0);
   if (!p) return null;
-  const selected = p.id === store.selectedProject;
-  const expanded = selected && !treeFolded.has(p.id);
-  const open = store.openSessions.filter((s) => !s.home && s.project_id === p.id);
-  let best: Dot = "none";
-  let mark = sessionView(store, open[0] ?? ({ id: -1 } as OpenSession));
-  for (const s of open) {
-    const v = sessionView(store, s);
-    if (RANKS[v.dot] > RANKS[best]) {
-      best = v.dot;
-      mark = v;
-    }
-  }
-  const cs = store.session(store.currentSession);
-  const current = !!cs && cs.project_id === p.id && !expanded && !store.web?.titles[String(cs.id)]?.chat;
+  const cs = store.session(shownSession(app));
+  const current = !!cs && cs.project_id === p.id && !expanded && !store.webTitle(cs.id)?.chat;
+  const n = mark?.n ?? 0;
   return (
     <div
       class={"row project-row" + (current ? " current" : "") + (r.hidden || p.missing ? " dim" : "")}
       style={{ paddingLeft: 8 + r.depth * 20 + "px" }}
       role="button"
       tabIndex={0}
-      onClick={() => {
-        if (selected) {
-          if (treeFolded.has(p.id)) treeFolded.delete(p.id);
-          else treeFolded.add(p.id);
-          force((x) => x + 1);
-        } else {
-          treeFolded.delete(p.id);
-          app.run({ type: "select_project", project_id: p.id });
-        }
-      }}
+      aria-expanded={expanded ? "true" : "false"}
+      onClick={onToggle}
       onContextMenu={(e) => {
         e.preventDefault();
         if (!remote) menuAt(app, e, projectItems(app, p.id));
       }}
     >
       <Icon name={expanded ? "chevron-down" : "chevron-right"} size={12} class="chev" />
-      <Icon name="folder" size={14} class={selected ? "secondary" : "muted"} />
-      <span class={"title" + (selected ? " bold" : "")}>{r.name}</span>
+      <Icon name="folder" size={14} class={expanded ? "secondary" : "muted"} />
+      <span class={"title" + (expanded ? " bold" : "")}>{r.name}</span>
       <span class="spacer" />
       {r.kids > 0 ? (
         <button
@@ -394,15 +446,15 @@ function ProjectRow({ r, remote }: { r: WebProjectRow; remote?: boolean }) {
           class="kids"
           onClick={(e) => {
             e.stopPropagation();
-            if (!r.forced) app.run({ type: "set_row_expanded", path: r.path, expanded: !r.open });
+            if (!r.forced) fold.toggleKids(r.key);
           }}
         >
-          <Icon name={r.open ? "chevron-down" : "chevron-right"} size={12} />
+          <Icon name={kidsOpen ? "chevron-down" : "chevron-right"} size={12} />
           {r.kids} folder{r.kids === 1 ? "" : "s"}
         </button>
       ) : null}
-      <span class="when">{r.hidden ? "hidden" : open.length ? String(open.length) : ""}</span>
-      {open.length || best !== "none" ? <StatusMark mark={mark.mark} progress={mark.progress} /> : null}
+      <span class="when">{r.hidden ? "hidden" : n ? String(n) : ""}</span>
+      {mark?.v && (n || mark.v.dot !== "none") ? <StatusMark mark={mark.v.mark} progress={mark.v.progress} /> : null}
       {!remote ? (
         <span class="row-btns">
           <button type="button" class="icon-btn small star" title={r.pin >= 0 ? "Unpin" : "Pin"} onClick={(e) => { e.stopPropagation(); app.run({ type: "set_pinned", project_id: p.id, pinned: r.pin < 0 }); }}>
@@ -418,14 +470,10 @@ function ProjectRow({ r, remote }: { r: WebProjectRow; remote?: boolean }) {
 
 const RANKS: Record<Dot, number> = { none: 0, exited: 1, working: 2, question: 3, unseen: 4, error: 5, waiting: 6 };
 
-// The selected project folds and unfolds on a second click: the window's own memory, not State.
-const treeFolded = new Set<number>();
-
-function GroupRow({ r }: { r: WebProjectRow }) {
-  const app = useApp();
+function GroupRow({ r, open }: { r: WebProjectRow; open: boolean }) {
   return (
-    <div class="row group-row" style={{ paddingLeft: 8 + r.depth * 20 + "px" }} role="button" tabIndex={0} onClick={() => !r.forced && app.run({ type: "set_row_expanded", path: r.path, expanded: !r.open })}>
-      <Icon name={r.open ? "chevron-down" : "chevron-right"} size={12} class="chev" />
+    <div class="row group-row" style={{ paddingLeft: 8 + r.depth * 20 + "px" }} role="button" tabIndex={0} aria-expanded={open ? "true" : "false"} onClick={() => !r.forced && fold.toggleKids(r.key)}>
+      <Icon name={open ? "chevron-down" : "chevron-right"} size={12} class="chev" />
       <Icon name="folder" size={14} class="muted" />
       <span class="title muted-text">{r.name}</span>
       <span class="spacer" />
@@ -477,31 +525,7 @@ function projectItems(app: App, id: number): MenuItem[] {
   ];
 }
 
-const TREE_SHOW = 8;
-const shownAll = new Set<number>();
-
-function ProjectSessions({ projectId, depth }: { projectId: number; depth: number }) {
-  const app = useApp();
-  const [, force] = useState(0);
-  if (treeFolded.has(projectId)) return null;
-  const rows = app.store.web!.sessions;
-  const all = shownAll.has(projectId);
-  const shown = all ? rows : rows.slice(0, TREE_SHOW);
-  return (
-    <>
-      {shown.map((r, i) => (
-        <>
-          {i > 0 && shown[i - 1].pin >= 0 && r.pin < 0 ? <div class="pinned-divider" /> : null}
-          <SessionRow r={r} projectId={projectId} depth={depth + 1} />
-        </>
-      ))}
-      {rows.length > shown.length ? (
-        <ActionRow icon="more" label={`Show ${rows.length - shown.length} more`} depth={depth + 1} run={() => { shownAll.add(projectId); force((x) => x + 1); }} />
-      ) : null}
-      <ActionRow icon="plus" label="New session" depth={depth + 1} run={(e) => menuAt(app, e, newSessionItems(app, projectId))} />
-    </>
-  );
-}
+const opening = new Set<string>(); // sessions the page asked to open, not open yet
 
 function SessionRow({ r, projectId, chat, depth }: { r: WebSessionRow; projectId: number; chat?: boolean; depth: number }) {
   const app = useApp();
@@ -510,7 +534,7 @@ function SessionRow({ r, projectId, chat, depth }: { r: WebSessionRow; projectId
   const v = open ? sessionView(store, open) : null;
   const dot = (v?.dot ?? r.dot) as Dot;
   const mark = v?.mark ?? dotMark(dot);
-  const current = !!open && open.id === store.currentSession;
+  const current = (!!open && open.id === shownSession(app)) || opening.has(r.id);
   const when = dot === "waiting" ? "Waiting for you" : r.hidden ? "hidden" : ago(r.modified) || "new";
   const marked = !!open || dot !== "none";
   const harness = r.codex ? "codex" : r.claude ? "claude" : "pi";
@@ -522,7 +546,11 @@ function SessionRow({ r, projectId, chat, depth }: { r: WebSessionRow; projectId
       tabIndex={0}
       onClick={async () => {
         if (open) return focusSession(app, open.id);
+        // drawn as the current row at once; the core opens it
+        opening.add(r.id);
+        app.wish("opening", r.id);
         const res = await app.run({ type: "open_session", project_id: projectId, pi_session_id: r.id });
+        opening.delete(r.id);
         if (res.ok) {
           const s = store.openSessions.find((x) => x.pi_session_id === r.id);
           if (s) app.go({ screen: "session", session: s.id });
@@ -590,13 +618,15 @@ const MACHINE_WORDS: Record<string, string> = {
 function MachineHeader({ no }: { no: number }) {
   const app = useApp();
   const { store } = app;
+  useFold();
   const m = no ? store.machines.find((x) => x.no === no) : null;
-  const folded = no ? machineFolded.has(no) : !!store.sidebar.folded?.this_mac;
-  const [, force] = useState(0);
+  const folded = no ? fold.machines.has(no) : !!store.sidebar.folded?.this_mac;
   const status = m ? m.status : "online";
   const act = m && (status === "taken" ? "Take back" : status !== "online" && status !== "connecting" ? "Connect" : "");
-  const label = no ? m!.name : "This machine";
-  const n = no ? (store.web?.machines.find((x) => x.no === no)?.open.length ?? 0) : 0;
+  // the window's words: this machine's name, "this Mac" beside it (src/ui_sidebar.odin machine_header)
+  const here = store.web?.here;
+  const label = no ? m!.name : here?.name || "This machine";
+  const n = no ? (store.webMachines.find((x) => x.no === no)?.open.length ?? 0) : 0;
   return (
     <div class="machine-header">
       <button
@@ -604,17 +634,13 @@ function MachineHeader({ no }: { no: number }) {
         class="nav-title"
         onClick={() => {
           if (!no) app.run({ type: "set_sidebar_folded", section: "this_mac", folded: !folded });
-          else {
-            if (folded) machineFolded.delete(no);
-            else machineFolded.add(no);
-            force((x) => x + 1);
-          }
+          else fold.toggleMachine(no);
         }}
       >
         <Icon name={folded ? "chevron-right" : "chevron-down"} size={12} class="fold" />
         <span class={"machine-dot " + (status === "online" ? "on" : status === "connecting" ? "wait" : "off")} />
         <span class="machine-name">{label}</span>
-        {MACHINE_WORDS[status] ? <span class="count">{MACHINE_WORDS[status]}</span> : n ? <span class="count">{n}</span> : null}
+        {!no && here?.label ? <span class="count">{here.label}</span> : MACHINE_WORDS[status] ? <span class="count">{MACHINE_WORDS[status]}</span> : n ? <span class="count">{n}</span> : null}
       </button>
       <span class="spacer" />
       {act ? (
@@ -626,26 +652,49 @@ function MachineHeader({ no }: { no: number }) {
   );
 }
 
-const machineFolded = new Set<number>();
-
+// Another machine: its open sessions and projects. A project's sessions live on that machine, so
+// opening one selects it (the core asks that machine); the fold is still the page's.
 function MachineSection({ no }: { no: number }) {
   const app = useApp();
   const { store } = app;
-  const mv = store.web?.machines.find((x) => x.no === no);
+  useFold();
+  const mv = store.webMachines.find((x) => x.no === no);
   const m = store.machines.find((x) => x.no === no);
   if (!m) return null;
+  const rowH = app.phone ? 44 : 30;
+  const marks = projectMarks(store);
   return (
     <>
       <MachineHeader no={no} />
-      {machineFolded.has(no) || !mv ? null : (
+      {fold.machines.has(no) || !mv ? null : (
         <>
-          {mv.open.map((id) => store.session(id)).map((s) => (s ? <OpenRow s={s} /> : null))}
-          {mv.projects.map((r) => (
-            <>
-              <ProjectRow r={r} remote />
-              {r.id === store.selectedProject ? <ProjectSessions projectId={r.id} depth={0} /> : null}
-            </>
-          ))}
+          {mv.open.map((id) => store.session(id)).map((s) => (s ? <OpenRow key={s.id} s={s} /> : null))}
+          {mv.projects.map((x) => {
+            const key = String(x.id);
+            const r: WebProjectRow = { key, id: x.id, name: x.name, path: "", depth: x.depth, kids: 0, forced: false, pin: -1, hidden: false };
+            const open = fold.open.has(key);
+            const items: WItem[] = [];
+            if (open && store.selectedProject === x.id) projectSessionItems(app, x.id, key, x.depth + 1, rowH, items);
+            return (
+              <>
+                <ProjectRow
+                  key={key}
+                  r={r}
+                  remote
+                  expanded={open}
+                  kidsOpen={false}
+                  mark={marks.get(x.id)}
+                  onToggle={() => {
+                    if (!open && store.selectedProject !== x.id) app.run({ type: "select_project", project_id: x.id });
+                    fold.toggleOpen(key);
+                  }}
+                />
+                {items.map((it) => (
+                  <div key={it.key} class="w-item" style={{ height: it.h + "px" }}>{it.draw()}</div>
+                ))}
+              </>
+            );
+          })}
           {m.error && m.status !== "online" ? <p class="note small">{m.error}</p> : null}
         </>
       )}

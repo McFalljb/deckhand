@@ -217,6 +217,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Web_Listen:      return "set_web_listen"
 	case Web_Pair:            return "web_pair"
 	case Web_Devices:         return "web_devices"
+	case Web_Watch:           return "web_watch"
 	case Web_Revoke:          return "web_revoke"
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
@@ -555,6 +556,14 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Fs_Changed:
 		kv_u64(&w, "paths", u64(len(c.paths))) // how many, not which
 	case Web_Pair, Web_Devices: // nothing
+	case Web_Watch:
+		key(&w, "projects")
+		strings.write_byte(w.b, '[')
+		for id, i in c.projects {
+			if i > 0 do strings.write_byte(w.b, ',')
+			strings.write_u64(w.b, id)
+		}
+		strings.write_byte(w.b, ']')
 	case Copy_Control_Token: // nothing: the token is never written
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty

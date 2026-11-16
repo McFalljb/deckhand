@@ -13,6 +13,8 @@ import { NotHere } from "./Bars.tsx";
 import { fold } from "./fold.ts";
 import { FilesPanel } from "./Files.tsx";
 import { Windowed, type WItem } from "./Windowed.tsx";
+import { infoItems, infoMenu, peekItem, renameItem } from "./SessionExtras.tsx";
+import { peekProps } from "./Peek.tsx";
 
 const SORTS = [
   ["recent", "Recent activity", "Sessions by recent activity"],
@@ -39,7 +41,7 @@ export function Sidebar({ width, onResize, forceSessions }: { width: number; onR
       </div>
       <div class="segmented left-tabs">
         {(["sessions", "files", "settings", "jobs"] as const).map((t) => (
-          <button type="button" class={t === tab ? "on" : ""} onClick={() => app.run({ type: "set_left_tab", tab: t })}>
+          <button type="button" class={(t === "settings" ? app.route.screen === "settings" : t === tab && app.route.screen !== "settings") ? "on" : ""} onClick={() => (t === "settings" ? app.go({ screen: "settings" }) : (app.route.screen === "settings" && app.go({ screen: "home" }), app.run({ type: "set_left_tab", tab: t })))}>
             {t[0].toUpperCase() + t.slice(1)}
           </button>
         ))}
@@ -351,7 +353,7 @@ function addProject(app: App) {
 }
 
 // An open session's row: [project ·] harness, title; its age or "Waiting for you"; its mark.
-export function OpenRow({ s, from, mach }: { s: OpenSession; from?: number; mach?: string }) {
+export function OpenRow({ s, from, mach, peek }: { s: OpenSession; from?: number; mach?: string; peek?: boolean }) {
   const app = useApp();
   const { store } = app;
   const w = store.webTitle(s.id);
@@ -367,6 +369,7 @@ export function OpenRow({ s, from, mach }: { s: OpenSession; from?: number; mach
       class={"row open-row" + (current ? " current" : "")}
       role="button"
       tabIndex={0}
+      {...(peek ? peekProps(app, s.id, from) : {})}
       onClick={() => focusSession(app, s.id, from)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -407,9 +410,11 @@ export function sessionItems(app: App, s: OpenSession): MenuItem[] {
     items.push({ label: "New shell tab here", run: () => app.run({ type: "new_shell_tab", session: s.id }) });
     items.push({ label: "New Claude tab here", run: () => app.run({ type: "new_claude_tab", session: s.id }) });
     items.push({ sep: true });
-    items.push({ label: "Copy session info", run: () => app.run({ type: "session_info", project_id: s.project_id, pi_session_id: s.pi_session_id, to: "clipboard" }) });
+    if (s.agent === "claude") items.push(renameItem(app, s.pi_session_id, store.webTitle(s.id)?.title ?? s.title));
+    items.push(...infoItems(app, s.project_id, s.pi_session_id));
     items.push({ sep: true });
   }
+  items.push(...peekItem(app, s.id));
   items.push({ label: "Mark as unread", run: () => app.run({ type: "set_unread", pi_session_id: s.pi_session_id, unread: true }) });
   if (!s.machine) items.push({ label: hidden ? "Show again" : "Hide", run: () => app.run({ type: "set_hidden", pi_session_id: s.pi_session_id, hidden: !hidden }) });
   items.push({ label: "Close session", run: () => app.run({ type: "close_session", session: s.id }) });
@@ -571,6 +576,7 @@ function SessionRow({ r, projectId, chat, depth }: { r: WebSessionRow; projectId
         <button type="button" class="icon-btn small star" title={r.pin >= 0 ? "Unpin" : "Pin"} onClick={(e) => { e.stopPropagation(); app.run({ type: "set_pinned", pi_session_id: r.id, pinned: r.pin < 0 }); }}>
           {r.pin >= 0 ? "★" : "☆"}
         </button>
+        <IconButton small icon="info" label="Session info" run={(e) => infoMenu(app, e, projectId, r.id)} />
         <IconButton small icon="more" label="More" run={(e) => menuAt(app, e, sessionRowItems(app, r, projectId, open))} />
         {open ? <IconButton small icon="close" label="Close session" run={() => app.run({ type: "close_session", session: open.id })} /> : null}
       </span>
@@ -585,8 +591,10 @@ function sessionRowItems(app: App, r: WebSessionRow, projectId: number, open?: O
   ];
   if (open) items.push({ label: "New Claude tab here", run: () => app.run({ type: "new_claude_tab", session: open.id }) });
   items.push({ sep: true });
-  items.push({ label: "Copy session info", run: () => app.run({ type: "session_info", project_id: projectId, pi_session_id: r.id, to: "clipboard" }) });
+  if (r.claude) items.push(renameItem(app, r.id, r.label));
+  items.push(...infoItems(app, projectId, r.id));
   items.push({ sep: true });
+  if (open) items.push(...peekItem(app, open.id));
   if (open) items.push({ label: "Mark as unread", run: () => app.run({ type: "set_unread", pi_session_id: r.id, unread: true }) });
   items.push({ label: r.hidden ? "Show again" : "Hide", run: () => app.run({ type: "set_hidden", pi_session_id: r.id, hidden: !r.hidden }) });
   if (open) items.push({ label: "Close session", run: () => app.run({ type: "close_session", session: open.id }) });
@@ -721,7 +729,7 @@ function AttentionList() {
       last = r.group;
       out.push(<div class="nav-header"><span class="nav-title static">{GROUP_TITLE[r.group].toUpperCase()}</span></div>);
     }
-    out.push(<OpenRow s={s} from={r.tab || undefined} mach={s.machine ? store.machineName(s.machine) : ""} />);
+    out.push(<OpenRow s={s} from={r.tab || undefined} mach={s.machine ? store.machineName(s.machine) : ""} peek />);
   }
   return <>{out}</>;
 }

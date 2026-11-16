@@ -220,6 +220,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Web_Watch:           return "web_watch"
 	case File_Read:           return "file_read"
 	case File_Save:           return "file_save"
+	case Web_Settings, Job_Draft: return web_extra_type(cmd)
 	case Web_Revoke:          return "web_revoke"
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
@@ -568,6 +569,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		else do kv_str(&w, "text", c.text) // the wire to the core only (command_wire_json)
 		if c.base != "" do kv_str(&w, "base", c.base)
 		if c.force do kv_bool(&w, "force", true)
+	case Web_Settings: kv_bool(&w, "open", c.open)
+	case Job_Draft: web_extra_write(&w, c, redact) // web_jobs.odin
 	case Web_Watch:
 		key(&w, "projects")
 		strings.write_byte(w.b, '[')
@@ -2172,4 +2175,16 @@ write_machine_jobs :: proc(b: ^strings.Builder, rows: []Job_Row) {
 		obj_end(&w)
 	}
 	strings.write_byte(b, ']')
+}
+
+// job_draft's (web_jobs.odin): the form and the note are the user's text, their lengths only when
+// redacted.
+@(private = "file")
+web_extra_write :: proc(w: ^Jw, c: Job_Draft, redact: bool) {
+	x := c
+	for f, i in job_draft_strings(&x) {
+		if f^ == "" do continue
+		if redact && i > 1 do kv_str(w, JOB_DRAFT_FIELDS[i], fmt.tprintf("<redacted %d bytes>", len(f^)))
+		else do kv_str(w, JOB_DRAFT_FIELDS[i], f^)
+	}
 }

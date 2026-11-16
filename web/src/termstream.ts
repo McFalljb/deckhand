@@ -38,6 +38,8 @@ export class TermStream {
   constructor(
     private link: Link,
     private view: TermView,
+    // a peek (Peek.tsx): only looks: never says it has the keyboard, never asks for a size
+    private look = false,
   ) {
     this.off = [
       link.onJson("term.attached", (m) => this.onAttached(m)),
@@ -86,16 +88,19 @@ export class TermStream {
   }
 
   input(b: Uint8Array): void {
+    if (this.look) return;
     if (!this.channel || b.length === 0) return;
     this.link.sendFrame(this.channel, Kind.Data, b);
   }
 
   focus(gained: boolean): void {
+    if (this.look) return;
     if (this.channel) this.link.sendFrame(this.channel, Kind.Focus, new Uint8Array([gained ? 1 : 0]));
   }
 
   // The element's size changed: ask the core for the grid it fits (the core alone resizes).
   refit(now = false): void {
+    if (this.look) return;
     window.clearTimeout(this.fitTimer);
     if (now) this.sendFit();
     else this.fitTimer = window.setTimeout(() => this.sendFit(), FIT_DELAY);

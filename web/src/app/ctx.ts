@@ -23,6 +23,8 @@ export interface Overlay {
   sheet: { title: string; body?: string; items: MenuItem[] } | null;
   link: string | null; // a URL waiting for a tap
   copy: string | null; // text to copy by hand (no async clipboard here)
+  job: { job: string; for_project: string } | null; // the job sheet (JobSheet.tsx): a job to edit, or "" new
+  peek: { session: number; tab: number; x: number; y: number } | null; // a look at another session (Peek.tsx)
 }
 
 export interface App {
@@ -34,7 +36,7 @@ export interface App {
   overlay: Overlay;
   setOverlay(o: Partial<Overlay>): void;
   // the session and tab the phone shows (the desktop follows the core's current session)
-  route: { screen: "home" | "session" | "deck" | "jobs"; session: number; project: number };
+  route: { screen: "home" | "session" | "deck" | "jobs" | "settings"; session: number; project: number };
   go(r: Partial<App["route"]>): void;
   // the terminal pane that has the keyboard (desktop), for window.request term_fit and keys
   fit(): { cols: number; rows: number; cellW: number; cellH: number } | null;

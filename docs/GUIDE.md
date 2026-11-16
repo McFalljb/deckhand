@@ -1597,7 +1597,10 @@ show this machine's sessions: the sessions list, terminals, confirmations, new s
 on this machine and on the machines it is linked to. A browser you pair acts as you here, as a
 machine you allow to connect does; it can't change the settings marked *Only you, at this Mac*,
 web access itself, or copy a control token. Browser, app, Markdown and editor tabs stay in the
-Mac's window.
+Mac's window. Its Settings page shows every setting, with the ones it can't change marked
+*Change this at the Mac* (a settings file opens in an editor tab, so files stay in the window
+too); its Jobs tab has **New job** and each job's **Edit…** (the same job sheet), and a hover on
+a Deck card, or a long press on a phone, peeks at that session.
 
 - **Listen address** (default `0.0.0.0:7433`: every network interface). Deckhand serves plain
   HTTP, with no encryption of its own: anyone who can see the traffic can read your sessions and

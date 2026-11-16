@@ -7,6 +7,7 @@ import { sessionView, tabView, type TabView } from "../status.ts";
 import { ago, menuAt, useApp, shownSession } from "./ctx.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { focusSession, newChat, openHarness, sessionItems } from "./Sidebar.tsx";
+import { peekProps } from "./Peek.tsx";
 
 const GROUPS = [
   ["needs_you", "Needs you"],
@@ -93,6 +94,7 @@ function Card({ r }: { r: WebAttention }) {
       class={"card g-" + r.group + (v.dot === "error" ? " err" : "") + (shownSession(app) === s.id ? " current" : "")}
       role="button"
       tabIndex={0}
+      {...peekProps(app, s.id, r.tab || undefined)}
       onClick={() => focusSession(app, s.id, r.tab || undefined)}
       onKeyDown={(e) => e.key === "Enter" && focusSession(app, s.id, r.tab || undefined)}
       onContextMenu={(e) => {

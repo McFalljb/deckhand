@@ -32,6 +32,7 @@ export function PhoneHome() {
         <span class="spacer" />
         <IconButton icon="search" label="Search or run a command" run={() => app.setOverlay({ palette: true })} />
         <IconButton icon="bell" label="Notifications" badge={unreadCount(app)} run={() => app.setOverlay({ bell: true })} />
+        <IconButton icon="sliders" label="Settings" run={() => app.go({ screen: "settings" })} />
         {app.store.homeSession ? (
           <button type="button" class="agent-btn" onClick={() => app.run({ type: "set_home", open: !app.store.homeOpen })}>
             <span class="agent-avatar">{agentName(app)[0]}</span>

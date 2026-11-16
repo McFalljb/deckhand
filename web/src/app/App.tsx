@@ -17,9 +17,12 @@ import { ConfirmBar, CopySheet, LinkSheet, Menu, Sheet, Toasts, type ToastItem }
 import { PhoneHome, PhoneSession } from "./Phone.tsx";
 import { fitFor, focusedFit } from "./Term.tsx";
 import { pairScreen } from "../ui/pair.ts";
+import { SettingsPage } from "./Settings.tsx";
+import { JobSheet } from "./JobSheet.tsx";
+import { Peek } from "./Peek.tsx";
 
 const PHONE = "(max-width: 760px)";
-const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null };
+const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null };
 
 type Screen = { kind: "pair" } | { kind: "away"; title: string; text: string; button: string; act: () => void } | { kind: "main" };
 
@@ -155,7 +158,7 @@ function Root() {
     route,
     go: (r) => {
       const next = { ...route, ...r };
-      const hash = next.screen === "session" && next.session ? `s/${next.session}` : next.screen === "deck" || next.screen === "jobs" ? next.screen : "";
+      const hash = next.screen === "session" && next.session ? `s/${next.session}` : next.screen === "deck" || next.screen === "jobs" || next.screen === "settings" ? next.screen : "";
       if (location.hash.slice(1) !== hash) location.hash = hash;
       setRoute(next);
     },
@@ -196,6 +199,8 @@ function Root() {
           <Sheet />
           <LinkSheet />
           <CopySheet />
+          {overlay.job ? <JobSheet /> : null}
+          {overlay.peek ? <Peek /> : null}
         </>
       ) : null}
       <Toasts items={toasts} />
@@ -206,7 +211,7 @@ function Root() {
 function parseHash(): App["route"] {
   const [kind, a] = location.hash.slice(1).split("/");
   if (kind === "s" && Number(a)) return { screen: "session", session: Number(a), project: 0 };
-  if (kind === "deck" || kind === "jobs") return { screen: kind, session: 0, project: 0 };
+  if (kind === "deck" || kind === "jobs" || kind === "settings") return { screen: kind, session: 0, project: 0 };
   return { screen: "home", session: 0, project: 0 };
 }
 
@@ -264,12 +269,14 @@ function Main() {
   const [leftW, setLeftW] = useState<number | null>(null);
   if (!store.ready) return <div class="loading">Connecting…</div>;
   if (app.phone) {
+    if (app.route.screen === "settings") return <SettingsPage onClose={() => app.go({ screen: "home" })} />;
     if (app.route.screen === "session" && app.route.session) return <PhoneSession id={app.route.session} />;
     return <PhoneHome />;
   }
   const layout = store.layout;
   const width = leftW ?? Math.round(Number(layout.left_width) || 300);
   const cs = store.session(shownSession(app));
+  const settings = app.route.screen === "settings";
   return (
     <div class={"window" + (layout.left_open ? "" : " no-left") + (layout.right_open ? "" : " no-right")} style={{ "--left-w": width + "px", "--right-w": Math.round(Number(layout.right_width) || 320) + "px" }}>
       {layout.left_open ? (
@@ -284,8 +291,8 @@ function Main() {
       <div class="centre">
         <TopBar />
         <div class="centre-body">
-          <div class="panes">{cs && !cs.home ? <SessionPanes s={cs} key={cs.id} /> : <Deck />}</div>
-          {layout.right_open && cs && !cs.home ? <RightPanels /> : null}
+          <div class="panes">{settings ? <SettingsPage onClose={() => app.go({ screen: "home" })} /> : cs && !cs.home ? <SessionPanes s={cs} key={cs.id} /> : <Deck />}</div>
+          {layout.right_open && cs && !cs.home && !settings ? <RightPanels /> : null}
           {store.homeOpen ? <AgentDrawer /> : null}
         </div>
       </div>

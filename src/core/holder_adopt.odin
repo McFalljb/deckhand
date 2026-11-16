@@ -377,8 +377,12 @@ holder_adopt_all :: proc() {
 			log_ln("Deckhand: session holder: terminal", id, "was not started as this", HELD_KIND_NAMES[kind], "tab (tokens.json): not adopted")
 			continue
 		}
+		// a shell tab started as a command (Log in…'s ssh) stays busy; one with no record of how it
+		// started (tokens.json missing or rejected) is taken for one too, until it exits (fails closed).
+		// A record without the key (0.4.0's) is an ordinary shell.
+		saved.command = kind == .Shell && (!known || saved.command)
 		if !adopt_tab(&s, &tab, id, snaps, saved, known) do continue
-		start := Held_Start{kind = kind}
+		start := Held_Start{kind = kind, command = saved.command} // kept for the next relaunch
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi do start.extras = tab.reload.extras
 		if !socket_tokens_adopt(id, tab.id, start) && kind != .Shell do untrusted += 1
 		if _, is_cl := tab.kind.(Claude_Tab); is_cl {
@@ -470,7 +474,7 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 	}
 	if autotest_active && adopted && tail_start == 0 do adopt_ref_check(t, id, tail, cols, rows)
 	t.inexact = !exact
-	t.pty = Pty{fd = -1, held = id, pid = pid}
+	t.pty = Pty{fd = -1, held = id, pid = pid, command = saved.command} // Log in…'s ssh stays busy (holder_adopt_all)
 	t.running = true
 	t.reader.eof = false
 	t.changed = true

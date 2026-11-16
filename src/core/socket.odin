@@ -1219,7 +1219,8 @@ socket_request_conn :: proc(request_id: u64) -> u64 {
 // Body (JSON, after the macfile header):
 //   {"v":1,"terms":[{"term":7,"kind":"pi","extras":5,"claude_root":4242,
 //     "tokens":[{"sha256":"<hex>","caller":"panel","claude":false,"single_use":false}]}]}
-// `kind` (shell, pi, claude) always; `extras` for pi; `claude_root` only when set. An older
+// `kind` (shell, pi, claude) always; `extras` for pi; `command` for a shell tab started as a
+// command (Log in…'s ssh; an older Deckhand ignores it); `claude_root` only when set. An older
 // file's `pi_ro` and `ro` (the removed read-only chats') are ignored. A pi env token that was
 // used is not listed (it was swapped
 // for a reconnect token, which is): an unlisted token is unknown, as a used one must be.
@@ -1265,6 +1266,7 @@ HELD_KIND_NAMES := [Held_Kind]string {
 Held_Start :: struct {
 	kind:   Held_Kind,
 	extras: u64, // pi: the optional extensions it loaded (Tab.reload.extras)
+	command: bool, // shell: a command run in place (Log in…'s ssh), never a shell at its prompt
 }
 
 @(private = "file")
@@ -1498,6 +1500,7 @@ tokens_save :: proc() {
 		first = false
 		fmt.sbprintf(&b, `{{"term":%d,"kind":"%s"`, id, HELD_KIND_NAMES[o.start.kind])
 		if o.start.kind == .Pi do fmt.sbprintf(&b, `,"extras":%d`, transmute(i64)o.start.extras)
+		if o.start.command do strings.write_string(&b, `,"command":true`)
 		if o.root > 1 do fmt.sbprintf(&b, `,"claude_root":%d`, o.root)
 		slice.sort(o.toks[:]) // stable output: the map's order is not
 		strings.write_string(&b, `,"tokens":[`)
@@ -1590,6 +1593,11 @@ tokens_load :: proc(path: string, key: []u8) -> (ok: bool, why: string) {
 			n, nok := r.(json.Integer)
 			if !nok || st.kind != .Pi do return false, "bad extras"
 			st.extras = transmute(u64)i64(n)
+		}
+		if r, has := o["command"]; has {
+			v, vok := r.(json.Boolean)
+			if !vok || st.kind != .Shell do return false, "bad command"
+			st.command = bool(v)
 		}
 		starts[term] = st
 		if r, has := o["claude_root"]; has {

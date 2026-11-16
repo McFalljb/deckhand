@@ -150,6 +150,17 @@ class Link:
             fail(f"{msg['type']}: {r}")
         return r["result"]
 
+    def send_text(self, tab, text):
+        # a terminal in the holder is "not known yet" until the holder answers its first FOREGROUND
+        # (a control caller is refused, not let in): tried again for a few seconds
+        for _ in range(25):
+            r = self.ask({"type": "send_text", "tab_id": tab, "text": text})
+            if r["result"]["ok"] or "not known yet" not in r["result"].get("error", ""):
+                break
+            time.sleep(0.2)
+        if not r["result"]["ok"]:
+            fail(f"send_text: {r}")
+
     def close(self):
         self.s.close()
 
@@ -177,7 +188,7 @@ def open_shell(link, home):
     st = link.ok({"type": "get_state"})["data"]
     session = st["open_sessions"][0]["id"]
     tab = link.ok({"type": "new_shell_tab", "session": session})["created_id"]
-    link.ok({"type": "send_text", "tab_id": tab, "text": f"echo $$ > {pid_file}.tmp && mv {pid_file}.tmp {pid_file}\r"})
+    link.send_text(tab, f"echo $$ > {pid_file}.tmp && mv {pid_file}.tmp {pid_file}\r")
     pid = int(wait_for("shell pid file", lambda: os.path.exists(pid_file) and open(pid_file).read().strip()))
     return tab, pid
 

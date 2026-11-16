@@ -972,9 +972,27 @@ confirm_mode :: proc(caller: Caller, class: Command_Class) -> Confirm_Mode {
 }
 
 // Whether closing this running tab should ask (Settings.confirm_close).
-close_needs_confirm :: proc(tab: Tab) -> bool {
-	if tab.status != .Running do return false
-	switch state.settings.confirm_close[tab_kind_id(tab.kind)] {
+close_needs_confirm :: proc(tab: Tab) -> bool {return tabs_need_confirm({tab})}
+
+// Whether closing these tabs (a session's) should ask: the first that does decides; held shell
+// tabs are asked about together, under one deadline (holder_foreground_check).
+tabs_need_confirm :: proc(tabs: []Tab) -> bool {
+	ids, pids := make([dynamic]u32, context.temp_allocator), make([dynamic]i32, context.temp_allocator)
+	for tab in tabs do if tab_close_asks(tab, &ids, &pids) do return true
+	return len(ids) > 0 && holder_foreground_check(ids[:], pids[:]) != .Idle
+}
+
+// A held shell tab under auto goes in ids/pids (answered by its holder) instead.
+@(private = "file")
+tab_close_asks :: proc(tab: Tab, ids: ^[dynamic]u32, pids: ^[dynamic]i32) -> bool {
+	_, is_shell := tab.kind.(Shell_Tab)
+	rule := state.settings.confirm_close[tab_kind_id(tab.kind)]
+	if tab.status != .Running {
+		// its process still runs in a holder that stopped answering: it is not over
+		t := tab
+		return is_shell && rule != .Never && tab_held_away(&t) != 0
+	}
+	switch rule {
 	case .Always: return true
 	case .Never:  return false
 	case .Auto:
@@ -984,7 +1002,13 @@ close_needs_confirm :: proc(tab: Tab) -> bool {
 			return tab.agent == .Unknown || tab.agent == .Working || tab.waiting
 		case Shell_Tab:
 			t := term_of(tab.id)
-			return t != nil && pty_foreground_busy(&t.pty)
+			if t == nil do return false
+			if t.pty.held != 0 && t.pty.pid > 0 && !t.pty.command {
+				append(ids, t.pty.held)
+				append(pids, t.pty.pid)
+				return false
+			}
+			return pty_foreground(&t.pty) != .Idle
 		case Editor_Tab:
 			dirty, known := window_tab_dirty(tab.id)
 			return dirty || !known // unsaved changes (not known with no window: ask)
@@ -1132,8 +1156,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if owns_session(caller, s.id) do return fail("a caller cannot close its own session"), false
 		// comments not sent to its pi yet: the user picks (close prompt), others say what to do
 		if cr, go_on, cch := comments_close_check(s, 0, c.comments, caller); !go_on do return cr, cch
-		busy := false
-		for tab in s.tabs do if close_needs_confirm(tab) do busy = true
+		busy := tabs_need_confirm(s.tabs[:])
 		if busy || c.ask {
 			what := busy ? "close session %q in %s? Its processes are still running." : "close session %q in %s?"
 			gr, go_on, ch := confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf(what, summary_title(s), session_project_name(s)))
@@ -1214,7 +1237,11 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if _, is_cl := tab.kind.(Claude_Tab); is_cl do return fail("send prompts to a Claude tab with claude_prompt, not send_text"), false
 			if pt := session_pi_tab(s); pt != nil && pt.waiting do return fail("pi in this session is waiting for the user"), false
 			// only at a shell prompt: never into whatever runs there (ssh, sudo, rm -i, a pi)
-			if pty_foreground_busy(&t.pty) do return fail("a program is running in this tab; control callers type only at a shell prompt"), false
+			switch pty_foreground(&t.pty) {
+			case .Idle:
+			case .Busy:    return fail("a program is running in this tab; control callers type only at a shell prompt"), false
+			case .Unknown: return fail("this tab's state is not known yet (the session holder has not answered); try again in a moment"), false
+			}
 		}
 		if tab.status != .Running do return fail("the tab's process has exited"), false
 		// a Codex composer: only the user's own paste goes in as it is (codex.odin), decided here on
@@ -2561,7 +2588,8 @@ shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0, argv: []st
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)
 	t := new_term(id)
-	if !term_start(t, argv != nil ? argv : {login_shell(), "-l"}, cwd, start = {kind = .Shell}) {
+	// a command (Log in…'s ssh) is never a shell at its prompt: busy (Held_Start.command, kept in tokens.json)
+	if !term_start(t, argv != nil ? argv : {login_shell(), "-l"}, cwd, start = {kind = .Shell, command = argv != nil}) {
 		drop_term(id)
 		pane_tab_gone(s, id)
 		for x, i in s.tabs do if x.id == id {

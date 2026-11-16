@@ -13,8 +13,10 @@ import "core:sync"
 //   pty_resize(&p, cols, rows, w_px, h_px)
 //   pty_close(&p)                         hang up the child and release the pty
 //   pty_reap()                            collect exited children (call each frame)
-//   pty_foreground_busy(&p) -> bool       a program other than the child itself is in
-//                                         the foreground (e.g. a shell running a command)
+//   pty_foreground(&p) -> Foreground      Busy: a program other than the child itself is in
+//                                         the foreground (e.g. a shell running a command);
+//                                         Unknown: a held one the holder did not answer for
+//   pty_foreground_busy(&p) -> bool       pty_foreground == .Busy
 //   pty_foreground_pgrp(&p) -> i32        the foreground process group (0 = unknown)
 //   pty_open(&p) -> bool                  a pty to read and write (ours, or the holder's)
 //
@@ -42,5 +44,6 @@ Pty :: struct {
 	held:    u32, // the session holder's terminal id (holder_client.odin); 0 = our own PTY
 	pid:     i32,
 	exited:  bool,
+	command: bool, // the child is a command run in place (Log in…'s ssh; Held_Start.command): always busy
 	pending: [dynamic]u8, // bytes the pty did not accept yet
 }

@@ -200,19 +200,25 @@ pty_reap :: proc() {
 	}
 }
 
-// The terminal's foreground process group differs from the child's own (the
-// child is a session leader, so its group id is its pid): a shell is running
-// a command. False if unknown.
-pty_foreground_busy :: proc(p: ^Pty) -> bool {
-	if p.pid <= 0 do return false
-	if p.held != 0 {
-		pg := holder_foreground(p.held)
-		return pg > 0 && pg != p.pid
-	}
-	if p.fd < 0 do return false
-	pg := tcgetpgrp(p.fd)
-	return pg > 0 && pg != p.pid
+Foreground :: enum u8 {
+	Idle, // the child itself is in the foreground (a shell at its prompt), or it ended
+	Busy, // another program is (a shell running a command), or the child is a command (Pty.command)
+	Unknown, // a held terminal the holder did not answer for in time (holder_foreground_check)
 }
+
+// Busy: the terminal's foreground process group differs from the child's own (the child is a
+// session leader, so its group id is its pid), or the child is a command run in place, never a
+// shell at its prompt. A held terminal's holder is asked now (a bounded wait).
+pty_foreground :: proc(p: ^Pty) -> Foreground {
+	if p.pid <= 0 do return .Idle
+	if p.command do return .Busy
+	if p.held != 0 do return holder_foreground_check({p.held}, {p.pid})
+	if p.fd < 0 do return .Idle
+	pg := tcgetpgrp(p.fd)
+	return pg > 0 && pg != p.pid ? .Busy : .Idle
+}
+
+pty_foreground_busy :: proc(p: ^Pty) -> bool {return pty_foreground(p) == .Busy}
 
 // The terminal's foreground process group, or 0 if unknown (agent_status.odin:
 // a program that reported working leaves the foreground when it exits).

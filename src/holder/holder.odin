@@ -36,7 +36,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 7
+HOLDER_REV :: 8
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -727,6 +727,23 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 		if t == nil || t.master < 0 || t.eof do return
 		append(&t.input, ..f.payload)
 		term_flush(t)
+	case .Input_If_Idle:
+		// written only while the child's own group has the terminal, checked as the bytes are
+		// taken (#141): a control caller types only at a shell prompt, never into a running program.
+		// "written" means taken now: what the pty does not take at once follows without a new check.
+		// Earlier input still queued: busy (it is on its way, so what it starts is not known yet).
+		rid, bytes, e := holderwire.decode_input_if_idle(f)
+		if e != .None do return
+		t := live_term(h, id)
+		result := "written"
+		if t == nil || t.pending || t.master < 0 || t.eof || t.reaped do result = "gone"
+		else if len(t.input) > 0 do result = "busy"
+		else if pg := tcgetpgrp(t.master); pg <= 0 || pg != t.pgid do result = "busy"
+		else {
+			append(&t.input, ..bytes)
+			term_flush(t)
+		}
+		send_msg(cn, .Input_Result, id, holderwire.Input_Result{id = i64(rid), result = result})
 	case .Resize:
 		t := live_term(h, id)
 		m: holderwire.Resize

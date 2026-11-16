@@ -31,12 +31,14 @@ Payload :: enum {
 	Json,
 	Raw, // INPUT
 	Offset_Raw, // OUTPUT, TAIL: u64 LE start + bytes
+	Id_Raw, // INPUT_IF_IDLE: u64 LE request id + bytes
 }
 
 PAYLOAD_NAMES := [Payload]string {
 	.Json       = "json",
 	.Raw        = "raw",
 	.Offset_Raw = "offset+raw",
+	.Id_Raw     = "id+raw",
 }
 
 Field_Spec :: struct {
@@ -134,6 +136,8 @@ SPECS := []Kind_Spec {
 		{name = "gave_up", type = .Bool, required = true},
 		{name = "previous", type = .Bool, required = true},
 	}},
+	{"INPUT_IF_IDLE", .Input_If_Idle, false, .Id_Raw, nil},
+	{"INPUT_RESULT", .Input_Result, false, .Json, {{name = "id", type = .Int, required = true}, {name = "result", type = .String, required = true}}},
 }
 
 spec_of :: proc(kind: u8) -> (Kind_Spec, bool) {

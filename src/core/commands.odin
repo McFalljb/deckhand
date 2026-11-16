@@ -1230,6 +1230,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if owns_tab(caller, c.tab_id) do return fail("a caller cannot act on its own tab"), false
 		t := tab != nil ? term_of(tab.id) : nil
 		if t == nil do return fail("no such terminal tab"), false
+		FG_BUSY :: "a program is running in this tab; control callers type only at a shell prompt"
+		FG_UNKNOWN :: "this tab's state is not known yet (the session holder has not answered); try again in a moment"
+		// a held terminal whose holder checks input itself: the check is the write (below)
+		guarded := false
 		if caller.kind == .Control {
 			// keystrokes into pi bypass its prompt handling; and a session
 			// whose pi waits for the user is the user's to answer
@@ -1237,10 +1241,11 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if _, is_cl := tab.kind.(Claude_Tab); is_cl do return fail("send prompts to a Claude tab with claude_prompt, not send_text"), false
 			if pt := session_pi_tab(s); pt != nil && pt.waiting do return fail("pi in this session is waiting for the user"), false
 			// only at a shell prompt: never into whatever runs there (ssh, sudo, rm -i, a pi)
-			switch pty_foreground(&t.pty) {
+			guarded = t.pty.held != 0 && t.pty.pid > 0 && !t.pty.command && holder_guards_input()
+			if !guarded do switch pty_foreground(&t.pty) {
 			case .Idle:
-			case .Busy:    return fail("a program is running in this tab; control callers type only at a shell prompt"), false
-			case .Unknown: return fail("this tab's state is not known yet (the session holder has not answered); try again in a moment"), false
+			case .Busy:    return fail(FG_BUSY), false
+			case .Unknown: return fail(FG_UNKNOWN), false
 			}
 		}
 		if tab.status != .Running do return fail("the tab's process has exited"), false
@@ -1248,8 +1253,25 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// the core's own state right before writing. generated only ever adds the check (anyone
 		// may set it; leaving it out exempts only the user's own UI paste): claiming it gains nothing
 		if c.generated || caller.kind != .UI || caller.hub do if why := codex_paste_refusal(tab, c.text); why != "" do return fail(why), false
-		term_paste(t, c.text)
-		return {ok = true}, false // the child's screen changes, not State
+		// into a shell from anyone but the user's own paste: a trailing newline runs the line
+		_, is_shell := tab.kind.(Shell_Tab)
+		submit := is_shell && caller.kind != .UI
+		if !guarded {
+			term_paste(t, c.text, submit)
+			return {ok = true}, false // the child's screen changes, not State
+		}
+		if !t.running || len(c.text) == 0 do return {ok = true}, false // as term_paste
+		// a bound on the one frame: it is written from the main thread, which a large one could
+		// block for the socket's timeout on a holder that does not read
+		data := term_paste_bytes(t, c.text, submit)
+		if len(data) > HOLDER_GUARD_MAX do return fail("text too long for a shell prompt: a control caller sends at most 64 KB"), false
+		switch holder_input_if_idle(t.pty.held, data) {
+		case .Written: term_scroll_to_bottom(t)
+		case .Busy:    return fail(FG_BUSY), false
+		case .Gone:    return fail("the tab's process has exited"), false
+		case .Unknown: return fail(FG_UNKNOWN), false
+		}
+		return {ok = true}, false
 	case Set_Focus:
 		if c.widget != "" && !is_widget(c.widget) do return fail("no such widget"), false
 		if state.focus_widget == "agent_input" && caller.kind == .Control do return fail("the agent's terminal has the keyboard"), false

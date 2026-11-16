@@ -48,6 +48,8 @@ HOLDER_WAIT :: 5 * time.Second // the socket after a launch, WELCOME + TAILs, SP
 HOLDER_MAX_TERMS :: 4096
 HOLDER_FG_EVERY :: 250 * time.Millisecond // FOREGROUND at most this often per terminal (agent_status's cached read)
 HOLDER_FG_WAIT :: 200 * time.Millisecond // a close or a control send_text waits this long for its answers
+HOLDER_GUARD_REV :: 8 // the first holder_rev that answers INPUT_IF_IDLE (#141); an older one gets FOREGROUND, then INPUT
+HOLDER_GUARD_MAX :: 64 * 1024 // the most a control send_text writes through INPUT_IF_IDLE (one frame, from the main thread)
 // A refused connect is tried again after each of these (macOS refuses on a full listen backlog
 // too: a busy live holder); 750 ms in all before its socket is taken for a dead one's.
 HOLDER_RECHECKS := [?]time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
@@ -130,6 +132,11 @@ Holder_Client :: struct {
 	rejoining: bool, // the holder dropped us and the reader attaches again: frames wait in pending (wmu)
 	released:  map[u32]bool, // terminals this core RELEASEd (or gave up spawning): sent again to a holder that still lists them after a reattach (mu)
 	epoch:     u64, // bumped at each reattach (hc.mu): an answer awaited on the old connection never comes
+	guard_seq: u64, // INPUT_IF_IDLE request ids, never reused in a run (hc.mu)
+	guard_id:  u64, // the one awaited (0: none; holder_input_if_idle runs on the main thread only)
+	guard_term: u32,
+	guard_res: Input_Guard, // its answer, once in (guard_done)
+	guard_done: bool,
 	stuck:     bool, // a send blocked for SO_SNDTIMEO: the holder does not read (hung), so the end is no drop to rejoin after
 	upgrade_told: bool, // the user was told a tab opened meanwhile is not kept (holder_wanted)
 	pending:   [dynamic]u8, // whole frames held back during an upgrade (wmu), sent after it
@@ -678,6 +685,17 @@ holder_frame :: proc(f: hw.Frame) {
 		if h == nil || hw.decode(f, .Foreground_Is, &m, context.temp_allocator) != .None do return
 		h.fg, h.fg_out = i32(clamp(m.pgid, 0, i64(max(i32)))), false
 		sync.cond_broadcast(&hc.cond) // holder_foreground_check waits for it
+	case .Input_Result:
+		m: hw.Input_Result
+		if hc.guard_id == 0 || hc.guard_done || f.terminal != hc.guard_term || hw.decode(f, .Input_Result, &m, context.temp_allocator) != .None || m.id != i64(hc.guard_id) do return
+		switch m.result {
+		case "written": hc.guard_res = .Written
+		case "busy":    hc.guard_res = .Busy
+		case "gone":    hc.guard_res = .Gone
+		case:           hc.guard_res = .Unknown
+		}
+		hc.guard_done = true
+		sync.cond_broadcast(&hc.cond) // holder_input_if_idle waits for it
 	case .Goodbye_Ack:
 		if !hc.handed || hc.acked {
 			trust.wipe(f.payload)
@@ -974,25 +992,86 @@ holder_foreground_check :: proc(ids: []u32, pids: []i32) -> Foreground {
 @(private = "file")
 Fg_Send :: enum u8 {Sent, Later, Never}
 
-// FOREGROUND for h (hc.mu held), never blocking: Later while another thread writes (wmu taken),
-// Never when it can't go out at once (the holder lost, stuck, upgrading or rejoining, the socket
-// full: a holder that does not read).
+// FOREGROUND for h (hc.mu held), never blocking: send_now_locked.
 @(private = "file")
 fg_send_locked :: proc(h: ^Held) -> Fg_Send {
+	out := make([dynamic]u8, context.temp_allocator)
+	hw.encode(&out, .Foreground, h.id, hw.Empty{})
+	r := send_now_locked(out[:])
+	if r == .Sent do h.fg_out, h.fg_asked = true, time.tick_now()
+	return r
+}
+
+// A frame that goes now or not at all (hc.mu held): Later while another thread writes (wmu
+// taken), Never when it can't go out at once (the holder lost, stuck, upgrading or rejoining, the
+// socket full: a holder that does not read). Never queued in pending.
+@(private = "file")
+send_now_locked :: proc(frame: []u8) -> Fg_Send {
 	if !sync.try_lock(&hc.wmu) do return .Later // try: wmu comes before hc.mu
 	defer sync.unlock(&hc.wmu)
 	if sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) || sync.atomic_load(&hc.stuck) || hc.upgrading || hc.rejoining || hc.fd < 0 do return .Never
 	pfd := posix.pollfd{fd = hc.fd, events = {.OUT}}
 	if posix.poll(&pfd, 1, 0) <= 0 || .OUT not_in pfd.revents do return .Never // room for a few bytes at least: the frame goes at once
-	out := make([dynamic]u8, context.temp_allocator)
-	hw.encode(&out, .Foreground, h.id, hw.Empty{})
-	if !sock_write_all(hc.fd, out[:]) {
+	if !sock_write_all(hc.fd, frame) {
 		send_failed() // as holder_write: nothing more can follow on the wire, the reader loses the holder
 		sock_shutdown(hc.fd)
 		return .Never
 	}
-	h.fg_out, h.fg_asked = true, time.tick_now()
 	return .Sent
+}
+
+Input_Guard :: enum u8 {
+	Written, // the holder wrote it: the shell's own group had the terminal as it took the bytes
+	Busy, // another program had it: nothing written
+	Gone, // the terminal ended: nothing written
+	Unknown, // no answer to this request on this connection in time, or it could not go out: not known to be written
+}
+
+// Whether the attached holder checks input itself (INPUT_IF_IDLE, holder_rev 8): an older one
+// that keeps running across an update does not, and gets #140's FOREGROUND check instead.
+holder_guards_input :: proc() -> bool {
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	return hc.on && hc.holder_rev >= HOLDER_GUARD_REV
+}
+
+// INPUT_IF_IDLE (main thread): the holder writes data only while the terminal's foreground group
+// is the child's own, checked as it takes the bytes (#141). The reader records only the answer
+// whose id is this request's (hc.guard_id, never 0) for this terminal. Written only on that answer;
+// anything else is Unknown: no answer within HOLDER_FG_WAIT, a lost holder, a reattach. A
+// "written" already recorded counts even if this thread gets hc.mu back past the deadline or after
+// a reattach: the holder wrote it, a fact. Waits on hc.cond, which releases hc.mu for the reader.
+holder_input_if_idle :: proc(id: u32, data: []u8) -> Input_Guard {
+	if len(data) + 8 > hw.MAX_PAYLOAD do return .Unknown
+	deadline := time.tick_add(time.tick_now(), HOLDER_FG_WAIT)
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	h := hc.held[id]
+	if h == nil || h.lost do return .Unknown
+	if h.eof do return .Gone // it exited (EXITED)
+	epoch := hc.epoch
+	hc.guard_seq += 1
+	hc.guard_id, hc.guard_term, hc.guard_done = hc.guard_seq, id, false
+	defer hc.guard_id = 0
+	out := make([dynamic]u8, context.temp_allocator)
+	hw.encode_input_if_idle(&out, id, hc.guard_id, data)
+	sent := false
+	for {
+		// the answer first: a "written" is a fact whenever it was taken in (the reader holds
+		// hc.mu to record it, so it came while this waited), past the deadline or a reattach too
+		if hc.guard_done do return hc.guard_res
+		if sync.atomic_load(&hc.lost) || hc.epoch != epoch do return .Unknown
+		left := time.tick_diff(time.tick_now(), deadline)
+		if left <= 0 do return .Unknown
+		if !sent {
+			switch send_now_locked(out[:]) {
+			case .Sent:  sent = true
+			case .Never: return .Unknown
+			case .Later: sync.cond_wait_with_timeout(&hc.cond, &hc.mu, min(left, 5 * time.Millisecond)); continue
+			}
+		}
+		sync.cond_wait_with_timeout(&hc.cond, &hc.mu, left)
+	}
 }
 
 // How it ended once it did: reaped = no more process (exit unknown when the holder was lost).

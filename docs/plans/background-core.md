@@ -430,6 +430,7 @@ JSON; terminal bytes are raw.
 | `SIGNAL{signal, target: pid\|pgroup}` · `RELEASE` | `EXITED{code, signal, offset}` (after output up to `offset`) |
 | `GOODBYE{mode: handover\|shutdown}` | `GOODBYE_ACK{terminals[{id, offset}], successor_secret}` |
 | `FOREGROUND` | `FOREGROUND_IS{pgid}` |
+| `INPUT_IF_IDLE`: `id u64` + bytes (holder_rev 8+) | `INPUT_RESULT{id, result: written\|busy\|gone}`: written only while the terminal's foreground group is the child's own, checked (`tcgetpgrp`) as the holder takes the bytes; busy and gone write nothing. A core sends it only to a holder whose `holder_rev` says it knows it, else `FOREGROUND` then `INPUT` (#141) |
 | `UPGRADE{path}` | `UPGRADE_FAILED{error}` |
 | `PING` (every 5 s) | `PONG`. A core that misses pongs for 30 s is dropped (counted on a clock that stops while the Mac sleeps). A dropped core that still runs attaches again, as after an `UPGRADE` (same instance and key; #108). |
 | — | `REFUSED{code: wire\|identity\|floor\|attached\|secret, error}`, then close |

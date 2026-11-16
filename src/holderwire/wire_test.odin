@@ -318,6 +318,7 @@ decoder_fuzz :: proc(t: ^testing.T) {
 		if !known do continue
 		switch spec.payload {
 		case .Offset_Raw: _, _, _ = decode_output(f)
+		case .Id_Raw: _, _, _ = decode_input_if_idle(f)
 		case .Raw:
 		case .Json: fuzz_decode(t, f, spec.kind)
 		}
@@ -519,4 +520,22 @@ welcome_upgrade_fields :: proc(t: ^testing.T) {
 	// a wrong type is refused like any other field's
 	bad := `{"wire":1,"instance":"ab","pid":7,"holder_rev":2,"previous":"none","hmac_key":"00","terminals":[{"id":1,"pid":9,"pgid":9,"cols":80,"rows":24,"xpixel":0,"ypixel":0,"offset":0,"degraded":1}]}`
 	testing.expect_value(t, decode(Frame{u8(Kind.Welcome), 0, transmute([]u8)string(bad)}, .Welcome, &w, context.temp_allocator), Msg_Error.Wrong_Type)
+}
+
+// INPUT_IF_IDLE carries its request id ahead of the bytes; a payload shorter than the id is refused.
+@(test)
+input_if_idle_round_trip :: proc(t: ^testing.T) {
+	b := make([dynamic]u8, context.temp_allocator)
+	testing.expect(t, encode_input_if_idle(&b, 9, 0x0102030405060708, transmute([]u8)string("ls\r")))
+	f, used, e := next_frame(b[:])
+	testing.expect_value(t, e, Frame_Error.None)
+	testing.expect_value(t, used, len(b))
+	id, bytes, de := decode_input_if_idle(f)
+	testing.expect_value(t, de, Msg_Error.None)
+	testing.expect_value(t, id, u64(0x0102030405060708))
+	testing.expect_value(t, string(bytes), "ls\r")
+	testing.expect_value(t, f.terminal, u32(9))
+	_, _, de = decode_input_if_idle(Frame{u8(Kind.Input_If_Idle), 9, b[HEADER_SIZE:HEADER_SIZE + 4]})
+	testing.expect_value(t, de, Msg_Error.Short_Payload)
+	free_all(context.temp_allocator)
 }

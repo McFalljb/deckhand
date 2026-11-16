@@ -156,3 +156,16 @@ test("filter at once: the tree the page holds, narrowed the core's way, parents 
   narrowTree(big, "p12");
   assert.ok(performance.now() - t0 < 50, "5,000 rows in under 50 ms");
 });
+
+import { knowFile, knownFile } from "../src/app/filecache.ts";
+
+test("file tabs: the files read last are kept by path, at most 8 and 16 MB of text", () => {
+  const f = (path: string, n: number) => ({ path, size: n, mtime: 0, hash: path, markdown: false, text: "x".repeat(n) });
+  for (let i = 0; i < 10; i++) knowFile("/p/" + i, f("/p/" + i, 10));
+  assert.equal(knownFile("/p/0"), undefined); // the oldest went
+  assert.equal(knownFile("/p/9")?.hash, "/p/9");
+  knowFile("/p/big1", f("/p/big1", 9 << 20));
+  knowFile("/p/big2", f("/p/big2", 9 << 20)); // over 16 MB: the older big one goes, not the newest
+  assert.equal(knownFile("/p/big1"), undefined);
+  assert.equal(knownFile("/p/big2")?.hash, "/p/big2");
+});

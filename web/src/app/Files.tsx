@@ -13,6 +13,7 @@ import { IS_MAC, shownSession, useApp, type App } from "./ctx.ts";
 import { Icon } from "./icons.tsx";
 import { parseMarkdown, safeHref, type Block, type Inline } from "./markdown.ts";
 import { Windowed, type WItem } from "./Windowed.tsx";
+import { knowFile, knownFile } from "./filecache.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -152,14 +153,16 @@ function useFile(app: App, path: string) {
     if (d.same) return;
     if (editing.current && cur.current && !force) return setChanged(true);
     cur.current = d;
+    knowFile(path, d);
     setFile(d);
     setChanged(false);
   };
   useEffect(() => {
-    cur.current = null;
-    setFile(null);
+    const had = knownFile(path) ?? null;
+    cur.current = had;
+    setFile(had);
     setDraft(null);
-    read(true);
+    read(!had); // known: asked with its hash (unchanged: nothing sent)
     const t = window.setInterval(() => read(), 2500);
     return () => window.clearInterval(t);
   }, [path]);
@@ -173,6 +176,7 @@ function useFile(app: App, path: string) {
     }
     const d: FileData = json(r.data);
     cur.current = { ...d, text: draft };
+    knowFile(path, cur.current);
     setFile(cur.current);
     setDraft(null);
     setChanged(false);

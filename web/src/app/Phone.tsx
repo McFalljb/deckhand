@@ -12,7 +12,7 @@ import { ChangesView } from "./Changes.tsx";
 import { Deck } from "./Deck.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { fileTabPath, newTabItems, tabHarness, tabTitle } from "./Panes.tsx";
-import { FileTab } from "./Files.tsx";
+import { FilesPanel, FileTab } from "./Files.tsx";
 import { setTermFont, termFontSize, TermPane, type TermHandle } from "./Term.tsx";
 import { agentName, AgentDrawer } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
@@ -67,6 +67,11 @@ export function PhoneSession({ id }: { id: number }) {
   modsRef.current = mods;
   const term = useRef<TermHandle | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
+  // the session's Files (the desktop's sidebar tab) in place of its tab; a file opened from it
+  // opens in a tab, which then shows
+  const [files, setFiles] = useState(false);
+  const activeTab = store.session(id)?.active_tab ?? 0;
+  useEffect(() => setFiles(false), [activeTab]);
 
   // makes it current at the core, which starts its restored tabs
   useEffect(() => {
@@ -158,11 +163,16 @@ export function PhoneSession({ id }: { id: number }) {
           <div class="bar-title">{w?.title ?? s.title}</div>
           <div class="bar-sub">{[w?.chat ? "Chats" : w?.place, store.machineName(s.machine)].filter(Boolean).join(" · ")}</div>
         </div>
+        <IconButton icon="folder" label={files ? "Back to the tab" : "Files"} on={files} run={() => setFiles(!files)} />
         <IconButton icon="more" label="Session menu" run={menu} />
       </header>
       <PhoneStrip s={s} active={tab?.id ?? 0} />
       <div class="phone-term">
-        {!tab ? (
+        {files ? (
+          <div class="sidebar phone-files">
+            <FilesPanel />
+          </div>
+        ) : !tab ? (
           <div class="pane-note">No tabs.</div>
         ) : isTerminalTab(tab) ? (
           <>
@@ -184,7 +194,7 @@ export function PhoneSession({ id }: { id: number }) {
           <div class="pane-note">This tab shows in the Deckhand window.</div>
         )}
       </div>
-      {tab && !isTerminalTab(tab) ? null : (
+      {files || (tab && !isTerminalTab(tab)) ? null : (
       <>
       <div class="keybar">
         {waiting ? (

@@ -38,8 +38,9 @@ await build({
 });
 
 copyFileSync(join(web, "index.html"), join(dist, "index.html"));
+copyFileSync(join(web, "..", "assets", "icon", "deckhand.svg"), join(dist, "icon.svg")); // the tab's icon (the app's)
 
-for (const f of ["index.html", "app.js", "app.css"]) {
+for (const f of ["index.html", "app.js", "app.css", "icon.svg"]) {
   const n = statSync(join(dist, f)).size;
   console.log(`dist/${f}  ${(n / 1024).toFixed(1)} KiB`);
 }

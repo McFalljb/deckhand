@@ -836,6 +836,7 @@ a { color: inherit; }
 .md-img { color: var(--text-muted); }
 .phone-term .file-tab { position: absolute; inset: 0; }
 .phone-term .md-body { padding: 16px; }
+.phone-term .phone-files { position: absolute; inset: 0; display: flex; flex-direction: column; width: auto; border: 0; }
 /* ---- Settings (Settings.tsx; src/ui_settings_page.odin): the sections, then cards of rows ---- */
 .settings-page { flex: 1; min-width: 0; min-height: 0; display: flex; background: var(--bg-app); }
 .set-nav { flex: 0 0 clamp(112px, 28%, 200px); display: flex; flex-direction: column; gap: 2px; padding: 8px; overflow-y: auto; background: var(--bg-sidebar); border-right: 1px solid var(--border); }

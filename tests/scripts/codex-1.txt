@@ -90,9 +90,10 @@ waitstate 5000 open_sessions.0.tabs.0.agent_status.osc7501.state done
 assert_not_screen SLASH COMMAND RAN
 assert_not_screen SHELL MODE
 assert_not_screen MENTION POPUP
-# 7. Codex tabs take no comments and no flags yet; never on another machine (none here)
-ui_command {"type":"new_claude_tab","session":$session,"harness":"codex","args":["-m","o3"]}
-assert_result error Codex tabs take no extra flags yet: your own Codex settings (~/.codex/config.toml) apply
+# 7. Codex tabs take only the flags Deckhand passes on (codex_args_check, #131: -m o3 would open
+# one); never on another machine (none here)
+ui_command {"type":"new_claude_tab","session":$session,"harness":"codex","args":["--bogus"]}
+assert_result error --bogus is not a Codex flag Deckhand passes on
 # 8. its main tab's title and the tab's tooltip say Codex
 hover tab 0
 eventually

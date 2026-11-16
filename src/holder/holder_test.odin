@@ -837,8 +837,10 @@ start_checks :: proc(t: ^testing.T) {
 	cs :: proc(s: string) -> cstring {return strings.clone_to_cstring(s, context.temp_allocator)}
 	testing.expect_value(t, posix.mkdir(cs(base), posix.S_IRWXU), posix.result.OK)
 	defer posix.rmdir(cs(base))
-	testing.expect_value(t, posix.mkdir(cs(run), posix.S_IRWXU + {.IRGRP, .IXGRP, .IROTH, .IXOTH}), posix.result.OK)
+	testing.expect_value(t, posix.mkdir(cs(run), posix.S_IRWXU), posix.result.OK)
 	defer posix.rmdir(cs(run))
+	// 0755 set after mkdir: mkdir's mode is masked by the umask (077 left a 0700 folder, accepted)
+	chmod(cs(run), 0o755)
 
 	cfg := test_cfg()
 	cfg.run_dir = run

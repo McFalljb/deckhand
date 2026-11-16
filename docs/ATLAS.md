@@ -530,7 +530,7 @@ Today: `<data dir>/atlas/ATLAS.md`. New: `<atlas folder>/ATLAS.md` (`<home_dir>/
 3. Neither → write the starter into the notes folder.
 4. no main folder, or the atlas folder unreachable → use the data-dir copy (or its starter) and show a one-line
    warning in the drawer.
-Settings' Atlas group and "Atlas: edit prompt" open whichever copy is in use.
+Settings › Atlas & jobs and "Atlas: edit prompt" open whichever copy is in use.
 
 ## 9. Build plan
 

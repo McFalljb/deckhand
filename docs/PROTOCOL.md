@@ -1333,9 +1333,10 @@ from the `uname -sm` probe) through `skew_check`; `state.machines`
 text, cleaned: printable runes only, no bidi controls; `version` at most 64 bytes, `error` 128),
 `job` and `job_note` (`machine_install`), `update` (`none`, `button`, `command`), `linger`
 (`unknown`, `on`, `off`), `codex` (its hello's features list `codex_tabs`: Codex tabs may be
-started there) and `checklist` (`[{id, state, command}]`: that core's coding agents
+started there) and `checklist` (`[{id, state, version, command}]`: that core's coding agents
 checklist, from its `live.checklist`, which a core fills only while a hub is attached; ids this
-build knows, at most 16, commands cleaned, at most 512 bytes; shown read-only with Copy).
+build knows, at most 16, commands cleaned, at most 512 bytes; `version`: what it found there,
+cleaned, at most 64 bytes, `""` when not known or from an older core; shown read-only with Copy).
 A Linux core whose data dir holds `machines-reachable.grant` (a regular 0600 file of this user's,
 no link followed; written by `install --allow-hubs`) turns `machines_reachable` on at its start and
 removes it. It reconnects after

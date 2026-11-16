@@ -58,6 +58,18 @@ jobs:
       - name: No window imports in src/core or src/holder; the M2-B verifier refuses what it must
         run: scripts/check-core-boundary.sh && sh tests/check-core-boundary-test.sh && sh tests/core-move-verify-test.sh
 
+  # The browser client (web/): its types, unit tests and bundle (docs/PROTOCOL.md §5b)
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22.18" }
+      - name: Typecheck, test and build
+        run: cd web && npm ci --no-audit --no-fund && npm run check
+
   unit:
     runs-on: macos-15 # arm64
     timeout-minutes: 20

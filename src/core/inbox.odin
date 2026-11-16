@@ -127,6 +127,13 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Machine_Add:         return Machine_Add{name = s(c.name, allocator), target = s(c.target, allocator), via = s(c.via, allocator)}
 	case Machine_Remove:      return Machine_Remove{no = c.no, confirm = s(c.confirm, allocator)}
 	case Set_Machines_Reachable: return Set_Machines_Reachable{on = c.on, confirm = s(c.confirm, allocator)}
+	case Set_Web_Access:      return Set_Web_Access{on = c.on, confirm = s(c.confirm, allocator)}
+	case Web_Watch:           return Web_Watch{projects = slice.clone(c.projects, allocator)}
+	case File_Read:           return File_Read{path = s(c.path, allocator), since = s(c.since, allocator)}
+	case File_Save:           return File_Save{path = s(c.path, allocator), text = s(c.text, allocator), base = s(c.base, allocator), force = c.force}
+	case Web_Settings, Job_Draft: return web_extra_clone(cmd, allocator)
+	case Set_Web_Listen:      return Set_Web_Listen{address = s(c.address, allocator)}
+	case Web_Revoke:          return Web_Revoke{id = s(c.id, allocator)}
 	case Machine_Rename:      return Machine_Rename{no = c.no, name = s(c.name, allocator)}
 	case Machine_Open_Page:   return Machine_Open_Page{no = c.no, port = c.port, path = s(c.path, allocator)}
 	case Pi_Handoff:          return Pi_Handoff{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), to_project_id = c.to_project_id, run = s(c.run, allocator), folder = s(c.folder, allocator)}
@@ -255,7 +262,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return cmd
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
 		return update_clone(cmd, allocator)
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
+	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_command_clone(cmd, allocator)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		return md_command_clone(cmd, allocator)
@@ -288,7 +295,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return browser_agent_clone(cmd, allocator)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
 		return browser_act_clone(cmd, allocator)
-	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Set_Sidebar_View, Select_Project, New_Chat, Focus_Session, Show_No_Session, Next_Needing_You, Mark_All_Read, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Zoom_Pane, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Set_Remote_Machines, Machine_Connect, Machine_Login, Machine_Install, Machine_Linger, Holder_Replace, Holder_Restart, Holder_Recover, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Dim_Panes, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
+	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Set_Sidebar_View, Select_Project, New_Chat, Focus_Session, Show_No_Session, Next_Needing_You, Mark_All_Read, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Zoom_Pane, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Set_Remote_Machines, Machine_Connect, Machine_Login, Machine_Install, Machine_Linger, Web_Pair, Web_Devices, Holder_Replace, Holder_Restart, Holder_Recover, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Dim_Panes, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
 		return cmd
 	}
 	return cmd
@@ -305,6 +312,18 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Pi_Handoff_Part:     delete(c.data, allocator)
 	case Machine_Remove:      delete(c.confirm, allocator)
 	case Set_Machines_Reachable: delete(c.confirm, allocator)
+	case Set_Web_Access:      delete(c.confirm, allocator)
+	case Web_Watch:           delete(c.projects, allocator)
+	case File_Read:
+		delete(c.path, allocator)
+		delete(c.since, allocator)
+	case File_Save:
+		delete(c.path, allocator)
+		delete(c.text, allocator)
+		delete(c.base, allocator)
+	case Web_Settings, Job_Draft: web_extra_free(cmd, allocator)
+	case Set_Web_Listen:      delete(c.address, allocator)
+	case Web_Revoke:          delete(c.id, allocator)
 	case Machine_Rename:      delete(c.name, allocator)
 	case Machine_Add:
 		delete(c.name, allocator)
@@ -489,7 +508,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Jobs_Env:
 		delete(c.path, allocator)
 		delete(c.notes, allocator)
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
+	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		changes_command_free(cmd, allocator)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		md_command_free(cmd, allocator)

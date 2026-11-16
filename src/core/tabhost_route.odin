@@ -70,7 +70,7 @@ browser_not_here :: proc() -> Result {return {error = BROWSER_NOT_HERE_ERROR, da
 
 // Whether a window of this machine's hosts tabs now. A hub (another machine's core, viewing this
 // one's sessions) hosts none: this core's pages, apps and file views stay here (§8.2).
-tab_host_up :: proc() -> bool {return window_attached() && !window_link_hub()}
+tab_host_up :: proc() -> bool {return window_attached() && !window_link_hub() && !window_link_web()}
 
 // The answer to a command a window would host, none being here: browser_not_here for a browser
 // command while another machine views this one (or on a machine with no window at all), else
@@ -79,7 +79,7 @@ tab_host_up :: proc() -> bool {return window_attached() && !window_link_hub()}
 tab_host_absent :: proc(cmd: Command) -> Result {
 	browser := strings.has_prefix(command_type(cmd), "browser_")
 	when ODIN_OS != .Darwin do if browser do return browser_not_here() // no window runs here
-	if browser && window_link_hub() do return browser_not_here()
+	if browser && (window_link_hub() || window_link_web()) do return browser_not_here() // a browser viewing: no CEF there either
 	return no_window()
 }
 

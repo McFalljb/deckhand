@@ -13,6 +13,9 @@
 //   deckhand-core-serve connect [--from NAME]       another machine's hub link, over its ssh: the
 //                                                   hub hello on this machine's core.sock, then
 //                                                   stdio <-> the socket (connect.odin)
+//   deckhand-core-serve web on|off|pair|list|revoke ID|listen ADDRESS
+//                                                   web access, from a terminal on this machine
+//                                                   (web_cli.odin)
 //   deckhand-core-serve linger [--enable]           Linux: this user's systemd linger, on|off|unknown;
 //                                                   --enable (the user said yes) asks logind for it,
 //                                                   no password prompt, no sudo (platform_linux.odin)
@@ -43,6 +46,7 @@ main :: proc() {
 	when ODIN_OS == .Linux do if len(os.args) == 5 && os.args[1] == "install" && os.args[2] == "--data" && os.args[4] == "--allow-hubs" do os.exit(install_main(os.args[3], allow_hubs = true))
 	if len(os.args) == 6 && os.args[1] == "launch" && os.args[2] == "--run" && os.args[4] == "--data" do os.exit(launch_main(os.args[3], os.args[5]))
 	if len(os.args) >= 2 && os.args[1] == "connect" do os.exit(connect_main(os.args[2:]))
+	if len(os.args) >= 2 && os.args[1] == "web" do os.exit(web_main(os.args[2:]))
 	when ODIN_OS == .Linux do if len(os.args) >= 2 && os.args[1] == "linger" do os.exit(linger_main(os.args[2:]))
 	fmt.eprintln(SERVE_USAGE)
 	os.exit(2)

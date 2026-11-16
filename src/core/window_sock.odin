@@ -65,7 +65,9 @@ Window_Arrival :: struct {
 	peer:     trust.Peer,
 	version:  string, // heap: the window's release version ("" for a development build)
 	hub:      bool, // another machine's core (its hello said "peer":"hub")
-	from:     string, // heap: that machine's name
+	from:     string, // heap: that machine's name (a browser's: its name)
+	web:      bool, // a paired browser (web_http.odin's relay): fd is the core's end of its socketpair
+	device:   string, // heap: the browser's device id
 }
 
 @(private = "file")
@@ -81,6 +83,7 @@ door: struct {
 	hub_ok:     bool, // Settings › Machines › Allow other machines to connect (main thread keeps it current)
 	hub_known:  bool, // ...from the saved settings: the loop's first turn (a hub hello waits for it, ≤ 5 s)
 	hub_no_sshd: bool, // test builds: DECKHAND_HUB_WITHOUT_SSHD=1 (the --via scenes have no sshd)
+	web_admin_anywhere: bool, // test builds: DECKHAND_WEB_ADMIN_ANYWHERE=1 (tests/web-smoke.py has no sshd or login)
 	arrived:    [dynamic]Window_Arrival,
 }
 
@@ -109,6 +112,7 @@ window_token_publish :: proc(run_dir: string) -> bool {
 	copy(door.token[:], hex)
 	copy(door.core_id[:], id)
 	when TEST_HOOKS do door.hub_no_sshd = hook_env(.Hub_Without_Sshd) == "1"
+	when TEST_HOOKS do door.web_admin_anywhere = hook_env(.Web_Admin_Anywhere) == "1"
 	delete(door.path, runtime.heap_allocator())
 	door.path = strings.clone(path, runtime.heap_allocator())
 	door.own_pid = i32(posix.getpid())
@@ -164,6 +168,43 @@ window_hello_refusal :: proc(h: Window_Hello) -> string {
 	if h.holder_child do return h.hub ? "a program running in a Deckhand tab can't be its hub" : "a program running in a Deckhand tab can't be its window"
 	if h.hub && h.self do return "a core can't be its own hub"
 	return ""
+}
+
+// The hello of `deckhand-core-serve web on|off|pair|list|revoke|listen` (coremain/web_cli.odin): a
+// line hello with "peer":"web-admin", the window token, and op and arg. Its checks, as a window's
+// minus the code check: the token (a file only this user reads); this user, still the process
+// that connected; not a program in a Deckhand tab (an agent there is not the user at this
+// machine); and come in over ssh (pid_from_outside: a root-owned sshd or sshd-session above it),
+// since a tab's program can fork, let its parent exit and so stop being a tab's
+// descendant. What it does not stop: a program that can itself ssh into this machine (a key
+// without a passphrase, an agent socket) passes as the user would.
+WEB_ADMIN_PEER :: "web-admin"
+
+WEB_ADMIN_NOT_OUTSIDE :: "web: ssh into this machine and run it there (at its own screen too: ssh localhost); on a Mac, Settings › Machines › Web access"
+
+web_admin_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, token: string) -> string {
+	sync.lock(&door.mu)
+	on, want, holder, own, anywhere := door.on, door.token, door.holder_pid, door.own_pid, door.web_admin_anywhere
+	sync.unlock(&door.mu)
+	if !on || !hex64_equal(string(want[:]), token) do return "web: not this core's window token"
+	if trust.peer_allowed(.Adhoc, trust.own_uid(), at_accept) != .Allow do return "web: must run as this user"
+	if trust.peer_still(at_accept, trust.peer_read(fd)) != .Allow do return "web: the process changed since it connected"
+	if pid_descends_from(at_accept.pid, {own, holder}) do return "web: not from a program in a Deckhand tab: run it in a terminal of your own on this machine (ssh in, or the machine's own console)"
+	if !anywhere && !pid_from_outside(at_accept.pid) do return WEB_ADMIN_NOT_OUTSIDE
+	return ""
+}
+
+// What a web-admin op runs (with the internal caller: the terminal is the user's yes).
+web_admin_command :: proc(op, arg: string) -> (cmd: Command, err: string) {
+	switch op {
+	case "on":     return Set_Web_Access{on = true}, ""
+	case "off":    return Set_Web_Access{on = false}, ""
+	case "pair":   return Web_Pair{}, ""
+	case "list":   return Web_Devices{}, ""
+	case "revoke": return Web_Revoke{id = arg}, ""
+	case "listen": return Set_Web_Listen{address = arg}, ""
+	}
+	return nil, "web: on, off, pair, list, revoke ID or listen ADDRESS"
 }
 
 // The framed hello's checks (a connection's reader thread, before the reply). at_accept and tok:
@@ -247,13 +288,25 @@ Proc_Look :: #type proc(pid: i32) -> (parent: i32, uid: u32, name: string)
 // 64 steps: the peer came in through ssh. Only root makes a root-owned process, so a same-user
 // process can't fake one; one a tab detached (nohup, setsid, launchctl) is launchd's.
 pid_via_sshd :: proc(pid: i32, look: Proc_Look = proc_look) -> bool {
+	return pid_root_ancestor(pid, {"sshd", "sshd-session"}, look)
+}
+
+// Whether pid came into this machine from outside: a root-owned sshd or sshd-session among its
+// ancestors (as the hub's). Not login: macOS's `/usr/bin/login -f $USER` is setuid root and asks
+// the same user for no password, so a tab's detached program could start one above itself.
+pid_from_outside :: proc(pid: i32, look: Proc_Look = proc_look) -> bool {
+	return pid_via_sshd(pid, look)
+}
+
+@(private = "file")
+pid_root_ancestor :: proc(pid: i32, names: []string, look: Proc_Look) -> bool {
 	p := pid
 	for _ in 0 ..< 64 {
 		if p <= 1 do return false
 		parent, _, _ := look(p)
 		if parent <= 1 || parent == p do return false
 		_, uid, name := look(parent)
-		if uid == 0 && (name == "sshd" || name == "sshd-session") do return true
+		if uid == 0 do for n in names do if name == n do return true
 		p = parent
 	}
 	return false
@@ -291,6 +344,22 @@ window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.
 	if platform.wake != nil do platform.wake()
 }
 
+// A paired browser's WebSocket is up (web_http.odin's relay thread): fd, the core's end of its
+// socketpair, waits for the main thread as a window's does. Closed if the door is shut.
+web_arrived :: proc(fd: Sock_Fd, device, name: string) {
+	heap := runtime.heap_allocator()
+	sync.lock(&door.mu)
+	if !door.on {
+		sync.unlock(&door.mu)
+		sock_close(fd)
+		return
+	}
+	if door.arrived == nil do door.arrived = make([dynamic]Window_Arrival, heap)
+	append(&door.arrived, Window_Arrival{fd = fd, web = true, from = strings.clone(name, heap), device = strings.clone(device, heap)})
+	sync.unlock(&door.mu)
+	if platform.wake != nil do platform.wake()
+}
+
 // Main thread, each turn of the core loop: windows that said their hello attach (the newest one
 // stays), and the door learns the holder's pid.
 window_door_tick :: proc() {
@@ -309,9 +378,16 @@ window_door_tick :: proc() {
 	door.arrived = nil
 	sync.unlock(&door.mu)
 	heap := runtime.heap_allocator()
+	now := time.to_unix_seconds(time.now())
 	for a, i in got {
-		if i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from) {
-			if !a.hub { // a window's version raises the floor; a hub's is a core's (none here)
+		// a browser checked on its connection's thread: revoked or expired since, it is not attached.
+		// Checked and attached as one step (web_device_hold): an unpair waits, then kicks it.
+		live := true
+		if a.web do live = web_device_hold(a.device, now)
+		attached := live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device)
+		if a.web do web_device_release()
+		if attached {
+			if !a.hub && !a.web { // a window's version raises the floor; a hub's is a core's, a browser has none
 				sync.lock(&door.mu)
 				was := door.floor
 				door.floor = cw.window_floor_raise(door.floor, a.version)
@@ -323,6 +399,7 @@ window_door_tick :: proc() {
 		delete(a.leftover, heap)
 		delete(a.version, heap)
 		delete(a.from, heap)
+		delete(a.device, heap)
 	}
 	delete(got)
 }
@@ -368,6 +445,7 @@ window_door_stop :: proc() {
 		delete(a.leftover, runtime.heap_allocator())
 		delete(a.version, runtime.heap_allocator())
 		delete(a.from, runtime.heap_allocator())
+		delete(a.device, runtime.heap_allocator())
 	}
 	delete(got)
 	if window_link_is_sock() do core_detach_window()
@@ -423,6 +501,14 @@ when TEST_HOOKS {
 	window_door_hub_for_test :: proc(allowed, without_sshd: bool) {
 		sync.guard(&door.mu)
 		door.hub_ok, door.hub_no_sshd, door.hub_known = allowed, without_sshd, true
+	}
+}
+
+when TEST_HOOKS {
+	// Tests: web_admin_check's from-outside check off (as DECKHAND_WEB_ADMIN_ANYWHERE).
+	window_door_web_admin_anywhere_for_test :: proc(on: bool) {
+		sync.guard(&door.mu)
+		door.web_admin_anywhere = on
 	}
 }
 

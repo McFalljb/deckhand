@@ -89,6 +89,16 @@ Changes_Commit :: struct {
 	tab_id:  u64,
 	message: string,
 }
+// A browser's Changes tab (web_changes.odin): selects a listed file (its diff is read as for
+// the window's), shows more of the diff, or reads the checkout again. View state only.
+Changes_Select :: struct {
+	tab_id:  u64,
+	path:    string, // "" = keep the selection
+	scope:   string, // "uncommitted" (default) or "committed"
+	status:  string, // as for Changes_Stage
+	more:    bool, // CHANGES_LINES_STEP more lines of the diff
+	refresh: bool, // read the checkout again now
+}
 // Internal: a worker read a checkout's changes.
 Changes_Scan_Done :: struct {
 	root: string,
@@ -190,6 +200,8 @@ Changes_View :: struct {
 	shown:        int, // lines shown (CHANGES_LINES_STEP, more per "Show more")
 	diff_gen:     u64,
 	diff_loading: bool,
+	diff_link:    u64, // the browser's link it is read for (window_link_serial; 0 = not a browser's): a result after that link went is dropped
+	msg:          string, // why the diff area shows no diff (owned; "" = it shows one): a browser's (web_changes.odin)
 	busy:         string, // an action running ("Staging…"); "" = none
 	notice:       string, // the last action's outcome (owned)
 	notice_err:   bool,
@@ -680,7 +692,9 @@ changes_drop :: proc(tab_id: u64) {
 	delete(v.sel_path)
 	delete(v.diff)
 	delete(v.notice)
+	delete(v.msg)
 	free(v)
+	web_changes_drop(tab_id)
 	delete_key(&changes_views, tab_id)
 }
 
@@ -688,7 +702,9 @@ changes_drop :: proc(tab_id: u64) {
 // refused editor as a message with the path under it).
 @(private = "file")
 changes_message :: proc(v: ^Changes_View, msg: string, path := "") {
-	if window_link_is_sock() do return // its own view says it (changes_view)
+	delete(v.msg)
+	v.msg = strings.clone(msg)
+	if window_link_is_sock() && !window_link_web() do return // its own view says it (changes_view); a browser's: this one
 	window_changes_diff(v.tab_id, path != "" ? path : v.root, "", msg)
 	window_state_changed()
 }
@@ -751,6 +767,10 @@ changes_select :: proc(v: ^Changes_View, path: string, scope: Change_Scope, stat
 		v.sel_scope = scope
 		v.sel_status = status
 		v.shown = CHANGES_LINES_STEP
+		// the old file's diff goes: never shown under the new path while its own is read
+		delete(v.diff)
+		delete(v.msg)
+		v.diff, v.diff_lines, v.msg = "", 0, ""
 		window_changes_rewind(v.tab_id)
 	}
 	changes_diff_start(v)
@@ -791,7 +811,7 @@ changes_is_selected :: proc(v: ^Changes_View, f: Change_File) -> bool {
 // else the nearest one; its diff is read again.
 @(private = "file")
 changes_view_follow :: proc(v: ^Changes_View, r: ^Changes_Repo) {
-	if window_link_is_sock() do return // a window in another process follows the list itself (changes_view)
+	if window_link_is_sock() && !window_link_web() do return // a window in another process follows the list itself (changes_view); a browser: the core does
 	if r.err != "" {
 		changes_message(v, r.err)
 		return
@@ -845,6 +865,7 @@ changes_diff_start :: proc(v: ^Changes_View) {
 		return
 	}
 	v.diff_loading = true
+	v.diff_link = window_link_web() ? window_link_serial() : 0
 	Job :: struct {
 		tab_id, gen:           u64,
 		root, path, old, base: string,
@@ -915,6 +936,14 @@ changes_diff_done :: proc(c: Changes_Diff_Done) {
 	delete(v.diff)
 	v.diff = ""
 	v.diff_lines = 0
+	// a hub never gets one; one read for a browser whose link went (a hub, a window or another
+	// browser took it) is dropped, never sent on; a browser attached reads it again (changes_web_tick)
+	if window_link_hub() || (v.diff_link != 0 && v.diff_link != window_link_serial()) {
+		delete(v.msg)
+		v.msg = ""
+		window_state_changed()
+		return
+	}
 	_, f := changes_selected(v)
 	abs := f != nil ? strings.concatenate({v.root, "/", f.path}, context.temp_allocator) : v.root
 	if c.err != "" {
@@ -924,10 +953,13 @@ changes_diff_done :: proc(c: Changes_Diff_Done) {
 	v.diff = strings.clone(c.text)
 	v.diff_lines = strings.count(v.diff, "\n")
 	changes_show(v, abs)
+	window_state_changed() // a browser's: its webdiff section (web_changes.odin)
 }
 
 // Puts the first v.shown lines of the diff in the editor (ui_changes.odin's Show more too).
 changes_show :: proc(v: ^Changes_View, abs: string) {
+	delete(v.msg)
+	v.msg = ""
 	text := v.diff
 	if v.diff_lines > v.shown {
 		end := 0
@@ -1033,6 +1065,8 @@ changes_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		if repo == nil do return fail("not in a git repository"), false
 		changes_ask(repo)
 		return {ok = true, data = strings.clone(changes_json(repo))}, false
+	case Changes_Select:
+		return changes_select_apply(c, caller), false
 	case Changes_Stage, Changes_Unstage:
 		tab_id: u64
 		path, status: string
@@ -1364,6 +1398,7 @@ changes_command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Com
 	case Changes_Unstage:   return Changes_Unstage{tab_id = c.tab_id, path = s(c.path, allocator), status = s(c.status, allocator)}
 	case Changes_Discard:   return Changes_Discard{tab_id = c.tab_id, path = s(c.path, allocator), status = s(c.status, allocator), confirm = s(c.confirm, allocator), second = c.second}
 	case Changes_Commit:    return Changes_Commit{tab_id = c.tab_id, message = s(c.message, allocator)}
+	case Changes_Select:    return Changes_Select{tab_id = c.tab_id, path = s(c.path, allocator), scope = s(c.scope, allocator), status = s(c.status, allocator), more = c.more, refresh = c.refresh}
 	case Changes_Scan_Done: return Changes_Scan_Done{root = s(c.root, allocator), gen = c.gen, out = s(c.out, allocator)}
 	case Changes_Diff_Done: return Changes_Diff_Done{tab_id = c.tab_id, gen = c.gen, text = s(c.text, allocator), err = s(c.err, allocator)}
 	case Changes_Op_Done:   return Changes_Op_Done{tab_id = c.tab_id, root = s(c.root, allocator), request_id = c.request_id, what = c.what, trash = s(c.trash, allocator), err = s(c.err, allocator)}
@@ -1386,6 +1421,10 @@ changes_command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.status, allocator)
 		delete(c.confirm, allocator)
 	case Changes_Commit:  delete(c.message, allocator)
+	case Changes_Select:
+		delete(c.path, allocator)
+		delete(c.scope, allocator)
+		delete(c.status, allocator)
 	case Changes_Scan_Done:
 		delete(c.root, allocator)
 		delete(c.out, allocator)
@@ -1407,6 +1446,7 @@ changes_command_type :: proc(cmd: Command) -> string {
 	case Changes_Unstage:   return "changes_unstage"
 	case Changes_Discard:   return "changes_discard"
 	case Changes_Commit:    return "changes_commit"
+	case Changes_Select:    return "changes_select"
 	case Changes_Scan_Done: return "changes_scan_done"
 	case Changes_Diff_Done: return "changes_diff_done"
 	case Changes_Op_Done:   return "changes_op_done"

@@ -273,7 +273,9 @@ sidebar_filtering :: proc() -> bool {
 // shows (as their context). Parent and group rows are open when saved open
 // (Sidebar.expanded), while filtering (the matches show), or when they hold
 // the selected project or waiting work.
-sidebar_projects :: proc() -> []Sidebar_Row {
+// all (a browser's tree, web_view.odin): the rows that pass, nested ones too whatever is folded
+// (the browser folds rows itself).
+sidebar_projects :: proc(all := false) -> []Sidebar_Row {
 	Node :: struct {
 		row:   Sidebar_Row,
 		ok:    bool, // passes on its own
@@ -370,7 +372,7 @@ sidebar_projects :: proc() -> []Sidebar_Row {
 	}
 	for i in top do visit(nodes[:], i)
 	rows := make([dynamic]Sidebar_Row, context.temp_allocator)
-	emit :: proc(nodes: []Node, list: []int, depth: int, rows: ^[dynamic]Sidebar_Row) {
+	emit :: proc(nodes: []Node, list: []int, depth: int, rows: ^[dynamic]Sidebar_Row, all: bool) {
 		level := make([dynamic]Sidebar_Row, context.temp_allocator)
 		for i in list {
 			if !nodes[i].shown do continue
@@ -385,10 +387,10 @@ sidebar_projects :: proc() -> []Sidebar_Row {
 			r.forced = n.row.kids > 0 && (sidebar_filtering() || n.force)
 			r.open = r.forced || (n.row.kids > 0 && list_index(state.sidebar.expanded[:], n.path) >= 0)
 			append(rows, r)
-			if r.open do emit(nodes, n.kids[:], depth + 1, rows)
+			if r.open || (all && r.kids > 0) do emit(nodes, n.kids[:], depth + 1, rows, all)
 		}
 	}
-	emit(nodes[:], top[:], 0, &rows)
+	emit(nodes[:], top[:], 0, &rows, all)
 	return rows[:]
 }
 
@@ -438,16 +440,21 @@ project_sessions_match :: proc(p: Project) -> bool {
 // The session rows of a section (.Sessions: the selected project's; .Chats)
 // in display order (temp allocator).
 sidebar_sessions :: proc(section: Sort_Section) -> []Sidebar_Row {
+	return sidebar_sessions_of(section, section == .Chats ? state.chats[:] : state.sessions[:], state.selected_project)
+}
+
+// The same for any project's listed sessions (a browser's tree lists the projects it opened:
+// web_view.odin); pid is ignored for .Chats.
+sidebar_sessions_of :: proc(section: Sort_Section, list: []Session, pid: u64) -> []Sidebar_Row {
 	rows := make([dynamic]Sidebar_Row, context.temp_allocator)
-	list := section == .Chats ? state.chats[:] : state.sessions[:]
 	words := filter_words()
 	// a project found by the filter shows all its sessions
 	if section == .Sessions && len(words) > 0 {
-		if p := find_project(state.selected_project); p != nil {
+		if p := find_project(pid); p != nil {
 			if _, ok := filter_score(words, project_name(p^), p.cwd); ok do words = nil
 		}
 	}
-	for &s in sessions_with_new(section, list) {
+	for &s in sessions_with_new(section, list, pid) {
 		r := Sidebar_Row{session = &s, pin = session_pinned(s.id), hidden = session_hidden(s.id)}
 		st := session_status(s.id)
 		r.attn = attention_tier(st)
@@ -466,8 +473,8 @@ sidebar_sessions :: proc(section: Sort_Section) -> []Sidebar_Row {
 // A section's listed sessions plus the open ones not listed yet (a new chat
 // or session before pi wrote its file, or since the last scan), as the
 // section's rows show them (temp allocator; the listed ones are copies).
-sessions_with_new :: proc(section: Sort_Section, list: []Session) -> []Session {
-	pid := state.selected_project
+sessions_with_new :: proc(section: Sort_Section, list: []Session, project: u64 = 0) -> []Session {
+	pid := project != 0 ? project : state.selected_project
 	if section == .Chats {
 		c := chats_project()
 		pid = c != nil ? c.id : 0
@@ -726,7 +733,7 @@ open_session_age :: proc(s: ^Open_Session) -> string {
 		return "new"
 	}
 	if s.session_file == "" do return "new"
-	open_session_refresh(s)
+	if !web_view_computing do open_session_refresh(s)
 	return ago(s.mtime)
 }
 
@@ -818,7 +825,7 @@ session_place :: proc(s: ^Open_Session) -> (ic: Icon, name: string) {
 // selected project's), else read from its session file (cached until the
 // file grows); "Untitled session · <created>" (a project's) or "Untitled
 // chat · …" while the file has no title, plain while there is no file yet.
-open_session_title :: proc(s: ^Open_Session) -> string {
+open_session_title :: proc(s: ^Open_Session, refresh := true) -> string {
 	// another machine's: the title it sent (its session file and Claude history are not on this Mac)
 	if s.machine != 0 && s.title != "" do return strings.clone(s.title, context.temp_allocator)
 	// a Claude-only session: its history entry's title (claude.odin; the first prompt, or the user's)
@@ -830,7 +837,7 @@ open_session_title :: proc(s: ^Open_Session) -> string {
 	untitled := open_session_is_chat(s) ? "Untitled chat" : "Untitled session"
 	for l in state.sessions do if l.id == s.pi_session_id do return session_label(l)
 	if s.session_file == "" do return untitled
-	open_session_refresh(s) // at most once a second (sidebar.odin)
+	if refresh && !web_view_computing do open_session_refresh(s) // at most once a second; a browser's view: never (web_view.odin)
 	// a copy for this frame: a later call may replace the cached one while
 	// earlier palette items still point at it
 	if s.title != "" do return strings.clone(s.title, context.temp_allocator)

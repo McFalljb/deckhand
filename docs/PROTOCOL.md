@@ -89,8 +89,10 @@ The first message on a connection is `hello`:
   not, nor any command while this core's window link is a hub's: every `machine_*` command,
   `pi_handoff`, `holder_recover`, `show_no_session`, `set_sidebar_view` and `set_notifications`, and the
   settings that bound what other machines and agents may do here: `set_machines_reachable`,
-  `set_remote_machines`, `set_pi_extension` and `set_claude_default_flags`. A machine viewing this one can't change them, nor answer their
-  confirmation. Any other command a hub sends on behalf of its user (`ui`) gets the `ui`
+  `set_remote_machines`, `set_pi_extension` and `set_claude_default_flags`, and web access's
+  `set_web_access`, `set_web_listen`, `web_pair`, `web_devices` and `web_revoke`. A machine viewing this one can't change them, nor answer their
+  confirmation. A paired browser (§5b, `Caller.web`) is refused them too, but for `show_no_session`,
+  `set_sidebar_view` and `machine_connect`, and is refused `copy_control_token`. Any other command a hub sends on behalf of its user (`ui`) gets the `ui`
   caller's rules here.
 - **Where tokens come from.** Every pi tab Deckhand starts gets a fresh 256-bit random token
   (caller `panel`, that tab) in `DECKHAND_TOKEN`, with `DECKHAND_SOCKET`, and where app
@@ -268,6 +270,15 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `set_separate_core` | `on` | **user only**, on by default (`separate_core_default_on`; `state.settings.separate_core`, saved when it differs from the default): read at the next launch: on, the core is its own process, `deckhand-core-serve serve`, and the window its client over `core.sock` (§5a); off, the core runs in the window's process. A change takes effect once the running core has stopped |
 | `set_remote_machines` | `on` | **this Mac's user only** (`User_Here`: never an agent, a script, a pi tab or another machine's core), on by default since M6-F (`remote_machines_default_on`, `src/core/machines.odin`; `state.settings.remote_machines`, saved when it differs from the default, so off is an opt-out): Settings › Machines over SSH. On, a separate core keeps a link to each machine in `machines.json` (§5a, "The hub"); with none, nothing runs |
 | `set_machines_reachable` | `on`, `confirm`? | **this Mac's user only** (`User_Here`: never an agent, a script, a pi tab or another machine's core) (turning it on: the user confirms first, `needs_confirmation`, whatever the policy), off by default (`machines_reachable_default_on`, `src/core/machines.odin`; `state.settings.machines_reachable`, saved when it differs from the default): Settings › Machines › *Allow other machines to connect to this Mac*. Off, this core's hub door refuses every hub hello (§5a, "The hub"); on, another machine's core that logs in here over ssh as this user can view and drive this machine's sessions. Separate from `remote_machines`, which reaches out |
+| `set_web_access` | `on`, `confirm`? | **this Mac's user only** (`User_Here`, and never a paired browser) (turning it on: the user confirms first, `needs_confirmation`, whatever the policy; the terminal's `deckhand-core-serve web on` does not ask), off by default (`state.settings.web_access`, saved when on): Settings › Machines › *Web access*. On, a separate core listens on `web_listen` over plain HTTP and a paired browser may view and drive this machine's sessions (§5b); off, it stops listening and the browser's link closes |
+| `set_web_listen` | `address` | **this Mac's user only**: web access's listen address, `host:port` with an IPv4 address or a bracketed IPv6 one (`""` = `0.0.0.0:7433`); a host name is refused (`state.settings.web_listen`, saved when set) |
+| `web_pair` | | **this Mac's user only**, with web access on: opens a pairing code (§5b): `data` `{code, expires_in, until, address}`. Never in an event or the log |
+| `file_read` | `path`, `since`? | **a paired browser only** (refused for any other caller): a project's text file for its editor and Markdown tabs: an absolute path inside a project folder of this machine (not the folder itself, nothing in `.git`); never a credentials file (by name or inode) nor what `deckhand show` refuses an agent (keys, tokens, sign-ins: `show_secret`); no device, network or removable volume; no binary; at most 4 MB; UTF-8 only. Read through its folder's descriptor with links not followed and the folder's real path checked again. `data` `{path, size, mtime (ns), hash, markdown, text}`; `since` (the hash it has): `{same: true}` without the text when unchanged. Never in an event (`src/core/web_files.odin`) |
+| `file_save` | `path`, `text`, `base`?, `force`? | **a paired browser only**: saves its edit of an existing regular file under the same rules as `file_read` (not a link, inside a project folder, no secrets, at most 4 MB of UTF-8): a new file beside it (`O_EXCL`, `O_NOFOLLOW`, through the folder's descriptor), its permissions copied, fsync, renamed over it. `base`: the hash it read; a file changed on disk since is refused (`data.code` `changed`) unless `force`. Events and the log carry the path and the text's length, never the text |
+| `web_watch` | `projects` | **a paired browser only** (refused for any other caller): the projects it opened in its Projects tree (ids; at most 1000 sent, the first 48 of this machine's kept); the core then lists their sessions in `websl:`/`webs:` sections, from what it lists for the window anyway (folder listings, cached titles), and again every 10 s. Its folding is its own: no command. Never in an event |
+| `web_settings` | `open` | **a paired browser only** (refused for any other caller): its Settings page shows (`open: true`) or not. While it shows, the core sends that browser `webset` in its state (see `state.full`): the settings registry (`src/core/settings_registry.odin`) as rows, each with its current value, whether a browser may send its command (`web_may_run`: a setting whose command is `User_Here`, or that opens the window's own sheets, is shown "Change this at the Mac") and its list's rows with what a browser may do on each. Changing a setting is its own command, decided by the gate as any browser command. Built when the page opens and when a section it reads changes (a file or folder changed on disk alone shows when the page opens again); a browser that takes the link over gets none until it opens its own. Never in an event |
+| `web_devices` | | **this Mac's user only**: the paired browsers, `data.devices` `[{id, name, paired, last_seen, linked}]` (unix seconds; `linked`: its link is the attached one). Never in an event |
+| `web_revoke` | `id` | **this Mac's user only**: forgets a paired browser (its token stops working) and closes its live link |
 | `machine_add` | `target`, `name`?, `via`? | **this Mac's user only** (`User_Here`), with `remote_machines` on: adds a machine to `<data>/machines.json` (0600; numbers from 1, never reused; `created_id` = its number). `target`: an `~/.ssh/config` alias or `user@host` (letters, digits and `. _ - @ :`, not starting with `-`; a leading `ssh ` or `ssh://` and a trailing `/` are dropped; a target already added is refused); `name`: one line, at most 64 bytes, unique; `""` or the target itself: the target's host part (`nuc` for `me@nuc.local`; an IP address whole), or the whole target when another machine has that name. `via`: a command run in place of `ssh … connect`, development and test builds only (refused in a release build) |
 | `machine_remove` | `no`, `confirm`? | **this Mac's user only** (`User_Here`), confirmed by the user first (`needs_confirmation`, whatever the policy): forgets a machine (its link ends; nothing on it is touched; an install running to it ends and removes what it copied). Its session on screen gives way to this Mac's last shown session |
 | `machine_rename` | `no`, `name` | **this Mac's user only** (`User_Here`): what Deckhand calls a machine (one line, at most 64 bytes, unique); its ssh target stays. A machine waiting for the user (`needs_login`, `refused`, `unsupported`) tries again |
@@ -375,6 +386,7 @@ never inside `.git`; a pi tab's bridge cannot send these).
 | `changes_list` | `tab_id`? \| `path`? | a checkout's changes: a Changes tab's, a folder's (control callers: inside a project), default the current session's. Not for pi tabs. `data` = `{root, loading, branch, default_branch, ahead, truncated?, error?, files: [{path, old_path?, status (M A D R U untracked), scope (uncommitted\|committed), staged? (none\|partly\|all), added?, removed?, binary?, credential?}]}`; `committed` files are those changed by commits on the branch that are not on the default branch (against their merge base). Paths and counts only: never diff text. git runs on a worker (debounced after file changes, at most every 1.5 s, only while the tab or the top bar's "±" is on screen, or after this command asked): while it runs `loading` is true; ask again |
 | `changes_stage`, `changes_unstage` | `tab_id`, `path`, `status`? | the user only; long-running. `status` (`M` `A` `D` `R` `U` `untracked`, as `changes_list` gives it) picks the entry when a path has two (`git rm --cached` plus the file still there: `D` and `untracked`); it is required then. A listed uncommitted file of the tab's checkout: `git add -A -- path` / `git restore --staged -- path` (no HEAD yet: `git rm --cached`) |
 | `changes_discard` | `tab_id`, `path`, `status`?, `confirm`?, `second`? | the user only; long-running, asks first (class `delete`). Back to HEAD: `git restore --source=HEAD --staged --worktree`; refused when that would overwrite something in the work tree (a `D` or `R` entry whose HEAD name exists there) and for a nested git repository. A file HEAD does not have (untracked, added, a rename's new name) is moved to the Trash (staged ones taken out of the index first) and asks a second time (`second`, its own token) |
+| `changes_select` | `tab_id`, `path`?, `scope`?, `status`?, `more`?, `refresh`? | a browser's Changes tab, as the window's own view does: selects a listed file (`scope` `uncommitted` (default) or `committed`; `status` as for `changes_stage`) and reads its diff as the window's tab does (credential and binary files never read), shows 5000 more lines of it (`more`), or reads the checkout again (`refresh`). The diff goes to the browser in its state (`webchg:`, `webdiff:`), never in a result or an event |
 | `changes_commit` | `tab_id`, `message` | the user only; long-running. `git commit -F -` with what is staged, run as the user's terminal would: **with the repository's hooks** and signing (every other git call of Deckhand runs with `core.hooksPath=/dev/null`); run through the user's login shell (`$SHELL -l`) so their PATH finds hook tools; bounded at 120 s, then its process group gets SIGTERM and, after a grace, SIGKILL (a leftover `index.lock` is reported, never removed). A refusal's git output shows in the tab; the finished event says only that it failed. Events carry the message's length, not its text |
 
 Atlas's jobs (`src/core/jobs.odin`, docs/ATLAS.md §3, §7). Job notes live in the jobs folder (`settings.folders.jobs.path`, `<home_dir>/jobs/` by default) as `*.md`;
@@ -391,6 +403,7 @@ their runs and state in `<data dir>/jobs/<id>/`. `job` is a job's id (its note's
 | `job_create` | `name`?, `schedule`?, `prompt`?, `folder`?, `for_project`? | writes a note (`enabled: true`; it runs on its schedule, no approval step) in the jobs folder, never over a file → `data.path`; from the user the note opens in an editor tab. `for_project`: the owner, `atlas`, `chats`, `none` or a listed project (its folder or name; written as its folder, `~/…`); its folder is also `folder` unless that is given (Atlas: `<home_dir>/atlas`, Chats: the chats folder, none: `~`). An unknown project is refused |
 | `job_sheet` | `open`, `job`?, `for_project`? | **user only**; the job sheet (src/ui_job_sheet.odin): open it for a new job (`for_project` preselected) or to edit `job`, or close it (nothing written) |
 | `job_save` | `path`?, `text`, `based_on`? | **user only**; the job sheet's Create / Save: `text` is the whole note and must parse (job note rules). No `path`: a new note in the jobs folder, written `enabled: true`, with an id no other job has → `data.path`. `path`: that job's note is rewritten (temp file + rename); its `id` must stay, and `based_on` (required then) is the FNV-1a 64 hash, 16 hex digits, of the note's text the edit started from: refused when the file has changed since |
+| `job_draft` | `op`, `job`?, `for_project`?, the form's fields?, `base`?, `id`?, `date`?, `path`?, `text`? | **user only**; changes nothing: the job sheet's form as data, for a browser's job sheet, from the window's own procs (`src/core/jobs_form.odin`). `op` `open`: `job` (an id) read into the form (`data` `{path, text, based_on, id, date, note, err, form, owners}`; `note` true: it does not read as a form, `err` says why), or a new one with `for_project` preselected; `owners` `[{label, value, folder}]` as the window's picker lists them. `write`: the form (`name`, `for_project`, `folder`, `preset` `manual`\|`hourly`\|`every_hours`\|`daily`\|`weekdays`\|`custom`, `every_n`, `at`, `custom`, `prompt`, `access`, `notify`, `model`, `hours`, `max_cost`, `timeout`, `max_turns`) written into `base` (`""`: a new note from `id` and `date`) → `{text, err, next, next_ok}`: the note as the preview shows it, what Create or Save would refuse (`""`: nothing), the next run or why the schedule does not parse. `read`: `text` (Edit as note's) → `{form, form_err, err, owners?}` (`form` null: it stays a note). Create and Save are `job_save`; Delete is `job_delete`. Never in an event or the command log (the note's text is its caller's only); `open` reads the note without following a link |
 | `job_set_enabled` | `job`, `on` | **user only**; writes `enabled:` in the note |
 | `job_mark_read` | `job`?, `run`? | marks runs read |
 | `job_delete` | `job`, `confirm`? | **confirms** (class `delete`), then moves the note to the Trash; the history stays in the data dir. Refused while it runs |
@@ -1266,7 +1279,7 @@ Core → window:
 
 | type | fields | |
 |---|---|---|
-| `state.full` | `version`, `state` | every section of State (§5.8 of the design: `projects`, `sessions`, `view`, `settings`, `jobs`, `confirmations`, `notifications`, `reload`, `claude`, `live`, `machines`, `tabs:<session>`, `panes:<session>`, `panels:<tab>`; `live` is filled only over `core.sock`: the core's runtime a window in another process shows, as `Core_Live` in `src/core/core_live.odin`: the update bar, the setup sheet's install run, worktree clean-ups, the pi config folders to watch, a lost session holder (`holder_lost`, `holder_recover`)). Carries what `get_state` keeps from agents (confirmation tokens, transcript paths, account folders) |
+| `state.full` | `version`, `state` | every section of State (§5.8 of the design: `projects`, `sessions`, `view`, `settings`, `jobs`, `confirmations`, `notifications`, `reload`, `claude`, `live`, `machines`, `tabs:<session>`, `panes:<session>`, `panels:<tab>`; to a browser (`peer: "web"`), `projects` carries only what the page reads of each project (`id`, `machine`, `group`, `name`, `cwd`, `label`, and `missing`, `temp`, `repo`, `parent` when set) and `selected_project`; to a browser only, the views the core computes for it from the window's own procs (`src/core/web_view.odin`), keyed so a delta carries only the rows that changed: `web` (the fleet tally, Open and the Attention and Deck order, this machine's name, the projects it lists sessions for), `webo:<session>` (an open session's title, place and age), `webm` (other machines' rows), `webtree` (the Projects tree's order: every row that passes the filter, whatever is folded; the browser folds rows itself), `webp:<key>` (a tree row), `websl:<project>` and `webs:<project>:<id>` (the sessions of the projects the browser opened, `web_watch`, and of the selected one), `webcl` and `webc:<id>` (the Chats); `webchg:<tab>` and `webdiff:<tab>` (a Changes tab: its list, as `changes_list` gives it, the selection, the action running and the last one's outcome; the selected file's diff, as much as the window shows, at most 4 MB, or why there is none); `webset` (the Settings page, only while it shows: `web_settings`); `live` is filled only over `core.sock`: the core's runtime a window in another process shows, as `Core_Live` in `src/core/core_live.odin`: the update bar, the setup sheet's install run, worktree clean-ups, the pi config folders to watch, a lost session holder (`holder_lost`, `holder_recover`)). Carries what `get_state` keeps from agents (confirmation tokens, transcript paths, account folders) |
 | `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went). A pane's `rect` and `frame` are not sent (the window lays them out): a replica's pane keeps its own |
 | `result` | `id`, `request_id?`, `result` | a command's result, as on the socket |
 | `finished` | `request_id`, `result` | over `core.sock`: the end of one of the window's own commands that answered `pending` (`request_id` as its `result` gave it; test mode's script waits for it) |
@@ -1551,6 +1564,121 @@ by screen hash (the newest 2000 rows: once the scrollback is full, the two may k
 number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link
 (a terminal channel's by kind and size).
 
+## 5b. Web access (a browser's link)
+
+A paired browser is the user's window, over a WebSocket that carries the framed wire (§5a) one
+frame per message. Off by default; `src/core/web.odin`, `src/core/web_http.odin`,
+`src/core/web_assets.odin`. Users: [GUIDE.md](GUIDE.md#deckhand-in-a-browser).
+
+**Listening.** While `set_web_access` is on, a separate core (`deckhand-core-serve serve`) listens
+on `settings.web_listen` (`host:port`: IPv4, or `[IPv6]`; `""` = `0.0.0.0:7433`, every
+interface) and does not idle out (`core_idle_facts`). Plain HTTP/1.1: no TLS of its own, no
+accounts. One request per connection (`Connection: close`); `GET` and `POST` only; request line
+and headers at most 8 KiB, a body at most 4 KiB with `Content-Length` (no `Transfer-Encoding`),
+all within 10 s; at most 16 connections before an upgrade and 4 WebSockets. State shows it as
+`live.web` {`listening`, `address`, `error`, `pairing` (until, unix s; never the code), `devices`}.
+
+**Endpoints.**
+
+| Request | Answer |
+|---|---|
+| `GET /` | the web client (`web/dist/index.html`, embedded at build; a placeholder page when the core was built without it): `Cache-Control: no-cache`, an `ETag`, `304` with no body when `If-None-Match` names it |
+| `GET /assets/<name>` | `web/dist/<name>` (flat; `[A-Za-z0-9._-]`, not starting with `.`, not a `.gz` name). The build names each file by its content's hash (`app.<10 hex>.js`, `app.<10 hex>.css`, `icon.<10 hex>.svg`): such a name is `Cache-Control: public, max-age=31536000, immutable`; its gzip copy is sent (`Content-Encoding: gzip`) when `Accept-Encoding` takes gzip, `Vary: Accept-Encoding` either way |
+| `GET /api/whoami` | `200 {"paired":true,"name","core","version"}` and the cookie again (60 days from now), or `401 {"paired":false}`. The cookie alone: it says only that browser's own name, this core's id and its version |
+| `POST /api/pair` `{"code","name"}` | `200 {"paired":true,"key":<64 hex>}` and `Set-Cookie: deckhand_web=<64 hex>; HttpOnly; SameSite=Strict; Path=/; Max-Age=5184000`; a wrong, used or expired code `403` |
+| `POST /api/unpair` | with the cookie and `X-Deckhand-Key: <key>`: that browser forgotten (its live link closes), `200`, the cookie cleared; the cookie with no key or another's `403` |
+| `GET /ws` | the WebSocket upgrade (RFC 6455, version 13, no extensions or subprotocols) |
+
+Every response: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none';
+form-action 'self'; frame-ancestors 'none'; connect-src 'self' ws://<Host> wss://<Host>`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+`Cache-Control` as above (files; others `no-cache`) or `no-store` (`/api/`). No CORS headers at all. Every `POST`
+and the upgrade need an `Origin` of `http://` or `https://` plus exactly the `Host` header's
+`host:port`; the upgrade and `whoami` need the cookie.
+
+**The key.** A cookie belongs to a host name, not a port: the browser also sends `deckhand_web` to
+any other service on the same name (an agent's dev server on another port that the user opens),
+which could replay it with a matching `Host` and `Origin`. So pairing also returns a second
+256-bit key in the response body. The page keeps it in `localStorage`, which is per origin and so
+per port, and says it in the hello (`"key"`). Unpair sends it as `X-Deckhand-Key`. The core keeps
+only its SHA-256 beside the token's and compares in constant time. A link whose first message is
+not a hello with this browser's key closes with code `4401` before it is attached or anything is
+sent. The page treats `4401`, or no key in its storage, as unpaired and shows pairing. The key is
+taken out of the hello before it goes on to the link. A browser that clears site data (a private
+window, Safari's 7-day limit on script storage for a site not added to the Home Screen) pairs again.
+
+**Pairing.** `web_pair` (this machine's user: Settings › Machines › **Pair a browser…**, or
+`deckhand-core-serve web pair` in a terminal there) opens a code of 8 characters from
+`ABCDEFGHJKMNPQRSTUVWXYZ23456789`, shown `ABCD-EFGH`; typed with or without the dash, in either
+case. One code at a time; it lasts 2 minutes, works once and is void after 5 wrong tries;
+compared in constant time. A right code makes a 256-bit token and a 256-bit key.
+`<data>/web-devices.json` (0600) keeps each browser's id (12 hex), name (printable, at most 64
+bytes), the token's and the key's SHA-256, paired and last seen (unix s); at most 32 browsers. A
+token unused for 60 days expires. `web_revoke` forgets one and closes its link; a link checked on
+its connection's thread is checked again (still paired, not expired) on the main thread just
+before it is attached. The code and tokens are never logged, never in State, never in
+an event: `web_pair`'s result goes to its caller only.
+
+**The handshake a browser performs.**
+
+1. `GET /api/whoami`: `401`, or no key in this page's storage → pair (`POST /api/pair`, keep its
+   `key`), then again.
+2. `GET /ws` with the cookie and `Origin`. A refused upgrade is an HTTP status (`400` bad upgrade,
+   `401` not paired, `403` wrong `Origin`, `503` too many), never a WebSocket.
+3. Every message either way is one binary WebSocket message holding exactly one frame:
+   `[channel u32 LE][kind u8][len u32 LE][payload]`, channel 0 DATA a JSON message. A text
+   message, a fragment, an unmasked frame, RSV bits, a message that is not exactly one frame or
+   over 9 B + 16 MiB closes the link. The core pings every 30 s and closes a browser silent for 90 s.
+4. The browser's first message: `{"v":1,"id":"hello","type":"hello","key":<its key>}` (other
+   fields ignored), at most 16 KiB; anything else, or a wrong key, closes with `4401`. The
+   core answers `{"type":"result","id":"hello","result":{"ok":true,"data":{"app":"deckhand",
+   "caller":"ui","web":true,"framed":true,"name","generation","version","core","features",
+   "methods","machine":{"name","os","arch"},"snapshot":["vt"],"build"}}}`; `methods` are the
+   commands this browser may send. A changed `core` id is a restarted core: reload the page.
+5. `{"v":1,"type":"state.subscribe"}` → `state.full`, then `state.delta`s; commands, results,
+   `finished`, toasts, `confirmation.parked`, `term.*` and the terminal channels as a window's
+   (§5a). Snapshots are always the VT replay (`vt`), whatever `term.attach` asks.
+
+**What a browser may do.** Its commands run as `{kind = ui, web = true}` (`caller_from_web`,
+`web_may_run`): every `Anyone` and `User` command, and of the `User_Here` ones only the view
+state `show_no_session`, `set_sidebar_view` and `machine_connect`; never `copy_control_token` nor
+web access's own commands. Its commands on other linked machines' ids are forwarded as the
+user's (unlike a hub's). Caps as a hub's: `window.facts`, `window.tab_facts`, `window.command`,
+`tab_host.event`, `finished` and `script.core` are refused; no `tab_host.call` (browser, app,
+Markdown and editor views: `no_window`; agents' browser commands `browser_not_here`; the browser's own
+file tabs read and save with `file_read` and `file_save`); of the
+`window.request`s only `clipboard_set`, `term_fit`, `changes_diff`, `notify` and `open_url` are
+sent (the rest answer as if no window were attached); it answers them with `window.reply`. A
+notification also shows as the core's own banner. `open_url` should open only on the user's tap.
+
+**One link per core.** The newest connection wins, as for a hub. A browser taking this Mac's
+window shows **Viewed in a browser** there with **Take Back**; a hub taken by it gets
+`hub.taken` `by` `"a browser"`. A browser's link taken by another gets
+`{"type":"web.taken","by":"window"|"machine"|"browser","name"}` and should wait for its user's
+Take back. `{"type":"web.revoked"}`: its token was revoked; `{"type":"web.closed"}`: web access
+was turned off. The link closes after each.
+
+**From a terminal.** `deckhand-core-serve web on|off|pair|list|revoke ID|listen ADDRESS` says a
+line hello on `core.sock`: `{"type":"hello","peer":"web-admin","token":<window token>,"op","arg"}`;
+one result, then the end. Checked as a window's hello minus the code check: the window token
+(0600, this user's), this user and still that process, never a program in a Deckhand tab, and
+come in over ssh: a root-owned `sshd` or `sshd-session` among its ancestors (`web_admin_check`,
+`pid_from_outside`), since a tab's program can fork and let its parent exit to stop being a tab's
+descendant (it is then launchd's or init's child, with no such ancestor). Not a root-owned `login`:
+macOS's `/usr/bin/login -f $USER` is setuid root and asks the same user for no password, so a
+tab's program could start one above itself. At the machine's own screen: `ssh localhost`; on a Mac,
+Settings. Not stopped: a program that can itself ssh into this machine (a key without a passphrase, a
+forwarded agent) passes as the user would. It runs with the internal caller, so `on` does not ask
+again.
+
+**Plain HTTP: what follows.** Anyone who can see the traffic reads every terminal and command and
+can copy the cookie, which is then as good as the user's. Use it over a network that encrypts
+(Tailscale, WireGuard, a VPN) or behind an HTTPS proxy, and bind to that interface
+(`100.x.y.z:7433`) rather than every one. Away from `localhost` the page is not a secure context:
+no service worker, install, push, or asynchronous clipboard. The `Origin` check stops other
+sites' pages from pairing or opening the socket; a site that rebinds its DNS name to this address
+has no cookie, so it can only guess codes while one is open (5 tries).
+
 ## 6. Redaction
 
 - Events and the command log never contain: `send_text` or `pi_prompt` text (replaced by
@@ -1579,6 +1707,7 @@ number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every fram
 | the window's link and the framed hello | `src/core/window_link.odin`, `src/core/window_sock.odin`, `src/corewire/`; the window's side `src/client.odin`, `src/client_core.odin` |
 | tab host routing (`tab_host.call`, `finished`, `tab_host.event`, `no_window`) | `src/core/tabhost_route.odin`; the window's side `src/tabhost_link.odin`, `src/tabhost.odin` |
 | CLI client | `deckhand --ctl` in `src/core/ctl.odin` |
+| web access (§5b): HTTP, WebSocket relay, pairing, the client's files | `src/core/web.odin`, `src/core/web_http.odin`, `src/core/web_assets.odin`; `deckhand-core-serve web` in `src/coremain/web_cli.odin` |
 
 Where each feature lives (status dots, hot reload, jobs, the bell, browser, Claude tabs,
 comments): [DEVELOPING.md](DEVELOPING.md) "Source map".

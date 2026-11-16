@@ -1,0 +1,399 @@
+// The replica of the core's State (src/core/state_wire.odin): state.full{version, state} gives
+// every section, state.delta{version, sections} the sections that changed (null: it went). A
+// section is plain JSON in State's own shape: field names as in the Odin structs, enums as
+// lowercased names, unions as {"<variant>": value}.
+//
+// Fixed sections: projects, sessions, view, settings, jobs, confirmations, notifications, reload,
+// claude, live, machines; per open session "tabs:<id>" and "panes:<id>"; per tab "panels:<id>".
+
+export type Json = any;
+
+export interface Project {
+  id: number;
+  machine: number;
+  group: string;
+  name: string;
+  cwd: string;
+  label: string;
+  missing?: boolean;
+  temp?: boolean;
+  repo?: boolean;
+  parent?: number;
+}
+
+export interface SessionRow {
+  id: string;
+  path: string;
+  when_: string;
+  title: string;
+  untitled?: string;
+  claude?: boolean;
+  codex?: boolean;
+}
+
+export interface ProgSummary {
+  state: string;
+  kind: string;
+  progress?: number;
+  title?: string;
+  msg?: string;
+  at?: number;
+}
+
+export interface Tab {
+  id: number;
+  machine: number;
+  kind: Record<string, Json> | null;
+  title: string;
+  pane?: number;
+  exit?: { known: boolean; code: number; signal: number };
+  live?: Json;
+  reload?: Json;
+  status: string; // running | exited | not_started
+  agent: string; // unknown | idle | working | error
+  waiting: boolean;
+  question: boolean;
+  unseen: boolean;
+  prog?: ProgSummary;
+  status_since?: number;
+  has_term?: boolean;
+  output_recent?: boolean;
+}
+
+export interface OpenSession {
+  id: number;
+  machine: number;
+  agent: string; // pi | claude
+  pi_session_id: string;
+  project_id: number;
+  cwd: string;
+  active_tab: number;
+  missing?: boolean;
+  home?: boolean;
+  title: string;
+  shown_at?: number;
+}
+
+export interface PendingConfirmation {
+  token: string;
+  summary: string;
+  command: Json;
+  class: string;
+  caller: Json;
+}
+
+export interface MachineView {
+  no: number;
+  name: string;
+  status: string;
+  error?: string;
+  version?: string;
+  os?: string;
+}
+
+// The browser's sections (src/core/web_view.odin): the views the core computes for a browser,
+// keyed so a delta carries only the rows that changed.
+//   web: the small part; webo:<id> an open session's row; webm other machines; webtree the
+//   Projects tree's order [[key, depth, kids, forced]]; webp:<key> a tree row; websl:<p> a
+//   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats.
+export interface WebProjectRow {
+  key: string;
+  id: number; // 0: a group row (its folder in path)
+  name: string;
+  path: string;
+  depth: number;
+  kids: number; // nested folders shown
+  forced: boolean; // open whatever the page folded (the filter, waiting work)
+  pin: number;
+  hidden: boolean;
+}
+export interface WebSessionRow {
+  id: string;
+  label: string;
+  open: number;
+  pin: number;
+  hidden: boolean;
+  dot: string;
+  claude: boolean;
+  codex: boolean;
+  modified: number;
+}
+export interface WebAttention {
+  session: number;
+  group: "needs_you" | "finished" | "working" | "idle";
+  tab: number;
+}
+export interface WebTitle {
+  title: string;
+  place: string;
+  chat: boolean;
+  at: number; // Unix ns, 0 "new"
+}
+export interface WebMachine {
+  no: number;
+  open: number[];
+  projects: { id: number; depth: number; name: string }[];
+}
+export interface WebView {
+  fleet: { waiting: number; errors: number; unseen: number; working: number };
+  next: number;
+  open: number[];
+  attention: WebAttention[];
+  deck: WebAttention[];
+  filtered: number;
+  here: { name: string; label: string };
+  watch: number[];
+}
+
+export interface PaneLeaf {
+  id: number;
+  active: number;
+  slot: number;
+}
+export interface LayoutNode {
+  id: number;
+  leaf: boolean;
+  pane: number;
+  dir: string; // right | down
+  ratio: number;
+  a: number;
+  b: number;
+  parent: number;
+}
+export interface Panes {
+  panes: PaneLeaf[];
+  nodes: LayoutNode[];
+  root: number;
+  focused_pane: number;
+  zoomed_pane: number;
+}
+export interface Panel {
+  id: string;
+  title: string;
+  rows: { text: string; tone: string; head: boolean }[];
+}
+
+export class Store {
+  version = 0;
+  sections = new Map<string, Json>();
+  private listeners = new Set<() => void>();
+
+  // state.full: every section, replacing what was there.
+  applyFull(msg: Json): boolean {
+    if (!msg || typeof msg.state !== "object" || msg.state === null) return false;
+    this.sections = new Map(Object.entries(msg.state));
+    this.rowsStamp++;
+    this.version = Number(msg.version) || 0;
+    this.changed();
+    return true;
+  }
+
+  // state.delta: the changed sections, null for one that went. False: not taken (no state.full yet,
+  // or a malformed message), and the caller asks for state.full again.
+  applyDelta(msg: Json): boolean {
+    if (!msg || typeof msg.sections !== "object" || msg.sections === null) return false;
+    if (this.sections.size === 0) return false;
+    for (const [k, v] of Object.entries(msg.sections)) {
+      if (k.startsWith("webp:")) this.rowsStamp++;
+      if (v === null) this.sections.delete(k);
+      else this.sections.set(k, v);
+    }
+    this.version = Number(msg.version) || this.version;
+    this.changed();
+    return true;
+  }
+
+  clear(): void {
+    this.sections.clear();
+    this.version = 0;
+    this.changed();
+  }
+
+  get ready(): boolean {
+    return this.sections.size > 0;
+  }
+
+  subscribe(fn: () => void): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  private changed(): void {
+    for (const fn of this.listeners) fn();
+  }
+
+  // ---- readers ----
+
+  private sec(name: string): Json {
+    return this.sections.get(name) ?? {};
+  }
+
+  get projects(): Project[] {
+    return this.sec("projects").projects ?? [];
+  }
+  get selectedProject(): number {
+    return this.sec("projects").selected_project ?? 0;
+  }
+  get sessions(): SessionRow[] {
+    return this.sec("sessions").sessions ?? [];
+  }
+  get chats(): SessionRow[] {
+    return this.sec("sessions").chats ?? [];
+  }
+  get openSessions(): OpenSession[] {
+    return this.sec("sessions").open_sessions ?? [];
+  }
+  get currentSession(): number {
+    return this.sec("sessions").current_session ?? 0;
+  }
+  get confirmations(): PendingConfirmation[] {
+    return this.sec("confirmations").pending_confirmations ?? [];
+  }
+  get machines(): MachineView[] {
+    const m = this.sections.get("machines");
+    return (m && m.machines) ?? [];
+  }
+  get settings(): Json {
+    return this.sec("settings").settings ?? {};
+  }
+  get sidebar(): Json {
+    return this.sec("view").sidebar ?? {};
+  }
+
+  get web(): WebView | null {
+    return this.sections.get("web") ?? null;
+  }
+  webTitle(id: number): WebTitle | undefined {
+    return this.sections.get("webo:" + id);
+  }
+  get webMachines(): WebMachine[] {
+    return this.sections.get("webm") ?? [];
+  }
+  // The Projects tree in the core's order, every row that passes the filter (folding is the page's).
+  get webTree(): WebProjectRow[] {
+    const t = this.sections.get("webtree");
+    if (t !== this.treeOf) {
+      this.treeOf = t;
+      this.treeRowsAt = -1;
+    }
+    if (this.treeRowsAt !== this.rowsStamp) {
+      // the order or a row changed: the rows again from their sections (a key alone: depth 0)
+      this.treeRows = (Array.isArray(t) ? t : []).map((e: string | [string, number, number, number]) => {
+        const [key, depth, kids, forced] = typeof e === "string" ? [e, 0, 0, 0] : e;
+        return { key, depth, kids, forced: !!forced, id: 0, name: "", path: "", pin: -1, hidden: false, ...(this.sections.get("webp:" + key) ?? {}) };
+      });
+      this.treeRowsAt = this.rowsStamp;
+    }
+    return this.treeRows;
+  }
+  private treeOf: Json = undefined;
+  private treeRows: WebProjectRow[] = [];
+  private treeRowsAt = -1;
+  private rowsStamp = 0;
+  // A project's listed sessions (the ones the page opened: web_watch, and the selected one's).
+  webSessions(pid: number): WebSessionRow[] | null {
+    const ids = this.sections.get("websl:" + pid);
+    if (!Array.isArray(ids)) return null;
+    return ids.map((id: string) => ({ id, ...(this.sections.get(`webs:${pid}:${id}`) ?? {}) }));
+  }
+  get webChats(): WebSessionRow[] {
+    const ids = this.sections.get("webcl");
+    if (!Array.isArray(ids)) return [];
+    return ids.map((id: string) => ({ id, ...(this.sections.get("webc:" + id) ?? {}) }));
+  }
+  get layout(): Json {
+    return this.sec("view").layout ?? {};
+  }
+  get homeSession(): number {
+    return this.sec("sessions").home ?? 0;
+  }
+  get homeOpen(): boolean {
+    return !!this.sec("view").home_open;
+  }
+  get jobs(): Json[] {
+    return this.sec("jobs").jobs ?? [];
+  }
+  get machineJobs(): Json[] {
+    return this.sec("jobs").machine_jobs ?? [];
+  }
+  get notices(): Json {
+    return this.sec("notifications").notices ?? {};
+  }
+  get agent(): Json {
+    return this.sec("notifications").agent ?? {};
+  }
+  get live(): Json {
+    return this.sections.get("live")?.live ?? {};
+  }
+  get reload(): Json {
+    return this.sections.get("reload")?.reload ?? {};
+  }
+  get holderAsk(): Json {
+    return this.sec("confirmations").holder_ask ?? {};
+  }
+
+  panes(sessionId: number): Panes | null {
+    return this.sections.get("panes:" + sessionId) ?? null;
+  }
+  panels(tabId: number): Panel[] {
+    return this.sections.get("panels:" + tabId) ?? [];
+  }
+
+  tabs(sessionId: number): Tab[] {
+    return this.sections.get("tabs:" + sessionId) ?? [];
+  }
+
+  session(id: number): OpenSession | undefined {
+    return this.openSessions.find((s) => s.id === id);
+  }
+
+  project(id: number): Project | undefined {
+    const ps = this.projects;
+    if (ps !== this.byIdOf) {
+      this.byIdOf = ps;
+      this.byId = new Map(ps.map((p) => [p.id, p]));
+    }
+    return this.byId.get(id);
+  }
+  private byIdOf: Project[] | null = null;
+  private byId = new Map<number, Project>();
+
+  tab(id: number): { session: OpenSession; tab: Tab } | undefined {
+    for (const s of this.openSessions) {
+      const t = this.tabs(s.id).find((x) => x.id === id);
+      if (t) return { session: s, tab: t };
+    }
+    return undefined;
+  }
+
+  // The Chats entry (projects' last, group "chats"): new_chat with its id starts a chat.
+  get chatsEntry(): Project | undefined {
+    return this.projects.find((p) => p.group === "chats" && !p.machine);
+  }
+
+  machineName(no: number): string {
+    if (!no) return "";
+    return this.machines.find((m) => m.no === no)?.name ?? "machine " + no;
+  }
+}
+
+// The variant name of a tab's kind union: "pi_tab", "shell_tab", "claude_tab", "editor_tab", …
+export function tabKind(t: Tab): string {
+  if (!t.kind || typeof t.kind !== "object") return "";
+  return Object.keys(t.kind)[0] ?? "";
+}
+
+// A tab whose program runs in a terminal the core can stream.
+export function isTerminalTab(t: Tab): boolean {
+  const k = tabKind(t);
+  return k === "pi_tab" || k === "shell_tab" || k === "claude_tab" || !!t.has_term;
+}
+
+export function sessionTitle(store: Store, s: OpenSession): string {
+  const w = store.webTitle(s.id);
+  if (w?.title) return w.title;
+  if (s.title) return s.title;
+  const p = store.project(s.project_id);
+  if (p) return p.name || p.label;
+  return "Session " + s.id;
+}

@@ -213,6 +213,15 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Separate_Core:   return "set_separate_core"
 	case Set_Remote_Machines: return "set_remote_machines"
 	case Set_Machines_Reachable: return "set_machines_reachable"
+	case Set_Web_Access:      return "set_web_access"
+	case Set_Web_Listen:      return "set_web_listen"
+	case Web_Pair:            return "web_pair"
+	case Web_Devices:         return "web_devices"
+	case Web_Watch:           return "web_watch"
+	case File_Read:           return "file_read"
+	case File_Save:           return "file_save"
+	case Web_Settings, Job_Draft: return web_extra_type(cmd)
+	case Web_Revoke:          return "web_revoke"
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
 	case Machine_Rename:      return "machine_rename"
@@ -314,7 +323,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Jobs_Tick:           return "jobs_tick"
 	case Job_Run_Done:        return "job_run_done"
 	case Jobs_Env:            return "jobs_env"
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
+	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_command_type(cmd)
 	case Markdown_Open:       return "markdown_open"
 	case Show_File:           return "show_file"
@@ -490,6 +499,13 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Set_Machines_Reachable:
 		kv_bool(&w, "on", c.on)
 		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+	case Set_Web_Access:
+		kv_bool(&w, "on", c.on)
+		token(&w, c.confirm, redact)
+	case Set_Web_Listen:
+		kv_str(&w, "address", c.address)
+	case Web_Revoke:
+		kv_str(&w, "id", c.id)
 	case Machine_Add:
 		kv_str(&w, "name", c.name)
 		kv_str(&w, "target", c.target)
@@ -542,6 +558,27 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "dismiss", c.dismiss)
 	case Fs_Changed:
 		kv_u64(&w, "paths", u64(len(c.paths))) // how many, not which
+	case Web_Pair, Web_Devices: // nothing
+	case File_Read:
+		kv_str(&w, "path", c.path)
+		if c.since != "" do kv_str(&w, "since", c.since)
+	case File_Save:
+		// events and the log (redact): the path and how much, never the text
+		kv_str(&w, "path", c.path)
+		if redact do kv_u64(&w, "text_bytes", u64(len(c.text)))
+		else do kv_str(&w, "text", c.text) // the wire to the core only (command_wire_json)
+		if c.base != "" do kv_str(&w, "base", c.base)
+		if c.force do kv_bool(&w, "force", true)
+	case Web_Settings: kv_bool(&w, "open", c.open)
+	case Job_Draft: web_extra_write(&w, c, redact) // web_jobs.odin
+	case Web_Watch:
+		key(&w, "projects")
+		strings.write_byte(w.b, '[')
+		for id, i in c.projects {
+			if i > 0 do strings.write_byte(w.b, ',')
+			strings.write_u64(w.b, id)
+		}
+		strings.write_byte(w.b, ']')
 	case Copy_Control_Token: // nothing: the token is never written
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty
@@ -910,6 +947,13 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.status != "" do kv_str(&w, "status", c.status)
 		if c.second do kv_bool(&w, "second", true)
 		token(&w, c.confirm, redact)
+	case Changes_Select:
+		kv_u64(&w, "tab_id", c.tab_id)
+		if c.path != "" do kv_str(&w, "path", c.path)
+		if c.scope != "" do kv_str(&w, "scope", c.scope)
+		if c.status != "" do kv_str(&w, "status", c.status)
+		if c.more do kv_bool(&w, "more", true)
+		if c.refresh do kv_bool(&w, "refresh", true)
 	case Changes_Commit:
 		kv_u64(&w, "tab_id", c.tab_id)
 		if redact do kv_u64(&w, "message_bytes", u64(len(c.message)))
@@ -1836,6 +1880,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_bool(&st, "keep_sessions", s.settings.keep_sessions)
 		kv_bool(&st, "remote_machines", s.settings.remote_machines)
 		kv_bool(&st, "machines_reachable", s.settings.machines_reachable)
+		kv_bool(&st, "web_access", s.settings.web_access)
+		kv_str(&st, "web_listen", web_listen_address())
 		key(&st, "bell")
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)
@@ -2129,4 +2175,16 @@ write_machine_jobs :: proc(b: ^strings.Builder, rows: []Job_Row) {
 		obj_end(&w)
 	}
 	strings.write_byte(b, ']')
+}
+
+// job_draft's (web_jobs.odin): the form and the note are the user's text, their lengths only when
+// redacted.
+@(private = "file")
+web_extra_write :: proc(w: ^Jw, c: Job_Draft, redact: bool) {
+	x := c
+	for f, i in job_draft_strings(&x) {
+		if f^ == "" do continue
+		if redact && i > 1 do kv_str(w, JOB_DRAFT_FIELDS[i], fmt.tprintf("<redacted %d bytes>", len(f^)))
+		else do kv_str(w, JOB_DRAFT_FIELDS[i], f^)
+	}
 }

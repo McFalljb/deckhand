@@ -368,3 +368,9 @@ header_cwd :: proc(path: string) -> string {
 	cwd, _ := obj["cwd"].(json.String)
 	return strings.clone(cwd)
 }
+
+// Lists another project's sessions as scan_sessions does, into its own arena and list (a
+// browser's open rows in the tree: web_view.odin).
+read_project_sessions :: proc(dir: string, arena: ^virtual.Arena, out: ^[dynamic]Session, budget: ^i64 = nil) {
+	read_sessions(dir, arena, out, budget = budget)
+}

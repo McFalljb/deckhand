@@ -78,6 +78,7 @@ Sp_Edit_Kind :: enum u8 {
 	Add_Machine,
 	Rename_Machine,
 	Rename_Account,
+	Web_Listen, // web access's listen address
 	// a file row's menu (right click; settings_page_context): as the old Settings tab's name field
 	New_File, // target: the folder
 	New_Folder,
@@ -207,6 +208,8 @@ sp_edit_commit :: proc() {
 	case .Rename_Machine:
 		if name == "" do break
 		if no, ok := core.machine_row_no(spage.edit.target); ok do r = ui_run(core.Machine_Rename{no = no, name = name})
+	case .Web_Listen: // "" = the default
+		r = ui_run(core.Set_Web_Listen{address = name})
 	case .Rename_Account:
 		if name == "" do break
 		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, codex = true})
@@ -606,6 +609,9 @@ sp_section :: proc(sec: core.Setting_Section, rows: []core.Settings_File_Row, pr
 			}
 		}
 		if sp_card("") do sp_setting(core.setting_by_id("machines_reachable"), rows)
+		if sp_card("Web access") {
+			for id in ([]string{"web_access", "web_listen", "web_pair", "web_devices"}) do sp_setting(core.setting_by_id(id), rows)
+		}
 	case .Sessions:
 		for card in ([]string{"Running", "Chats", "Fix-ups"}) {
 			if sp_card(card) {
@@ -851,6 +857,7 @@ sp_switch_on :: proc(s: ^core.Setting) -> bool {
 	case "codex_full_access":       return st.codex_full_access
 	case "remote_machines":         return st.remote_machines
 	case "machines_reachable":      return st.machines_reachable
+	case "web_access":              return st.web_access
 	case "keep_sessions":           return st.keep_sessions
 	case "separate_core":           return st.separate_core
 	case "tidy_projects":           return !st.tidy_off
@@ -868,6 +875,8 @@ sp_button_text :: proc(s: ^core.Setting) -> (button, hint: string) {
 	case "chats_dir":          return "Change…", action_detail("chats_dir")
 	case "atlas_model":        return "Change…", action_detail("agent_model")
 	case "machine_add":        return "Add…", s.hint
+	case "web_listen":         return "Change…", fmt.tprintf("%s · %s", core.web_listen_address(), s.hint)
+	case "web_pair":           return "Pair…", web_pair_hint(s.hint)
 	case "setup":              return "Set up…", s.hint
 	case "shortcuts":          return "Show ⌘/", s.hint
 	case "control_token":      return "Copy", s.hint
@@ -940,18 +949,21 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 		sp_grid()
 	case .Button:
 		if (s.id == "reload_all_pi" || s.id == "restart_all_claude") && !action_ok(s.action) do return // only while such a tab runs
+		if s.id == "web_pair" && !state.settings.web_access do return // pairing needs web access on
 		if s.id == "main_folder" {
 			for r in rows do if r.path == core.FOLDER_MAIN_ROW do sp_list_row(r)
 			return
 		}
 		btn, hint := sp_button_text(s)
-		k := s.id == "machine_add" ? sp_item({do_ = .Row, path = core.MACHINE_ADD_ROW}) : sp_item({do_ = .Action, action = s.action})
-		if sp_row(label, hint, sp_badges(s), mono_hint = s.id == "chats_dir") {
+		k := s.id == "machine_add" || strings.has_prefix(s.id, "web_") ? sp_item({do_ = .Row, path = s.row}) : sp_item({do_ = .Action, action = s.action})
+		if sp_row(label, hint, strings.has_prefix(s.id, "web_") ? nil : sp_badges(s), mono_hint = s.id == "chats_dir") { // web access's rows: its switch carries the badge
 			sp_button(k, btn)
 			if s.id == "chats_dir" && action_ok("chats_dir_default") do sp_button(sp_item({do_ = .Action, action = "chats_dir_default"}), "Default")
 			if s.id == "update_checks" do sp_button(sp_item({do_ = .Action, action = "check_updates"}), "Check now")
 		}
 		if s.id == "machine_add" && spage.edit.kind == .Add_Machine do sp_edit_row("Add a machine", "user@host or an ~/.ssh/config name")
+		if s.id == "web_listen" && spage.edit.kind == .Web_Listen do sp_edit_row("Listen address", core.WEB_LISTEN_DEFAULT)
+		if s.id == "web_pair" && web_pair_open() do if sp_row(fmt.tprintf("Code: %s", web_pair.code), fmt.tprintf("Open http://%s/ in the browser and type it. It works once, for 2 minutes.", web_pair_address())) {}
 	case .Status:
 		has := false
 		for r in rows do if r.group == "agents" && core.setting_for_row(r.path) == s {
@@ -963,6 +975,14 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 		switch s.id {
 		case "machines":
 			for r in rows do if strings.has_prefix(r.path, core.MACHINE_ROW) || strings.has_prefix(r.path, core.MACHINE_CHECK_ROW) do sp_list_row(r)
+		case "web_devices":
+			if !state.settings.web_access do break
+			n := 0
+			for r in rows do if strings.has_prefix(r.path, core.WEB_DEVICE_ROW) {
+				sp_list_row(r)
+				n += 1
+			}
+			if n == 0 do if sp_row("No paired browsers", "") {}
 		case "claude_accounts":
 			for r in rows do if r.group == "claude-accounts" do sp_list_row(r)
 		case "codex_accounts":
@@ -982,6 +1002,7 @@ sp_list_row :: proc(r: core.Settings_File_Row) {
 		return
 	}
 	label := strings.trim_space(r.label)
+	if r.path == core.WEB_ACCESS_ROW || r.path == core.WEB_LISTEN_ROW || r.path == core.WEB_PAIR_ROW do return // the Web access card draws them as settings
 	if r.path == core.MACHINE_REACH_ROW || r.path == core.CLAUDE_FLAGS_ROW || r.path == core.MACHINE_SSH_ROW || strings.has_prefix(r.path, core.PI_EXT_ROW) || r.path == core.ATLAS_MODEL_ROW {
 		if s := core.setting_for_row(r.path); s != nil do sp_setting(s, nil) // a switch: drawn as its setting
 		return
@@ -1287,4 +1308,9 @@ sp_scroll_to :: proc() {
 	else if r.y + r.height > bottom do sc.scrollPosition.y -= r.y + r.height - bottom
 	else do return
 	app.redraw = true
+}
+
+// Settings › Machines › Web access › Listen address's Change…: the page's field, with the address.
+settings_page_web_listen_edit :: proc() {
+	sp_edit_begin(.Web_Listen, core.WEB_LISTEN_ROW, state.settings.web_listen)
 }

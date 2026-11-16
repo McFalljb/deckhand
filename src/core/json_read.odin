@@ -162,6 +162,28 @@ get_todos :: proc(r: ^Rd, k: string) -> []Claude_Todo_In {
 
 // claude.background's snapshot lists (claude_panels.odin): absent = empty; at most
 // CLAUDE_BG_IN_MAX tasks and CLAUDE_CRONS_IN_MAX crons, each with an id string.
+// A list of ids (non-negative integers): at most max of them.
+@(private = "file")
+get_ids :: proc(r: ^Rd, k: string, max: int) -> []u64 {
+	v, ok := need(r, k)
+	if !ok do return nil
+	a, is := v.(json.Array)
+	if !is || len(a) > max {
+		if r.err == "" do r.err = fmt.tprintf("%s must be a list of at most %d ids", k, max)
+		return nil
+	}
+	out := make([]u64, len(a), r.a)
+	for x, i in a {
+		n, isn := x.(json.Integer)
+		if !isn || n < 0 {
+			if r.err == "" do r.err = strings.concatenate({k, " must be a list of ids"}, context.temp_allocator)
+			return out
+		}
+		out[i] = u64(n)
+	}
+	return out
+}
+
 @(private = "file")
 get_bg_tasks :: proc(r: ^Rd, k: string) -> []Claude_Bg_In {
 	v, ok := r.obj[k]
@@ -676,6 +698,16 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_separate_core":   cmd = Set_Separate_Core{on = get_bool(&r, "on")}
 	case "set_remote_machines": cmd = Set_Remote_Machines{on = get_bool(&r, "on")}
 	case "set_machines_reachable": cmd = Set_Machines_Reachable{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
+	case "set_web_access":      cmd = Set_Web_Access{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
+	case "set_web_listen":      cmd = Set_Web_Listen{address = get_str(&r, "address")}
+	case "web_pair":            cmd = Web_Pair{}
+	case "web_devices":         cmd = Web_Devices{}
+	case "file_read":           cmd = File_Read{path = get_str(&r, "path"), since = get_str(&r, "since", true)}
+	case "file_save":           cmd = File_Save{path = get_str(&r, "path"), text = get_str(&r, "text"), base = get_str(&r, "base", true), force = opt_bool(&r, "force").? or_else false}
+	case "web_watch":           cmd = Web_Watch{projects = get_ids(&r, "projects", WEB_WATCH_IN_MAX)}
+	case "web_settings":        cmd = Web_Settings{open = get_bool(&r, "open")}
+	case "job_draft":           cmd = job_draft_read(&r)
+	case "web_revoke":          cmd = Web_Revoke{id = get_str(&r, "id")}
 	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name", optional = true), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}
 	case "machine_remove":      cmd = Machine_Remove{no = get_u64(&r, "no"), confirm = get_str(&r, "confirm", optional = true)}
 	case "machine_rename":      cmd = Machine_Rename{no = get_u64(&r, "no"), name = get_str(&r, "name")}
@@ -746,6 +778,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "changes_stage":       cmd = Changes_Stage{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true)}
 	case "changes_unstage":     cmd = Changes_Unstage{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true)}
 	case "changes_discard":     cmd = Changes_Discard{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true), confirm = get_str(&r, "confirm", optional = true), second = opt_bool(&r, "second").? or_else false}
+	case "changes_select":      cmd = Changes_Select{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path", true), scope = get_str(&r, "scope", true), status = get_str(&r, "status", true), more = opt_bool(&r, "more").? or_else false, refresh = opt_bool(&r, "refresh").? or_else false}
 	case "changes_commit":      cmd = Changes_Commit{tab_id = get_u64(&r, "tab_id"), message = get_str(&r, "message")}
 	case "show_file":           cmd = Show_File{path = get_str(&r, "path"), line = int(min(opt_u64(&r, "line"), 1 << 30)), anchor = get_str(&r, "anchor", optional = true), session = opt_u64(&r, "session")}
 	case "markdown_open":       cmd = Markdown_Open{path = get_str(&r, "path"), session = opt_u64(&r, "session"), anchor = get_str(&r, "anchor", optional = true)}
@@ -861,6 +894,7 @@ Request_Msg :: struct {
 	peer:    string, // a framed hello: "hub" for another machine's core (deckhand-core-serve connect), else the window
 	from:    string, // a hub hello: that machine's name (Viewed from <machine>)
 	core:    string, // a hub hello: its core's id (a core is not its own hub)
+	op, arg: string, // a web-admin hello (`deckhand-core-serve web`): what to do, and its argument
 	command: Command, // command, pi.session, pi.status
 	session: u64, // subscribe filter: an open session id (0 = all)
 	tab_id:  u64, // subscribe filter: a tab id (0 = all)
@@ -891,6 +925,8 @@ parse_request :: proc(line: string, allocator := context.allocator) -> (m: Reque
 		m.peer = get_str(&r, "peer", optional = true)
 		m.from = get_str(&r, "from", optional = true)
 		m.core = get_str(&r, "core", optional = true)
+		m.op = get_str(&r, "op", optional = true)
+		m.arg = get_str(&r, "arg", optional = true)
 	case "hello.proof":
 		m.proof = get_str(&r, "proof")
 		m.framed = opt_bool(&r, "framed").? or_else false
@@ -1245,4 +1281,12 @@ enum_of :: proc(r: ^Rd, k: string, names: [$E]string) -> (E, bool) {
 	if is do for name, e in names do if name == s do return e, true
 	if r.err == "" do r.err = strings.concatenate({k, " must be one of its names"}, context.temp_allocator)
 	return {}, false
+}
+
+// job_draft (web_jobs.odin): every field optional but op.
+@(private = "file")
+job_draft_read :: proc(r: ^Rd) -> Job_Draft {
+	c := Job_Draft{op = get_str(r, "op")}
+	for f, i in job_draft_strings(&c) do if i > 0 do f^ = get_str(r, JOB_DRAFT_FIELDS[i], optional = true)
+	return c
 }

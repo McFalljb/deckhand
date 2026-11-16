@@ -7,7 +7,7 @@ Users start with the [README](../README.md) and the [user guide](GUIDE.md); the 
 ## Contents
 
 1. [Requirements](#requirements)
-2. [Building and running](#building-and-running) ([the rename](#the-rename), [code signing](#code-signing), [the Linux core](#building-the-linux-core))
+2. [Building and running](#building-and-running) ([the rename](#the-rename), [code signing](#code-signing), [the Linux core](#building-the-linux-core), [the browser client](#the-browser-client))
 3. [Rebuilding libghostty-vt](#rebuilding-libghostty-vt)
 4. [Pinned versions](#pinned-versions)
 5. [Releases](#releases) ([the Linux tarball](#the-linux-tarball), [update signing](#update-signing))
@@ -21,7 +21,8 @@ Users start with the [README](../README.md) and the [user guide](GUIDE.md); the 
 macOS 14 or later on Apple silicon (arm64), [Odin](https://odin-lang.org/) `dev-2026-09`, and
 `clang` from the Xcode command line tools. Intel Macs can build Deckhand, but without browser
 tabs: CEF is wired up for arm64 only. Node 22.18 or later runs the pi integration's tests
-(`./build.sh test` skips them without `node`). To run what you build you need at least one coding
+(`./build.sh test` skips them without `node`) and builds the browser client
+([below](#the-browser-client)). To run what you build you need at least one coding
 agent on your login shell's `PATH`: [pi](https://pi.dev) 1.4.0 or newer (Atlas and jobs need pi),
 Claude Code 2.1.295 or newer, or Codex 0.163.0 or newer. The pi integration and the Claude Code
 plugin ship with Deckhand (`integrations/`); Codex gets its hooks and tools per run
@@ -265,6 +266,27 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
 - **No window on Linux:** the window door refuses every framed hello but a hub's
   (`NO_WINDOW_HERE`): with no code signing, a window hello would be any same-user process's `ui`.
 
+### The browser client
+
+`web/` is the page a core serves for web access ([PROTOCOL.md](PROTOCOL.md) §5b): TypeScript,
+Preact and xterm.js, bundled by esbuild, no CDN. It needs Node 22.18 or later.
+
+```sh
+cd web
+npm ci             # the pinned packages (package-lock.json)
+npm run build      # web/dist/: index.html, app.<hash>.js, app.<hash>.css, icon.<hash>.svg, .gz copies
+npm run check      # typecheck, unit tests (node --test), build: what CI's web job runs
+```
+
+`./build.sh` runs `scripts/build-web.sh` first, which does `npm ci` (only when the lock file
+changed) and `npm run build`. The core embeds `web/dist/` at compile time
+(`src/core/web_assets.odin`, `#load_directory`); `web/dist/` is not committed. Without Node the
+build goes on and the core embeds a placeholder page (or a stale `web/dist/` already there).
+A release build (`DECKHAND_RELEASE=1 ./build.sh`, `scripts/pack-linux.sh`) sets
+`DECKHAND_WEB_REQUIRED=1` and fails without it. The page's colours come from the native tokens:
+`web/tools/theme.mjs` writes `web/src/theme.gen.css` and `theme.gen.ts` (committed) from
+`src/theme.odin` and `src/core/term_palette.odin`; run `npm run build` after changing a look.
+
 ## Rebuilding libghostty-vt
 
 ```sh
@@ -289,6 +311,7 @@ so the Windows library keeps strong compiler_rt symbols; Windows linking is unte
 | Clay | `e6cc36941ab2af5d81107617039d6f527a1c660b` (2026-05-20) |
 | Odin | dev-2026-09 |
 | CEF | `vendor/cef/VERSION` |
+| Browser client (`web/`): esbuild, TypeScript, Preact, xterm.js | `web/package.json`, locked in `web/package-lock.json`; Node 22.18+ |
 | tree-sitter + 13 grammars | lib `v0.27.1`; grammars at pinned tags in `vendor/tree-sitter/` (`VERSIONS`; refresh with `scripts/vendor-tree-sitter.sh`) |
 
 libghostty-vt's C ABI is not stable yet, and `src/ghostty/ghostty.odin` is hand-written for
@@ -653,6 +676,9 @@ core/machines.odin  other machines over SSH: the registry, the link, statuses (P
 core/machine_mirror.odin, machine_route.odin  their sessions, jobs and bells here; commands run there
 core/machine_install.odin, machine_page.odin  install and update a machine's core; a machine's web page in a local tab
 core/window_sock.odin  the window's and the hub's door on core.sock (sshd check, Allow other machines)
+core/web*.odin      web access (PROTOCOL.md §5b): the HTTP listener and WebSocket, pairing, the embedded client, the browser's views (Changes, files, Settings, jobs)
+coremain/web_cli.odin  `deckhand-core-serve web …`; ui_web.odin  Settings › Machines › Web access
+../web/             the browser client (TypeScript; The browser client, above)
 core/handoff.odin, ui_handoff.odin  new session on another machine
 core/pi_handoff.odin  Continue this conversation on <machine>: pi only, this Mac outward (#115)
 coremain/connect.odin  `deckhand-core-serve connect`: the far end of a machine's ssh link

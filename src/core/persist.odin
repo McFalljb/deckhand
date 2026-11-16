@@ -616,6 +616,8 @@ workspace_json :: proc() -> string {
 	if st.separate_core != separate_core_default_on do kb(&w, "separate_core", st.separate_core) // an opt-out (or in): read by the window before it starts (separate_core_wanted)
 	if st.remote_machines != remote_machines_default_on do kb(&w, "remote_machines", st.remote_machines) // Machines over SSH (machines.odin): saved when it differs from the default
 	if st.machines_reachable != machines_reachable_default_on do kb(&w, "machines_reachable", st.machines_reachable) // the hub door (window_sock.odin)
+	if st.web_access do kb(&w, "web_access", true) // web access (web.odin): off by default
+	if st.web_listen != "" do ks(&w, "web_listen", st.web_listen)
 	if st.last_harness != .Pi do ks(&w, "last_harness", HARNESS_KEYS[st.last_harness]) // the picker's first row (harness.odin)
 	if st.bell_off != {} || st.bell_os != {} || st.bell_sound != {} || st.bell_dock_off {
 		k(&w, "bell")
@@ -787,6 +789,8 @@ workspace_restore :: proc(text: string) -> string {
 		if sc, sok := st["separate_core"].(json.Boolean); sok do state.settings.separate_core = bool(sc)
 		if rm, rok := st["remote_machines"].(json.Boolean); rok do state.settings.remote_machines = bool(rm)
 		if mr, mok := st["machines_reachable"].(json.Boolean); mok do state.settings.machines_reachable = bool(mr)
+		if wa, wok := st["web_access"].(json.Boolean); wok do state.settings.web_access = bool(wa)
+		if wl, wok := st["web_listen"].(json.String); wok do run(Set_Web_Listen{address = wl}) // checked as the user's would be
 		claude_accounts_restore(st) // claude_accounts.odin
 		if lh, lok := enum_of(st, "last_harness", HARNESS_KEYS); lok do state.settings.last_harness = lh // harness.odin
 		if bo, bok := st["bell"].(json.Object); bok {

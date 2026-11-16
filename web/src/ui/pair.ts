@@ -15,7 +15,7 @@ export function pairScreen(onPaired: () => void): HTMLElement {
     autocapitalize: "characters",
     spellcheck: false,
     maxLength: CODE_LEN + 2,
-    placeholder: "XXXXXXXX",
+    placeholder: "XXXX-XXXX",
     "aria-label": "Pairing code",
   });
   const name = h("input", {

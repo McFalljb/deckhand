@@ -9,9 +9,10 @@ import { whoami } from "./api.ts";
 
 export const PROTOCOL_VERSION = 1;
 
-// ASSUMPTION (check against web-core): the hello a browser says on the socket. The cookie already
-// proved the browser, so it carries no token; `peer: "web"` names the door. The reply is a
-// `result` with this id whose data has at least `core` (this run's id).
+// The hello a browser says on the socket (docs/PROTOCOL.md §5c). The cookie already proved the
+// browser (a bad one is refused at the upgrade, 401 or 403), so it carries no token. The reply is a
+// `result` with this id: data {core, version, generation, features, methods, name, machine,
+// snapshot, build, web, framed}.
 function helloMessage(): object {
   return { v: PROTOCOL_VERSION, id: "hello", type: "hello", framed: true, peer: "web", snapshot: ["vt"] };
 }
@@ -29,7 +30,7 @@ export type LinkStatus =
   | { kind: "connecting" }
   | { kind: "up" }
   | { kind: "reconnecting"; why: string }
-  | { kind: "displaced"; by: string } // another window or machine took the core: Take back
+  | { kind: "displaced"; by: string } // another window, machine or browser took the core: Take back ("" = this machine's window)
   | { kind: "unpaired" }
   | { kind: "stopped"; why: string }; // the core ended on purpose
 
@@ -300,10 +301,22 @@ export class Link {
       case "window.request":
         this.onWindowRequest(String(m.id ?? ""), m.request ?? {});
         return;
-      case "hub.taken":
-      case "web.taken":
-        // ASSUMPTION: what a web link gets when another window or machine takes the core
-        this.displaced(String(m.by ?? ""));
+      case "web.taken": {
+        // another window, machine or browser took the core: Take back dials again
+        const by = String(m.by ?? ""), name = String(m.name ?? "");
+        this.displaced(by === "machine" ? `Viewed from ${name || "another machine"}` : by === "browser" ? `Viewed in ${name || "another browser"}` : "");
+        return;
+      }
+      case "web.revoked":
+        // this browser was unpaired at the Mac: pair again
+        this.hold = true;
+        this.dropSocket();
+        this.setStatus({ kind: "unpaired" });
+        return;
+      case "web.closed":
+        this.hold = true;
+        this.dropSocket();
+        this.setStatus({ kind: "stopped", why: "Web access was turned off at the Mac." });
         return;
     }
     this.jsonHandlers.get(m.type)?.(m);
@@ -344,18 +357,7 @@ export class Link {
   }
 
   private onWindowRequest(id: string, req: WindowRequest): void {
-    let reply: Record<string, any> | null = null;
-    switch (req.op) {
-      case "viewed_from":
-        this.displaced(String(req.text ?? ""));
-        return;
-      case "quit":
-        // the core ends on purpose, or lets this link go for a newer window
-        this.displaced(String(req.text ?? ""));
-        return;
-      default:
-        reply = this.hooks.request(req);
-    }
+    const reply = this.hooks.request(req);
     if (id) this.sendJson({ type: "window.reply", id, reply: reply ?? { ok: false } });
   }
 }

@@ -179,7 +179,7 @@ function onStatus(s: LinkStatus): void {
       break;
     case "displaced":
       away(
-        s.by ? "Viewed from " + s.by : "Viewed at the Mac",
+        s.by || "Viewed at the Mac",
         "Your sessions keep running. Take them back to show them here (the other window lets go).",
         "Take back",
         () => link.takeBack(),
@@ -189,7 +189,7 @@ function onStatus(s: LinkStatus): void {
       showPair();
       break;
     case "stopped":
-      away("Deckhand stopped this browser", s.why, "Try again", () => link.takeBack());
+      away("Disconnected", s.why, "Try again", () => link.takeBack());
       break;
   }
 }

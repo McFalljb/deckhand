@@ -213,9 +213,10 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
 // cell sizes into <style> elements and true colours into style attributes; the browser drops
 // both. This moves them to what CSP allows (CSSOM is not inline style):
 // - a style attribute becomes el.style.cssText;
-// - a <style> element (only xterm.js makes them: this page has none of its own) gets a type the
-//   browser does not parse, so it is inert, and its text is mirrored into a constructed
-//   stylesheet in document.adoptedStyleSheets while it is in the document.
+// - a <style> element (only xterm.js makes them: this page has none of its own) is never put in
+//   the document (each insertion, and each change to one in it, is a CSP report: thousands an
+//   hour); its text is mirrored into a constructed stylesheet in document.adoptedStyleSheets from
+//   when xterm.js appends it until it removes it.
 
 let shimmed = false;
 
@@ -232,20 +233,24 @@ function installCspStyleShim(): void {
   };
   if (!("adoptedStyleSheets" in Document.prototype) || typeof CSSStyleSheet === "undefined") return;
 
+  const mirrored = new WeakSet<Node>();
   const sheets = new Map<HTMLStyleElement, CSSStyleSheet>();
   const sync = (el: HTMLStyleElement) => {
-    if (!el.isConnected) return drop(el);
-    let sheet = sheets.get(el);
-    if (!sheet) {
-      sheet = new CSSStyleSheet();
-      sheets.set(el, sheet);
-      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-    }
+    const sheet = sheets.get(el);
+    if (!sheet) return; // not "in the document" (yet, or any more)
     try {
       sheet.replaceSync(el.textContent ?? "");
     } catch {
       /* a rule the browser does not take */
     }
+  };
+  const attach = (el: HTMLStyleElement) => {
+    if (!sheets.has(el)) {
+      const sheet = new CSSStyleSheet();
+      sheets.set(el, sheet);
+      document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    }
+    sync(el);
   };
   const drop = (el: HTMLStyleElement) => {
     const sheet = sheets.get(el);
@@ -258,23 +263,19 @@ function installCspStyleShim(): void {
   Document.prototype.createElement = function (this: Document, tag: string, options?: ElementCreationOptions) {
     const el = create.call(this, tag, options);
     if (el instanceof HTMLStyleElement) {
-      el.type = "text/x-deckhand-mirrored"; // not text/css: never parsed, so CSP has nothing to refuse
+      mirrored.add(el);
+      el.remove = () => drop(el);
       new MutationObserver(() => sync(el)).observe(el, { childList: true, characterData: true, subtree: true });
     }
     return el;
   } as typeof Document.prototype.createElement;
 
-  // in and out of the document
-  new MutationObserver((records) => {
-    for (const r of records) {
-      r.addedNodes.forEach((n) => {
-        if (n instanceof HTMLStyleElement) sync(n);
-        else if (n instanceof Element) n.querySelectorAll("style").forEach(sync);
-      });
-      r.removedNodes.forEach((n) => {
-        if (n instanceof HTMLStyleElement) drop(n);
-        else if (n instanceof Element) n.querySelectorAll("style").forEach(drop);
-      });
+  const appendChild = Node.prototype.appendChild;
+  Node.prototype.appendChild = function <T extends Node>(this: Node, child: T): T {
+    if (mirrored.has(child)) {
+      attach(child as unknown as HTMLStyleElement);
+      return child;
     }
-  }).observe(document.documentElement, { subtree: true, childList: true });
+    return appendChild.call(this, child) as T;
+  };
 }

@@ -1,12 +1,23 @@
 // A project: its open sessions, New session, and its past sessions to resume.
 
-import { sessionTitle, type SessionRow } from "../state.ts";
+import { sessionTitle, type SessionRow, type Store } from "../state.ts";
 import { sessionDot } from "../status.ts";
 import type { Ctx } from "./ctx.ts";
 import { h, replace } from "./dom.ts";
 import { mark } from "./home.ts";
 
 const PAST_MAX = 40;
+
+const FOUND = new Set(["ok", "too_old", "unchecked"]);
+
+// Codex can start there: this machine's checklist (state.live) lists it, or another machine's
+// core starts Codex tabs (its hello's codex_tabs) and has it (src/core/harness.odin machine_harnesses).
+function codexAvailable(store: Store, machine: number): boolean {
+  const has = (list: any[] | undefined) => (list ?? []).some((c) => c.id === "codex" && FOUND.has(c.state));
+  if (!machine) return has(store.sections.get("live")?.live?.checklist);
+  const m: any = store.machines.find((x) => x.no === machine);
+  return !!m?.codex && has(m.checklist);
+}
 
 export class ProjectScreen {
   readonly el: HTMLElement;
@@ -60,6 +71,7 @@ export class ProjectScreen {
     } else {
       actions.append(this.button("New pi session", true, { type: "new_chat", project_id: p.id }));
       actions.append(this.button("New Claude session", false, { type: "new_claude_session", project_id: p.id }));
+      if (codexAvailable(store, p.machine)) actions.append(this.button("New Codex session", false, { type: "new_claude_session", project_id: p.id, harness: "codex" }));
     }
     out.push(actions);
     if (p.machine) out.push(h("p", { class: "muted small" }, "On " + store.machineName(p.machine) + " · " + p.label));

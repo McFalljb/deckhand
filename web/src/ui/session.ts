@@ -318,6 +318,17 @@ export class SessionScreen {
     } else this.stream.input(CR);
   }
 
+  // A new line without sending: into the text field, or (raw keys) a line feed for the program.
+  private newline(): void {
+    if (this.raw) {
+      this.stream.input(enc.encode("\n"));
+      return;
+    }
+    const f = this.input, at = f.selectionStart ?? f.value.length, end = f.selectionEnd ?? at;
+    f.setRangeText("\n", at, end, "end");
+    f.focus();
+  }
+
   // A key with the sticky modifiers, which then let go.
   private withMods(b: Uint8Array): Uint8Array {
     if (!this.ctrl && !this.alt) return b;
@@ -393,6 +404,7 @@ export class SessionScreen {
       keys.push(b("↑", () => this.arrow("A"), "", "Up"));
       keys.push(b("→", () => this.arrow("C"), "", "Right"));
       keys.push(b("^C", () => this.stream.input(new Uint8Array([3])), "", "Control C"));
+      keys.push(b("⏎", () => this.newline(), "", "Newline"));
     }
     replace(this.keybar, ...keys);
   }

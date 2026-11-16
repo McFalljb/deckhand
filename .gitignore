@@ -9,3 +9,6 @@
 .env.*
 *.p12
 __pycache__/
+# the browser client's build and packages (scripts/build-web.sh)
+/web/dist/
+/web/node_modules/

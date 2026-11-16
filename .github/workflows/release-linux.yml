@@ -44,6 +44,9 @@ jobs:
         with: { persist-credentials: false }
       - uses: ./.github/actions/setup
         with: { cef: "false" }
+      # the browser client is built into the core (scripts/build-web.sh: Node 22.18 or later)
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: "22.18" }
       - name: The version (the tag's, else the input)
         run: |
           if [ "$GITHUB_EVENT_NAME" = push ]; then

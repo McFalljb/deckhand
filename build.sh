@@ -160,8 +160,11 @@ OUT=build/deckhand
 DEFINES=""
 if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then
   [ "$MODE" = test ] || [ "$MODE" = fake-app ] && { echo "build.sh: DECKHAND_RELEASE=1 is for release builds, not $MODE"; exit 1; }
-  DEFINES="-define:DECKHAND_TEST_HOOKS=false"
+  DEFINES="-define:DECKHAND_TEST_HOOKS=false -define:DECKHAND_WEB_REQUIRED=true"
+  export DECKHAND_WEB_REQUIRED=1 # scripts/build-web.sh: no Node is an error, not a placeholder
 fi
+# the browser client (web/, docs/PROTOCOL.md §5b) into web/dist/, which the core embeds
+scripts/build-web.sh
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
   CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"

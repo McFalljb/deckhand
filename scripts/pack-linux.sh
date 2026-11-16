@@ -32,7 +32,9 @@ trap 'rm -rf "$B"' EXIT
 trap 'rm -rf "$B"; exit 130' INT TERM
 S=$B/$TOP
 mkdir -p "$S" "$OUT"
-odin build src/coremain -out:"$S/deckhand-core-serve" -o:speed -define:DECKHAND_TEST_HOOKS=false -define:DECKHAND_VERSION="$VERSION"
+# the browser client, embedded in the core (Node 22.18+; never the placeholder in a release)
+DECKHAND_WEB_REQUIRED=1 scripts/build-web.sh
+odin build src/coremain -out:"$S/deckhand-core-serve" -o:speed -define:DECKHAND_TEST_HOOKS=false -define:DECKHAND_WEB_REQUIRED=true -define:DECKHAND_VERSION="$VERSION"
 odin build src/holder -out:"$S/deckhand-core" -o:speed
 odin build tools/deckhand-cli -out:"$S/deckhand" -o:speed
 # what pi loads (build.sh's build_pi: its tests stay behind), and the Claude Code plugin

@@ -21,7 +21,9 @@ Users start with the [README](../README.md) and the [user guide](GUIDE.md); the 
 macOS 14 or later on Apple silicon (arm64), [Odin](https://odin-lang.org/) `dev-2026-09`, and
 `clang` from the Xcode command line tools. Intel Macs can build Deckhand, but without browser
 tabs: CEF is wired up for arm64 only. Node 22.18 or later runs the pi integration's tests
-(`./build.sh test` skips them without `node`). To run what you build you need at least one coding
+(`./build.sh test` skips them without `node`) and builds the browser client (`web/`, embedded in
+the core by `scripts/build-web.sh`: without Node the core embeds a placeholder page, and a release
+build fails instead). To run what you build you need at least one coding
 agent on your login shell's `PATH`: [pi](https://pi.dev) 1.4.0 or newer (Atlas and jobs need pi),
 Claude Code 2.1.295 or newer, or Codex 0.163.0 or newer. The pi integration and the Claude Code
 plugin ship with Deckhand (`integrations/`); Codex gets its hooks and tools per run

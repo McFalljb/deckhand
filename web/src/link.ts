@@ -9,7 +9,7 @@ import { whoami } from "./api.ts";
 
 export const PROTOCOL_VERSION = 1;
 
-// The hello a browser says on the socket (docs/PROTOCOL.md §5c). The cookie already proved the
+// The hello a browser says on the socket (docs/PROTOCOL.md §5b). The cookie already proved the
 // browser (a bad one is refused at the upgrade, 401 or 403), so it carries no token. The reply is a
 // `result` with this id: data {core, version, generation, features, methods, name, machine,
 // snapshot, build, web, framed}.

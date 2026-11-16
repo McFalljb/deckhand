@@ -1583,8 +1583,7 @@ all within 10 s; at most 16 connections before an upgrade and 4 WebSockets. Stat
 | `POST /api/unpair` | the caller's own token forgotten (its live link closes); `200`, the cookie cleared |
 | `GET /ws` | the WebSocket upgrade (RFC 6455, version 13, no extensions or subprotocols) |
 
-Every response: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
-'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none';
+Every response: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none';
 form-action 'self'; frame-ancestors 'none'; connect-src 'self' ws://<Host> wss://<Host>`,
 `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
 `Cache-Control: no-cache` (files) or `no-store` (`/api/`). No CORS headers at all. Every `POST`

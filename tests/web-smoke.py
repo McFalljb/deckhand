@@ -163,6 +163,14 @@ def main():
         assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "unsafe-eval" not in csp, csp
         assert h["x-content-type-options"] == ["nosniff"] and h["referrer-policy"] == ["no-referrer"], h
         assert "access-control-allow-origin" not in h
+        assert "'unsafe-inline'" not in csp and "style-src 'self';" in csp, csp
+        if b"app.js" in body:  # the real client embedded (scripts/build-web.sh ran), not the placeholder
+            for name, ctype in (("app.js", "text/javascript"), ("app.css", "text/css")):
+                st, h, b = http(port, "GET", f"/assets/{name}")
+                assert st == 200 and h["content-type"][0].startswith(ctype) and len(b) > 1000, (name, st, h.get("content-type"))
+            print("web-smoke: the real web client is embedded")
+        else:
+            print("web-smoke: the placeholder page is embedded (no web/dist at build time)")
         assert http(port, "GET", "/nope")[0] == 404
         assert http(port, "GET", "/assets/../web.odin")[0] == 404
         assert http(port, "DELETE", "/")[0] == 405

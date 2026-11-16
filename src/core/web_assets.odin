@@ -14,6 +14,14 @@ WEB_PLACEHOLDER :: `<!doctype html>
 <body><p>Deckhand's web client is not in this build of its core (it was built without web/dist: cd web &amp;&amp; npm ci &amp;&amp; npm run build, then build Deckhand again).</p></body></html>
 `
 
+// Release builds (-define:DECKHAND_WEB_REQUIRED=true: build.sh with DECKHAND_RELEASE=1,
+// scripts/pack-linux.sh) never ship the placeholder.
+WEB_REQUIRED :: #config(DECKHAND_WEB_REQUIRED, false)
+
+when WEB_REQUIRED && !#exists("../../web/dist/index.html") {
+	#panic("web/dist/index.html is missing: a release build embeds the web client (scripts/build-web.sh needs Node 22.18 or later)")
+}
+
 when #exists("../../web/dist/index.html") {
 	@(private = "file")
 	WEB_FILES := #load_directory("../../web/dist")

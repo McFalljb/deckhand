@@ -132,6 +132,9 @@ Window_Link :: struct {
 	following:  map[u64]bool, // over core.sock: its commands answered pending, whose finished it is sent (window_link_finished)
 	hub:        bool, // another machine's core, not a window (window_sock.odin's hub door; §10.4 M6-A)
 	hub_from:   string, // heap: that machine's name
+	web:        bool, // a paired browser over web access (web.odin): the user's window with a hub's caps
+	web_device: string, // heap: its device id (web_revoke closes it)
+	web_name:   string, // heap: what it calls itself
 	serial:     u64, // this connection's number in this run (link_serials): a hub's pi_handoff copy is bound to it
 }
 
@@ -240,6 +243,8 @@ core_detach_window :: proc(keep_transport := false) {
 	}
 	if link.hub do pi_handoff_link_gone(link.serial) // a copy it was sending goes (pi_handoff.odin)
 	delete(link.hub_from, heap)
+	delete(link.web_device, heap)
+	delete(link.web_name, heap)
 	free(link, heap)
 	link = nil
 	tab_host_detached() // what the window owed ends: no_window (tabhost_route.odin)
@@ -727,6 +732,7 @@ window_command_ok :: proc(id: typeid) -> bool {
 window_link_request :: proc(r: Window_Request, want_reply: bool) -> (reply: Window_Reply, answered: bool) {
 	if replica_process && replica_request != nil do return replica_request(r), true // the window's own (window_hooks.odin)
 	if link == nil || link.held_off do return
+	if link.web && !web_request_ok(r.op) do return // a browser hosts no views or sheets (web_request_ok)
 	id := ""
 	if want_reply {
 		link.next_ask += 1
@@ -968,7 +974,22 @@ link_message :: proc(text: string) -> (command: bool) {
 		link_reply_now(id, fail(fmt.tprintf("%s is a window's, not a hub's", type)), 0)
 		return
 	}
+	if link.web do switch type {
+	case "window.facts", "window.tab_facts", "window.command", "script.core", "tab_host.event", "finished":
+		// the native window's own (its facts and exe, the internal caller, test mode, the tab host):
+		// never a browser's. window.reply stays: it answers the requests a browser is sent
+		log_ln("Deckhand: a browser sent", type, "(refused)")
+		link_reply_now(id, fail(fmt.tprintf("%s is the native window's, not a browser's", type)), 0)
+		return
+	}
 	switch type {
+	case "hello":
+		// a browser's first message (its cookie was checked at the upgrade): the hello reply's facts
+		if !link.web {
+			log_ln("Deckhand: an unknown window message:", type)
+			return
+		}
+		link_send(reply_json(id, {ok = true, data = web_hello_data(link.web_name)}, 0))
 	case "state.subscribe":
 		link.subscribed = true
 		link.dirty = false
@@ -1141,7 +1162,7 @@ link_command_caller :: proc(obj: json.Object) -> Caller {
 			for n, k in SCRIPT_AS_NAMES do if n != "" && n == name do return {kind = k, tab_id = u64(max(tab, 0))}
 		}
 	}
-	return {kind = .UI}
+	return {kind = .UI, web = link.web}
 }
 
 @(private = "file")
@@ -1269,19 +1290,21 @@ WINDOW_REPLY_WAIT := 250 * time.Millisecond
 // transport is the socket, leftover the bytes its hello's reader read past the line. A window
 // already attached goes first (one window at a time; the newer is the one the user sees).
 // Main thread.
-core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, hub := false, from := "") -> bool {
+core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, hub := false, from := "", web := false, web_device := "") -> bool {
 	// the newest connection wins (§10.4, decided 2026-11-09): the one it replaces is told who took
 	// it, and waits for its user's Take back rather than reconnecting (they would take turns)
 	if link != nil {
-		log_ln("Deckhand: a new", hub ? "hub" : "window", "attached: the previous", link.hub ? "hub" : "window", "is let go")
-		if link.hub {
+		log_ln("Deckhand: a new", link_kind_name(hub, web), "attached: the previous", link_kind_name(link.hub, link.web), "is let go")
+		if link.web {
+			link_web_taken(hub ? "machine" : web ? "browser" : "window", hub || web ? from : "")
+		} else if link.hub {
 			b := strings.builder_make(context.temp_allocator)
 			fmt.sbprintf(&b, `{{"v":%d,"type":"hub.taken","by":`, PROTOCOL_VERSION)
-			json_quote(&b, hub ? from : "")
+			json_quote(&b, hub ? from : web ? "a browser" : "")
 			strings.write_byte(&b, '}')
 			link_send(strings.to_string(b))
-		} else if hub {
-			window_viewed_from(from) // Viewed from <machine>, with Take back
+		} else if hub || web {
+			window_viewed_from(from, browser = web) // Viewed from <machine> (in a browser), with Take back
 		} else do window_quit("another Deckhand window attached") // it quits, not reconnects
 		link_linger_start()
 		core_detach_window()
@@ -1289,12 +1312,17 @@ core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, h
 	heap := runtime.heap_allocator()
 	link = new(Window_Link, heap)
 	link.hub = hub
+	link.web = web
 	link_serials += 1
 	link.serial = link_serials
-	link.hub_from = strings.clone(from, heap)
+	link.hub_from = strings.clone(hub ? from : "", heap)
+	link.web_name = strings.clone(web ? from : "", heap)
+	link.web_device = strings.clone(web_device, heap)
 	link.sock = new(cw.Sock_Transport, heap)
 	link.sock_peer = peer
-	cw.sock_open(link.sock, fd, peer_check = link_sock_peer_ok, peer_data = &link.sock_peer, initial = leftover, allocator = heap)
+	// a browser's end is this process's own socketpair (web_http.odin's relay): no peer to re-read
+	if web do cw.sock_open(link.sock, fd, initial = leftover, allocator = heap)
+	else do cw.sock_open(link.sock, fd, peer_check = link_sock_peer_ok, peer_data = &link.sock_peer, initial = leftover, allocator = heap)
 	link.replies = make([dynamic]^Link_Reply, heap)
 	link.untracked = make([dynamic]string, heap)
 	cw.backlog_init(&link.backlog, allocator = heap)
@@ -1302,6 +1330,84 @@ core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, h
 	link.tab_facts = make(map[u64]Tab_Facts, heap)
 	link.asking = make([dynamic]Link_Ask, heap)
 	return true
+}
+
+@(private = "file")
+link_kind_name :: proc(hub, web: bool) -> string {return hub ? "hub" : web ? "browser" : "window"}
+
+// A browser's link is let go for another: it is told who took it (by: window, machine or
+// browser; name: that machine's or browser's), and waits for its user's Take back.
+@(private = "file")
+link_web_taken :: proc(by, name: string) {
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"v":%d,"type":"web.taken","by":"%s","name":`, PROTOCOL_VERSION, by)
+	json_quote(&b, name)
+	strings.write_byte(&b, '}')
+	link_send(strings.to_string(b))
+}
+
+// The data of the result a browser's hello gets (docs/PROTOCOL.md §5c): what the hello reply
+// tells a window, for a browser: the core, its version and features, the commands it may send,
+// vt snapshots only.
+web_hello_data :: proc(name: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"v":%d,"app":"deckhand","caller":"ui","web":true,"framed":true,"name":`, PROTOCOL_VERSION)
+	json_quote(&b, name)
+	fmt.sbprintf(&b, `,"generation":%d,"version":`, cw.GENERATION)
+	json_quote(&b, core_version())
+	strings.write_string(&b, `,"core":`)
+	json_quote(&b, window_door_core_id())
+	strings.write_string(&b, `,"features":[`)
+	for f, i in CORE_FEATURES {
+		if i > 0 do strings.write_byte(&b, ',')
+		json_quote(&b, f)
+	}
+	strings.write_string(&b, `],"methods":[`)
+	n := 0
+	for spec in COMMAND_SPECS {
+		if spec.who == .Internal || !who_allows(.UI, spec.who) || !web_may_run(spec.type, spec.who) do continue
+		if n > 0 do strings.write_byte(&b, ',')
+		json_quote(&b, spec.type)
+		n += 1
+	}
+	strings.write_string(&b, `],"machine":{"name":`)
+	json_quote(&b, machine_here_name())
+	fmt.sbprintf(&b, `,"os":"%s","arch":"%s"}},"snapshot":["%s"],"build":`, ODIN_OS_STRING, ODIN_ARCH_STRING, SNAPSHOT_VT)
+	json_quote(&b, core_build())
+	strings.write_byte(&b, '}')
+	return strings.to_string(b)
+}
+
+// The window.requests a browser is sent; any other answers as if no window were attached.
+web_request_ok :: proc(op: Window_Op) -> bool {
+	#partial switch op {
+	case .Clipboard_Set, .Term_Fit, .Changes_Diff, .Notify, .Open_Url: return true
+	}
+	return false
+}
+
+// The attached link is a paired browser's (web access).
+window_link_web :: proc() -> bool {return link != nil && link.web}
+
+// The attached browser's device id ("" = none, or not a browser).
+window_link_web_device :: proc() -> string {return link != nil && link.web ? link.web_device : ""}
+
+// A browser was revoked (web_revoke, an unpair): its link, if attached, is told and let go.
+window_link_web_revoked :: proc(device: string) {
+	if link == nil || !link.web || link.web_device != device do return
+	link_send(fmt.tprintf(`{{"v":%d,"type":"web.revoked"}}`, PROTOCOL_VERSION))
+	log_ln("Deckhand: a revoked browser's link is let go")
+	link_linger_start()
+	core_detach_window()
+}
+
+// Web access went off: the browser's link is let go (why: the log's).
+window_link_web_close :: proc(why: string) {
+	if link == nil || !link.web do return
+	log_ln("Deckhand: the browser's link is let go:", why)
+	link_send(fmt.tprintf(`{{"v":%d,"type":"web.closed"}}`, PROTOCOL_VERSION))
+	link_linger_start()
+	core_detach_window()
 }
 
 // A link let go for a newer one: its last message (quit, viewed_from, hub.taken) must reach it, and

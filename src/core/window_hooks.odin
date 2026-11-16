@@ -89,7 +89,7 @@ Window_Op :: enum u8 {
 	Job_Sheet_Holds_Quit, // a quit: reply ok when the sheet has changes (it asks to discard them; the quit stops)
 	Notify, // a separate core's OS notification (text: title, message: body; count 1: shown also in front), shown by the window's own
 	Quit, // the core ends on purpose (a quit, Stop All) or let this window go for a newer one (text: why): the window quits too, never reconnects
-	Viewed_From, // another machine's Deckhand took this core (text: its name): the window shows Viewed from <machine> with Take back, and does not reconnect until then
+	Viewed_From, // another machine's Deckhand took this core (text: its name; count 1: a paired browser, text its name): the window shows Viewed from <machine> with Take back, and does not reconnect until then
 	App_Boxes, // a separate core: tab_id's app sent new tab.boxes (text: {"boxes":[…]}), drawn while inspected
 	Sound, // a bell entry's sound (text: its name, BELL_SOUND_LABELS), played by the window (notify.odin)
 	Path_Changed, // a separate core's own file command changed path: the window's file model forgets it (its watcher may lag)
@@ -202,7 +202,7 @@ window_notify :: proc(title, body: string, front := false) {ask({op = .Notify, t
 window_sound :: proc(name: string) {ask({op = .Sound, text = name})}
 // A separate core: the window goes too (it must not reconnect). why: for its log.
 window_quit :: proc(why: string) {ask({op = .Quit, text = why})}
-window_viewed_from :: proc(machine: string) {ask({op = .Viewed_From, text = machine})}
+window_viewed_from :: proc(machine: string, browser := false) {ask({op = .Viewed_From, text = machine, count = browser ? 1 : 0})}
 // A separate core: an app tab's new tab.boxes for the window to draw (text: {"boxes":[…]}).
 window_app_boxes :: proc(tab_id: u64, text: string) {ask({op = .App_Boxes, tab_id = tab_id, text = text})}
 window_set_appearance :: proc(mode: Appearance) {ask({op = .Appearance, mode = mode})}

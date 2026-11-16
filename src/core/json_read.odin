@@ -676,6 +676,11 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_separate_core":   cmd = Set_Separate_Core{on = get_bool(&r, "on")}
 	case "set_remote_machines": cmd = Set_Remote_Machines{on = get_bool(&r, "on")}
 	case "set_machines_reachable": cmd = Set_Machines_Reachable{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
+	case "set_web_access":      cmd = Set_Web_Access{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
+	case "set_web_listen":      cmd = Set_Web_Listen{address = get_str(&r, "address")}
+	case "web_pair":            cmd = Web_Pair{}
+	case "web_devices":         cmd = Web_Devices{}
+	case "web_revoke":          cmd = Web_Revoke{id = get_str(&r, "id")}
 	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name", optional = true), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}
 	case "machine_remove":      cmd = Machine_Remove{no = get_u64(&r, "no"), confirm = get_str(&r, "confirm", optional = true)}
 	case "machine_rename":      cmd = Machine_Rename{no = get_u64(&r, "no"), name = get_str(&r, "name")}
@@ -861,6 +866,7 @@ Request_Msg :: struct {
 	peer:    string, // a framed hello: "hub" for another machine's core (deckhand-core-serve connect), else the window
 	from:    string, // a hub hello: that machine's name (Viewed from <machine>)
 	core:    string, // a hub hello: its core's id (a core is not its own hub)
+	op, arg: string, // a web-admin hello (`deckhand-core-serve web`): what to do, and its argument
 	command: Command, // command, pi.session, pi.status
 	session: u64, // subscribe filter: an open session id (0 = all)
 	tab_id:  u64, // subscribe filter: a tab id (0 = all)
@@ -891,6 +897,8 @@ parse_request :: proc(line: string, allocator := context.allocator) -> (m: Reque
 		m.peer = get_str(&r, "peer", optional = true)
 		m.from = get_str(&r, "from", optional = true)
 		m.core = get_str(&r, "core", optional = true)
+		m.op = get_str(&r, "op", optional = true)
+		m.arg = get_str(&r, "arg", optional = true)
 	case "hello.proof":
 		m.proof = get_str(&r, "proof")
 		m.framed = opt_bool(&r, "framed").? or_else false

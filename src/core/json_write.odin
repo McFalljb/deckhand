@@ -213,6 +213,11 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Separate_Core:   return "set_separate_core"
 	case Set_Remote_Machines: return "set_remote_machines"
 	case Set_Machines_Reachable: return "set_machines_reachable"
+	case Set_Web_Access:      return "set_web_access"
+	case Set_Web_Listen:      return "set_web_listen"
+	case Web_Pair:            return "web_pair"
+	case Web_Devices:         return "web_devices"
+	case Web_Revoke:          return "web_revoke"
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
 	case Machine_Rename:      return "machine_rename"
@@ -490,6 +495,13 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Set_Machines_Reachable:
 		kv_bool(&w, "on", c.on)
 		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+	case Set_Web_Access:
+		kv_bool(&w, "on", c.on)
+		token(&w, c.confirm, redact)
+	case Set_Web_Listen:
+		kv_str(&w, "address", c.address)
+	case Web_Revoke:
+		kv_str(&w, "id", c.id)
 	case Machine_Add:
 		kv_str(&w, "name", c.name)
 		kv_str(&w, "target", c.target)
@@ -542,6 +554,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "dismiss", c.dismiss)
 	case Fs_Changed:
 		kv_u64(&w, "paths", u64(len(c.paths))) // how many, not which
+	case Web_Pair, Web_Devices: // nothing
 	case Copy_Control_Token: // nothing: the token is never written
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty
@@ -1836,6 +1849,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_bool(&st, "keep_sessions", s.settings.keep_sessions)
 		kv_bool(&st, "remote_machines", s.settings.remote_machines)
 		kv_bool(&st, "machines_reachable", s.settings.machines_reachable)
+		kv_bool(&st, "web_access", s.settings.web_access)
+		kv_str(&st, "web_listen", web_listen_address())
 		key(&st, "bell")
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)

@@ -33,49 +33,8 @@ connect_main :: proc(args: []string) -> int {
 	}
 	posix.signal(.SIGPIPE, auto_cast posix.SIG_IGN)
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
-	data := core.data_dir()
-	if data == "" {
-		fmt.eprintln("deckhand-core-serve connect: no data dir (HOME is not set)")
-		return 1
-	}
-	core.home_root = data
-	run, rwhy := core.sock_runtime_dir_why() // heap: the login shell's merge below frees the temp allocator
-	if rwhy != "" {
-		fmt.eprintln("deckhand-core-serve connect:", rwhy)
-		return 1
-	}
-	path := fmt.aprintf("%s/%s", run, core.CORE_SOCK)
-	fd: core.Sock_Fd = -1
-	deadline := time.tick_add(time.tick_now(), 15 * time.Second)
-	last_launch: time.Tick
-	asked_shell := false
-	for fd < 0 {
-		if s, ok := core.sock_connect(path); ok {
-			if core.window_token_read(run) != "" do fd = s
-			else do core.sock_close(s) // not a core's (yet): no window token
-		}
-		if fd >= 0 do break
-		if last_launch == {} || time.tick_since(last_launch) >= time.Second {
-			last_launch = time.tick_now()
-			// a Mac's core started from here has no window's environment to inherit: this process
-			// (ssh's, never a terminal's) asks the login shell first, as a Dock launch does, and the
-			// core gets the merge and DECKHAND_GUI_LAUNCH=1 (core_launch). Linux: the core asks itself
-			when ODIN_OS == .Darwin {
-				if !asked_shell do core.login_env_startup(no_window = true)
-				asked_shell = true
-			}
-			if _, ok, why := core.core_launch(core.executable_path(), run, data); !ok {
-				fmt.eprintln("deckhand-core-serve connect: cannot start the core:", why)
-				return 1
-			}
-		}
-		if time.tick_diff(time.tick_now(), deadline) <= 0 {
-			fmt.eprintln("deckhand-core-serve connect: no core answered within 15 s")
-			when ODIN_OS == .Linux do fmt.eprintfln("deckhand-core-serve connect: its log: journalctl --user -u deckhand-core (systemd), else %s/%s", run, core.CORE_LOG)
-			return 1
-		}
-		time.sleep(50 * time.Millisecond)
-	}
+	fd, run, ok := core_dial("connect")
+	if !ok do return 1
 	defer core.sock_close(fd)
 	peer, why := core.core_peer_check(fd) // before a byte is sent (B4)
 	if why != "" {
@@ -94,6 +53,56 @@ connect_main :: proc(args: []string) -> int {
 	}
 	core.trust_wipe(b.buf[:])
 	return connect_relay(fd, peer)
+}
+
+// This machine's core.sock, dialled; a core launched when none answers (≤ 15 s), as `deckhand
+// --ctl` does. run: the runtime dir (heap). ok false: why is printed, as `deckhand-core-serve <who>`.
+core_dial :: proc(who: string) -> (fd: core.Sock_Fd, run: string, ok: bool) {
+	fd = -1
+	data := core.data_dir()
+	if data == "" {
+		fmt.eprintfln("deckhand-core-serve %s: no data dir (HOME is not set)", who)
+		return
+	}
+	core.home_root = data
+	rwhy: string
+	run, rwhy = core.sock_runtime_dir_why() // heap: the login shell's merge below frees the temp allocator
+	if rwhy != "" {
+		fmt.eprintfln("deckhand-core-serve %s: %s", who, rwhy)
+		return
+	}
+	path := fmt.aprintf("%s/%s", run, core.CORE_SOCK)
+	deadline := time.tick_add(time.tick_now(), 15 * time.Second)
+	last_launch: time.Tick
+	asked_shell := false
+	for fd < 0 {
+		if s, sok := core.sock_connect(path); sok {
+			if core.window_token_read(run) != "" do fd = s
+			else do core.sock_close(s) // not a core's (yet): no window token
+		}
+		if fd >= 0 do break
+		if last_launch == {} || time.tick_since(last_launch) >= time.Second {
+			last_launch = time.tick_now()
+			// a Mac's core started from here has no window's environment to inherit: this process
+			// (ssh's, never a terminal's) asks the login shell first, as a Dock launch does, and the
+			// core gets the merge and DECKHAND_GUI_LAUNCH=1 (core_launch). Linux: the core asks itself
+			when ODIN_OS == .Darwin {
+				if !asked_shell do core.login_env_startup(no_window = true)
+				asked_shell = true
+			}
+			if _, lok, why := core.core_launch(core.executable_path(), run, data); !lok {
+				fmt.eprintfln("deckhand-core-serve %s: cannot start the core: %s", who, why)
+				return
+			}
+		}
+		if time.tick_diff(time.tick_now(), deadline) <= 0 {
+			fmt.eprintfln("deckhand-core-serve %s: no core answered within 15 s", who)
+			when ODIN_OS == .Linux do fmt.eprintfln("deckhand-core-serve %s: its log: journalctl --user -u deckhand-core (systemd), else %s/%s", who, run, core.CORE_LOG)
+			return
+		}
+		time.sleep(50 * time.Millisecond)
+	}
+	return fd, run, true
 }
 
 // stdin -> fd, fd -> stdout, until either ends. Every read from the core is from the process

@@ -65,7 +65,9 @@ Window_Arrival :: struct {
 	peer:     trust.Peer,
 	version:  string, // heap: the window's release version ("" for a development build)
 	hub:      bool, // another machine's core (its hello said "peer":"hub")
-	from:     string, // heap: that machine's name
+	from:     string, // heap: that machine's name (a browser's: its name)
+	web:      bool, // a paired browser (web_http.odin's relay): fd is the core's end of its socketpair
+	device:   string, // heap: the browser's device id
 }
 
 @(private = "file")
@@ -164,6 +166,37 @@ window_hello_refusal :: proc(h: Window_Hello) -> string {
 	if h.holder_child do return h.hub ? "a program running in a Deckhand tab can't be its hub" : "a program running in a Deckhand tab can't be its window"
 	if h.hub && h.self do return "a core can't be its own hub"
 	return ""
+}
+
+// The hello of `deckhand-core-serve web on|off|pair|list|revoke|listen` (coremain/web_cli.odin): a
+// line hello with "peer":"web-admin", the window token, and op and arg. Its checks, as a window's
+// minus the code check: the token (a file only this user reads); this user, still the process
+// that connected; and not a program in a Deckhand tab (an agent there is not the user at this
+// machine). Running it in a terminal on the machine is the proof of being there.
+WEB_ADMIN_PEER :: "web-admin"
+
+web_admin_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, token: string) -> string {
+	sync.lock(&door.mu)
+	on, want, holder, own := door.on, door.token, door.holder_pid, door.own_pid
+	sync.unlock(&door.mu)
+	if !on || !hex64_equal(string(want[:]), token) do return "web: not this core's window token"
+	if trust.peer_allowed(.Adhoc, trust.own_uid(), at_accept) != .Allow do return "web: must run as this user"
+	if trust.peer_still(at_accept, trust.peer_read(fd)) != .Allow do return "web: the process changed since it connected"
+	if pid_descends_from(at_accept.pid, {own, holder}) do return "web: not from a program in a Deckhand tab: run it in a terminal of your own on this machine (ssh in, or the machine's own console)"
+	return ""
+}
+
+// What a web-admin op runs (with the internal caller: the terminal is the user's yes).
+web_admin_command :: proc(op, arg: string) -> (cmd: Command, err: string) {
+	switch op {
+	case "on":     return Set_Web_Access{on = true}, ""
+	case "off":    return Set_Web_Access{on = false}, ""
+	case "pair":   return Web_Pair{}, ""
+	case "list":   return Web_Devices{}, ""
+	case "revoke": return Web_Revoke{id = arg}, ""
+	case "listen": return Set_Web_Listen{address = arg}, ""
+	}
+	return nil, "web: on, off, pair, list, revoke ID or listen ADDRESS"
 }
 
 // The framed hello's checks (a connection's reader thread, before the reply). at_accept and tok:
@@ -291,6 +324,22 @@ window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.
 	if platform.wake != nil do platform.wake()
 }
 
+// A paired browser's WebSocket is up (web_http.odin's relay thread): fd, the core's end of its
+// socketpair, waits for the main thread as a window's does. Closed if the door is shut.
+web_arrived :: proc(fd: Sock_Fd, device, name: string) {
+	heap := runtime.heap_allocator()
+	sync.lock(&door.mu)
+	if !door.on {
+		sync.unlock(&door.mu)
+		sock_close(fd)
+		return
+	}
+	if door.arrived == nil do door.arrived = make([dynamic]Window_Arrival, heap)
+	append(&door.arrived, Window_Arrival{fd = fd, web = true, from = strings.clone(name, heap), device = strings.clone(device, heap)})
+	sync.unlock(&door.mu)
+	if platform.wake != nil do platform.wake()
+}
+
 // Main thread, each turn of the core loop: windows that said their hello attach (the newest one
 // stays), and the door learns the holder's pid.
 window_door_tick :: proc() {
@@ -310,8 +359,8 @@ window_door_tick :: proc() {
 	sync.unlock(&door.mu)
 	heap := runtime.heap_allocator()
 	for a, i in got {
-		if i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from) {
-			if !a.hub { // a window's version raises the floor; a hub's is a core's (none here)
+		if i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device) {
+			if !a.hub && !a.web { // a window's version raises the floor; a hub's is a core's, a browser has none
 				sync.lock(&door.mu)
 				was := door.floor
 				door.floor = cw.window_floor_raise(door.floor, a.version)
@@ -323,6 +372,7 @@ window_door_tick :: proc() {
 		delete(a.leftover, heap)
 		delete(a.version, heap)
 		delete(a.from, heap)
+		delete(a.device, heap)
 	}
 	delete(got)
 }
@@ -368,6 +418,7 @@ window_door_stop :: proc() {
 		delete(a.leftover, runtime.heap_allocator())
 		delete(a.version, runtime.heap_allocator())
 		delete(a.from, runtime.heap_allocator())
+		delete(a.device, runtime.heap_allocator())
 	}
 	delete(got)
 	if window_link_is_sock() do core_detach_window()

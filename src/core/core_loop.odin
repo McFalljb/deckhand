@@ -197,6 +197,7 @@ Idle_Facts :: struct {
 	job_run:     bool, // a job run is under way
 	job_schedule: bool, // an enabled job has a schedule (until M5's login agent starts a core for it)
 	machine_live: bool, // a hub: an online linked machine runs a tab or a job (machines_keep_core)
+	web:         bool, // web access is on: a browser may come at any time (web.odin)
 }
 
 // What keeps the core now.
@@ -205,6 +206,7 @@ core_idle_facts :: proc() -> (f: Idle_Facts) {
 	f.job_run = jobs_any_running()
 	f.job_schedule = jobs_any_scheduled()
 	f.machine_live = machines_keep_core(state.machines, state.open_sessions[:], state.machine_jobs[:])
+	f.web = state.settings.web_access
 	for _, t in terms do if t.running {
 		f.tab_process = true
 		break
@@ -230,7 +232,7 @@ machines_keep_core :: proc(machines: []Machine_View, sessions: []Open_Session, j
 // The idle rule on any clock: since is when the core last had nothing to do ({} = it has
 // something). True: exit now.
 core_idle_due :: proc(since: ^time.Tick, f: Idle_Facts, now: time.Tick) -> bool {
-	if f.window || f.tab_process || f.job_run || f.job_schedule || f.machine_live {
+	if f.window || f.tab_process || f.job_run || f.job_schedule || f.machine_live || f.web {
 		since^ = {}
 		return false
 	}

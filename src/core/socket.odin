@@ -807,6 +807,23 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 		if err == "" && m.type == "hello.proof" && !c.ch_open do err = "the first message must be hello"
 		if err == "" && m.type == "hello" && c.ch_open do err = "the challenge wants hello.proof"
 		if err == "" && m.type != "hello" && m.type != "hello.proof" do err = "the first message must be hello"
+		// `deckhand-core-serve web …` in a terminal on this machine (web.odin): one request, then the end
+		if err == "" && m.type == "hello" && m.peer == WEB_ADMIN_PEER && !m.framed {
+			if why := web_admin_check(c.fd, c.peer, m.token); why != "" {
+				conn_push(c, reply_json(m.id, fail(why)), force = true)
+				return false
+			}
+			r: Reply
+			cmd, cerr := web_admin_command(m.op, m.arg)
+			if cerr != "" do r.result = fail(cerr)
+			else {
+				inbox_submit(cmd, {kind = .Internal}, &r)
+				sync.one_shot_event_wait(&r.done)
+			}
+			conn_push(c, reply_json(m.id, r.result), force = true) // a pairing code: to this terminal only
+			if cerr == "" do result_free(r.result)
+			return false
+		}
 		if err == "" && m.framed && socket_framed_handler == nil do err = "framed mode is not available in this build"
 		// the framed wire is the window's only: its own token and checks, never a line token's caller
 		if err == "" && m.framed && (m.type != "hello" || m.token_id != "") do err = "framed mode is only for Deckhand's window"

@@ -571,6 +571,11 @@ Command :: union {
 	Set_Separate_Core,
 	Set_Remote_Machines,
 	Set_Machines_Reachable,
+	Set_Web_Access, // web access (web.odin)
+	Set_Web_Listen,
+	Web_Pair,
+	Web_Devices,
+	Web_Revoke,
 	Machine_Add,
 	Machine_Remove,
 	Machine_Rename,
@@ -830,12 +835,30 @@ Caller :: struct {
 	tab_id: u64,
 	claude: bool, // kind panel: a Claude tab's plugin and CLI (claude.odin), not a pi tab's bridge
 	hub:    bool, // it came over a hub link (another machine's core, on_behalf): kept with a queued command, so a hub that is gone by the time it runs still counts (caller_from_hub)
+	web:    bool, // kind ui: a paired browser's (web access, web.odin): the user, with a hub's caps and no User_Here (web_may_run)
 }
 
 // The command came from another machine's core: its own link said so (kept with it in the inbox),
 // or this core's attached link is a hub now. A User_Here command (every machine_*) is refused
 // then (caller_may).
 caller_from_hub :: proc(c: Caller) -> bool {return c.hub || window_link_hub()}
+
+// The command came from a paired browser: its link said so, or the user's link is a browser's now.
+caller_from_web :: proc(c: Caller) -> bool {return c.web || (c.kind == .UI && window_link_web())}
+
+// The User_Here commands a browser may still send: view state, not authority (the Deck, the
+// Sessions column's view, a machine's Take back).
+WEB_USER_HERE_OK := [?]string{"show_no_session", "set_sidebar_view", "machine_connect"}
+// The user's commands a browser may not send (they hand out or widen authority).
+WEB_REFUSED := [?]string{"copy_control_token"}
+
+// Whether a paired browser may send a command of this type and who (caller_may; web.hello's methods).
+web_may_run :: proc(type: string, who: Command_Who) -> bool {
+	for x in WEB_REFUSED do if x == type do return false
+	if who != .User_Here do return true
+	for x in WEB_USER_HERE_OK do if x == type do return true
+	return false
+}
 
 fail :: proc(msg: string) -> Result {return {error = msg}}
 
@@ -889,6 +912,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	case Job_List, Job_Runs:   q3 = true
 	case Job_Run_Done:         q3 = true // job.finished says it (the run is freed by now)
 	case Pi_Handoff_Part:      q3 = true // a conversation's bytes: never in an event (pi_handoff.odin)
+	case Web_Pair, Web_Devices: q3 = true // a pairing code: its caller's only, never in an event or the log (web.odin)
 	case Focus_Release:        q3 = !changed // nothing had the keyboard (test mode's barrier: client_barrier)
 	}
 	// app tabs: answers and queries (App_Call_Done finishes its request itself)
@@ -927,6 +951,7 @@ caller_may :: proc(caller: Caller, cmd: Command) -> bool {
 	spec := command_spec(command_type(cmd))
 	if spec == nil || !who_allows(caller.kind, spec.who) do return false
 	if spec.who == .User_Here && caller_from_hub(caller) do return false // the one gate: this machine's own user only
+	if caller_from_web(caller) && !web_may_run(spec.type, spec.who) do return false // a browser: no User_Here but view state (web.odin)
 	// a Claude tab (panel + claude): its own claude.* reports, never a pi bridge's; and only
 	// a Claude tab sends those (scripts too, for tests)
 	if spec.who == .Claude do return caller.kind != .Panel || (caller.claude && caller.tab_id == claude_command_tab(cmd))
@@ -1634,6 +1659,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
+	case Set_Web_Access, Set_Web_Listen, Web_Pair, Web_Devices, Web_Revoke: return web_apply(cmd, caller) // web.odin
 	case Set_Remote_Machines: // Settings › Machines over SSH (machines.odin)
 		if state.settings.remote_machines == c.on do return {ok = true}, false
 		state.settings.remote_machines = c.on
@@ -2284,6 +2310,9 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok && x.no == y.no
 	case Set_Machines_Reachable:
 		y, ok := b.(Set_Machines_Reachable)
+		return ok && x.on == y.on
+	case Set_Web_Access:
+		y, ok := b.(Set_Web_Access)
 		return ok && x.on == y.on
 	case Delete_Path:
 		y, ok := b.(Delete_Path)

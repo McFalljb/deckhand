@@ -20,6 +20,7 @@ Core_Live :: struct {
 	checklist: []Harness_Check_Live, // viewed from another machine (a hub): this machine's coding agents checklist, which its row shows (M6-E)
 	machine:   string, // this machine's name (machine_here_name): the sidebar's and the Jobs tab's header over its own rows
 	holder_lost: Holder_Lost_Live, // the session holder is lost: the window's bar and its Restart session holder (holder_recover.odin)
+	web:       Web_Live, // Settings › Machines › Web access: the listener and the paired browsers (web.odin)
 }
 
 // One row of the checklist, as another machine's Deckhand shows it (read-only, Copy).
@@ -133,6 +134,7 @@ live_make :: proc(a: runtime.Allocator) -> Core_Live {
 	l.holder_restart = holder_restart_available()
 	l.holder_lost = holder_lost_now()
 	l.machine = strings.clone(machine_here_name(), a)
+	l.web = web_live(a)
 	if window_link_hub() {
 		l.checklist = make([]Harness_Check_Live, len(harness_items), a)
 		for it, i in harness_items do l.checklist[i] = {id = strings.clone(HARNESS_MANIFEST[it.row].id, a), state = it.state, version = strings.clone(it.version, a), command = strings.clone(it.command, a)}

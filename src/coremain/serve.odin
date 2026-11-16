@@ -189,12 +189,14 @@ serve_platform :: proc() -> bool {
 		run_later = proc(p: proc()) {append(&loop.later, p)},
 		notify = proc(title, body: string) {
 			if core.autotest_active do fmt.println("[autotest] notify:", title, "-", body, core.window_attached() ? "" : "(Deckhand Core)")
-			if core.window_attached() && !core.window_link_hub() do core.window_notify(title, body) // a hub drops it: the core's own banner
+			if core.window_link_web() do core.window_notify(title, body) // a browser is told, and the core shows its own banner too
+			if core.window_attached() && !core.window_link_hub() && !core.window_link_web() do core.window_notify(title, body) // a hub drops it: the core's own banner
 			else if !core.autotest_active do dh_core_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator))
 		},
 		notify_front = proc(title, body: string) {
 			if core.autotest_active do fmt.println("[autotest] notify (front):", title, "-", body, core.window_attached() ? "" : "(Deckhand Core)")
-			if core.window_attached() && !core.window_link_hub() do core.window_notify(title, body, front = true)
+			if core.window_link_web() do core.window_notify(title, body, front = true)
+			if core.window_attached() && !core.window_link_hub() && !core.window_link_web() do core.window_notify(title, body, front = true)
 			else if !core.autotest_active do dh_core_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator)) // the core is never in front
 		},
 		trash = proc(path: string) -> bool {return dh_core_trash(strings.clone_to_cstring(path, context.temp_allocator)) == 1},
@@ -236,6 +238,7 @@ serve_loop :: proc() {
 		for p in later do p()
 		delete(later)
 		core.window_door_tick()
+		core.web_tick() // web access: its listener as the settings say (web.odin)
 		core.machines_tick()
 		now := time.tick_now()
 		if loop.every > 0 && time.tick_diff(loop.next_fire, now) >= 0 {
@@ -292,6 +295,7 @@ serve_stop :: proc(run: string) {
 	core.login_env_kill_probe()
 	core.harness_no_sudo_sweep(at_quit = true)
 	core.titles_save()
+	core.web_stop() // no more browsers: the listener goes (its link with the window door, below)
 	core.socket_stop()
 	core.jobs_shutdown()
 	core.close_all()

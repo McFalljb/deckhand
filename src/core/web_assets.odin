@@ -120,22 +120,25 @@ web_asset_hashed :: proc(name: string) -> bool {
 	return true
 }
 
-// Whether Accept-Encoding takes gzip (a gzip or * entry, not with q=0).
+// Whether Accept-Encoding takes gzip: a gzip entry (not q=0) or, with none, a * entry (not q=0).
 http_accepts_gzip :: proc(header: string) -> bool {
+	// gzip by name decides; else the wildcard does; else no (RFC 9110 §12.5.3)
+	named, wild := -1, -1 // -1 not listed, 0 refused (q=0), 1 taken
 	rest := header
 	for part in strings.split_iterator(&rest, ",") {
 		p := strings.trim_space(part)
 		coding, params := p, ""
 		if i := strings.index_byte(p, ';'); i >= 0 do coding, params = strings.trim_space(p[:i]), p[i + 1:]
-		if !strings.equal_fold(coding, "gzip") && coding != "*" do continue
+		ok := 1
 		q := strings.trim_space(params)
 		if strings.has_prefix(q, "q=") || strings.has_prefix(q, "Q=") {
 			v := strings.trim_space(q[2:])
-			if v == "0" || v == "0." || v == "0.0" || v == "0.00" || v == "0.000" do continue
+			if v == "0" || v == "0." || v == "0.0" || v == "0.00" || v == "0.000" do ok = 0
 		}
-		return true
+		if strings.equal_fold(coding, "gzip") do named = ok
+		else if coding == "*" do wild = ok
 	}
-	return false
+	return named == 1 || (named < 0 && wild == 1)
 }
 
 // Whether If-None-Match names etag (a list, weak or strong, or *).

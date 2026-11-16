@@ -389,6 +389,9 @@ web_asset_caching :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.if_none_match, `"abc"`)
 	testing.expect(t, http_accepts_gzip("gzip, deflate, br") && http_accepts_gzip("br;q=1, GZIP;q=0.5") && http_accepts_gzip("*"), "gzip taken")
 	testing.expect(t, !http_accepts_gzip("") && !http_accepts_gzip("br, deflate") && !http_accepts_gzip("gzip;q=0") && !http_accepts_gzip("gzipx"), "gzip not taken")
+	// an explicit gzip entry beats the wildcard, whichever comes first
+	testing.expect(t, !http_accepts_gzip("gzip;q=0, *") && !http_accepts_gzip("*, gzip;q=0") && !http_accepts_gzip("br, *;q=0"), "gzip refused by name")
+	testing.expect(t, http_accepts_gzip("gzip;q=0.5, *;q=0") && http_accepts_gzip("*;q=0, gzip"), "gzip taken by name")
 	testing.expect(t, http_etag_match(`"a", W/"b"`, `"b"`) && http_etag_match("*", `"x"`) && !http_etag_match(`"a"`, `"b"`) && !http_etag_match("", `"b"`), "If-None-Match")
 	testing.expect(t, web_asset_hashed("app.a717027bc4.js") && !web_asset_hashed("app.js") && !web_asset_hashed("app.A717027BC4.js") && !web_asset_hashed("app.12345.js"), "hashed names")
 	_, ok := web_asset_reply("/assets/.hidden", "", "")

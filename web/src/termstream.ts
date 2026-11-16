@@ -31,6 +31,7 @@ export class TermStream {
   private creditTimer = 0;
   private fitTimer = 0;
   private sentFit: Fit | null = null;
+  private fitRetries = 0;
   private onEvent: (e: StreamEvent) => void = () => {};
   private off: (() => void)[];
 
@@ -120,7 +121,12 @@ export class TermStream {
   private sendFit(): void {
     if (!this.tabId || !this.channel) return;
     const f = this.view.fit();
-    if (!f) return;
+    if (!f) {
+      // not measurable yet (the renderer has no cell size before its first paint): again shortly
+      if (this.fitRetries++ < 20) this.fitTimer = window.setTimeout(() => this.sendFit(), 100);
+      return;
+    }
+    this.fitRetries = 0;
     const s = this.sentFit;
     if (s && s.cols === f.cols && s.rows === f.rows) return;
     this.sentFit = f;
@@ -150,6 +156,9 @@ export class TermStream {
         this.view.reset();
         if (s.meta.cols && s.meta.rows) this.view.resize(s.meta.cols, s.meta.rows);
         this.view.write(s.body);
+        // the snapshot's grid is the terminal's as it was: this pane's, if it differs
+        this.sentFit = null;
+        this.refit();
         return;
       }
       case Kind.Data: {

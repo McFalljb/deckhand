@@ -77,7 +77,7 @@ function Split({ s, p, n, tabs }: { s: OpenSession; p: Panes; n: LayoutNode; tab
     if (done) app.run({ type: "set_split", split: n.id, ratio: x });
   };
   return (
-    <div class={"split " + (right ? "row" : "col")} ref={box} style={{ "--ratio": String(ratio) }}>
+    <div class={"split " + (right ? "split-row" : "split-col")} ref={box} style={{ "--ratio": String(ratio) }}>
       <div class="split-a">
         <NodeView s={s} p={p} index={n.a} tabs={tabs} />
       </div>

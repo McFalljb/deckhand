@@ -381,12 +381,12 @@ a { color: inherit; }
 .centre-body { position: relative; flex: 1; min-height: 0; display: flex; }
 .panes { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .split { flex: 1; min-width: 0; min-height: 0; display: flex; }
-.split.col { flex-direction: column; }
+.split.split-col { flex-direction: column; }
 .split-a { flex: var(--ratio) 1 0; min-width: 0; min-height: 0; display: flex; }
 .split-b { flex: calc(1 - var(--ratio)) 1 0; min-width: 0; min-height: 0; display: flex; }
 .split-divider { flex: none; background: var(--border); }
-.split.row > .split-divider { width: 1px; cursor: col-resize; box-shadow: 0 0 0 3px transparent; }
-.split.col > .split-divider { height: 1px; cursor: row-resize; }
+.split.split-row > .split-divider { width: 1px; cursor: col-resize; box-shadow: 0 0 0 3px transparent; }
+.split.split-col > .split-divider { height: 1px; cursor: row-resize; }
 .split-divider:hover { background: var(--accent); }
 
 .pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-app); }
@@ -752,3 +752,4 @@ a { color: inherit; }
 .term:hover .xterm-scrollable-element > .scrollbar.vertical { opacity: 1; }
 .term .xterm-scrollable-element > .scrollbar > .slider { background: var(--selected) !important; border-radius: 4px; }
 .phone-term .xterm-scrollable-element > .scrollbar.vertical { display: none; }
+.phone-body .filter .keys { display: none; }

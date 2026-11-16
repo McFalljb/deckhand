@@ -6,6 +6,8 @@ package main
 import "core:testing"
 import "core:time"
 
+import "core"
+
 @(test)
 quit_paths_table :: proc(t: ^testing.T) {
 	Row :: struct {
@@ -43,4 +45,39 @@ reconnect_limit :: proc(t: ^testing.T) {
 	for i in 0 ..< RECONNECTS_MAX do testing.expectf(t, reconnect_allowed(&since, &n, time.tick_add(t0, time.Duration(i) * time.Second)), "reconnect %d", i + 1)
 	testing.expect(t, !reconnect_allowed(&since, &n, time.tick_add(t0, 30 * time.Second)), "one too many within the minute")
 	testing.expect(t, reconnect_allowed(&since, &n, time.tick_add(t0, RECONNECTS_PER)), "a minute later")
+}
+
+// One prompt per displacement: the alert's modal loop runs the window's timer, whose
+// client_core_tick must neither ask again nor dial before the user answers.
+@(test)
+viewed_asks_once :: proc(t: ^testing.T) {
+	@(static) asks, nested_reconnects: int
+	@(static) depth: int
+	asks, nested_reconnects, depth = 0, 0, 0
+	saved_ask := client_ask
+	defer client_ask = saved_ask
+	client_ask = proc(title, text, yes, no: string) -> bool {
+		asks += 1
+		depth += 1
+		defer depth -= 1
+		if depth <= 3 { 	// the modal loop's timer turns
+			before := client.reconnects
+			client_core_tick()
+			client_core_tick()
+			nested_reconnects += client.reconnects - before
+		}
+		return false // Quit
+	}
+	saved_lost, saved_gave, saved_quit := client.lost, client.gave_up, core.app_quitting
+	defer {
+		client.lost, client.gave_up, core.app_quitting = saved_lost, saved_gave, saved_quit
+		client.asking = false
+	}
+	client.lost, client.gave_up, core.app_quitting = true, false, false
+	client_core_viewed("Mac Chrome", browser = true)
+	client_core_tick()
+	testing.expect_value(t, asks, 1)
+	testing.expect_value(t, nested_reconnects, 0)
+	testing.expect_value(t, client.viewed_from, "")
+	testing.expect(t, client.gave_up, "Quit: the window closes, once")
 }

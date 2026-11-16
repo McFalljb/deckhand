@@ -419,17 +419,39 @@ client_core_viewed :: proc(machine: string, browser := false) {
 	client.viewed_from = strings.clone(machine != "" ? machine : "another machine", runtime.heap_allocator())
 }
 
+// The window's modal questions about its core (Take Back or Quit); tests swap it. Test builds:
+// DECKHAND_ASK_ANSWER=yes|no answers them at once (a check of the real window with no click).
+client_ask: proc(title, text, yes, no: string) -> bool = client_ask_default
+
+client_ask_default :: proc(title, text, yes, no: string) -> bool {
+	when core.TEST_HOOKS {
+		if a := core.hook_env(.Ask_Answer); a == "yes" || a == "no" {
+			fmt.eprintln("Deckhand: answered by DECKHAND_ASK_ANSWER:", a == "yes" ? yes : no)
+			return a == "yes"
+		}
+	}
+	return platform_ask(title, text, yes, no)
+}
+
 // The frame's and the hidden window's turn: a lost connection is dialled again. One that cannot be
 // (no core within 15 s, or more than RECONNECTS_MAX in RECONNECTS_PER) gives up, once. One that
 // another machine took (viewed_from) asks first: Take Back dials again (and the other machine's
 // link is let go), Quit closes the window.
+//
+// One question per displacement: the alert's modal loop runs the window's timer, and so this proc
+// again. So viewed_from is taken before the question and `asking` makes those turns do nothing:
+// no second question, and no dial before the user answers.
 client_core_tick :: proc() {
-	if !client.lost || core.app_quitting || client.gave_up do return
+	if !client.lost || core.app_quitting || client.gave_up || client.asking do return
 	if client.viewed_from != "" {
 		if core.autotest_active do return // test mode never shows the modal: the scene's log says it
-		take := client.viewed_browser ? platform_ask("Viewed in a browser", fmt.tprintf("A browser (%s) is showing this Mac's sessions now, over web access. They keep running. Take them back to show them here (the browser's view lets go).", client.viewed_from), "Take Back", "Quit") : platform_ask(fmt.tprintf("Viewed from %s", client.viewed_from), fmt.tprintf("Deckhand on %s is showing this Mac's sessions now. They keep running. Take them back to show them here (%s's view lets go).", client.viewed_from, client.viewed_from), "Take Back", "Quit")
-		delete(client.viewed_from, runtime.heap_allocator())
+		who := client.viewed_from
 		client.viewed_from = ""
+		defer delete(who, runtime.heap_allocator())
+		client.asking = true
+		fmt.eprintln("Deckhand: asking: Take Back or Quit (viewed from", who, ")")
+		take := client.viewed_browser ? client_ask("Viewed in a browser", fmt.tprintf("A browser (%s) is showing this Mac's sessions now, over web access. They keep running. Take them back to show them here (the browser's view lets go).", who), "Take Back", "Quit") : client_ask(fmt.tprintf("Viewed from %s", who), fmt.tprintf("Deckhand on %s is showing this Mac's sessions now. They keep running. Take them back to show them here (%s's view lets go).", who, who), "Take Back", "Quit")
+		client.asking = false
 		if !take {
 			client.gave_up = true
 			app_request_quit()

@@ -78,6 +78,7 @@ Client :: struct {
 	handing_over: bool, // a core handover at attach: its connection's end is expected (client_core.odin)
 	viewed_from: string, // another machine's Deckhand took the core (window.request viewed_from; heap): no reconnect until Take back
 	viewed_browser: bool, // ...a paired browser did (web access): viewed_from is its name
+	asking:         bool, // the Take Back question is up (client_core_tick): its modal loop's timer turns do nothing
 }
 
 client: Client
@@ -435,7 +436,9 @@ client_frame :: proc(channel: u32, kind: cw.Kind, payload: []u8) -> bool {
 	}
 	if client.sock != nil {
 		if e := cw.sock_send(client.sock, channel, kind, payload); e != .None {
-			if e != .Full do fmt.eprintln("Deckhand: the connection to the core refused a message:", e)
+			// Closed: the connection ended, said once already (client_core.odin); while the Take
+			// Back question is up the window's timer sends each turn, and would say it each time
+			if e != .Full && e != .Closed do fmt.eprintln("Deckhand: the connection to the core refused a message:", e)
 			return false
 		}
 		cw.sock_flush(client.sock) // never blocks: the rest goes at the next client_io

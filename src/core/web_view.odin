@@ -173,6 +173,7 @@ web_view_tick :: proc() {
 		if s.mtime != before do window_state_changed()
 	}
 	for &w in web_watch do if time.tick_since(w.at) >= WEB_WATCH_RESCAN do web_watch_list(&w)
+	changes_web_tick()
 }
 
 @(private = "file")

@@ -216,6 +216,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "changes_stage", args = "tab_id, path", does = "stage a listed uncommitted file of a Changes tab (git add); the user's", who = .User, long_running = true},
 	{type = "changes_unstage", args = "tab_id, path", does = "unstage a listed file of a Changes tab (git restore --staged); the user's", who = .User, long_running = true},
 	{type = "changes_discard", args = "tab_id, path, confirm?, second?", does = "discard a listed file's uncommitted changes (back to HEAD); a file git does not have goes to the Trash after a second confirmation; the user's, confirmed", who = .User, confirm = .Delete, long_running = true},
+	{type = "changes_select", args = "tab_id, path?, scope?, status?, more?, refresh?", does = "a browser's Changes tab (as the window's own view does): select a listed file (scope uncommitted or committed; status as for changes_stage) and read its diff as the window's tab does (credential and binary files never read), show 5000 more lines of it (more), or read the checkout again (refresh). The diff goes to the browser in its state (webchg:, webdiff:), never in a result or an event", who = .User},
 	{type = "changes_commit", args = "tab_id, message", does = "commit what is staged in a Changes tab's checkout with the user's git hooks; the user's", who = .User, long_running = true},
 	{type = "changes_scan_done", args = "root", does = "a worker read a checkout's changes", who = .Internal},
 	{type = "changes_diff_done", args = "tab_id", does = "a worker read a file's diff for a Changes tab", who = .Internal},

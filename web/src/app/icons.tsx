@@ -9,7 +9,7 @@ export type IconName =
   | "search" | "compose" | "plus" | "chevron-down" | "chevron-right" | "sidebar-left" | "sidebar-right"
   | "sliders" | "close" | "more" | "check" | "folder" | "chat" | "sort" | "bell" | "alert" | "clock"
   | "play" | "pause" | "stop" | "info" | "eye" | "deck" | "split-right" | "split-down" | "refresh"
-  | "file" | "branch" | "pi" | "claude" | "codex" | "terminal" | "pin" | "keyboard" | "back" | "send" | "atlas";
+  | "file" | "branch" | "pi" | "claude" | "codex" | "terminal" | "pin" | "keyboard" | "back" | "send" | "atlas" | "arrow-up" | "arrow-down";
 
 function paths(name: IconName): ComponentChildren {
   switch (name) {
@@ -23,6 +23,10 @@ function paths(name: IconName): ComponentChildren {
       return <path d="m4.5 6.25 3.5 3.5 3.5-3.5" />;
     case "chevron-right":
       return <path d="m6.25 4.5 3.5 3.5-3.5 3.5" />;
+    case "arrow-up":
+      return <path d="m4.5 9.75 3.5-3.5 3.5 3.5" />;
+    case "arrow-down":
+      return <path d="m4.5 6.25 3.5 3.5 3.5-3.5" />;
     case "back":
       return <path d="m9.75 3.5-4.5 4.5 4.5 4.5" />;
     case "sidebar-left":

@@ -68,6 +68,7 @@ export const ACTIONS: Action[] = [
   { id: "new_shell_tab", label: "New shell tab", keys: { k: "t", alt: true }, when: (app) => !!cur(app), run: (app) => app.run({ type: "new_shell_tab", session: cur(app)!.id, pane: panes(app)?.focused_pane || undefined }) },
   { id: "new_claude_tab", label: "New Claude tab", when: (app) => !!cur(app), run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id }) },
   { id: "new_codex_tab", label: "New Codex tab", when: (app) => !!cur(app) && codexAvailable(app.store, cur(app)!.machine), run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id, harness: "codex" }) },
+  { id: "show_changes", label: "Show changes", when: (app) => !!cur(app) && !cur(app)!.machine && !cur(app)!.home, run: (app) => app.run({ type: "changes_open", session: cur(app)!.id }) },
   { id: "close_tab", label: "Close tab", when: (app) => !!curTab(app), run: (app) => app.run({ type: "close_tab", tab_id: curTab(app)!.id }) },
   { id: "close_session", label: "Close session", when: (app) => !!cur(app), run: (app) => app.run({ type: "close_session", session: cur(app)!.id }) },
   {

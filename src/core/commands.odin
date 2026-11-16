@@ -700,6 +700,7 @@ Command :: union {
 	Changes_Unstage,
 	Changes_Discard,
 	Changes_Commit,
+	Changes_Select,
 	Changes_Scan_Done,
 	Changes_Diff_Done,
 	Changes_Op_Done,
@@ -1948,7 +1949,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return files_apply(cmd, caller)
 	case List_Worktrees, Files_Set_Root, Worktree_Cleanup, Worktree_Cleanup_Done, Worktrees_Done:
 		return worktrees_apply(cmd, caller, request_id)
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
+	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_apply(cmd, caller, request_id)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		return tab_host_apply(cmd, caller, request_id) // Markdown

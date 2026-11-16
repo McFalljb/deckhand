@@ -62,3 +62,11 @@ test("fold: a project opened before folds and unfolds with no command; a new one
   fold.syncWatch(s, link); // the same ask is not sent twice
   assert.deepEqual(sent, [{ type: "web_watch", projects: [9] }]);
 });
+
+import { reviewPrompt } from "../src/app/review.ts";
+
+test("changes: the review prompt is the window's (src/ui_changes.odin changes_review_prompt)", () => {
+  const l = { root: "/r", loading: false, branch: "feat", default_branch: "main", ahead: 2, files: [] };
+  assert.equal(reviewPrompt(l), "Review the uncommitted changes in this checkout (/r): git status and git diff HEAD, and the 2 commits on feat that are not on main (git diff main...HEAD). Point out bugs, risks and unfinished work.");
+  assert.equal(reviewPrompt({ ...l, ahead: 0 }), "Review the uncommitted changes in this checkout (/r): git status and git diff HEAD. Point out bugs, risks and unfinished work.");
+});

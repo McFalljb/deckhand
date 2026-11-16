@@ -49,13 +49,21 @@ function term(body) {
   return { fg: one("fg"), bg: one("bg"), cursor: one("cursor"), ansi };
 }
 
+// The editor's colours (EDITOR_COLORS: line numbers, diffs, syntax) as chrome keys.
+function editor(body) {
+  const out = {};
+  for (const k of ["line_number", "diff_added", "diff_modified", "diff_removed"]) out[k] = rgba(body.match(new RegExp(`\\b${k}\\s*=\\s*\\{([^}]*)\\}`))[1]);
+  for (const m of body.matchAll(/\.(\w+)\s*=\s*\{(0x[^}]*)\}/g)) out["syn_" + m[1].toLowerCase()] = rgba(m[2]);
+  return out;
+}
+
 const theme = readFileSync(join(repo, "src/theme.odin"), "utf8");
 const palette = readFileSync(join(repo, "src/core/term_palette.odin"), "utf8");
 const LOOKS = ["Graphite", "Warm", "Ghostty"];
 const looks = {};
 for (const L of LOOKS) {
-  const dark = chrome(block(theme, "THEMES", L));
-  const light = chrome(block(theme, "THEMES_LIGHT", L));
+  const dark = { ...chrome(block(theme, "THEMES", L)), ...editor(block(theme, "EDITOR_COLORS", L)) };
+  const light = { ...chrome(block(theme, "THEMES_LIGHT", L)), ...editor(block(theme, "EDITOR_COLORS_LIGHT", L)) };
   looks[L.toLowerCase()] = {
     dark,
     light,
@@ -67,7 +75,7 @@ for (const L of LOOKS) {
 }
 const { dark, light } = looks.graphite;
 
-const KEYS = ["bg_app", "bg_sidebar", "bg_panel", "bg_elevated", "bg_field", "hover", "selected", "text", "text_secondary", "text_muted", "text_on_accent", "border", "accent", "selection", "scrim", "shadow", "running", "waiting", "done", "error"];
+const KEYS = ["bg_app", "bg_sidebar", "bg_panel", "bg_elevated", "bg_field", "hover", "selected", "text", "text_secondary", "text_muted", "text_on_accent", "border", "accent", "selection", "scrim", "shadow", "running", "waiting", "done", "error", "line_number", "diff_added", "diff_modified", "diff_removed", "syn_comment", "syn_keyword", "syn_string", "syn_number", "syn_function", "syn_type", "syn_heading", "syn_link"];
 const vars = (t) => KEYS.map((k) => `  --${k.replace(/_/g, "-")}: ${t[k]};`).join("\n");
 
 // the other looks: the page sets data-look and data-light on <html> (app/App.tsx)

@@ -8,6 +8,7 @@ import { stripView, tabView } from "../status.ts";
 import { menuAt, useApp } from "./ctx.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { IconButton, Sidebar } from "./Sidebar.tsx";
+import { ChangesView } from "./Changes.tsx";
 import { Deck } from "./Deck.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { newTabItems, tabHarness, tabTitle } from "./Panes.tsx";
@@ -173,10 +174,14 @@ export function PhoneSession({ id }: { id: number }) {
             />
             {tab.status === "not_started" ? <div class="pane-note over">Starting…</div> : null}
           </>
+        ) : tabKind(tab) === "changes_tab" ? (
+          <ChangesView s={s} tab={tab} />
         ) : (
           <div class="pane-note">This tab shows in the Deckhand window.</div>
         )}
       </div>
+      {tab && !isTerminalTab(tab) ? null : (
+      <>
       <div class="keybar">
         {waiting ? (
           <>
@@ -237,6 +242,8 @@ export function PhoneSession({ id }: { id: number }) {
           </button>
         ) : null}
       </div>
+      </>
+      )}
       {app.store.homeOpen ? <AgentDrawer /> : null}
     </div>
   );

@@ -774,6 +774,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "changes_stage":       cmd = Changes_Stage{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true)}
 	case "changes_unstage":     cmd = Changes_Unstage{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true)}
 	case "changes_discard":     cmd = Changes_Discard{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true), confirm = get_str(&r, "confirm", optional = true), second = opt_bool(&r, "second").? or_else false}
+	case "changes_select":      cmd = Changes_Select{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path", true), scope = get_str(&r, "scope", true), status = get_str(&r, "status", true), more = opt_bool(&r, "more").? or_else false, refresh = opt_bool(&r, "refresh").? or_else false}
 	case "changes_commit":      cmd = Changes_Commit{tab_id = get_u64(&r, "tab_id"), message = get_str(&r, "message")}
 	case "show_file":           cmd = Show_File{path = get_str(&r, "path"), line = int(min(opt_u64(&r, "line"), 1 << 30)), anchor = get_str(&r, "anchor", optional = true), session = opt_u64(&r, "session")}
 	case "markdown_open":       cmd = Markdown_Open{path = get_str(&r, "path"), session = opt_u64(&r, "session"), anchor = get_str(&r, "anchor", optional = true)}

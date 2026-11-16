@@ -8,6 +8,7 @@ import { stripView } from "../status.ts";
 import { keysLabel, menuAt, useApp, wished, type App, type MenuItem } from "./ctx.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { TermPane } from "./Term.tsx";
+import { ChangesView } from "./Changes.tsx";
 import { codexAvailable } from "./Sidebar.tsx";
 
 const KIND_WORDS: Record<string, string> = {
@@ -116,6 +117,8 @@ function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: 
       <div class="pane-body">
         {!tab ? (
           <div class="pane-note">No tabs here.</div>
+        ) : tabKind(tab) === "changes_tab" ? (
+          <ChangesView s={s} tab={tab} />
         ) : isTerminalTab(tab) ? (
           <>
             <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused={props.focused} keyboard={!app.phone} onFocus={focusPane} />
@@ -219,6 +222,7 @@ export function newTabItems(app: App, s: OpenSession, paneId?: number): MenuItem
     { label: "Claude Code", run: () => app.run({ type: "new_claude_tab", session: s.id }) },
   ];
   if (codexAvailable(app.store, s.machine)) items.push({ label: "Codex", run: () => app.run({ type: "new_claude_tab", session: s.id, harness: "codex" }) });
+  if (!s.machine) items.push({ label: "Changes", run: () => app.run({ type: "changes_open", session: s.id }) });
   return items;
 }
 

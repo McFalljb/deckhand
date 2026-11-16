@@ -320,7 +320,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Jobs_Tick:           return "jobs_tick"
 	case Job_Run_Done:        return "job_run_done"
 	case Jobs_Env:            return "jobs_env"
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
+	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_command_type(cmd)
 	case Markdown_Open:       return "markdown_open"
 	case Show_File:           return "show_file"
@@ -932,6 +932,13 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.status != "" do kv_str(&w, "status", c.status)
 		if c.second do kv_bool(&w, "second", true)
 		token(&w, c.confirm, redact)
+	case Changes_Select:
+		kv_u64(&w, "tab_id", c.tab_id)
+		if c.path != "" do kv_str(&w, "path", c.path)
+		if c.scope != "" do kv_str(&w, "scope", c.scope)
+		if c.status != "" do kv_str(&w, "status", c.status)
+		if c.more do kv_bool(&w, "more", true)
+		if c.refresh do kv_bool(&w, "refresh", true)
 	case Changes_Commit:
 		kv_u64(&w, "tab_id", c.tab_id)
 		if redact do kv_u64(&w, "message_bytes", u64(len(c.message)))

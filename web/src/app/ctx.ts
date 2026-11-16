@@ -95,10 +95,10 @@ export function ago(ns: number | undefined, now = Date.now()): string {
 // equals it, or for WISH_MS at most (a refused command: the state's value comes back).
 const WISH_MS = 3000;
 export const wishes = new Map<string, { v: unknown; at: number }>();
-export function wished<T>(key: string, actual: T): T {
+export function wished<T>(key: string, actual: T, eq: (a: T, b: T) => boolean = Object.is): T {
   const w = wishes.get(key);
   if (!w) return actual;
-  if (w.v === actual || performance.now() - w.at > WISH_MS) {
+  if (eq(w.v as T, actual) || performance.now() - w.at > WISH_MS) {
     wishes.delete(key);
     return actual;
   }

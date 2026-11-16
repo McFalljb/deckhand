@@ -21,6 +21,18 @@
   --waiting: #e5b95c;
   --done: #7ec488;
   --error: #ef6f6c;
+  --line-number: #5a5a63;
+  --diff-added: #7ec488;
+  --diff-modified: #7aa2f7;
+  --diff-removed: #ef6f6c;
+  --syn-comment: #6e6e78;
+  --syn-keyword: #c29be0;
+  --syn-string: #8fc48a;
+  --syn-number: #e3a06b;
+  --syn-function: #7aa2f7;
+  --syn-type: #e3c07b;
+  --syn-heading: #7aa2f7;
+  --syn-link: #6fc2c8;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-appearance="dark"]) {
@@ -45,6 +57,18 @@
     --waiting: #a35a00;
     --done: #15803d;
     --error: #c42b2b;
+    --line-number: #a1a1aa;
+    --diff-added: #2f9e44;
+    --diff-modified: #2563eb;
+    --diff-removed: #dc2626;
+    --syn-comment: #6e6e78;
+    --syn-keyword: #7c3ab5;
+    --syn-string: #2f7a2c;
+    --syn-number: #b45309;
+    --syn-function: #2563eb;
+    --syn-type: #925d00;
+    --syn-heading: #2563eb;
+    --syn-link: #0e747c;
   }
 }
 :root[data-appearance="light"] {
@@ -69,6 +93,18 @@
   --waiting: #a35a00;
   --done: #15803d;
   --error: #c42b2b;
+  --line-number: #a1a1aa;
+  --diff-added: #2f9e44;
+  --diff-modified: #2563eb;
+  --diff-removed: #dc2626;
+  --syn-comment: #6e6e78;
+  --syn-keyword: #7c3ab5;
+  --syn-string: #2f7a2c;
+  --syn-number: #b45309;
+  --syn-function: #2563eb;
+  --syn-type: #925d00;
+  --syn-heading: #2563eb;
+  --syn-link: #0e747c;
 }
 :root[data-look="warm"]:not([data-light="1"]) {
   color-scheme: dark;
@@ -92,6 +128,18 @@
   --waiting: #e8c25a;
   --done: #a6be6e;
   --error: #e0675a;
+  --line-number: #6b6056;
+  --diff-added: #a6be6e;
+  --diff-modified: #7fb0c8;
+  --diff-removed: #e0675a;
+  --syn-comment: #7d7165;
+  --syn-keyword: #c6919f;
+  --syn-string: #a3b86c;
+  --syn-number: #e0895f;
+  --syn-function: #7fa7c9;
+  --syn-type: #e3b341;
+  --syn-heading: #e0895f;
+  --syn-link: #86b8a6;
 }
 :root[data-look="warm"][data-light="1"] {
   color-scheme: light;
@@ -115,6 +163,18 @@
   --waiting: #956000;
   --done: #4c7520;
   --error: #b3372a;
+  --line-number: #a89c8e;
+  --diff-added: #5a8a2a;
+  --diff-modified: #3a74a8;
+  --diff-removed: #c04538;
+  --syn-comment: #85786a;
+  --syn-keyword: #8e3b5c;
+  --syn-string: #4f6b1f;
+  --syn-number: #a84a22;
+  --syn-function: #2e5e8a;
+  --syn-type: #8a5a00;
+  --syn-heading: #a84a22;
+  --syn-link: #2f6e5c;
 }
 :root[data-look="ghostty"]:not([data-light="1"]) {
   color-scheme: dark;
@@ -138,6 +198,18 @@
   --waiting: #f0c674;
   --done: #b5bd68;
   --error: #cc6666;
+  --line-number: #666b75;
+  --diff-added: #b5bd68;
+  --diff-modified: #81a2be;
+  --diff-removed: #cc6666;
+  --syn-comment: #7f848e;
+  --syn-keyword: #b294bb;
+  --syn-string: #b5bd68;
+  --syn-number: #de935f;
+  --syn-function: #81a2be;
+  --syn-type: #f0c674;
+  --syn-heading: #81a2be;
+  --syn-link: #8abeb7;
 }
 :root[data-look="ghostty"][data-light="1"] {
   color-scheme: light;
@@ -161,4 +233,16 @@
   --waiting: #8c6000;
   --done: #5a7000;
   --error: #c82829;
+  --line-number: #a0a19f;
+  --diff-added: #5b8a00;
+  --diff-modified: #4271ae;
+  --diff-removed: #c82829;
+  --syn-comment: #8e908c;
+  --syn-keyword: #8959a8;
+  --syn-string: #5b7200;
+  --syn-number: #b85c00;
+  --syn-function: #4271ae;
+  --syn-type: #8a6a00;
+  --syn-heading: #4271ae;
+  --syn-link: #2c757a;
 }

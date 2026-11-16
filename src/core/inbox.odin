@@ -259,7 +259,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return cmd
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
 		return update_clone(cmd, allocator)
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
+	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_command_clone(cmd, allocator)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		return md_command_clone(cmd, allocator)
@@ -497,7 +497,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Jobs_Env:
 		delete(c.path, allocator)
 		delete(c.notes, allocator)
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
+	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		changes_command_free(cmd, allocator)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		md_command_free(cmd, allocator)

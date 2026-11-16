@@ -11,7 +11,8 @@ import { IconButton, Sidebar } from "./Sidebar.tsx";
 import { ChangesView } from "./Changes.tsx";
 import { Deck } from "./Deck.tsx";
 import { JobsPanel } from "./Jobs.tsx";
-import { newTabItems, tabHarness, tabTitle } from "./Panes.tsx";
+import { fileTabPath, newTabItems, tabHarness, tabTitle } from "./Panes.tsx";
+import { FileTab } from "./Files.tsx";
 import { setTermFont, termFontSize, TermPane, type TermHandle } from "./Term.tsx";
 import { agentName, AgentDrawer } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
@@ -176,6 +177,8 @@ export function PhoneSession({ id }: { id: number }) {
           </>
         ) : tabKind(tab) === "changes_tab" ? (
           <ChangesView s={s} tab={tab} />
+        ) : fileTabPath(tab) ? (
+          <FileTab s={s} tab={tab} path={fileTabPath(tab)} markdown={tabKind(tab) === "markdown_tab"} />
         ) : (
           <div class="pane-note">This tab shows in the Deckhand window.</div>
         )}

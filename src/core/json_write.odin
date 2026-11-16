@@ -218,6 +218,8 @@ command_type :: proc(cmd: Command) -> string {
 	case Web_Pair:            return "web_pair"
 	case Web_Devices:         return "web_devices"
 	case Web_Watch:           return "web_watch"
+	case File_Read:           return "file_read"
+	case File_Save:           return "file_save"
 	case Web_Revoke:          return "web_revoke"
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
@@ -556,6 +558,16 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Fs_Changed:
 		kv_u64(&w, "paths", u64(len(c.paths))) // how many, not which
 	case Web_Pair, Web_Devices: // nothing
+	case File_Read:
+		kv_str(&w, "path", c.path)
+		if c.since != "" do kv_str(&w, "since", c.since)
+	case File_Save:
+		// events and the log (redact): the path and how much, never the text
+		kv_str(&w, "path", c.path)
+		if redact do kv_u64(&w, "text_bytes", u64(len(c.text)))
+		else do kv_str(&w, "text", c.text) // the wire to the core only (command_wire_json)
+		if c.base != "" do kv_str(&w, "base", c.base)
+		if c.force do kv_bool(&w, "force", true)
 	case Web_Watch:
 		key(&w, "projects")
 		strings.write_byte(w.b, '[')

@@ -702,6 +702,8 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_web_listen":      cmd = Set_Web_Listen{address = get_str(&r, "address")}
 	case "web_pair":            cmd = Web_Pair{}
 	case "web_devices":         cmd = Web_Devices{}
+	case "file_read":           cmd = File_Read{path = get_str(&r, "path"), since = get_str(&r, "since", true)}
+	case "file_save":           cmd = File_Save{path = get_str(&r, "path"), text = get_str(&r, "text"), base = get_str(&r, "base", true), force = opt_bool(&r, "force").? or_else false}
 	case "web_watch":           cmd = Web_Watch{projects = get_ids(&r, "projects", WEB_WATCH_IN_MAX)}
 	case "web_revoke":          cmd = Web_Revoke{id = get_str(&r, "id")}
 	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name", optional = true), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}

@@ -576,6 +576,8 @@ Command :: union {
 	Web_Pair,
 	Web_Devices,
 	Web_Watch,
+	File_Read,
+	File_Save,
 	Web_Revoke,
 	Machine_Add,
 	Machine_Remove,
@@ -915,6 +917,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	case Job_Run_Done:         q3 = true // job.finished says it (the run is freed by now)
 	case Pi_Handoff_Part:      q3 = true // a conversation's bytes: never in an event (pi_handoff.odin)
 	case Web_Watch:            q3 = true // a browser's own view (web_view.odin): which projects it lists
+	case File_Read:            q3 = true // a file's text: its caller's only, never in an event (web_files.odin)
 	case Web_Pair, Web_Devices: q3 = true // a pairing code: its caller's only, never in an event or the log (web.odin)
 	case Focus_Release:        q3 = !changed // nothing had the keyboard (test mode's barrier: client_barrier)
 	}
@@ -1663,6 +1666,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
 	case Set_Web_Access, Set_Web_Listen, Web_Pair, Web_Devices, Web_Revoke: return web_apply(cmd, caller) // web.odin
+	case File_Read: return file_read_apply(c, caller), false // web_files.odin
+	case File_Save: return file_save_apply(c, caller), false // its folder's watcher says it changed
 	case Web_Watch:
 		if !caller_from_web(caller) do return fail("only a browser lists projects this way"), false
 		return web_watch_apply(c), false // no State: its sections only (window_state_changed)

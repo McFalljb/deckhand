@@ -1,0 +1,180 @@
+package core
+
+// A browser's files (#148): it views and edits a project's text files in the session's editor and
+// Markdown tabs. The window keeps those tabs' text in its own editor (editor_*.odin, in the window
+// process); a browser has none, so it reads and saves through these two queries. Only a paired
+// browser may send them (caller_from_web), and only for a file inside a project folder of this
+// machine (fs_check: not a project folder itself, nothing in .git), never a credentials file or
+// what `deckhand show` refuses an agent (settings_credential, credential_inode, show_secret), no
+// device, network or removable volume, no binary, at most WEB_FILE_MAX bytes, UTF-8 text only.
+// Links: the file is read and replaced through its folder's descriptor (openat, NOFOLLOW), whose
+// real path is checked again (as pi_handoff checks the file it sends), so a link swapped in
+// after the check leads nowhere outside. Their text is never in an event or the log.
+
+import "core:fmt"
+import "core:hash"
+import "core:path/filepath"
+import "core:strings"
+import "core:sys/posix"
+import "core:unicode/utf8"
+import "core:crypto"
+import "core:encoding/hex"
+
+WEB_FILE_MAX :: 4 << 20 // a file a browser views or saves: at most this many bytes
+
+// Reads a project's text file for a browser's editor or Markdown tab. since: the hash the
+// browser has; the same file answers {same: true} without its text.
+File_Read :: struct {
+	path:  string, // absolute
+	since: string,
+}
+
+// Saves a browser's edit of a project's text file (an existing regular file, replaced atomically,
+// its permissions kept). base: the hash it read; a file changed on disk since is refused
+// (data.code "changed") unless force.
+File_Save :: struct {
+	path:  string, // absolute
+	text:  string,
+	base:  string,
+	force: bool,
+}
+
+@(private = "file")
+PERM :: posix.mode_t{.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IWGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH}
+
+// The checks both share, on the path as given: a browser's, absolute, not a device or slow
+// volume, not a secret by name; then where it really is (rp) inside a project folder.
+@(private = "file")
+web_file_where :: proc(path: string, caller: Caller) -> (p, dir, name: string, err: string) {
+	if !caller_from_web(caller) do return "", "", "", "only a browser reads and saves files this way (the window has its editor)"
+	if path == "" || !filepath.is_abs(path) do return "", "", "", "give the file's absolute path"
+	p, _ = filepath.clean(path, context.temp_allocator)
+	if show_device(p) || show_slow_path(p) do return "", "", "", "not on a device, network or removable volume"
+	name = filepath.base(p)
+	if name == "" || name == "." || name == ".." || name == "/" do return "", "", "", "not a file name"
+	dir = fs_real(filepath.dir(p))
+	rp := strings.concatenate({strings.trim_right(dir, "/"), "/", name}, context.temp_allocator)
+	if show_device(rp) || show_slow_path(rp) do return "", "", "", "not on a device, network or removable volume"
+	if settings_credential(p) || settings_credential(rp) do return "", "", "", CREDENTIAL_REFUSED
+	if show_secret(p) || show_secret(rp) do return "", "", "", "it looks like a secret (keys, tokens, sign-ins): not opened in a browser"
+	if _, _, ferr := fs_check(rp, caller); ferr != "" do return "", "", "", ferr
+	return p, dir, name, ""
+}
+
+// The folder, opened without following a link, and its real path checked again: the file is then
+// reached only through it (openat).
+@(private = "file")
+web_file_dir :: proc(dir, name: string, caller: Caller) -> (fd: posix.FD, err: string) {
+	fd = posix.open(strings.clone_to_cstring(dir, context.temp_allocator), {.DIRECTORY, .NOFOLLOW, .CLOEXEC})
+	if fd < 0 do return -1, "cannot open its folder"
+	at := fd_real_path(fd)
+	full := strings.concatenate({strings.trim_right(at, "/"), "/", name}, context.temp_allocator)
+	if _, _, ferr := fs_check(full, caller); at == "" || ferr != "" {
+		posix.close(fd)
+		return -1, ferr != "" ? ferr : "cannot tell where its folder is"
+	}
+	return fd, ""
+}
+
+// The file's bytes through the folder's descriptor: a regular file (not a link), not a
+// credentials file by inode, at most WEB_FILE_MAX.
+@(private = "file")
+web_file_bytes :: proc(dirfd: posix.FD, name: string) -> (data: []u8, st: posix.stat_t, err: string) {
+	fd := posix.openat(dirfd, strings.clone_to_cstring(name, context.temp_allocator), {.NOFOLLOW, .CLOEXEC, .NONBLOCK})
+	if fd < 0 do return nil, st, posix.errno() == .ELOOP ? "a link: open the file it points to" : "no such file"
+	defer posix.close(fd)
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return nil, st, "not a regular file"
+	if credential_inode(u64(st.st_dev), u64(st.st_ino)) do return nil, st, CREDENTIAL_REFUSED
+	if i64(st.st_size) > WEB_FILE_MAX do return nil, st, fmt.tprintf("too large to open in a browser (%.1f MB; at most %d MB)", f64(st.st_size) / (1 << 20), WEB_FILE_MAX >> 20)
+	buf := make([]u8, int(st.st_size) + 1, context.temp_allocator)
+	n := 0
+	for n < len(buf) {
+		rem := len(buf) - n
+		k := posix.read(fd, raw_data(buf[n:]), uint(rem))
+		if k < 0 {
+			if posix.errno() == .EINTR do continue
+			return nil, st, "cannot read it"
+		}
+		if k == 0 do break
+		n += int(k)
+	}
+	if n > WEB_FILE_MAX do return nil, st, "too large to open in a browser"
+	return buf[:n], st, ""
+}
+
+@(private = "file")
+web_file_hash :: proc(b: []u8) -> string {return fmt.tprintf("%016x", hash.fnv64a(b))}
+
+@(private = "file")
+web_file_json :: proc(path: string, st: posix.stat_t, h: string, text: Maybe(string), saved := false) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"path":`)
+	json_quote(&b, path)
+	mtime := i64(st.st_mtim.tv_sec) * 1_000_000_000 + i64(st.st_mtim.tv_nsec)
+	fmt.sbprintf(&b, `,"size":%d,"mtime":%d,"hash":"%s","markdown":%v`, i64(st.st_size), mtime, h, md_is_markdown_path(path))
+	if t, has := text.?; has {
+		strings.write_string(&b, `,"text":`)
+		json_quote(&b, t)
+	} else do strings.write_string(&b, saved ? `,"saved":true` : `,"same":true`)
+	strings.write_byte(&b, '}')
+	return strings.to_string(b)
+}
+
+file_read_apply :: proc(c: File_Read, caller: Caller) -> Result {
+	p, dir, name, err := web_file_where(c.path, caller)
+	if err != "" do return fail(err)
+	dirfd, derr := web_file_dir(dir, name, caller)
+	if derr != "" do return fail(derr)
+	defer posix.close(dirfd)
+	data, st, rerr := web_file_bytes(dirfd, name)
+	if rerr != "" do return fail(rerr)
+	if looks_binary(data[:min(len(data), 8192)]) do return fail("Binary file: not shown")
+	if !utf8.valid_string(string(data)) do return fail("not UTF-8 text: not shown in a browser")
+	h := web_file_hash(data)
+	if c.since != "" && c.since == h do return {ok = true, data = strings.clone(web_file_json(p, st, h, nil))}
+	return {ok = true, data = strings.clone(web_file_json(p, st, h, string(data)))}
+}
+
+file_save_apply :: proc(c: File_Save, caller: Caller) -> Result {
+	if len(c.text) > WEB_FILE_MAX do return fail(fmt.tprintf("too large to save from a browser (at most %d MB)", WEB_FILE_MAX >> 20))
+	if !utf8.valid_string(c.text) do return fail("not UTF-8 text")
+	p, dir, name, err := web_file_where(c.path, caller)
+	if err != "" do return fail(err)
+	dirfd, derr := web_file_dir(dir, name, caller)
+	if derr != "" do return fail(derr)
+	defer posix.close(dirfd)
+	// an existing regular file only (a new one: create_file), as it is now
+	now, st, rerr := web_file_bytes(dirfd, name)
+	if rerr != "" do return fail(rerr)
+	if !c.force && c.base != web_file_hash(now) do return {error = "the file changed on disk since you opened it", data = strings.clone(`{"code":"changed"}`)}
+	// a new file beside it, then renamed over it: a crash leaves the old file or the new one
+	r: [8]u8
+	crypto.rand_bytes(r[:])
+	tmp := fmt.tprintf(".%s.deckhand-%s.tmp", name, string(hex.encode(r[:], context.temp_allocator)))
+	ctmp := strings.clone_to_cstring(tmp, context.temp_allocator)
+	fd := posix.openat(dirfd, ctmp, {.WRONLY, .CREAT, .EXCL, .NOFOLLOW, .CLOEXEC}, posix.mode_t{.IRUSR, .IWUSR})
+	if fd < 0 do return fail("cannot write in its folder")
+	ok := true
+	for off := 0; off < len(c.text) && ok; {
+		rem := len(c.text) - off
+		k := posix.write(fd, raw_data(c.text[off:]), uint(rem))
+		if k < 0 {
+			if posix.errno() == .EINTR do continue
+			ok = false
+			break
+		}
+		off += int(k)
+	}
+	if ok do ok = posix.fchmod(fd, st.st_mode & PERM) == .OK
+	if ok do ok = posix.fsync(fd) == .OK
+	posix.close(fd)
+	if ok do ok = posix.renameat(dirfd, ctmp, dirfd, strings.clone_to_cstring(name, context.temp_allocator)) == .OK
+	if !ok {
+		posix.unlinkat(dirfd, ctmp, {})
+		return fail("could not save it")
+	}
+	fs_model_changed(strings.concatenate({strings.trim_right(fd_real_path(dirfd), "/"), "/", name}, context.temp_allocator)) // the Files tab's and Changes' git status
+	nst: posix.stat_t
+	posix.fstatat(dirfd, strings.clone_to_cstring(name, context.temp_allocator), &nst, {.SYMLINK_NOFOLLOW})
+	return {ok = true, data = strings.clone(web_file_json(p, nst, web_file_hash(transmute([]u8)c.text), nil, saved = true))}
+}

@@ -182,11 +182,11 @@ show_file_flags: proc(path: string) -> u32 = proc(path: string) -> u32 {
 	}
 }
 
-@(private = "file")
+@(private)
 show_device :: proc(p: string) -> bool {return p == "/dev" || strings.has_prefix(p, "/dev/")}
 
 // Network (autofs /net) and removable or mounted volumes (/Volumes): a stat can hang.
-@(private = "file")
+@(private)
 show_slow_path :: proc(p: string) -> bool {
 	for pre in ([]string{"/net", "/Volumes", "/System/Volumes/Data/net"}) {
 		if p == pre || strings.has_prefix(p, strings.concatenate({pre, "/"}, context.temp_allocator)) do return true

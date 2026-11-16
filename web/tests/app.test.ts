@@ -70,3 +70,48 @@ test("changes: the review prompt is the window's (src/ui_changes.odin changes_re
   assert.equal(reviewPrompt(l), "Review the uncommitted changes in this checkout (/r): git status and git diff HEAD, and the 2 commits on feat that are not on main (git diff main...HEAD). Point out bugs, risks and unfinished work.");
   assert.equal(reviewPrompt({ ...l, ahead: 0 }), "Review the uncommitted changes in this checkout (/r): git status and git diff HEAD. Point out bugs, risks and unfinished work.");
 });
+
+import { parseMarkdown, inlines, safeHref } from "../src/app/markdown.ts";
+
+test("markdown: blocks", () => {
+  const b = parseMarkdown("# Title\n\nSome *em* and **strong** and `code`.\n\n```ts\nlet a = 1;\n```\n\n- [x] done\n- todo\n  - nested\n\n1. one\n2. two\n\n> quoted\n\n| a | b |\n|:--|--:|\n| 1 | 2 |\n\n---\nSetext\n===\n");
+  assert.deepEqual(b.map((x) => x.t), ["h", "p", "code", "list", "list", "quote", "table", "hr", "h"]);
+  const h = b[0] as any;
+  assert.equal(h.id, "title");
+  const l = b[3] as any;
+  assert.equal(l.items[0].task, true);
+  assert.equal(l.items[1].task, null);
+  assert.equal(l.items[1].c[1].t, "list");
+  assert.equal((b[4] as any).ordered, true);
+  assert.deepEqual((b[6] as any).align, ["left", "right"]);
+  assert.equal((b[8] as any).level, 1);
+});
+
+test("markdown: strict: no raw HTML, no script links", () => {
+  const b = parseMarkdown("<script>alert(1)</script>\n\n[x](javascript:alert(1)) [y](data:text/html,hi) [z](https://ok.example/a) [r](docs/a.md) <img src=x onerror=alert(1)>");
+  assert.equal(b[0].t, "html"); // shown as its source text
+  const p = (b[1] as any).c;
+  const links = p.filter((x: any) => x.t === "link").map((x: any) => x.href);
+  assert.deepEqual(links, ["https://ok.example/a", "docs/a.md"]);
+  assert.ok(p.some((x: any) => x.t === "text" && x.s.includes("<img src=x onerror=alert(1)>")), "inline tags stay text");
+  assert.equal(safeHref("JaVaScRiPt:alert(1)"), null);
+  assert.equal(safeHref("//evil.example"), null);
+  assert.equal(safeHref("#section"), "#section");
+});
+
+test("markdown: hostile input stays bounded", () => {
+  const t0 = Date.now();
+  parseMarkdown(">".repeat(20000) + " deep");
+  parseMarkdown("- ".repeat(5000) + "x");
+  inlines("*".repeat(20000) + "a");
+  inlines("[".repeat(20000));
+  inlines("`".repeat(5000) + "a");
+  parseMarkdown("word ".repeat(200000));
+  assert.ok(Date.now() - t0 < 5000, `took ${Date.now() - t0} ms`);
+});
+
+test("markdown: a 4 MB file of openers parses in linear time", () => {
+  const t0 = Date.now();
+  for (const c of ["[", "*", "`", "_", "~~", "![", "<", "h", "*a "]) inlines(c.repeat((1 << 20) / c.length) + "x");
+  assert.ok(Date.now() - t0 < 8000, `took ${Date.now() - t0} ms`);
+});

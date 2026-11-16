@@ -11,6 +11,7 @@ import { HarnessIcon, Icon, StatusMark, dotMark } from "./icons.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { NotHere } from "./Bars.tsx";
 import { fold } from "./fold.ts";
+import { FilesPanel } from "./Files.tsx";
 import { Windowed, type WItem } from "./Windowed.tsx";
 
 const SORTS = [
@@ -43,7 +44,7 @@ export function Sidebar({ width, onResize, forceSessions }: { width: number; onR
           </button>
         ))}
       </div>
-      {tab === "jobs" ? <JobsPanel /> : tab === "files" ? <NotHere what="files" /> : tab === "settings" ? <NotHere what="settings" /> : <SessionsTab />}
+      {tab === "jobs" ? <JobsPanel /> : tab === "files" ? <FilesPanel /> : tab === "settings" ? <NotHere what="settings" /> : <SessionsTab />}
       <Divider width={width} onResize={onResize} />
     </aside>
   );

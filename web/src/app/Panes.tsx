@@ -9,6 +9,15 @@ import { keysLabel, menuAt, useApp, wished, type App, type MenuItem } from "./ct
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { TermPane } from "./Term.tsx";
 import { ChangesView } from "./Changes.tsx";
+import { FileTab } from "./Files.tsx";
+
+// An editor tab's (its file view) or a Markdown tab's file ("" = another kind or view).
+export function fileTabPath(t: Tab): string {
+  const k = t.kind ?? {};
+  if (k.markdown_tab) return String(k.markdown_tab.path ?? "");
+  if (k.editor_tab && (k.editor_tab.view ?? "file") === "file") return String(k.editor_tab.path ?? "");
+  return "";
+}
 import { codexAvailable } from "./Sidebar.tsx";
 
 const KIND_WORDS: Record<string, string> = {
@@ -119,6 +128,8 @@ function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: 
           <div class="pane-note">No tabs here.</div>
         ) : tabKind(tab) === "changes_tab" ? (
           <ChangesView s={s} tab={tab} />
+        ) : fileTabPath(tab) ? (
+          <FileTab s={s} tab={tab} path={fileTabPath(tab)} markdown={tabKind(tab) === "markdown_tab"} />
         ) : isTerminalTab(tab) ? (
           <>
             <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused={props.focused} keyboard={!app.phone} onFocus={focusPane} />

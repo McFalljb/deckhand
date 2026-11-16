@@ -71,7 +71,7 @@ test("changes: the review prompt is the window's (src/ui_changes.odin changes_re
   assert.equal(reviewPrompt({ ...l, ahead: 0 }), "Review the uncommitted changes in this checkout (/r): git status and git diff HEAD. Point out bugs, risks and unfinished work.");
 });
 
-import { parseMarkdown, inlines, safeHref } from "../src/app/markdown.ts";
+import { parseMarkdown, inlines, safeHref, TABLE_CELLS_MAX } from "../src/app/markdown.ts";
 
 test("markdown: blocks", () => {
   const b = parseMarkdown("# Title\n\nSome *em* and **strong** and `code`.\n\n```ts\nlet a = 1;\n```\n\n- [x] done\n- todo\n  - nested\n\n1. one\n2. two\n\n> quoted\n\n| a | b |\n|:--|--:|\n| 1 | 2 |\n\n---\nSetext\n===\n");
@@ -114,4 +114,23 @@ test("markdown: a 4 MB file of openers parses in linear time", () => {
   const t0 = Date.now();
   for (const c of ["[", "*", "`", "_", "~~", "![", "<", "h", "*a "]) inlines(c.repeat((1 << 20) / c.length) + "x");
   assert.ok(Date.now() - t0 < 8000, `took ${Date.now() - t0} ms`);
+});
+
+test("markdown: review: fences, tables and images stay linear and bounded", () => {
+  let t0 = Date.now();
+  parseMarkdown("~~~" + "a".repeat(1 << 16) + "`"); // an info string the fence regex backtracked over
+  assert.ok(Date.now() - t0 < 500, `fence: ${Date.now() - t0} ms`);
+  const fenced = parseMarkdown("~~~ js `x`\nlet a\n~~~\n\n```ts\nb\n```");
+  assert.deepEqual(fenced.map((x: any) => [x.t, x.lang, x.s]), [["code", "js", "let a"], ["code", "ts", "b"]]);
+  // a wide header with many short rows: each row is not widened past the cap
+  const w = 20000;
+  t0 = Date.now();
+  const b = parseMarkdown("|" + "a|".repeat(w) + "\n|" + "-|".repeat(w) + "\n" + "|x\n".repeat(20000));
+  const cellsOf = (bs: any[]) => bs.filter((x) => x.t === "table").reduce((n, x) => n + x.head.length + x.rows.length * x.head.length, 0);
+  assert.ok(cellsOf(b) <= TABLE_CELLS_MAX, `${cellsOf(b)} cells`);
+  assert.ok(Date.now() - t0 < 2000, `table: ${Date.now() - t0} ms`);
+  // images nested deep: no deeper than links (no stack overflow)
+  const n = 20000;
+  assert.doesNotThrow(() => inlines("![".repeat(n) + "x" + "]()".repeat(n)));
+  assert.deepEqual(inlines("![a *b*](u.png)"), [{ t: "img", alt: "a b" }]);
 });

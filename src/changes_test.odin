@@ -324,6 +324,38 @@ changes_select_for_a_browser :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(diff, fmt.tprintf(`"shown":%d`, 2 * core.CHANGES_LINES_STEP)), diff[max(0, len(diff) - 200):])
 }
 
+// Review (P1, P2): changes_select is a browser's only (a hub's diff: web_changes_test.odin); a
+// new selection never shows the old file's text under the new path while its own diff is read.
+@(test)
+changes_web_diff_stays_the_browsers :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f, ok := ch_setup()
+	defer ch_teardown(f)
+	if !ok do return
+	v := open_tab(t, &f)
+	if !testing.expect(t, v != nil, "opened") do return
+	web := core.Caller{kind = .UI, web = true}
+	for c in ([]core.Caller{{kind = .UI}, {kind = .UI, hub = true}, {kind = .Control}, {kind = .Script}}) {
+		r := core.run_command(core.Changes_Select{tab_id = f.tab, path = "a.txt"}, c)
+		testing.expectf(t, !r.ok, "%v: changes_select refused", c)
+	}
+	webdiff :: proc(tab: u64) -> string {
+		out := make([dynamic][2]string, context.temp_allocator)
+		core.web_changes_sections(&out)
+		for x in out do if x[0] == fmt.tprintf("webdiff:%d", tab) do return x[1]
+		return ""
+	}
+	// a.txt's diff read; then big.txt selected: until its own arrives, none of a.txt's text
+	testing.expect(t, core.run_command(core.Changes_Select{tab_id = f.tab, path = "a.txt"}, web).ok, "a.txt")
+	settle(f)
+	testing.expect(t, strings.contains(v.diff, "+TWO"), v.diff)
+	testing.expect(t, core.run_command(core.Changes_Select{tab_id = f.tab, path = "big.txt"}, web).ok, "big.txt")
+	d := webdiff(f.tab)
+	testing.expect(t, strings.contains(d, `"path":"big.txt"`) && !strings.contains(d, "TWO") && strings.contains(d, `"loading":true`), d)
+	settle(f)
+	testing.expect(t, strings.contains(v.diff, "+line 1\n"), "big.txt's own")
+}
+
 @(test)
 changes_caller_rules :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()

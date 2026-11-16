@@ -1529,5 +1529,8 @@ window_link_hub :: proc() -> bool {return link != nil && link.hub}
 // The attached hub connection's number in this run (0: none, or a window).
 window_link_hub_serial :: proc() -> u64 {return link != nil && link.hub ? link.serial : 0}
 
+// The attached link's number in this run (0: none).
+window_link_serial :: proc() -> u64 {return link != nil ? link.serial : 0}
+
 @(private = "file")
 link_serials: u64

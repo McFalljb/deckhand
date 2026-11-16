@@ -200,6 +200,7 @@ Changes_View :: struct {
 	shown:        int, // lines shown (CHANGES_LINES_STEP, more per "Show more")
 	diff_gen:     u64,
 	diff_loading: bool,
+	diff_link:    u64, // the browser's link it is read for (window_link_serial; 0 = not a browser's): a result after that link went is dropped
 	msg:          string, // why the diff area shows no diff (owned; "" = it shows one): a browser's (web_changes.odin)
 	busy:         string, // an action running ("Staging…"); "" = none
 	notice:       string, // the last action's outcome (owned)
@@ -766,6 +767,10 @@ changes_select :: proc(v: ^Changes_View, path: string, scope: Change_Scope, stat
 		v.sel_scope = scope
 		v.sel_status = status
 		v.shown = CHANGES_LINES_STEP
+		// the old file's diff goes: never shown under the new path while its own is read
+		delete(v.diff)
+		delete(v.msg)
+		v.diff, v.diff_lines, v.msg = "", 0, ""
 		window_changes_rewind(v.tab_id)
 	}
 	changes_diff_start(v)
@@ -860,6 +865,7 @@ changes_diff_start :: proc(v: ^Changes_View) {
 		return
 	}
 	v.diff_loading = true
+	v.diff_link = window_link_web() ? window_link_serial() : 0
 	Job :: struct {
 		tab_id, gen:           u64,
 		root, path, old, base: string,
@@ -930,6 +936,14 @@ changes_diff_done :: proc(c: Changes_Diff_Done) {
 	delete(v.diff)
 	v.diff = ""
 	v.diff_lines = 0
+	// a hub never gets one; one read for a browser whose link went (a hub, a window or another
+	// browser took it) is dropped, never sent on; a browser attached reads it again (changes_web_tick)
+	if window_link_hub() || (v.diff_link != 0 && v.diff_link != window_link_serial()) {
+		delete(v.msg)
+		v.msg = ""
+		window_state_changed()
+		return
+	}
 	_, f := changes_selected(v)
 	abs := f != nil ? strings.concatenate({v.root, "/", f.path}, context.temp_allocator) : v.root
 	if c.err != "" {
@@ -1052,7 +1066,7 @@ changes_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		changes_ask(repo)
 		return {ok = true, data = strings.clone(changes_json(repo))}, false
 	case Changes_Select:
-		return changes_select_apply(c), false
+		return changes_select_apply(c, caller), false
 	case Changes_Stage, Changes_Unstage:
 		tab_id: u64
 		path, status: string

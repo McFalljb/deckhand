@@ -109,6 +109,30 @@ web_files_read_and_save :: proc(t: ^testing.T) {
 	o3, _ := os.read_entire_file(fmt.tprintf("%s/secret.txt", out), context.temp_allocator)
 	testing.expect_value(t, string(o3), "outside\n")
 
+	// Review (P2): .git in another case (a case-insensitive volume opens the same entry), at
+	// any component, read or saved: a worktree's .git file names its gitdir
+	put(fmt.tprintf("%s/src/.git", proj), "gitdir: /elsewhere\n")
+	for gp in ([]string{fmt.tprintf("%s/.GIT/config", proj), fmt.tprintf("%s/.Git/config", proj), fmt.tprintf("%s/src/.GIT", proj), fmt.tprintf("%s/src/.git", proj)}) {
+		refused(t, gp, web, ".git")
+		save_refused(t, gp, web, ".git")
+	}
+	gd, _ := os.read_entire_file(fmt.tprintf("%s/src/.git", proj), context.temp_allocator)
+	testing.expect_value(t, string(gd), "gitdir: /elsewhere\n")
+	os.remove(fmt.tprintf("%s/src/.git", proj))
+	// Review (P3): a forced save checks the file on disk as a read does (binary, UTF-8)
+	put(fmt.tprintf("%s/latin1.txt", proj), "caf\xe9\n")
+	save_refused(t, fmt.tprintf("%s/bin.dat", proj), web, "Binary")
+	save_refused(t, fmt.tprintf("%s/latin1.txt", proj), web, "not shown") // binary or not UTF-8
+	bd, _ := os.read_entire_file(fmt.tprintf("%s/bin.dat", proj), context.temp_allocator)
+	testing.expect_value(t, string(bd), "a\x00b\x00c")
+	// Review (P3): a name near NAME_MAX saves (the temp file's name does not grow from it)
+	long := fmt.tprintf("%s/src/%s.txt", proj, strings.repeat("n", 251, context.temp_allocator))
+	put(long, "old\n")
+	ls := run_command(File_Save{path = long, text = "new\n", force = true}, web)
+	testing.expect(t, ls.ok, ls.error)
+	lg, _ := os.read_entire_file(long, context.temp_allocator)
+	testing.expect_value(t, string(lg), "new\n")
+
 	// what events and the log write: the path and the length, never the text
 	j := command_json(File_Save{path = a, text = "TOP-SECRET-TEXT", base = h}, redact = true) // events and the log
 	testing.expect(t, !strings.contains(j, "TOP-SECRET") && strings.contains(j, `"text_bytes":15`), j)

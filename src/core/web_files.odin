@@ -58,7 +58,20 @@ web_file_where :: proc(path: string, caller: Caller) -> (p, dir, name: string, e
 	if settings_credential(p) || settings_credential(rp) do return "", "", "", CREDENTIAL_REFUSED
 	if show_secret(p) || show_secret(rp) do return "", "", "", "it looks like a secret (keys, tokens, sign-ins): not opened in a browser"
 	if _, _, ferr := fs_check(rp, caller); ferr != "" do return "", "", "", ferr
+	// .git in any case, at any component (a case-insensitive volume opens .GIT as .git; a
+	// worktree's .git is a file naming its gitdir)
+	for q in ([]string{p, rp}) do for part in strings.split(q, "/", context.temp_allocator) {
+		if strings.equal_fold(part, ".git") do return "", "", "", "not inside .git"
+	}
 	return p, dir, name, ""
+}
+
+// A file's bytes as a browser may have them: not binary, UTF-8 ("" = fine).
+@(private = "file")
+web_file_text_err :: proc(data: []u8) -> string {
+	if looks_binary(data[:min(len(data), 8192)]) do return "Binary file: not shown"
+	if !utf8.valid_string(string(data)) do return "not UTF-8 text: not shown in a browser"
+	return ""
 }
 
 // The folder, opened without following a link, and its real path checked again: the file is then
@@ -128,8 +141,7 @@ file_read_apply :: proc(c: File_Read, caller: Caller) -> Result {
 	defer posix.close(dirfd)
 	data, st, rerr := web_file_bytes(dirfd, name)
 	if rerr != "" do return fail(rerr)
-	if looks_binary(data[:min(len(data), 8192)]) do return fail("Binary file: not shown")
-	if !utf8.valid_string(string(data)) do return fail("not UTF-8 text: not shown in a browser")
+	if terr := web_file_text_err(data); terr != "" do return fail(terr)
 	h := web_file_hash(data)
 	if c.since != "" && c.since == h do return {ok = true, data = strings.clone(web_file_json(p, st, h, nil))}
 	return {ok = true, data = strings.clone(web_file_json(p, st, h, string(data)))}
@@ -146,11 +158,13 @@ file_save_apply :: proc(c: File_Save, caller: Caller) -> Result {
 	// an existing regular file only (a new one: create_file), as it is now
 	now, st, rerr := web_file_bytes(dirfd, name)
 	if rerr != "" do return fail(rerr)
+	if terr := web_file_text_err(now); terr != "" do return fail(terr) // forced too: what a read refuses is not replaced
 	if !c.force && c.base != web_file_hash(now) do return {error = "the file changed on disk since you opened it", data = strings.clone(`{"code":"changed"}`)}
-	// a new file beside it, then renamed over it: a crash leaves the old file or the new one
+	// a new file beside it (a short name of its own: a name near NAME_MAX saves too; 0600 until
+	// its permissions are set), then renamed over it: a crash leaves the old file or the new one
 	r: [8]u8
 	crypto.rand_bytes(r[:])
-	tmp := fmt.tprintf(".%s.deckhand-%s.tmp", name, string(hex.encode(r[:], context.temp_allocator)))
+	tmp := fmt.tprintf(".deckhand-%s.tmp", string(hex.encode(r[:], context.temp_allocator)))
 	ctmp := strings.clone_to_cstring(tmp, context.temp_allocator)
 	fd := posix.openat(dirfd, ctmp, {.WRONLY, .CREAT, .EXCL, .NOFOLLOW, .CLOEXEC}, posix.mode_t{.IRUSR, .IWUSR})
 	if fd < 0 do return fail("cannot write in its folder")

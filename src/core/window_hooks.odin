@@ -228,10 +228,12 @@ window_view_moved :: proc(tab_id: u64, path: string) {if !window_link_hub() do a
 window_files_deleted :: proc(under: string) {ask({op = .Files_Deleted, path = under})}
 // this machine's window only: a hub (another machine viewing this one) gets no path (§8.2)
 window_path_changed :: proc(path: string) {if !window_link_hub() do ask({op = .Path_Changed, path = path})}
+// never to a hub: a diff is this machine's window's (or a browser's, as state)
 window_changes_diff :: proc(tab_id: u64, path, text: string, message := "") {
+	if window_link_hub() do return
 	ask({op = .Changes_Diff, tab_id = tab_id, path = path, text = text, message = message})
 }
-window_changes_rewind :: proc(tab_id: u64) {ask({op = .Changes_Rewind, tab_id = tab_id})}
+window_changes_rewind :: proc(tab_id: u64) {if !window_link_hub() do ask({op = .Changes_Rewind, tab_id = tab_id})}
 window_commit_message_clear :: proc() {ask({op = .Commit_Message_Clear})}
 window_watch_folder :: proc(folder: string) {ask({op = .Watch_Folder, path = folder})}
 window_watch_sync :: proc() {ask({op = .Watch_Sync})}

@@ -28,6 +28,7 @@ export type Block =
 const MAX_DEPTH = 24;
 const SCAN = 4000; // how far a code span looks for its closing backticks
 const EM_SCAN = 500; // how far an emphasis looks for its closing run
+export const TABLE_CELLS_MAX = 50_000; // a table's cells, its header's included (rows past it: text)
 
 // The length of the run of c at s[i] (no slicing: linear).
 function runAt(s: string, i: number, c: string): number {
@@ -55,7 +56,22 @@ export function parseMarkdown(src: string): Block[] {
 
 // ---- blocks ----
 
-const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)[^`]*$/;
+// An opening fence: its run and its info string's first word (one pass: a regex backtracked
+// over a long info string).
+function fenceAt(l: string): { fence: string; lang: string } | null {
+  let k = 0;
+  while (k < 3 && l[k] === " ") k++;
+  const c = l[k];
+  if (c !== "`" && c !== "~") return null;
+  const n = runAt(l, k, c);
+  if (n < 3) return null;
+  const info = l.slice(k + n);
+  if (c === "`" && info.includes("`")) return null; // a code span, not a fence
+  const t = info.trimStart();
+  let e = 0;
+  while (e < t.length && !/\s/.test(t[e])) e++;
+  return { fence: l.slice(k, k + n), lang: t.slice(0, e) };
+}
 const ATX = /^ {0,3}(#{1,6})(?:[ ]+(.*?))?(?:[ ]+#+)?[ ]*$/;
 const HR = /^ {0,3}([-*_])(?:[ ]*\1){2,}[ ]*$/;
 const QUOTE = /^ {0,3}> ?/;
@@ -65,7 +81,7 @@ const DELIM_ROW = /^ {0,3}\|?(?:\s*:?-+:?\s*\|)+\s*:?-+:?\s*\|?\s*$|^ {0,3}\|?\s
 const blank = (l: string) => /^\s*$/.test(l);
 
 function interrupts(l: string): boolean {
-  if (FENCE.test(l) || ATX.test(l) || HR.test(l) || QUOTE.test(l) || HTML_START.test(l)) return true;
+  if (fenceAt(l) || ATX.test(l) || HR.test(l) || QUOTE.test(l) || HTML_START.test(l)) return true;
   const m = ITEM.exec(l);
   return !!m && !!m[4] && (!/^\d/.test(m[2]) || m[2].startsWith("1"));
 }
@@ -80,14 +96,15 @@ function blocks(lines: string[], ids: Map<string, number>, depth: number): Block
       continue;
     }
     let m: RegExpExecArray | null;
-    if ((m = FENCE.exec(l))) {
-      const fence = m[1];
+    const f = fenceAt(l);
+    if (f) {
+      const fence = f.fence;
       const indent = l.length - l.trimStart().length;
       const body: string[] = [];
       i++;
       while (i < lines.length && !new RegExp(`^ {0,3}${fence[0] === "`" ? "`" : "~"}{${fence.length},}\\s*$`).test(lines[i])) body.push(lines[i++].replace(new RegExp(`^ {0,${indent}}`), ""));
       i++;
-      out.push({ t: "code", lang: m[2] ?? "", s: body.join("\n") });
+      out.push({ t: "code", lang: f.lang, s: body.join("\n") });
       continue;
     }
     if ((m = ATX.exec(l))) {
@@ -128,10 +145,11 @@ function blocks(lines: string[], ids: Map<string, number>, depth: number): Block
     if (l.includes("|") && i + 1 < lines.length && DELIM_ROW.test(lines[i + 1])) {
       const head = cells(l);
       const align = cells(lines[i + 1]).map((c) => (c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : c.startsWith(":") ? "left" : "")) as ("" | "left" | "center" | "right")[];
-      if (head.length === align.length) {
+      if (head.length === align.length && head.length <= TABLE_CELLS_MAX) {
         i += 2;
         const rows: Inline[][][] = [];
-        while (i < lines.length && !blank(lines[i]) && lines[i].includes("|") && !interrupts(lines[i])) {
+        // each row is widened to the header's: the cells are capped (the rest: a paragraph)
+        while (i < lines.length && !blank(lines[i]) && lines[i].includes("|") && !interrupts(lines[i]) && (rows.length + 2) * head.length <= TABLE_CELLS_MAX) {
           const r = cells(lines[i++]);
           rows.push(head.map((_, k) => inlines(r[k] ?? "", depth)));
         }
@@ -248,10 +266,13 @@ export function safeHref(url: string): string | null {
 export function inlines(s: string, depth = 0): Inline[] {
   const out: Inline[] = [];
   const close = brackets(s);
-  let text = "";
+  let text = ""; // the current line's text since the last flush
+  let held: string[] = []; // earlier lines of the same text node (joined once: linear)
   const flush = () => {
-    if (text) out.push({ t: "text", s: text });
+    const all = held.length ? held.join("") + text : text;
+    if (all) out.push({ t: "text", s: all });
     text = "";
+    held = [];
   };
   let i = 0;
   while (i < s.length) {
@@ -270,11 +291,19 @@ export function inlines(s: string, depth = 0): Inline[] {
       }
     }
     if (ch === "\n") {
-      if (text.endsWith("  ")) {
-        text = text.replace(/ +$/, "");
+      // the line's trailing spaces go (two or more: a hard break); only this line's text is
+      // trimmed (the whole text each time was quadratic)
+      let e = text.length;
+      while (e > 0 && text[e - 1] === " ") e--;
+      const hard = text.length - e >= 2;
+      text = text.slice(0, e);
+      if (hard) {
         flush();
         out.push({ t: "br" });
-      } else text = text.replace(/ +$/, "") + " ";
+      } else {
+        held.push(text + " ");
+        text = "";
+      }
       i++;
       continue;
     }
@@ -308,7 +337,7 @@ export function inlines(s: string, depth = 0): Inline[] {
       const r = linkAt(s, i + 1, close);
       if (r) {
         flush();
-        out.push({ t: "img", alt: plain(inlines(r.label, depth + 1)) });
+        out.push({ t: "img", alt: depth < MAX_DEPTH ? plain(inlines(r.label, depth + 1)) : r.label });
         i = r.end;
         continue;
       }

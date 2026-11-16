@@ -23,7 +23,8 @@ import "core:strings"
 WEB_DIFF_BYTES_MAX :: 4 << 20 // a diff shown in a browser: at most this much of it (then "Show more" stops)
 
 // changes_select (a browser's): select, show more, read again.
-changes_select_apply :: proc(c: Changes_Select) -> Result {
+changes_select_apply :: proc(c: Changes_Select, caller: Caller) -> Result {
+	if !caller_from_web(caller) do return fail("only a browser's Changes tab selects this way (the window keeps its own)")
 	v := changes_view(c.tab_id)
 	if v == nil do return fail("no such changes tab")
 	r := changes_repo(v.root)
@@ -51,10 +52,14 @@ changes_select_apply :: proc(c: Changes_Select) -> Result {
 
 // While a browser is attached (web_view_tick): a Changes tab with nothing selected selects as
 // the window's does once its list is read (a list read before the browser came has no
-// selection yet).
+// selection yet); a selection whose diff was dropped (read for a link that went) is read again.
 changes_web_tick :: proc() {
 	for _, v in changes_views {
-		if v.sel_path != "" || v.diff_loading do continue
+		if v.diff_loading do continue
+		if v.sel_path != "" {
+			if v.diff == "" && v.msg == "" do changes_diff_start(v)
+			continue
+		}
 		r := changes_repo(v.root)
 		if r == nil || !r.loaded || r.loading || len(r.files) == 0 do continue
 		f := r.files[0]

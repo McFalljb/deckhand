@@ -52,6 +52,8 @@ export interface LinkHooks {
   up(): void;
 }
 
+const RECONNECT_FIRST = 100; // a link that was up a while dials again this soon once, then backs off from RECONNECT_MIN
+const UP_STEADY = 1000; // up at least this long: a drop is a blip (shorter: a core dropping each link backs off)
 const RECONNECT_MIN = 1000;
 const RECONNECT_MAX = 15000;
 const HIDDEN_STALE = 30000; // hidden longer than this: the socket is suspect (phones drop them silently)
@@ -68,6 +70,7 @@ export class Link {
   private channels = new Map<number, (f: Frame) => void>();
   private jsonHandlers = new Map<string, Set<(m: any) => void>>();
   private retryMs = RECONNECT_MIN;
+  private upAt = 0; // when the last state.full came
   private retryTimer = 0;
   private hiddenAt = 0;
   private hold = false; // displaced, unpaired or stopped: no reconnect until asked
@@ -204,7 +207,7 @@ export class Link {
         });
         return;
       }
-      this.retry("the connection dropped");
+      this.retry("the connection dropped", Date.now() - this.upAt >= UP_STEADY);
     };
   }
 
@@ -231,13 +234,14 @@ export class Link {
     this.failWaiting();
   }
 
-  private retry(why: string): void {
+  // soon: the first try after a link that was up (most drops are a blip), the back-off unchanged
+  private retry(why: string, soon = false): void {
     this.dropSocket();
     if (this.hold) return;
     this.setStatus({ kind: "reconnecting", why });
     window.clearTimeout(this.retryTimer);
-    this.retryTimer = window.setTimeout(() => this.connect(), this.retryMs);
-    this.retryMs = Math.min(this.retryMs * 2, RECONNECT_MAX);
+    this.retryTimer = window.setTimeout(() => this.connect(), soon ? RECONNECT_FIRST : this.retryMs);
+    if (!soon) this.retryMs = Math.min(this.retryMs * 2, RECONNECT_MAX);
   }
 
   // Back in front, or the network came back: dial now instead of waiting out the back-off.
@@ -313,6 +317,7 @@ export class Link {
       case "state.full":
         if (this.store.applyFull(m)) {
           this.retryMs = RECONNECT_MIN;
+          this.upAt = Date.now();
           this.setStatus({ kind: "up" });
           this.hooks.up();
         }

@@ -70,13 +70,15 @@ export class Link {
   private channels = new Map<number, (f: Frame) => void>();
   private jsonHandlers = new Map<string, Set<(m: any) => void>>();
   private retryMs = RECONNECT_MIN;
-  private upAt = 0; // when the last state.full came
+  private upAt = 0; // when this connection's state.full came (0: not yet)
   private retryTimer = 0;
   private hiddenAt = 0;
   private hold = false; // displaced, unpaired or stopped: no reconnect until asked
   private statusNow: LinkStatus = { kind: "connecting" };
 
-  constructor(private hooks: LinkHooks) {
+  private hooks: LinkHooks;
+  constructor(hooks: LinkHooks) {
+    this.hooks = hooks;
     document.addEventListener("visibilitychange", () => this.onVisibility());
     window.addEventListener("online", () => this.kick());
   }
@@ -164,6 +166,7 @@ export class Link {
     ws.binaryType = "arraybuffer";
     this.ws = ws;
     this.helloDone = false;
+    this.upAt = 0; // per connection: one that closes before its state.full backs off
     ws.onopen = () => {
       if (this.ws !== ws) return;
       const key = pairKey();
@@ -207,7 +210,9 @@ export class Link {
         });
         return;
       }
-      this.retry("the connection dropped", Date.now() - this.upAt >= UP_STEADY);
+      const upAt = this.upAt;
+      this.upAt = 0;
+      this.retry("the connection dropped", upAt > 0 && Date.now() - upAt >= UP_STEADY);
     };
   }
 

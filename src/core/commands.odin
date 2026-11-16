@@ -581,6 +581,7 @@ Command :: union {
 	Machine_Linger, // Linux: linger on there (machine_install.odin)
 	Holder_Replace,
 	Holder_Restart, // a separate core's window: the palette's Restart session holder (holder_restart.odin)
+	Holder_Recover, // the bar over a lost session holder: attach again, or start a new one (holder_recover.odin)
 	Core_Handover,
 	Claude_Typed,
 	Claude_Status_Dismiss,
@@ -1656,6 +1657,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Holder_Restart:
 		holder_restart_start()
 		return {ok = true}, false
+	case Holder_Recover:
+		return holder_recover(c.stop), true
 	case Core_Handover:
 		return core_handover_start(c.to), false
 	case Claude_Typed:
@@ -1737,7 +1740,9 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		agent_pending_drop(tab.id) // Send to Atlas text waiting for it (session_info.odin)
 		tab_clear_panels(tab) // nobody publishes them any more
 		forget_confirmations_for(tab.id) // nothing left to confirm
-		socket_forget_tab(tab.id) // its token dies with the process
+		// its token dies with the process; one that runs on in a lost holder keeps it (and what it
+		// was started as) for when that holder is back (holder_recover)
+		if tab_held_away(tab) == 0 do socket_forget_tab(tab.id)
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi do comments_pi_exited(ts) // pending comments wait for the next pi
 		claude_tab_gone(tab) // a Claude tab: what it held goes
 		// claude not found (the tab's command exits 127): look for it again before the next start

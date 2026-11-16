@@ -330,8 +330,9 @@ handover_take :: proc() -> map[u32]Handover_Snap {
 }
 
 // At launch, after the workspace is restored: the held tabs get their terminals (see the top).
-// Every tab's saved held id is cleared, adopted or not.
-holder_adopt_all :: proc() {
+// Every tab's saved held id is cleared, adopted or not. released: terminals this core let go of
+// while its holder was lost (holder_recover): hung up if the holder still lists them.
+holder_adopt_all :: proc(released: map[u32]bool = nil) {
 	defer hc.adopt_done = true
 	any_held := false
 	for s in state.open_sessions do for t in s.tabs do if t.held != 0 do any_held = true
@@ -401,7 +402,7 @@ holder_adopt_all :: proc() {
 	kept := 0
 	sync.lock(&hc.mu)
 	for id, h in hc.held do if h.welcomed && !h.claimed {
-		if held_release_unclaimed(h.eof && h.exit.known, persist.restored_clean, same, listed[id]) {
+		if released[id] || held_release_unclaimed(h.eof && h.exit.known, persist.restored_clean, same, listed[id]) {
 			append(&gone, id)
 		} else {
 			h.kept, h.tail_len = true, 0
@@ -443,7 +444,10 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 	h.tail_len = 0
 	sync.unlock(&hc.mu)
 
-	t := new_term(tab.id)
+	// a tab whose terminal ended here when the holder was lost takes it again (holder_recover)
+	t := term_of(tab.id)
+	if t == nil do t = new_term(tab.id)
+	else do term_readopt_reset(t)
 	exact := false
 	snap, have := snaps[id]
 	adopted := false

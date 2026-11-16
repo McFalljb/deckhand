@@ -203,6 +203,16 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   holder never counts as alive (`pid_running`). Its log:
   `journalctl --user -u deckhand-core`. `KillMode=process` keeps systemd from killing
   processes left in the unit's cgroup on a stop or restart.
+  **Known limits (#135, not fixed):** a `systemctl --user stop deckhand-core` that lands while a
+  handover (an update) is under way stops the old core, but its successor has already been made
+  a new process in a `deckhand-core-<rand>.scope` (the unit was no longer `active`, so no exec in
+  place) and keeps serving; `status` says inactive until that scope is stopped
+  (`systemctl --user stop 'deckhand-core-*.scope'`, a clean stop that keeps the sessions). A
+  `systemctl --user restart` landing mid-update ends the same way: the successor serves from a
+  scope, and the unit's own new start exits 3 (another core runs). No session is lost either way.
+  Not fixed because the core cannot tell a stop from a restart (both are `deactivating`), and the
+  holder's supervisor relaunches a successor that never comes, through the unit; telling them
+  apart needs systemd's job type and a real-host test.
 - **The session holder** (M6-L3, `src/holder/sys_linux.odin`): `keep_sessions` works as on macOS.
   The core starts the holder with `systemd-run --user --scope --collect --unit
   deckhand-holder-<rand> -- deckhand-core hold …`, so it runs in a transient scope of its own and

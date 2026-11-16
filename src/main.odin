@@ -962,6 +962,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Claude_Reload: claude_reload_click(hit) // Claude Code's (ui_claude_reload.odin)
 		case Hit_Dead_Tab:  dead_tab_click(fp, hit) // a dead pi tab's Restart (dead_tab.odin)
 		case Hit_Update:    update_click(hit) // the update bar (ui_update.odin)
+		case Hit_Holder_Bar: holder_bar_click() // the lost session holder's bar (ui_holder.odin)
 		case Hit_Comments:  comments_click(hit) // pending comments (ui_comments.odin)
 		case Hit_Claude:    claude_click(fp, hit) // a Claude tab's held messages (ui_claude.odin)
 		case Hit_Pane_New:  pane_click(hit) // a pane strip's "+" (ui_panes.odin)

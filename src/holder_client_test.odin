@@ -735,6 +735,152 @@ holder_lost_alive_no_restart :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(saved, fmt.tprintf(`"holder":"%s"`, f.instance)), saved)
 }
 
+// The state holder_lost_alive_no_restart reaches: a pi tab adopted from terminal 3, then the holder
+// lost while it still runs (a send timed out), the tab ended here and its process held away.
+@(private = "file")
+lost_alive_setup :: proc(t: ^testing.T, f: ^core.Fake_Holder, proj: string) -> (s: ^core.Open_Session, ok: bool) {
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"eeee-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj)
+	adopt_run(t, f, text, binds)
+	s = &state.open_sessions[len(state.open_sessions) - 1]
+	s.missing = false // its session file is not made here
+	tab := &s.tabs[0]
+	if !testing.expect_value(t, tab.status, core.Tab_Status.Running) do return
+	big := make([]u8, 4 << 20)
+	defer delete(big)
+	core.holder_input(3, big) // fills the socket buffer, then times out: lost
+	if !testing.expect(t, core.wait_until(2000, proc() -> bool {return sync.atomic_load(&core.hc.lost)}), "lost") do return
+	for _ in 0 ..< 50 {
+		core.pump_all()
+		if tab.status == .Exited do break
+		time.sleep(10 * time.Millisecond)
+	}
+	if !testing.expect_value(t, tab.status, core.Tab_Status.Exited) do return
+	if !testing.expect_value(t, core.tab_held_away(tab), u32(3)) do return
+	return s, true
+}
+
+// #108: the holder lost while it still runs. The window says so (holder_lost_view: what it means)
+// and offers one action. When the old holder answers again, Restart session holder attaches to
+// it (no second holder) and the tab that waited for it gets its terminal back, the same process:
+// nothing spawned, nothing restarted, and new tabs are held again.
+@(test)
+holder_recover_reattaches :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}, rejoin_output = transmute([]u8)string("back again")}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	was := core.holder_send_timeout
+	core.holder_send_timeout = 200 * time.Millisecond
+	defer core.holder_send_timeout = was
+	proj := adopt_proj()
+	defer os.remove(proj)
+	s, ok := lost_alive_setup(t, &f, proj)
+	if !ok do return
+	tab := &s.tabs[0]
+	v := core.holder_lost_view()
+	testing.expect(t, v.lost && v.alive && !v.stop, "the window is not told the holder is lost")
+	r := core.run_command(core.Holder_Recover{}, {kind = .UI, hub = true})
+	testing.expect(t, !r.ok, "a hub restarted this machine's session holder")
+	sync.atomic_store(&f.no_read, false) // it answers again
+	r = core.run_command(core.Holder_Recover{}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect(t, core.hc.on && !sync.atomic_load(&core.hc.lost), "not attached again")
+	testing.expect_value(t, sync.atomic_load(&f.hellos), 2)
+	testing.expect_value(t, tab.status, core.Tab_Status.Running)
+	testing.expect_value(t, core.tab_held_away(tab), u32(0))
+	if x := core.term_of(tab.id); testing.expect(t, x != nil, "no terminal") do testing.expect_value(t, x.pty.held, u32(3))
+	for _ in 0 ..< 50 {
+		core.pump_all()
+		if term_shows(tab.id, "back again") do break
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(t, term_shows(tab.id, "back again"), "the holder's output after the reattach never reached the tab")
+	testing.expect(t, !core.holder_lost_view().lost, "the notice stays")
+	testing.expect(t, core.holder_wanted(), "new tabs are not held again")
+	testing.expect_value(t, core.fake_holder_count(&f, .Spawn), 0)
+	testing.expect_value(t, core.fake_holder_count(&f, .Release, 3), 0)
+}
+
+// Another holder run answers on that socket (the old one is gone: its pid now runs another
+// instance): the tab whose terminal was in it ends, saying why, and restarts as usual; new tabs
+// are held by the new holder. And Restart is refused when nothing is lost.
+@(test)
+holder_recover_old_run_gone :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}, rejoin_instance = "another-holder-run"}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	was := core.holder_send_timeout
+	core.holder_send_timeout = 200 * time.Millisecond
+	defer core.holder_send_timeout = was
+	proj := adopt_proj()
+	defer os.remove(proj)
+	s, ok := lost_alive_setup(t, &f, proj)
+	if !ok do return
+	tab := &s.tabs[0]
+	sync.atomic_store(&f.no_read, false)
+	r := core.run_command(core.Holder_Recover{}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect(t, core.hc.on, "not attached")
+	testing.expect_value(t, tab.status, core.Tab_Status.Exited)
+	testing.expect_value(t, core.tab_held_away(tab), u32(0))
+	testing.expect(t, core.tab_is_dead(tab), "no Restart offered")
+	testing.expect(t, term_shows(tab.id, "session holder stopped"), "the tab does not say why it ended")
+	testing.expect_value(t, core.fake_holder_count(&f, .Spawn), 0) // nothing restarted by itself
+	r = core.run_command(core.Holder_Recover{}, {kind = .UI})
+	testing.expect(t, !r.ok, "a restart with nothing lost")
+}
+
+// The old holder still runs but does not answer: no second holder beside it. The action then
+// says it stops it and ends its sessions; it signals only a process that runs a session holder
+// binary (the fake is this test binary: refused, nothing changes).
+@(test)
+holder_recover_hung_asks_to_stop :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	was := core.holder_send_timeout
+	core.holder_send_timeout = 200 * time.Millisecond
+	defer core.holder_send_timeout = was
+	proj := adopt_proj()
+	defer os.remove(proj)
+	s, ok := lost_alive_setup(t, &f, proj)
+	if !ok do return
+	tab := &s.tabs[0]
+	core.hc.recover_failed = true // a reconnect found it still not answering (5 s per try: not run here)
+	v := core.holder_lost_view()
+	testing.expect(t, v.lost && v.alive && v.stop, "the stop is not offered")
+	msg, button := holder_bar_text(v)
+	testing.expect(t, strings.contains(button, "Stop") && strings.contains(button, "end"), button)
+	testing.expect(t, strings.contains(msg, "can't be reached"), msg)
+	r := core.run_command(core.Holder_Recover{stop = true}, {kind = .UI})
+	testing.expect(t, !r.ok && strings.contains(r.error, "not a session holder"), r.error)
+	testing.expect(t, sync.atomic_load(&core.hc.lost), "no longer lost")
+	testing.expect_value(t, core.tab_held_away(tab), u32(3))
+	saved := core.workspace_json()
+	testing.expect(t, strings.contains(saved, `"held":3`), saved) // still kept for the next launch
+}
+
+// What the bar says: the holder gone (its sessions ended) or not answering; new tabs not kept.
+@(test)
+holder_bar_texts :: proc(t: ^testing.T) {
+	msg, button := holder_bar_text({lost = true})
+	testing.expect(t, strings.contains(msg, "stopped") && strings.contains(msg, "new tabs"), msg)
+	testing.expect_value(t, button, "Restart session holder")
+	msg, button = holder_bar_text({lost = true, alive = true})
+	testing.expect(t, strings.contains(msg, "isn't answering") && strings.contains(msg, "new tabs"), msg)
+	testing.expect_value(t, button, "Restart session holder")
+	msg, button = holder_bar_text({lost = true, alive = true, stop = true, sessions = 2})
+	testing.expect(t, strings.contains(button, "2 sessions"), button)
+	_, button = holder_bar_text({lost = true, alive = true, stop = true, sessions = 1})
+	testing.expect(t, strings.contains(button, "1 session") && !strings.contains(button, "sessions"), button)
+	spec := core.command_spec("holder_recover")
+	testing.expect(t, spec != nil && spec.who == .User_Here, "holder_recover is not this machine's user's only")
+}
+
 // #108: the holder dropped this core (its pong timeout: the core was stopped, or the Mac slept)
 // while both still run. The core attaches to the same holder again, as after an upgrade, and the
 // pi tab stays the same running terminal: the holder's TAIL and what follows reach it, input

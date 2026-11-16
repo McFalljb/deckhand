@@ -146,6 +146,7 @@ Holder_Client :: struct {
 	refused_pid:  i32, // a holder whose code is not ours answered (Refused_Code): the user is asked (state.holder_ask)
 	refused_path: string, // its socket
 	hung_since:   time.Tick, // a holder answered but never WELCOMEd (Warn_Running): its held_away tabs wait at most PONG_TIMEOUT
+	recover_failed: bool, // lost, and Holder_Recover found it still running but not answering: stopping it is offered (holder_recover.odin)
 }
 
 hc := Holder_Client{fd = -1}
@@ -825,7 +826,7 @@ tab_held_away :: proc(tab: ^Tab) -> u32 {
 	return 0
 }
 
-HELD_AWAY_TEXT :: "This session still runs in the session holder, which isn't answering. It isn't started here, so it never runs twice: quit and reopen Deckhand to get it back."
+HELD_AWAY_TEXT :: "This session still runs in the session holder, which isn't answering. It isn't started here, so it never runs twice: Restart session holder (the bar above, when it shows), or quit and reopen Deckhand, gets it back."
 
 // SPAWN through the holder; waits up to HOLDER_WAIT for SPAWNED. The terminal id is picked
 // here (max + 1, never reused within this connection).
@@ -1554,6 +1555,34 @@ holder_client_stop :: proc() {
 	hc.on = false
 }
 
+// After a loss, before attaching again (holder_recover): the old connection's state goes as at a
+// launch (its reader ended at the loss: holder_lose), so holder_client_start connects anew. The
+// pid stays (holder_alive) until an attach replaces it.
+holder_client_reset :: proc() {
+	holder_client_stop()
+	sync.lock(&hc.wmu)
+	clear(&hc.pending)
+	hc.upgrading, hc.rejoining = false, false
+	sync.unlock(&hc.wmu)
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	for _, h in hc.held do held_free(h)
+	clear(&hc.held)
+	clear(&hc.released)
+	clear(&hc.listed)
+	clear(&hc.ack)
+	for s in ([]^string{&hc.instance, &hc.previous, &hc.path, &hc.upgrade_error_seen}) {
+		delete(s^)
+		s^ = ""
+	}
+	hw.stream_destroy(&hc.rx)
+	hc.rx = {}
+	sync.atomic_store(&hc.lost, false)
+	sync.atomic_store(&hc.stuck, false)
+	hc.tried, hc.unreachable, hc.handover, hc.acked, hc.adopt_done, hc.up_done = false, false, false, false, false, false
+	hc.recover_failed, hc.hung_since = false, {}
+}
+
 // Forgets the connection and everything held (unit tests, between fake holders).
 holder_client_forget :: proc() {
 	holder_client_stop()
@@ -1631,16 +1660,7 @@ holder_replace :: proc(stop: bool) -> Result {
 		return fail("that session holder is gone") // a reused pid is never signalled
 	}
 	log_ln("Deckhand: session holder: stopping the one from another build (pid", pid, ") as the user asked")
-	posix.kill(posix.pid_t(pid), .SIGTERM)
-	deadline := time.tick_add(time.tick_now(), HOLDER_STOP_WAIT)
-	for posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
-	if posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK {
-		posix.kill(posix.pid_t(pid), .SIGKILL)
-		for _ in 0 ..< 50 {
-			if posix.kill(posix.pid_t(pid), posix.Signal(0)) != .OK do break
-			time.sleep(20 * time.Millisecond)
-		}
-	}
+	holder_stop_pid(pid)
 	if hc.refused_path != "" do sock_unlink(hc.refused_path)
 	hc.refused_pid = 0
 	hc.tried, hc.unreachable = false, false
@@ -1648,6 +1668,21 @@ holder_replace :: proc(stop: bool) -> Result {
 	if !holder_client_start() do return fail("the old session holder is stopped, but a new one did not start (new tabs stop when Deckhand quits)")
 	window_toast("A new session holder runs: tabs opened from now on keep running when Deckhand quits.")
 	return {ok = true}
+}
+
+// SIGTERM to a holder the user asked to stop (the caller checked it runs a holder binary), SIGKILL
+// after HOLDER_STOP_WAIT, then up to a second for it to go. Main thread.
+holder_stop_pid :: proc(pid: i32) {
+	posix.kill(posix.pid_t(pid), .SIGTERM)
+	deadline := time.tick_add(time.tick_now(), HOLDER_STOP_WAIT)
+	for pid_running(pid) && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
+	if pid_running(pid) {
+		posix.kill(posix.pid_t(pid), .SIGKILL)
+		for _ in 0 ..< 50 {
+			if !pid_running(pid) do break
+			time.sleep(20 * time.Millisecond)
+		}
+	}
 }
 
 // Main thread, every tick: a holder that answered but never WELCOMEd (Warn_Running) for

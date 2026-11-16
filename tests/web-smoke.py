@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Web access end to end (docs/PROTOCOL.md §5c): starts `deckhand-core-serve serve` in test mode in a
+"""Web access end to end (docs/PROTOCOL.md §5b): starts `deckhand-core-serve serve` in test mode in a
 temp dir with web access on, listening on 127.0.0.1 at a free port, then: the page and its headers,
 whoami (401), a code from `deckhand-core-serve web pair`, /api/pair (wrong origin, wrong code, the
 right one), whoami (200), the WebSocket upgrade (refused without Origin or cookie), the hello,

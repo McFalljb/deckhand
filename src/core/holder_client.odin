@@ -146,6 +146,7 @@ Holder_Client :: struct {
 	refused_pid:  i32, // a holder whose code is not ours answered (Refused_Code): the user is asked (state.holder_ask)
 	refused_path: string, // its socket
 	hung_since:   time.Tick, // a holder answered but never WELCOMEd (Warn_Running): its held_away tabs wait at most PONG_TIMEOUT
+	pid_start: i64, // the attached holder's start time (lock_proc_ident): Stop signals only that process (holder_stop_ours)
 	recover_failed: bool, // lost, and Holder_Recover found it still running but not answering: stopping it is offered (holder_recover.odin)
 }
 
@@ -394,6 +395,30 @@ handshake_got: int // bytes the handshake read so far (Quiet: none)
 @(private = "file")
 refused_code_pid: i32 // holder_connect's Refused_Code: the peer's pid
 
+// The holder at path alone, while it still runs (holder_recover): retried on a refusal as
+// holder_client_start does (a full listen backlog), but its socket is never taken for a dead
+// one's and nothing is launched: never a second holder beside a running one. True: attached.
+holder_attach_only :: proc(path: string) -> bool {
+	hc.tried = true
+	if path == "" do return false
+	r := holder_connect(path, "")
+	for wait in HOLDER_RECHECKS {
+		if r != .Stale do break
+		time.sleep(wait)
+		r = holder_connect(path, "")
+	}
+	if r == .Welcomed do return true
+	hc.unreachable = true
+	log_ln("Deckhand: session holder: it still runs but did not attach:", r)
+	return false
+}
+
+// pid's start time (0: not known): with the pid, the process's identity (lock_proc_ident).
+holder_pid_start :: proc(pid: i32) -> i64 {
+	h, ok := lock_proc_ident(pid)
+	return ok ? h.start : 0
+}
+
 // Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. Anything but
 // Welcomed keeps nothing: refused, a stale socket, a bad or lying WELCOME.
 @(private = "file")
@@ -487,6 +512,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	hc.holder_rev = w.holder_rev
 	hc.upgrade_error_seen = strings.clone(w.upgrade_error)
 	hc.pid = peer.pid
+	hc.pid_start = holder_pid_start(peer.pid)
 	copy(hc.key[:], key)
 	hc.next_id = max_id + 1
 	hc.on, hc.lost, hc.handed, hc.stop, hc.stuck = true, false, false, false, false
@@ -1373,7 +1399,6 @@ holder_rejoin :: proc(why: string) -> bool {
 }
 
 // hc's id sets live on the heap whatever allocator the calling thread has (as hc.rx, rx_reset).
-@(private = "file")
 held_ids_map :: proc(m: ^map[u32]bool) {
 	if m.allocator.procedure == nil do m^ = make(map[u32]bool, runtime.heap_allocator())
 }
@@ -1523,6 +1548,7 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 	delete(hc.upgrade_error_seen)
 	hc.upgrade_error_seen = strings.clone(w.upgrade_error)
 	hc.holder_rev = w.holder_rev
+	if peer.pid != hc.pid do hc.pid_start = holder_pid_start(peer.pid) // an upgrade's keeper
 	hc.pid = peer.pid
 	return "", true
 }

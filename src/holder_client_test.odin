@@ -809,7 +809,9 @@ holder_recover_reattaches :: proc(t: ^testing.T) {
 @(test)
 holder_recover_old_run_gone :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := core.Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}, rejoin_instance = "another-holder-run"}
+	// terminal 4: kept unseen at launch; this core's "let go of" set names it (review #145, 4): an
+	// id of the old run, never released in another run that happens to list the same id
+	f := core.Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, ""), fake_term(4, "")}, rejoin_instance = "another-holder-run"}
 	core.fake_holder_start(t, &f)
 	defer core.fake_holder_stop(&f)
 	was := core.holder_send_timeout
@@ -820,6 +822,9 @@ holder_recover_old_run_gone :: proc(t: ^testing.T) {
 	s, ok := lost_alive_setup(t, &f, proj)
 	if !ok do return
 	tab := &s.tabs[0]
+	sync.lock(&core.hc.mu)
+	core.hc.released[4] = true
+	sync.unlock(&core.hc.mu)
 	sync.atomic_store(&f.no_read, false)
 	r := core.run_command(core.Holder_Recover{}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
@@ -829,8 +834,68 @@ holder_recover_old_run_gone :: proc(t: ^testing.T) {
 	testing.expect(t, core.tab_is_dead(tab), "no Restart offered")
 	testing.expect(t, term_shows(tab.id, "session holder stopped"), "the tab does not say why it ended")
 	testing.expect_value(t, core.fake_holder_count(&f, .Spawn), 0) // nothing restarted by itself
+	time.sleep(100 * time.Millisecond)
+	testing.expect_value(t, core.fake_holder_count(&f, .Release, 4), 0)
 	r = core.run_command(core.Holder_Recover{}, {kind = .UI})
 	testing.expect(t, !r.ok, "a restart with nothing lost")
+}
+
+// Review #145, 1 and 3: the old holder runs but takes no connection (paused; its listen backlog
+// full: macOS refuses then). Restart never takes its socket for a dead one's: the socket stays,
+// nothing is launched, the action says it still isn't answering and offers the stop; and what this
+// core let go of meanwhile is still to be released at a later attach.
+@(test)
+holder_recover_alive_attach_only :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	was := core.holder_send_timeout
+	core.holder_send_timeout = 200 * time.Millisecond
+	defer core.holder_send_timeout = was
+	proj := adopt_proj()
+	defer os.remove(proj)
+	if _, ok := lost_alive_setup(t, &f, proj); !ok do return
+	// the fake stops taking connections: its socket is a full backlog's now
+	sync.atomic_store(&f.stop, true)
+	thread.join(f.th)
+	thread.destroy(f.th)
+	f.th = nil
+	core.sock_close(f.lfd)
+	core.sock_unlink(f.path)
+	f.lfd = -1
+	b := backlog_full(t, f.dir)
+	defer backlog_done(&b)
+	delete(core.hc.path)
+	core.hc.path = strings.clone(b.path)
+	sync.lock(&core.hc.mu)
+	core.hc.released[9] = true // a tab closed while it waited
+	sync.unlock(&core.hc.mu)
+	r := core.run_command(core.Holder_Recover{}, {kind = .UI})
+	testing.expect(t, !r.ok && strings.contains(r.error, "still isn't answering"), r.error)
+	testing.expect(t, os.exists(b.path), "the running holder's socket was removed")
+	files, _ := os.read_all_directory_by_path(f.dir, context.temp_allocator)
+	for x in files do testing.expectf(t, !core.holder_sock_name_ok(x.name) || x.name == "holder-0000b10c.sock", "another holder: %s", x.name)
+	testing.expect(t, sync.atomic_load(&core.hc.lost) && core.holder_lost_view().stop, "the stop is not offered")
+	sync.lock(&core.hc.mu)
+	testing.expect(t, core.hc.released[9], "the closed tab's terminal is forgotten: never released later")
+	sync.unlock(&core.hc.mu)
+}
+
+// Review #145, 2: Stop signals only the holder this core attached to: the process at that pid now
+// must have started when that one did (a pid reused by another Deckhand's holder is not ours).
+@(test)
+holder_stop_identity_rule :: proc(t: ^testing.T) {
+	ours := core.Lock_Holder{pid = 42, start = 1000, exe = "/x/deckhand-core"}
+	testing.expect(t, core.holder_stop_ours(1000, ours, true))
+	testing.expect(t, !core.holder_stop_ours(1000, ours, false), "gone")
+	testing.expect(t, !core.holder_stop_ours(0, ours, true), "no start recorded")
+	other := ours
+	other.start = 2000
+	testing.expect(t, !core.holder_stop_ours(1000, other, true), "a reused pid")
+	other = ours
+	other.exe = "/x/zsh"
+	testing.expect(t, !core.holder_stop_ours(1000, other, true), "not a holder binary")
 }
 
 // The old holder still runs but does not answer: no second holder beside it. The action then

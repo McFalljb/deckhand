@@ -11,8 +11,9 @@ package core
 //     that waited for it (held away) get their terminals back from its tails (inexact, as after a
 //     crash: holder_adopt_all), the same processes. What this core let go of meanwhile (a closed
 //     tab) is released then. It does not answer: no second holder beside it; the bar then offers
-//     to stop it, saying how many sessions that ends (stop: SIGTERM, then SIGKILL, only a process
-//     that runs a session holder binary), and a new holder starts.
+//     to stop it, saying how many sessions that ends (stop: SIGTERM, then SIGKILL, only the process
+//     this core attached to: holder_stop_ours), and a new holder starts. Attaching to a running
+//     holder never removes its socket or launches another (holder_attach_only).
 //   - it is gone (or stopped): a new holder starts. The tabs whose terminals were in it end here,
 //     saying "the session holder stopped", and restart as usual.
 //
@@ -56,7 +57,8 @@ holder_recover :: proc(stop: bool) -> Result {
 	old_path := strings.clone(hc.path, context.temp_allocator)
 	alive := holder_alive()
 	if stop && alive {
-		if exe := holder_pid_exe(old_pid); !strings.has_suffix(exe, "/" + HOLDER_BIN) do return fail("that process is not a session holder: nothing was stopped")
+		now, ok := lock_proc_ident(old_pid)
+		if !holder_stop_ours(hc.pid_start, now, ok) do return fail("that process is not a session holder this Deckhand started: nothing was stopped")
 		log_ln("Deckhand: session holder: stopping the one that stopped answering (pid", old_pid, ") as the user asked; its sessions end")
 		holder_stop_pid(old_pid)
 		if hc.path != "" do sock_unlink(hc.path)
@@ -67,19 +69,29 @@ holder_recover :: proc(stop: bool) -> Result {
 	away := make(map[u64]u32, 8, context.temp_allocator)
 	for s in state.open_sessions do for &tab in s.tabs do if id := tab_held_away(&tab); id != 0 do away[tab.id] = id
 	released := make(map[u32]bool, 8, context.temp_allocator)
+	let_go := make([dynamic]u32, context.temp_allocator) // hc.released as it was (put back if no attach)
 	sync.lock(&hc.mu)
-	for id in hc.released do released[id] = true
+	for id in hc.released {
+		released[id] = true
+		append(&let_go, id)
+	}
 	sync.unlock(&hc.mu)
 	for _, id in away do delete_key(&released, id)
 	if !alive do holder_away_end(away, "stopped")
 
 	holder_client_reset()
-	if !holder_client_start() {
+	old_start := hc.pid_start
+	// still running: that holder alone (never its socket removed, never another launched)
+	if !(alive ? holder_attach_only(old_path) : holder_client_start()) {
 		// as it was: lost (the held ids and the old instance are saved for the next launch)
 		delete(hc.instance)
 		delete(hc.path)
 		hc.instance, hc.path = strings.clone(old_instance), strings.clone(old_path)
-		hc.pid = old_pid
+		hc.pid, hc.pid_start = old_pid, old_start
+		sync.lock(&hc.mu)
+		held_ids_map(&hc.released)
+		for id in let_go do hc.released[id] = true // released at a later attach (holder_adopt_all)
+		sync.unlock(&hc.mu)
 		sync.atomic_store(&hc.lost, true)
 		hc.recover_failed = alive
 		window_state_changed()
@@ -98,7 +110,7 @@ holder_recover :: proc(stop: bool) -> Result {
 			tab.status = .Not_Started // adopt_tab takes its Term again
 		}
 	} else if gone && alive do holder_away_end(away, "stopped")
-	holder_adopt_all(released)
+	holder_adopt_all(same ? released : nil) // its ids are that run's: another run's may overlap
 	// a waiting tab whose terminal the holder no longer lists (it exited meanwhile): ended here
 	n := 0
 	for &s in state.open_sessions do for &tab in s.tabs do if _, has := away[tab.id]; has && same {
@@ -134,4 +146,11 @@ holder_term_ended :: proc(t: ^Term, what: string) {
 	msg := fmt.tprintf("\r\n\x1b[2m[%s: this session ended]\x1b[0m", what)
 	term_vt_write(t, transmute([]u8)msg)
 	t.changed = true
+}
+
+// Whether the process now at the attached holder's pid is that holder (Stop signals it): it runs a
+// session holder binary and started when the one this core attached to did (recorded_start, at
+// attach). A pid reused since (another Deckhand's holder, say) never matches.
+holder_stop_ours :: proc(recorded_start: i64, now: Lock_Holder, ok: bool) -> bool {
+	return ok && recorded_start != 0 && now.start == recorded_start && strings.has_suffix(now.exe, "/" + HOLDER_BIN)
 }

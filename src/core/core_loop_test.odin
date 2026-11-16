@@ -274,7 +274,7 @@ core_idle_exit_rule :: proc(t: ^testing.T) {
 	testing.expect(t, !core_idle_due(&since, {}, t0)) // the count starts
 	testing.expect(t, !core_idle_due(&since, {}, at(t0, CORE_IDLE_EXIT - time.Second)))
 	testing.expect(t, core_idle_due(&since, {}, at(t0, CORE_IDLE_EXIT)))
-	for keep in ([]Idle_Facts{{window = true}, {tab_process = true}, {job_run = true}, {job_schedule = true}}) {
+	for keep in ([]Idle_Facts{{window = true}, {tab_process = true}, {job_run = true}, {job_schedule = true}, {machine_live = true}}) {
 		since = {}
 		testing.expect(t, !core_idle_due(&since, {}, t0))
 		testing.expect(t, !core_idle_due(&since, keep, at(t0, CORE_IDLE_EXIT)), "kept")
@@ -283,6 +283,29 @@ core_idle_exit_rule :: proc(t: ^testing.T) {
 		testing.expect(t, !core_idle_due(&since, {}, at(t0, 2 * CORE_IDLE_EXIT)))
 		testing.expect(t, core_idle_due(&since, {}, at(t0, 2 * CORE_IDLE_EXIT + time.Second)))
 	}
+}
+
+// #135: a hub with no window still rings for its linked machines (machine_mirror.odin: their bell
+// and jobs that need the user): an online machine with a running tab or job run keeps it. An
+// online machine with nothing running, or one that is not online, does not (its core idles too).
+@(test)
+core_idle_machines_keep :: proc(t: ^testing.T) {
+	ms := []Machine_View{{no = 1, status = .Online}, {no = 2, status = .Offline}}
+	tab :: proc(machine: u64, st: Tab_Status) -> Tab {return {machine = machine, status = st}}
+	sess :: proc(machine: u64, tabs: []Tab) -> Open_Session {
+		s := Open_Session{machine = machine}
+		s.tabs = make([dynamic]Tab, context.temp_allocator)
+		append(&s.tabs, ..tabs)
+		return s
+	}
+	running := []Open_Session{sess(1, {tab(1, .Exited), tab(1, .Running)})}
+	testing.expect(t, machines_keep_core(ms, running, nil), "an online machine's running tab")
+	testing.expect(t, !machines_keep_core(ms, []Open_Session{sess(1, {tab(1, .Exited), tab(1, .Not_Started)})}, nil), "nothing runs there")
+	testing.expect(t, !machines_keep_core(ms, []Open_Session{sess(2, {tab(2, .Running)})}, nil), "an offline machine's last-seen tab")
+	testing.expect(t, !machines_keep_core(ms, []Open_Session{sess(0, {tab(0, .Running)})}, nil), "this machine's own (tab_process's)")
+	testing.expect(t, machines_keep_core(ms, nil, []Job_Row{{machine = 1, running = true}}), "an online machine's job run")
+	testing.expect(t, !machines_keep_core(ms, nil, []Job_Row{{machine = 2, running = true}, {machine = 1}}), "a job that does not run, or an offline machine's")
+	testing.expect(t, !machines_keep_core(nil, running, nil), "no machines")
 }
 
 // A core launched by `deckhand --ctl` in a tab (core_launch_env): none of the tab's tokens, socket

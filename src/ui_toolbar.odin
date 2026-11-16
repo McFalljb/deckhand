@@ -961,6 +961,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return core.session_explain(s), ""
 	case Hit_Update:
 		return update_tip(x)
+	case Hit_Holder_Bar:
+		return holder_bar_tip()
 	case Hit_Comments:
 		return comments_tip(x)
 	case Hit_Claude:

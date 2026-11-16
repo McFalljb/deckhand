@@ -184,9 +184,10 @@ core_loop_stop :: proc() {core_loop.stopped = true}
 // ---- a separate core's idle exit (docs/plans/background-core.md §6 "Idle", Q2) ----
 //
 // `deckhand-core serve` with nothing to do saves and exits: no window attached, no tab's process
-// running, no job run and no enabled job schedule, for CORE_IDLE_EXIT (not a setting): a schedule
-// keeps it, or its jobs would silently stop (M5's login agent starts a core for them). Its holder,
-// left with no core and no terminal, exits on its own.
+// running, no job run, no enabled job schedule and nothing running on an online linked machine
+// (a hub: machines_keep_core), for CORE_IDLE_EXIT (not a setting): a schedule keeps it, or its
+// jobs would silently stop (M5's login agent starts a core for them). Its holder, left with no
+// core and no terminal, exits on its own.
 
 CORE_IDLE_EXIT :: 10 * time.Minute
 
@@ -195,6 +196,7 @@ Idle_Facts :: struct {
 	tab_process: bool, // some tab's process runs (a held one too)
 	job_run:     bool, // a job run is under way
 	job_schedule: bool, // an enabled job has a schedule (until M5's login agent starts a core for it)
+	machine_live: bool, // a hub: an online linked machine runs a tab or a job (machines_keep_core)
 }
 
 // What keeps the core now.
@@ -202,6 +204,7 @@ core_idle_facts :: proc() -> (f: Idle_Facts) {
 	f.window = window_attached()
 	f.job_run = jobs_any_running()
 	f.job_schedule = jobs_any_scheduled()
+	f.machine_live = machines_keep_core(state.machines, state.open_sessions[:], state.machine_jobs[:])
 	for _, t in terms do if t.running {
 		f.tab_process = true
 		break
@@ -209,10 +212,25 @@ core_idle_facts :: proc() -> (f: Idle_Facts) {
 	return
 }
 
+// A hub with no window is still where its linked machines' bells and jobs that need the user ring
+// (machine_mirror.odin): it stays while an online machine runs a tab (its mirrored status) or a job
+// run there. An online machine with nothing running keeps nothing (a linked core never idles out
+// while this hub is attached: window_attached there), so the two do not keep each other forever.
+// A remote core with a hub attached is kept by its window link (window_attached) (#135).
+machines_keep_core :: proc(machines: []Machine_View, sessions: []Open_Session, jobs: []Job_Row) -> bool {
+	online :: proc(machines: []Machine_View, no: u64) -> bool {
+		for m in machines do if m.no == no do return m.status == .Online
+		return false
+	}
+	for s in sessions do for tab in s.tabs do if tab.machine != 0 && tab.status == .Running && online(machines, tab.machine) do return true
+	for j in jobs do if j.machine != 0 && j.running && online(machines, j.machine) do return true
+	return false
+}
+
 // The idle rule on any clock: since is when the core last had nothing to do ({} = it has
 // something). True: exit now.
 core_idle_due :: proc(since: ^time.Tick, f: Idle_Facts, now: time.Tick) -> bool {
-	if f.window || f.tab_process || f.job_run || f.job_schedule {
+	if f.window || f.tab_process || f.job_run || f.job_schedule || f.machine_live {
 		since^ = {}
 		return false
 	}

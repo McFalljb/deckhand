@@ -225,6 +225,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Machine_Open_Page:   return "machine_open_page"
 	case Holder_Replace:      return "holder_replace"
 	case Holder_Restart:      return "holder_restart"
+	case Holder_Recover:      return "holder_recover"
 	case Core_Handover:       return "core_handover"
 	case Claude_Typed:        return "claude_typed"
 	case Claude_Status_Dismiss: return "claude_status_dismiss"
@@ -525,6 +526,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.path != "" do kv_str(&w, "path", c.path)
 	case Holder_Replace:
 		kv_bool(&w, "stop", c.stop)
+	case Holder_Recover:
+		if c.stop do kv_bool(&w, "stop", true)
 	case Core_Handover:
 		kv_str(&w, "to", c.to)
 	case Claude_Typed:

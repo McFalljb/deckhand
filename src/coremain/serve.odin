@@ -248,7 +248,7 @@ serve_loop :: proc() {
 		core.window_link_io()
 		loop_again = core.output_backlog() && terms_bytes_in() != before
 		if core.core_idle_due(&loop.idle_since, core.core_idle_facts(), time.tick_now()) {
-			core.log_fln("deckhand-core serve: no window, no tab's process and no job run for %v: exiting", core.CORE_IDLE_EXIT)
+			core.log_fln("deckhand-core serve: no window, no tab's process, no job run and nothing running on a linked machine for %v: exiting", core.CORE_IDLE_EXIT)
 			loop.quit = true
 		}
 		free_all(context.temp_allocator)

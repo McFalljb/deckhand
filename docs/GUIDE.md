@@ -189,11 +189,21 @@ start fresh.
   on. Both logs (`holder.log`, `core.log` in the runtime folder) give each line's time in UTC.
 - **The session holder crashes**: its tabs stop and say "the session holder stopped". pi and
   Claude resume from their files when you restart them; shells start fresh.
+- **The session holder is lost while Deckhand runs** (it crashed, or stopped answering and
+  attaching to it again failed): a bar over the centre says so. The sessions it kept can't be
+  reached from here, and tabs you open meanwhile run in Deckhand Core itself, so they don't keep
+  running when it restarts or quits. **Restart session holder** on the bar fixes that: if the
+  old holder still runs, Deckhand attaches to it again and its sessions come back to their tabs
+  (their screens rebuilt from what it kept); if it is gone, a new holder starts, and the tabs
+  whose sessions were in it say why they ended and restart as usual. If the old holder runs but
+  still doesn't answer, Deckhand never starts a second one beside it: the button then reads
+  **Stop it (ends its N sessions) and start a new one**. Either way, new tabs keep running again.
 - **Stop All Sessions, a logout or a restart of the Mac**: everything stops. The next start
   restores your sessions. Scheduled jobs wait until Deckhand runs again.
 
-**When Deckhand Core stops by itself.** With no window, no tab's program running, no job run and
-no scheduled job for 10 minutes, it saves and exits; opening Deckhand starts it again. If it
+**When Deckhand Core stops by itself.** With no window, no tab's program running, no job run, no
+scheduled job and nothing running on another machine it is linked to (whose alerts it shows) for
+10 minutes, it saves and exits; opening Deckhand starts it again. If it
 crashes, the holder starts it again and the window reconnects. If it keeps crashing (or never
 comes up), the window offers **Use Previous Core** (the one from before the last update) or **Run
 Sessions in Deckhand Itself**. The palette's **Use previous core** does the first at any time;

@@ -167,3 +167,15 @@ command_wire_ui_parse_one_door :: proc(t: ^testing.T) {
 	for c in callers do if c != "json_read.odin" && c != "window_link.odin" do ok = false
 	testing.expectf(t, ok, "parse_command_ui is called from %v: only window_link.odin may", callers[:])
 }
+
+// The lost holder bar's click (Holder_Recover{}, stop false: the field left out) parses at the
+// window door: an optional field read as required refuses it, and the click did nothing (#108).
+@(test)
+command_wire_holder_recover_default :: proc(t: ^testing.T) {
+	for cmd in ([]Command{Holder_Recover{}, Holder_Recover{stop = true}}) {
+		text := command_wire_json(cmd)
+		back, err := parse_command_ui(text, context.temp_allocator)
+		testing.expectf(t, err == "", "%s does not parse: %s", text, err)
+		testing.expect_value(t, back.(Holder_Recover) or_else {stop = !cmd.(Holder_Recover).stop}, cmd.(Holder_Recover))
+	}
+}

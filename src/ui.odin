@@ -795,6 +795,7 @@ palette_row :: proc(it: Palette_Item, i: int, width: f32) {
 centre :: proc(cs: ^core.Open_Session) {
 	if clay.UI(clay.ID("centre"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
 		update_bar() // a Deckhand update: available, downloading, ready (ui_update.odin)
+		holder_bar() // the session holder lost: what it means, Restart session holder (ui_holder.odin)
 		reload_bars() // hot reload: pi settings changed, pi updated (ui_reload.odin)
 		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
@@ -1473,6 +1474,7 @@ Hit :: union {
 	Hit_Claude_Reload, // Claude Code's (ui_claude_reload.odin)
 	Hit_Dead_Tab, // the bar over a pi tab whose process exited (dead_tab.odin)
 	Hit_Update, // the update bar's buttons (ui_update.odin)
+	Hit_Holder_Bar, // the lost session holder's bar (ui_holder.odin)
 	Hit_Comments, // the pending comments' strip, list and close prompt (ui_comments.odin)
 	Hit_Claude, // a Claude tab's held messages bar (ui_claude.odin)
 	Hit_Bell, // the bell's popover (ui_bell.odin)
@@ -1566,6 +1568,7 @@ ui_hit :: proc() -> Hit {
 	if h := comments_hit(); h != nil do return h
 	if h := claude_hit(); h != nil do return h
 	if h := update_hit(); h != nil do return h
+	if h := holder_bar_hit(); h != nil do return h
 	if h := reload_hit(); h != nil do return h
 	if h := claude_reload_hit(); h != nil do return h
 	if h := dead_tab_hit(); h != nil do return h

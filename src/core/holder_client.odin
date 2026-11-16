@@ -146,6 +146,8 @@ Holder_Client :: struct {
 	refused_pid:  i32, // a holder whose code is not ours answered (Refused_Code): the user is asked (state.holder_ask)
 	refused_path: string, // its socket
 	hung_since:   time.Tick, // a holder answered but never WELCOMEd (Warn_Running): its held_away tabs wait at most PONG_TIMEOUT
+	pid_start: i64, // the attached holder's start time (lock_proc_ident): Stop signals only that process (holder_stop_ours)
+	recover_failed: bool, // lost, and Holder_Recover found it still running but not answering: stopping it is offered (holder_recover.odin)
 }
 
 hc := Holder_Client{fd = -1}
@@ -393,6 +395,30 @@ handshake_got: int // bytes the handshake read so far (Quiet: none)
 @(private = "file")
 refused_code_pid: i32 // holder_connect's Refused_Code: the peer's pid
 
+// The holder at path alone, while it still runs (holder_recover): retried on a refusal as
+// holder_client_start does (a full listen backlog), but its socket is never taken for a dead
+// one's and nothing is launched: never a second holder beside a running one. True: attached.
+holder_attach_only :: proc(path: string) -> bool {
+	hc.tried = true
+	if path == "" do return false
+	r := holder_connect(path, "")
+	for wait in HOLDER_RECHECKS {
+		if r != .Stale do break
+		time.sleep(wait)
+		r = holder_connect(path, "")
+	}
+	if r == .Welcomed do return true
+	hc.unreachable = true
+	log_ln("Deckhand: session holder: it still runs but did not attach:", r)
+	return false
+}
+
+// pid's start time (0: not known): with the pid, the process's identity (lock_proc_ident).
+holder_pid_start :: proc(pid: i32) -> i64 {
+	h, ok := lock_proc_ident(pid)
+	return ok ? h.start : 0
+}
+
 // Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. Anything but
 // Welcomed keeps nothing: refused, a stale socket, a bad or lying WELCOME.
 @(private = "file")
@@ -486,6 +512,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	hc.holder_rev = w.holder_rev
 	hc.upgrade_error_seen = strings.clone(w.upgrade_error)
 	hc.pid = peer.pid
+	hc.pid_start = holder_pid_start(peer.pid)
 	copy(hc.key[:], key)
 	hc.next_id = max_id + 1
 	hc.on, hc.lost, hc.handed, hc.stop, hc.stuck = true, false, false, false, false
@@ -825,7 +852,7 @@ tab_held_away :: proc(tab: ^Tab) -> u32 {
 	return 0
 }
 
-HELD_AWAY_TEXT :: "This session still runs in the session holder, which isn't answering. It isn't started here, so it never runs twice: quit and reopen Deckhand to get it back."
+HELD_AWAY_TEXT :: "This session still runs in the session holder, which isn't answering. It isn't started here, so it never runs twice: Restart session holder (the bar above, when it shows), or quit and reopen Deckhand, gets it back."
 
 // SPAWN through the holder; waits up to HOLDER_WAIT for SPAWNED. The terminal id is picked
 // here (max + 1, never reused within this connection).
@@ -1372,7 +1399,6 @@ holder_rejoin :: proc(why: string) -> bool {
 }
 
 // hc's id sets live on the heap whatever allocator the calling thread has (as hc.rx, rx_reset).
-@(private = "file")
 held_ids_map :: proc(m: ^map[u32]bool) {
 	if m.allocator.procedure == nil do m^ = make(map[u32]bool, runtime.heap_allocator())
 }
@@ -1522,6 +1548,7 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 	delete(hc.upgrade_error_seen)
 	hc.upgrade_error_seen = strings.clone(w.upgrade_error)
 	hc.holder_rev = w.holder_rev
+	if peer.pid != hc.pid do hc.pid_start = holder_pid_start(peer.pid) // an upgrade's keeper
 	hc.pid = peer.pid
 	return "", true
 }
@@ -1552,6 +1579,34 @@ holder_client_stop :: proc() {
 	if hc.fd >= 0 do sock_close(hc.fd)
 	hc.fd = -1
 	hc.on = false
+}
+
+// After a loss, before attaching again (holder_recover): the old connection's state goes as at a
+// launch (its reader ended at the loss: holder_lose), so holder_client_start connects anew. The
+// pid stays (holder_alive) until an attach replaces it.
+holder_client_reset :: proc() {
+	holder_client_stop()
+	sync.lock(&hc.wmu)
+	clear(&hc.pending)
+	hc.upgrading, hc.rejoining = false, false
+	sync.unlock(&hc.wmu)
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	for _, h in hc.held do held_free(h)
+	clear(&hc.held)
+	clear(&hc.released)
+	clear(&hc.listed)
+	clear(&hc.ack)
+	for s in ([]^string{&hc.instance, &hc.previous, &hc.path, &hc.upgrade_error_seen}) {
+		delete(s^)
+		s^ = ""
+	}
+	hw.stream_destroy(&hc.rx)
+	hc.rx = {}
+	sync.atomic_store(&hc.lost, false)
+	sync.atomic_store(&hc.stuck, false)
+	hc.tried, hc.unreachable, hc.handover, hc.acked, hc.adopt_done, hc.up_done = false, false, false, false, false, false
+	hc.recover_failed, hc.hung_since = false, {}
 }
 
 // Forgets the connection and everything held (unit tests, between fake holders).
@@ -1631,16 +1686,7 @@ holder_replace :: proc(stop: bool) -> Result {
 		return fail("that session holder is gone") // a reused pid is never signalled
 	}
 	log_ln("Deckhand: session holder: stopping the one from another build (pid", pid, ") as the user asked")
-	posix.kill(posix.pid_t(pid), .SIGTERM)
-	deadline := time.tick_add(time.tick_now(), HOLDER_STOP_WAIT)
-	for posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
-	if posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK {
-		posix.kill(posix.pid_t(pid), .SIGKILL)
-		for _ in 0 ..< 50 {
-			if posix.kill(posix.pid_t(pid), posix.Signal(0)) != .OK do break
-			time.sleep(20 * time.Millisecond)
-		}
-	}
+	holder_stop_pid(pid)
 	if hc.refused_path != "" do sock_unlink(hc.refused_path)
 	hc.refused_pid = 0
 	hc.tried, hc.unreachable = false, false
@@ -1648,6 +1694,29 @@ holder_replace :: proc(stop: bool) -> Result {
 	if !holder_client_start() do return fail("the old session holder is stopped, but a new one did not start (new tabs stop when Deckhand quits)")
 	window_toast("A new session holder runs: tabs opened from now on keep running when Deckhand quits.")
 	return {ok = true}
+}
+
+// SIGTERM to a holder the user asked to stop (the caller checked it runs a holder binary), SIGKILL
+// after HOLDER_STOP_WAIT, then up to a second for it to go. start (the attached holder's start
+// time, holder_recover): checked again right before each signal (holder_stop_ours), so a pid
+// reused while it waited (it exited on the SIGTERM) is never signalled. Main thread.
+holder_stop_pid :: proc(pid: i32, start: i64 = 0) {
+	ours :: proc(pid: i32, start: i64) -> bool {
+		if start == 0 do return pid_running(pid)
+		now, ok := lock_proc_ident(pid)
+		return holder_stop_ours(start, now, ok)
+	}
+	if !ours(pid, start) do return
+	posix.kill(posix.pid_t(pid), .SIGTERM)
+	deadline := time.tick_add(time.tick_now(), HOLDER_STOP_WAIT)
+	for ours(pid, start) && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
+	if ours(pid, start) {
+		posix.kill(posix.pid_t(pid), .SIGKILL)
+		for _ in 0 ..< 50 {
+			if !pid_running(pid) do break
+			time.sleep(20 * time.Millisecond)
+		}
+	}
 }
 
 // Main thread, every tick: a holder that answered but never WELCOMEd (Warn_Running) for

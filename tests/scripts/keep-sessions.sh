@@ -12,7 +12,8 @@
 # 3. relaunches after that crash, its bundled holder taken for a newer one: adopted from the tails
 #    (inexact), same pids, and the holder upgraded in place at attach, once; then "Quit
 #    Deckhand and Stop All Sessions": the holder must be gone after it.
-# 4. relaunches: fresh shells in a new holder, which is killed (-9): every tab says holder_lost.
+# 4. relaunches: fresh shells in a new holder, which is killed (-9): every tab says holder_lost;
+#    the bar's Restart session holder starts another, which holds the next new tab (#108).
 # A fake HOME, a fake pi, a temp data dir and a short runtime dir under $TMPDIR (never the user's).
 # Usage: tests/scripts/keep-sessions.sh
 set -eu
@@ -152,4 +153,5 @@ wait_log 4 "screen_hash"
 for p in $(holders); do kill -9 "$p"; done
 finish 4
 grep -q "session holder lost" "$W/run4.log" || { echo "run 4: the loss was not logged"; exit 1; }
+[ "$(grep -c "holder attached: previous none" "$W/run4.log")" -ge 2 ] || { echo "run 4: Restart session holder did not attach a new holder"; exit 1; }
 echo "keep-sessions scene ok"

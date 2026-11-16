@@ -236,6 +236,19 @@ term_free :: proc(t: ^Term) {
 	prog_free(&t.prog)
 }
 
+// A Term whose held process ended here when its holder was lost, made fresh for that process
+// again (holder_recover: adopt_tab feeds it the holder's tail), as term_start makes one for a new
+// process: its windows' copies start over (term_stream_reset, in adopt_tab).
+term_readopt_reset :: proc(t: ^Term) {
+	reader_stop_and_close(t)
+	gh.terminal_free(t.gt)
+	term_new_gt(t)
+	prog_reset(&t.prog)
+	t.prog.dirty = true
+	t.exit, t.eof_at, t.hung_pid = {}, {}, 0
+	t.inexact, t.holder_lost, t.holder_away = false, false, 0
+}
+
 // Starts argv on a fresh terminal (old child hung up, screen reset).
 // False if the process could not be started.
 term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = nil, start: Held_Start = {}) -> bool {

@@ -4,7 +4,7 @@ What makes pi feel native in Deckhand's **pi tabs** and lets **Atlas** drive Dec
 ships this folder inside `Deckhand.app` (`Contents/Resources/pi`) and starts every pi tab with
 one `-e <folder>/extensions/<name>` per extension in `extensions.json` (the required ones, and
 optional ones the user turned on, in that order). `-e` loads them for that run only: nothing is
-written to `~/.pi`, and pi outside Deckhand runs exactly as before. It needs pi 1.4.0 or newer
+written to `~/.pi`, and pi outside Deckhand runs exactly as before. It needs pi 1.4.0 or newer (`PI_MIN_VERSION`; an older pi starts without it)
 ([docs/HARNESSES.md](../../docs/HARNESSES.md), the design).
 
 | Extension | What it does | Active when |
@@ -17,8 +17,9 @@ written to `~/.pi`, and pi outside Deckhand runs exactly as before. It needs pi 
 | `shell` | Optional, on by default. pi-kit's shell: `bash_bg`, `monitor`, `wake_later`, `shell_stop`, `shell_list`, `/shells`; rows on `kit:shell:rows` (the Shells panel, the bridge's blockers) | not in read-only sessions |
 | `notes` | Optional, off by default. pi-kit's notes reminder: past `PI_KIT_NOTES_REMIND_PERCENT` (75) of the context, one note to update the session note (in `PI_KIT_NOTES_DIR` when set) | not in pi-subagents children |
 
-Optional ones are the user's Settings toggles (Settings tab, "pi extensions"; `extensions.json`
-`default` until chosen) and apply at a tab's next start. `skills/deckhand-desk` is Atlas's desk
+Optional ones are the user's switches under **Deckhand's pi extensions** (Settings › Coding agents ›
+pi; `extensions.json` `default` until chosen; only the user at this Mac changes them) and apply at
+a tab's next start. `skills/deckhand-desk` is Atlas's desk
 skill, passed with `--skill` to Atlas only. It has its own name because pi lists `--skill` paths
 last and keeps the first skill of a name, so it cannot share pi-kit's `desk`.
 

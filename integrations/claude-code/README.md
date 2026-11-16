@@ -20,13 +20,15 @@ definitions in Claude's context):
   ([docs/ENGINE-BRIDGE.md](../../docs/ENGINE-BRIDGE.md), apps.json's trust model). `tools/deckhand-cli/cli_test.odin`
   (`skill_leaves_app_open_to_claude`) checks the list.
 - **Hooks** (`hooks/hooks.json`): SessionStart tells Deckhand the Claude session id (so the tab can
-  be resumed and restored), UserPromptSubmit / Stop / Notification tell it when a turn starts,
-  ends or waits for the user (Deckhand types into the tab only when Claude is idle and nothing is
-  typed), and UserPromptSubmit hands Claude the user's pending comments with the message.
+  be resumed and restored), UserPromptSubmit / Stop / StopFailure / Notification tell it when a
+  turn starts, ends or waits for the user (Deckhand types into the tab only when Claude is idle and
+  nothing is typed), and UserPromptSubmit hands Claude the user's pending comments with the
+  message. Async hooks (todos, tasks, subagents, background shells, model switches) feed the
+  right column's panels and print nothing. The full list: [docs/CLAUDE.md](../../docs/CLAUDE.md) §2.
 
 All rules (own session only, no JavaScript, refused password/card/one-time-code fields, the
 user's Allow for uploads and downloads, Take over, Stop) are enforced by Deckhand, not here. See
-[docs/GUIDE.md](../../docs/GUIDE.md) ("Claude tabs") and [docs/PROTOCOL.md](../../docs/PROTOCOL.md).
+[docs/GUIDE.md](../../docs/GUIDE.md#claude-code-tabs) ("Claude Code tabs") and [docs/PROTOCOL.md](../../docs/PROTOCOL.md).
 
 ## How it is loaded
 
@@ -46,5 +48,6 @@ by hand, in Claude Code:
 ```
 
 It is not published anywhere. Installed this way it still only works inside Deckhand's Claude
-tabs, which set `DECKHAND_SOCKET`, `DECKHAND_CLAUDE_TOKEN` and `DECKHAND_CLI` (and, until 0.2.0,
-the same under their old names, `PI_DESK_*`, for tabs started before Deckhand 0.1.7).
+tabs, which set `DECKHAND_SOCKET`, `DECKHAND_CLAUDE_TOKEN` and `DECKHAND_CLI`, and the same under
+their old pi-desk names (`PI_DESK_*`) beside them. `bin/deckhand` falls back to `PI_DESK_CLI` for a
+tab started before Deckhand 0.1.7.

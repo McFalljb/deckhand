@@ -69,6 +69,9 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   Claude tabs save `{"kind":"claude","claude_session_id"?,"cwd","args"?,"account"?}` (docs/CLAUDE.md): Claude
   Code's session id once its SessionStart hook reported it, where it ran, the user's extra
   flags, and `account`: its account's config folder (§1b; it starts there again; absent: the default). A saved id that is not a session id, or flags Deckhand sets itself, drop the tab.
+  Codex tabs save the same fields with `"kind":"codex"` (`account`: its Codex home; docs/CODEX.md)
+  and restore with `codex resume <id>`; an older Deckhand skips the unknown kind rather than start
+  Claude Code on a Codex id.
 - **Panes** (docs/GUIDE.md, split panes): a session split into panes also saves `panes`; a
   session with one pane has no `panes` key:
 
@@ -94,8 +97,9 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   other tabs every restore drops) is removed and the split around it closes.
 - A Claude-only session (docs/CLAUDE.md §1) is saved in `open_sessions` as
   `{"agent":"claude","claude_session_id","pi_session_id":"","cwd","project","tabs":[{"kind":"claude",…},…],"active_tab"}`:
-  `tabs[0]` is its main Claude tab (same id), never a pi tab; saved once Claude reported its
-  session id; `pi_session_id` is `""`. Restored with `restore_session` and `agent: claude`; a
+  `tabs[0]` is its main Claude tab (same id; a Codex-only session's is `"kind":"codex"`), never a
+  pi tab; saved once Claude (or Codex) reported its session id; `pi_session_id` is `""`. Known
+  limit: one whose program exits before it reports an id is not saved. Restored with `restore_session` and `agent: claude`; a
   saved id that is not a session id, or a first tab that is not that Claude tab, drops the
   session. No `agent`: a pi session.
 - `claude_sessions`: `[{id, cwd, project, title?, used, args?, named?, transcript?, model?, account}]`, most recent first, at most 100:
@@ -107,7 +111,8 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   load: one that is not is dropped); never read. `model`: the last model reported (SessionStart,
   PostModelSwitch). `account`: the config folder it ran under (written at each start; left out
   for an older entry, which means the default account as resolved when it is used, never stamped
-  at load). `transcript` may be under any account's `projects/`. Restored with
+  at load). `transcript` may be under any account's `projects/`. `codex: true` marks a Codex
+  conversation (its `account` a Codex home). Restored with
   `claude_restore_history` (internal).
 - `current_session` and `active_tab` are positions in the saved lists (left out if none). While
   the Deck view shows no session (`show_no_session`), `current_session` is the session that was
@@ -196,7 +201,17 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   `show_hidden`. The filter text and quick filters are not saved. Restored with the internal
   `restore_sidebar`, then `set_sort`, `set_sidebar_folded`, `set_sidebar_view`, `set_filter`.
 - `settings`: only non-default values. `confirm`/`confirm_close` are user-only settings; reading
-  them back from the user's own file is the user setting them.
+  them back from the user's own file is the user setting them. Besides those above:
+  `theme`, `reduce_motion`, `appearance`, `text_size`, `terminal_text_size`;
+  `claude_skip_permissions` and `codex_full_access` (`set_claude_default_flags`), `pi_extensions`
+  (`{name: on}`, `set_pi_extension`), `last_harness` (the New session picker's first row);
+  `codex_accounts`, `codex_account_default`, `codex_account_last` (as the Claude keys); for
+  Atlas's jobs `pi_path`, `jobs_path` (the PATH runs get, read once from the login shell),
+  `jobs_paused` and `job_limits`. The four settings only this Mac's user
+  may change (`set_machines_reachable`, `set_remote_machines`, `set_pi_extension`,
+  `set_claude_default_flags`; PROTOCOL.md §2) are restored from this file like the rest: the file
+  is the user's own. Update checks and the update's progress are in `<data dir>/update.json`, not
+  here.
 - Focus always comes back to the terminal (a text field's content is not saved).
 - Not saved: runtime ids, `version`, the session list (rescanned), pending confirmations and their
   tokens, socket tokens, pi status and blockers, panel contents, the command log, text-field
@@ -213,8 +228,8 @@ own; an orphan an upgrade's keeper adopts ends with an unknown exit code there).
 - **`<data dir>/tokens.json`**: the socket tokens of the tabs whose process runs in the holder, so
   those processes can reconnect to the next core (PROTOCOL.md §2). Keyed by holder terminal,
   sha256 hashes only, never a token. Per terminal it also says what was started there (`kind`:
-  shell, pi or claude; for pi its optional extensions `extras`): a restored tab of another kind
-  never adopts that terminal. An older file's `pi_ro` and `ro` are ignored. A challenge-only reconnect token says `"hello":"challenge"`; its hash is the challenge
+  shell, pi, claude or codex; for pi its optional extensions `extras`; for a shell `command`,
+  a Log in… tab's ssh): a restored tab of another kind never adopts that terminal. An older file's `pi_ro` and `ro` are ignored. A challenge-only reconnect token says `"hello":"challenge"`; its hash is the challenge
   hello's key (PROTOCOL.md §2). Written whenever a holder is attached, rewritten atomically on
   every mint and revoke, MAC'd with the holder's in-memory key (`src/core/macfile.odin`: a
   `deckhand-mac 1 tokens <hmac>` line, then the JSON). A file that does not verify is ignored
@@ -263,7 +278,10 @@ ordinary commands with caller `internal` (so they appear in the command log): `s
 `rename_project`, `restore_session` (internal only: an open session with its tabs `not_started`;
 with `"home": true` the Home session), `set_panel`, `set_panel_collapsed`, `set_left_tab`,
 `set_layout`, `files_expand`, `restore_sidebar` (internal only), `set_sort`,
-`set_sidebar_folded`, `set_sidebar_view`, `set_filter` (`show_hidden`), `select_project`.
+`set_sidebar_folded`, `set_sidebar_view`, `set_filter` (`show_hidden`), `select_project`, and
+the settings' own commands (`set_claude_default_flags`, `set_pi_extension`, `set_agent_name`,
+`set_agent_model`, `set_notify`, `set_tidy_projects`, `set_keep_sessions`, `set_folder`,
+`set_home_dir`, `set_pi_path`, `set_job_limits`, `jobs_pause`).
 
 - **Held tabs first.** Tabs with a `held` id the session holder still lists are adopted at once
   (not lazily): the terminal comes back from the handover snapshot plus the holder's tail

@@ -1,8 +1,10 @@
 # Atlas: jobs and memory (design)
 
-Status: step 1 (§9) is built (`src/core/jobs*.odin`, `src/ui_jobs.odin`, `src/ui_job_sheet.odin`);
-"Step 1 as built" in §9 lists where it differs from this design. The rest is design. The user's
-view is in [GUIDE.md](GUIDE.md#jobs); how Atlas runs is in
+Status: built are step 1 (§9: `src/core/jobs*.odin`, `src/ui_jobs.odin`, `src/ui_job_sheet.odin`;
+"Step 1 as built" lists where it differs from this design), jobs with the window closed (§5, the
+core) and other machines' jobs (§7.1). The rest is design: memory (§6), `workspace` access,
+protected paths, worktrees and action approval (§4.1–4.2), no-agent checks (§3.3), delivery polish
+and the sandbox (§4.7). The user's view is in [GUIDE.md](GUIDE.md#jobs); how Atlas runs is in
 [PROTOCOL.md §8](PROTOCOL.md#8-the-built-in-agent) and `src/core/agent.odin`.
 
 **Where it runs.** Atlas's pi tab, the scheduler and job runs all live in the core. Atlas is a pi
@@ -44,17 +46,20 @@ report.
 - A sandbox in v1. Guardrails are pattern rails, not a boundary; phase 2 is §4.7 (**Decided**).
 - Embeddings over memory; plain text search first (§6).
 - Atlas writing new skills on its own (pi's skills folder; new skills ask first).
-- Linux and Windows (macOS first).
+- Windows. A Linux machine's core runs its own jobs and Atlas (§7.1); the window is macOS only.
 
 What we took from other systems, with links: §11.
 
-**Atlas drives pi and Claude tabs alike.** The desk tools in Deckhand's bundled pi integration
-(`integrations/pi`) (`desk_prompt`, `desk_wait`,
-`desk_watch`) take a pi tab, a Claude tab, or an open session (its pi tab; a Claude-only
-session's Claude tab). For a Claude tab they send `claude_prompt` (held until Claude is idle and
-the user types nothing; the tool says "held: <why>"), wait with `claude_wait_idle` (idle per
-Claude's hooks **and** its OSC 7501 status, nothing held, nobody typing; PROTOCOL.md) and watch
-the tab's `claude.turn` and `program_status` events. Atlas itself still runs on pi.
+**Atlas drives pi, Claude and Codex tabs alike.** The desk tools of the bundled pi integration
+(`integrations/pi`: `desk_prompt`, `desk_wait`, `desk_watch`) take a pi tab, a Claude tab (a
+Codex tab is a Claude tab with `harness: codex`), or an open session (its pi tab; a Claude-only
+session's Claude tab). For a Claude or Codex tab they send `claude_prompt` (held until it is idle
+and the user types nothing; the tool says "held: <why>"; Codex refuses text starting with `/`,
+`!` or `$`, or with an `@word`), wait with `claude_wait_idle` (idle per the hooks **and** OSC
+7501, nothing held, nobody typing) and watch `claude.turn` and `program_status`. **Shell tabs**
+take keystrokes through `desk_run`'s `send_text`: refused into a pi tab or a tab waiting for the
+user, and only at a shell prompt, which the session holder checks as it writes the text (at most
+64 KB; PROTOCOL.md `send_text`). Atlas itself runs on pi.
 
 ## 2. Folder layout (notes root)
 
@@ -62,8 +67,9 @@ The notes root is Deckhand's main folder (setting `home_dir`; GUIDE.md
 "Your folders"), chosen in the first-run sheet: it offers the user's `PI_KIT_NOTES_DIR` (Deckhand's
 environment, else read once per start from the login shell) or a notes folder named in pi's
 global AGENTS.md, or `~/Deckhand`. Each subfolder (`jobs/`, `atlas/`, `memory/`, `sessions/`,
-`chats/`) may be overridden. Deckhand passes `PI_KIT_NOTES_DIR=<home_dir>` to every pi tab and
-job run unless the user's own environment sets it (theirs wins).
+`chats/`) may be overridden. Deckhand passes `PI_KIT_NOTES_DIR=<the sessions folder's parent>`
+(the main folder unless `sessions/` moved; `notes_root`, `src/core/folders.odin`) to every pi tab
+and job run unless the user's own environment sets it (theirs wins).
 
 ```
 <notes root>/                    (may already hold other notes: sessions/, projects/, …)
@@ -233,7 +239,7 @@ Nothing is ever deleted automatically.
 - **Delete:** the row's Delete moves the note to the Trash (`delete_path`, confirms). Deleting the
   file by hand removes the job; its data-dir runs age out.
 
-New commands (rows in `src/core/command_table.odin`): `job_list` (query), `job_run_now`, `job_stop`,
+New commands (rows in `src/core/command_table.odin`): `job_list`, `job_runs` (queries), `job_run_now`, `job_stop`,
 `jobs_pause` (anyone), `job_create` (anyone), `job_mark_read`; user-only: `jobs_resume`,
 `job_set_enabled`. Planned, not built: `job_approve_action`, `job_revoke_action` (step 4),
 `memory_pending_decide` (step 3).
@@ -317,7 +323,7 @@ one; it is not shown again for that job.
 
 ### 4.4 Limits (off unless set)
 
-**Decided:** no default limits. Settings → Jobs → Limits, each off until set:
+**Decided:** no default limits. **Limits** in the Jobs tab's header, each off until set:
 - per run: `max_cost` (USD from `usage.cost`), `timeout`, `max_turns` (global defaults, per-job
   override in the note); hitting one stops that run (SIGTERM, SIGKILL after 5 s) → `over_limit`;
 - per day / per week / per month (USD across all jobs): when reached, no new model runs start
@@ -362,8 +368,11 @@ in the window, so jobs run whether or not a window is open. The design's separat
 helper (`deckhand --scheduler`, `scheduler.lock`, `jobs.sock`) was never built: the core replaced
 it.
 - **Staying up.** The core does not exit while an enabled, scheduled job could run, while a run
-  goes, while a window is attached or while a tab's process lives (`core_idle_due`,
-  `src/core/core_loop.odin`). With none of those for 10 minutes it saves and exits.
+  goes, while a window is attached, while a tab's process lives, or while an online machine it
+  links to has a running tab or job (`core_idle_due`, `machines_keep_core`,
+  `src/core/core_loop.odin`). With none of those for 10 minutes it saves and exits. On Linux the
+  core runs under the systemd user unit `deckhand-core` (started on demand, never enabled); with
+  linger off it stops at logout (GUIDE.md "Installing and updating other machines").
 - **Quitting.** ⌘Q closes only the window. **Quit Deckhand and Stop All Sessions…** stops the
   core: running runs get SIGTERM, then SIGKILL, and are recorded `stopped (quit)` (no
   notifications).
@@ -468,7 +477,7 @@ Delivery:
 3. **The bell** (notify.odin): every run with `notify` other than `never` goes to
    `notify_job_finished` (job id, title, status finished/needs_you/failed, the one-line summary,
    the run folder). The bell sends the macOS notification and sound for runs that need the user
-   or failed, as the gear's *Notify me about* Jobs row says (default: a notification while
+   or failed, as the Jobs row of *Notify me about* (Settings › Notifications) says (default: a notification while
    Deckhand is in the background, no sound; PROTOCOL.md `set_notifications`), paced by its own
    rules, also when the bell does not collect jobs.
 4. **Deckhand's own macOS notification** only for what the bell does not notify: a finished run
@@ -485,8 +494,8 @@ macOS notifications come from the window while one is open, else from the core i
 Optional (setting, off unless set): after N delivered runs of a job in a row go unread, its row
 suggests pausing it.
 
-**Jobs tab** (**Decided**: left column, next to Sessions and Files: the fourth segment, Sessions
-| Files | Settings | Jobs, icons when the column is too narrow for the labels). Rows: name,
+**Jobs tab** (**Decided**: left column, next to Sessions and Files: Sessions | Files | Jobs,
+icons when the column is too narrow for the labels). Rows: name,
 project (or global), status dot, next run, last result, unread dot, warnings (runs more
 often than 30 min, pending memory changes, blocked actions). A row expands to its last runs,
 skipped ticks included with their reason, and what needs the user. Row buttons: Run now, Stop,
@@ -510,15 +519,16 @@ Atlas-to-Atlas channel. That gate is about direct forwarding only: a machine thi
 (*Allow other machines to connect*) acts as the user here, so it can prompt this Atlas, and through
 it, or a shell here, reach the machines this one reaches. It can't change the settings that bound
 it and the agents here (`User_Here`: *Allow other machines to connect*, Machines over SSH, the pi
-extensions, Claude's skip-permissions default); only the user at this machine
-does. Let only machines you trust as yourself connect.
+extensions, Claude's and Codex's default flags); only the user at this machine does. Let only
+machines you trust as yourself connect.
 
 **Their jobs and bells reach the user here**, because a remote core can't notify: this core
 rings for a job there that needs the user (once per run) and for each new entry of that machine's
 bell, naming the machine, at most 4 a minute per machine (PROTOCOL.md §5a "Other machines' jobs
-and bells"). The Jobs tab lists their jobs after this Mac's (which then sit under this Mac's own name), under each machine's name and then its owner there (project, Atlas, Chats, Other, as that machine groups them: `owner` and
-`owner_name` in `machine_jobs`, display text only), read-only
-(what each is up to, and the first thing it needs you for). Everything that comes from another
+and bells"). The Jobs tab lists their jobs read-only after this Mac's (which then sit under this
+Mac's own name): under each machine's name, then its owner there (project, Atlas, Chats, Other,
+as that machine groups them: `owner` and `owner_name` in `machine_jobs`, display text only), with
+what each is up to and the first thing it needs you for. Everything that comes from another
 machine is untrusted: one line, no control, bidi or invisible characters, bounded, capped.
 
 ## 8. Migration: ATLAS.md
@@ -528,9 +538,13 @@ Today: `<data dir>/atlas/ATLAS.md`. New: `<atlas folder>/ATLAS.md` (`<home_dir>/
 2. Else data-dir copy exists → copy it to the notes folder with exclusive create (never
    overwrite), add frontmatter (`type: atlas`), use the copy; the data-dir file stays as fallback.
 3. Neither → write the starter into the notes folder.
-4. no main folder, or the atlas folder unreachable → use the data-dir copy (or its starter) and show a one-line
-   warning in the drawer.
-Settings › Atlas & jobs and "Atlas: edit prompt" open whichever copy is in use.
+4. No main folder, or the atlas folder unreachable → use the data-dir copy (or its starter) and
+   show a one-line warning in the drawer.
+
+Settings › Atlas & jobs and "Atlas: edit prompt" open whichever copy is in use. The starter
+(`ATLAS_PROMPT_STARTER`, `src/core/agent.odin`) names those two places. At each start a file
+that is byte for byte an older starter (`ATLAS_PROMPT_OLD_STARTERS`) becomes the current one,
+the old kept as `ATLAS.md.bak-<date>`; an edited file is left alone (`agent_prompt_migrate`).
 
 ## 9. Build plan
 
@@ -548,9 +562,9 @@ folder and §8. Tests: `src/core/jobs_test.odin`, `src/jobs_*_test.odin`, and th
 **Step 1 as built** (where it differs from or adds to the design):
 - **Commands** beyond §3.6's list: `job_delete {job, confirm?}` (the note to the Trash),
   `job_open {job, what: note|report|run_folder}`, `job_stop {job?}`, `jobs_pause` /
-  `jobs_resume` with an optional `job` (one job, or all), `job_set_enabled`, `set_home_dir`,
-  `set_pi_path`, `set_job_limits`. `jobs_resume`, `job_set_enabled` and the settings are the
-  user's only. A job run has no Deckhand socket or token, so jobs cannot create jobs.
+  `jobs_resume` with an optional `job` (one job, or all), `job_set_enabled`, the job sheet's
+  `job_sheet` and `job_save`, `set_home_dir`, `set_pi_path`, `set_job_limits`. `jobs_resume`,
+  `job_set_enabled`, the sheet's and the settings are the user's only. A job run has no Deckhand socket or token, so jobs cannot create jobs.
 - **Not yet:** `access: workspace` and `worktree: true` are refused on the job's row (step 4);
   `## Check` is parsed but not run (a warning on the row; step 5). The heartbeat's
   `HEARTBEAT_OK` → `quiet` is built.
@@ -558,15 +572,17 @@ folder and §8. Tests: `src/core/jobs_test.odin`, `src/jobs_*_test.odin`, and th
   `PATH` in absolute entries only.
 - **The prompt** goes after `--`. pi still reads a leading `@…` there as a file to attach, so a
   prompt starting with `@` gets a leading newline.
-- **`access: read`** also passes `--tools read,grep,find,ls --no-mcp`: pi's `--tools` allowlist
-  covers extension tools too, and MCP tools stay unless `--no-mcp` is given.
+- **`access: read`** also passes `--tools read,grep,find,ls --exclude-tools 'mcp__*' --no-mcp`
+  (`PI_READONLY_ARGS`, `src/core/commands.odin`): pi's `--tools` allowlist covers extension tools
+  too, `mcp__*` tools need the exclude, pi's own MCP needs `--no-mcp`. Extensions' own code (hooks)
+  still runs. It needs pi 1.0.4 or newer; an older pi fails the run with that reason.
 - **Statuses:** over `timeout` → `timeout`; over cost or turns → `over_limit`. Skips of one reason
   in a row are one run line with a count (`⏭ skipped (asleep) ×3`).
 - **Who may run what.** `job_run_now` from anyone but the user refuses a paused or disabled job.
   The limits hold for the user too. Limits in the Jobs tab step through presets; the safety stops
   have presets but no "off".
-- **Stopping a run** signals pi's whole process tree (children by `proc_listchildpids`, then each
-  one's process group): SIGTERM, then SIGKILL 5 s later. A stopped run's remembered tree gets
+- **Stopping a run** signals pi's whole process tree (children by `proc_listchildpids` on macOS,
+  `/proc/<pid>/task/<pid>/children` on Linux, then each one's process group): SIGTERM, then SIGKILL 5 s later. A stopped run's remembered tree gets
   SIGKILL when the run ends, so no child outlives it. Quit and handover: §5.
 - **Ticks without frames.** A timer thread in the core posts a scheduler tick every second while a
   run goes (else every 30 s), so due checks and the watchdog never depend on the window.

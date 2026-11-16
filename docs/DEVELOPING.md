@@ -20,10 +20,12 @@ Users start with the [README](../README.md) and the [user guide](GUIDE.md); the 
 
 macOS 14 or later on Apple silicon (arm64), [Odin](https://odin-lang.org/) `dev-2026-09`, and
 `clang` from the Xcode command line tools. Intel Macs can build Deckhand, but without browser
-tabs: CEF is wired up for arm64 only. Node 22.18 or later runs the pi integration's tests. To run
-what you build you need [pi](https://pi.dev) 1.4.0 or newer, Claude Code, or both, on your login
-shell's `PATH` (Atlas and jobs need pi). The pi and Claude Code integrations ship with Deckhand
-(`integrations/`, [HARNESSES.md](HARNESSES.md)).
+tabs: CEF is wired up for arm64 only. Node 22.18 or later runs the pi integration's tests
+(`./build.sh test` skips them without `node`). To run what you build you need at least one coding
+agent on your login shell's `PATH`: [pi](https://pi.dev) 1.4.0 or newer (Atlas and jobs need pi),
+Claude Code 2.1.295 or newer, or Codex 0.163.0 or newer. The pi integration and the Claude Code
+plugin ship with Deckhand (`integrations/`); Codex gets its hooks and tools per run
+([HARNESSES.md](HARNESSES.md)).
 
 The build does **not** need Zig: libghostty-vt comes prebuilt from `vendor/libghostty-vt/`. Zig is
 only needed to [rebuild that library](#rebuilding-libghostty-vt).
@@ -85,15 +87,16 @@ id and the old signature format, so the rename takes two releases:
     take the flip.
   - `scripts/rename-pi-desk.py` did the mechanical part (re-runnable with
     `scripts/rename-pi-desk-rebase.sh`).
-- **The flip (a later release, not yet made: 0.3.0 still ships `dev.pi-desk.app`).** The bundle
+- **The flip (a later release, not yet made: 0.5.0 still ships `dev.pi-desk.app`).** The bundle
   id becomes `dev.deckhand.app`, releases are signed v3,
-  and the data dir moves to `…/Deckhand` (with a link from the old place). The window's identifier
-  list in `src/trust` gains `dev.deckhand.app`. The move must handle a running core and holder:
+  and the data dir moves to `…/Deckhand` (with a link from the old place). `WINDOW_IDS` in
+  `src/trust/trust.odin` gains `dev.deckhand.app`. The move must handle a running core and holder:
   the runtime dir, `core.sock` and `core/<v>/` live in the data dir, and kept tabs have
   `DECKHAND_SOCKET` set. Deckhand 0.1.6 and older can't take the flip: they update to 0.2.0 first,
   or are reinstalled by hand.
-- **Three releases after 0.2.0:** the old names stop being set and
-  shipped (`PI_DESK_*` in tabs, `pi-desk-cli`, `bin/pi-desk`, `build/pi-desk`). Reading them stays.
+- **Later (planned for three releases after 0.2.0; 0.5.0 still does both):** the old names stop
+  being set and shipped (`PI_DESK_*` in tabs, `pi-desk-cli`, `bin/pi-desk`, `build/pi-desk`).
+  Reading them stays.
 
 Some names keep the old product's name for good: the instance guard's look for a running
 `pi-desk.app` (and its `$TMPDIR/pi-desk-<uid>` sockets), the old Atlas prompt starters it
@@ -168,8 +171,10 @@ a self-signed release like to any other.
 
 The core (`src/coremain`, the `core` package) also builds for Linux, so a Linux machine can run
 sessions for a Mac's window ([design §10.4](plans/background-core.md#104-m6-in-prs), M6-L1). It
-is a step in the build, behind no switch: nothing ships it yet. On Linux (Odin `dev-2026-09`,
-clang):
+ships since 0.3.0 as the release's Linux x86_64 tarball ([below](#the-linux-tarball)), which a Mac
+installs over SSH (Settings › Machines; removing it:
+[GUIDE.md](GUIDE.md#removing-deckhands-core-from-a-machine)). To build and try it by hand on Linux
+(Odin `dev-2026-09`, clang):
 
 ```sh
 mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
@@ -190,7 +195,7 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   a minute), `KillMode=process`
   and `DECKHAND_GUI_LAUNCH=1` (the login shell's environment, as under launchd). It is never
   enabled: `connect` from `core/current` starts it with `systemctl --user start` when no core
-  answers, and the idle exit (10 min, exit 0) stops it. Any other binary, no unit, no user
+  answers, and the idle exit (10 min, exit 0; [Processes](#processes)) stops it. Any other binary, no unit, no user
   manager (or a failed start), another data dir, test mode, Use previous core, or a running
   core's handover: that binary is spawned directly, as before. A handover (an update) of the
   unit's own core to core/current's binary is the exception: the successor takes the old core's
@@ -203,7 +208,7 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   holder never counts as alive (`pid_running`). Its log:
   `journalctl --user -u deckhand-core`. `KillMode=process` keeps systemd from killing
   processes left in the unit's cgroup on a stop or restart.
-  **Known limits (#135, not fixed):** a `systemctl --user stop deckhand-core` that lands while a
+  **Known limits (not fixed; tracked in [#146](https://github.com/McFalljb/deckhand/issues/146)):** a `systemctl --user stop deckhand-core` that lands while a
   handover (an update) is under way stops the old core, but its successor has already been made
   a new process in a `deckhand-core-<rand>.scope` (the unit was no longer `active`, so no exec in
   place) and keeps serving; `status` says inactive until that scope is stopped
@@ -433,14 +438,14 @@ holder, the CLI and the integrations, installed by Deckhand over SSH (M6-E; [des
   5. `check-release-build.sh` must pass on the three binaries.
 
   It writes `dist/<tarball>.sha256` from the log's value, then signs and verifies.
-- **M6-E's install must**:
-  1. verify the `.sig` on the Mac (for the version and name it expects) before anything is copied;
-  2. check the tarball's sha256 against the signed manifest;
-  3. refuse any member that is absolute, has a `..` part, lies outside the one top folder, or is
-     not a regular file or folder (a symlink, a hard link, a device), as `zip_names_check` does for
-     the app's zip;
-  4. extract into a new staging folder, then run its `deckhand-core-serve install --data
-     ~/.local/share/deckhand`.
+- **What the Mac's install does** (M6-E, `src/core/machine_install.odin`):
+  1. verifies the `.sig` on the Mac (for this Mac's version and the expected name) before
+     anything is copied;
+  2. checks the tarball's size and sha256 against the signed manifest;
+  3. refuses any member that is absolute, has a `..` part, lies outside the one top folder, is
+     not a regular file or folder (a symlink, a hard link, a device) or is setuid/setgid;
+  4. pipes the tarball over ssh into a new staging folder there, then runs its
+     `deckhand-core-serve install --data ~/.local/share/deckhand --allow-hubs`.
 
   The download's `.sha256` is a convenience only; the `.sig` is the trust anchor.
 
@@ -490,7 +495,8 @@ Every user-visible change updates [GUIDE.md](GUIDE.md) in the same branch. `src/
 (in `./build.sh test`) checks part of this: every action in `src/actions.odin` (label and
 shortcut) and every menu item must appear in GUIDE.md, and every command in
 `src/core/command_table.odin` that the user or agents may send (`who = .User` or `.Anyone`) must
-appear in GUIDE.md or [PROTOCOL.md](PROTOCOL.md).
+appear in GUIDE.md or [PROTOCOL.md](PROTOCOL.md). To run only that check (after one `./build.sh`):
+`python3 tests/unit.py --only docs_cover_actions_and_commands`.
 
 GUIDE.md is built into the binary and copied to `<data dir>/atlas/GUIDE.md` for Atlas
 (`src/core/agent.odin`). If you change Atlas's starter prompt (`ATLAS_PROMPT_STARTER`), add the
@@ -536,13 +542,15 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
   ends the window. See `src/client_core.odin` and [PROTOCOL.md](PROTOCOL.md) §5a.
 - **The core** runs headless in a `poll(2)` loop (`src/coremain/serve.odin`). It takes
   `core.lock` (one core per data dir) and `instance.lock` (shared), adopts the holder, restores and
-  serves. It runs with or without a window, and exits after 10 idle minutes (no window, no live tab
-  process, no job run or enabled scheduled job). Job runs are its children, not the holder's.
+  serves. It runs with or without a window, and exits after 10 idle minutes: no window, no live tab
+  process, no job run or enabled scheduled job, and no running tab or job on an online linked
+  machine (`core_idle_facts`, `src/core/core_loop.odin`). Job runs are its children, not the holder's.
   Browser and app tabs live in the window; with no window their commands answer `no_window`.
 - **The holder** owns the PTYs, so sessions survive the core and the window. It relaunches a core
   that crashes (backoff 1–30 s, giving up after 6 failures in a row). Its own code is in
   [The session holder](#the-session-holder).
-- **In-process mode** is the opt-out (Settings › *Run sessions in a background core* off, or
+- **In-process mode** is the opt-out (Settings › Sessions & chats › *Run sessions in a background
+  core* off, or
   `DECKHAND_SEPARATE_CORE=0` in test and development builds): the window runs the core in its own
   process over the in-memory transport (`src/core/window_link.odin`), with the same messages.
 - **Quitting** goes through one table, `quit_route` in `src/main.odin`: ⌘Q, the Dock's Quit and
@@ -578,7 +586,12 @@ the in-place upgrade (`upgrade.odin`, `keeper.odin`, `state.odin`;
 with a keeper process that hands the PTYs only to an image that passes the signature check. The
 core's side is `src/core/holder_*.odin`. A core upgrades an older attached holder to the one it
 bundles, once per run. In a development build the palette's *Restart session holder* upgrades to
-the one you just built. `DECKHAND_HOLDER_REV=N` (test builds) makes the app take its bundled holder
+the one you just built (`src/core/holder_restart.odin`; no palette entry in a release). A holder
+lost mid-run (a send timed out, a rejoin failed) shows a bar in the window with its own **Restart
+session holder** in every build: it attaches again to a holder that still answers, offers to stop
+one that does not, and starts a new one when it is gone (`holder_recover`,
+`src/core/holder_recover.odin`, `src/ui_holder.odin`; users: [How Deckhand
+runs](GUIDE.md#how-deckhand-runs)). `DECKHAND_HOLDER_REV=N` (test builds) makes the app take its bundled holder
 for rev N. The re-exec tests use `build/deckhand-core-hooks`, built with test hooks.
 
 ### Source map
@@ -606,7 +619,8 @@ core/tabhost_route.odin, tabhost_link.odin  browser, app, Markdown and editor ta
 core/core_loop.odin core_tick: inbox, terminals, persistence, jobs, Claude
 core/core_live.odin runtime a separate window shows that is not State
 core/core_handover.odin, core_versions.odin  handing a core over; installed cores, current and previous
-core/holder_*.odin  the core's side of the holder: client, install, adopt, successor, restart
+core/holder_*.odin  the core's side of the holder: client, install, adopt, successor, restart, recover
+ui_holder.odin      the lost-holder bar and its Restart session holder
 core/launchd_darwin.odin  launching the core or holder outside the app (launchd detach)
 core/inbox.odin     command inbox: any thread submits, the main thread drains
 core/events.odin    events, the command log, own-event filter
@@ -622,6 +636,8 @@ core/persist.odin   workspace.json (PERSISTENCE.md)
 core/login_env.odin the login shell's environment (Launch environment, below)
 core/sessions.odin, titles.odin  pi's sessions and their titles
 core/claude*.odin   Claude Code tabs (CLAUDE.md); ../tools/deckhand-cli/ the CLI its plugin runs
+core/codex.odin     Codex tabs: command line, per-run hooks and MCP server, version rule (CODEX.md)
+core/harness*.odin, ui_harness.odin  which coding agents are installed; the checklist's install and update
 core/pi_integration.odin  the bundled pi integration (HARNESSES.md)
 core/agent.odin, drawer.odin  Atlas and its drawer (ATLAS.md)
 core/jobs*.odin, ui_jobs.odin, ui_job_sheet.odin  jobs
@@ -638,6 +654,7 @@ core/machine_mirror.odin, machine_route.odin  their sessions, jobs and bells her
 core/machine_install.odin, machine_page.odin  install and update a machine's core; a machine's web page in a local tab
 core/window_sock.odin  the window's and the hub's door on core.sock (sshd check, Allow other machines)
 core/handoff.odin, ui_handoff.odin  new session on another machine
+core/pi_handoff.odin  Continue this conversation on <machine>: pi only, this Mac outward (#115)
 coremain/connect.odin  `deckhand-core-serve connect`: the far end of a machine's ssh link
 core/systemd_unit.odin, launch_linux.odin, proc_linux.odin  the Linux core: its systemd unit, launching, /proc
 core/lock_holder.odin  who holds a lock file when a second core is refused
@@ -663,7 +680,7 @@ autotest.odin       DECKHAND_SCRIPT test mode
 ### Data flow per terminal
 
 ```
-child (pi, claude, shell) <-> PTY master, owned by the holder (or the core when Keep sessions is off)
+child (pi, claude, codex, shell) <-> PTY master, owned by the holder (or the core when Keep sessions is off)
   output: holder reads, keeps a 1 MiB tail -> holder.sock -> core's ghostty-vt
           -> term stream (snapshot, then bytes) -> the window's ghostty-vt for a shown tab -> draw
   replies to queries (DA, DSR, colours): only the core's terminal answers
@@ -692,7 +709,9 @@ and command code never calls sokol; what it needs from the window goes as `windo
 ### The control socket
 
 The core listens on `core.sock` in a per-user `0700` runtime dir and gives each pi tab
-`DECKHAND_SOCKET` and its own `DECKHAND_TOKEN` (caller `panel`). The bridge of Deckhand's pi
+`DECKHAND_SOCKET` and its own `DECKHAND_TOKEN` (caller `panel`); Claude and Codex tabs get
+tokens of their own, accepted only from the tab's processes ([CLAUDE.md](CLAUDE.md),
+[CODEX.md](CODEX.md)). The bridge of Deckhand's pi
 integration ([HARNESSES.md](HARNESSES.md)) reports `pi.session` and `pi.status`, publishes panels
 with `panel.set` and receives `pi.prompt`, `pi.reload` and `pi.wait_idle`. Atlas drives the app
 through the same socket with the integration's `desk` tools (PROTOCOL.md §8). The window uses the
@@ -701,8 +720,8 @@ same socket with a framed hello.
 For local scripts, `build/deckhand --print-token script DIR` prints one
 `export DECKHAND_SOCKET=… DECKHAND_TOKEN=…` line, then `build/deckhand --ctl '{"type":"get_state"}'`
 talks to the running core (PROTOCOL.md §9). With a separate core, `--ctl` launches one if none
-answers. Release builds have no `--print-token`; there the gear's **Copy a control token** puts
-the same line on the clipboard.
+answers. Release builds have no `--print-token`; there **Copy a control token** (Settings › Deckhand, or
+the palette) puts the same line on the clipboard.
 
 ### Sessions and tabs
 
@@ -788,6 +807,7 @@ stand-in or refuses, and prints the refusal on stderr:
 - **pi tabs** run `DECKHAND_CMD` (it gets pi's arguments as `"$@"`); without it they exit 127,
   unless `DECKHAND_REAL_PI=1` opts in (the paid scenes).
 - **Claude tabs** run `DECKHAND_CLAUDE_CMD`; without it they exit 127. No opt-in.
+- **Codex tabs** run `DECKHAND_CODEX_CMD`; without it they exit 127. No opt-in.
 - **Jobs** run only the `pi_path` setting (a scene's fake), or pi from PATH with
   `DECKHAND_REAL_PI=1`.
 - **Installs and updates** from the coding agents checklist run `DECKHAND_INSTALL_CMD`

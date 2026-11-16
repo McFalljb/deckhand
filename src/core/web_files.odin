@@ -11,6 +11,7 @@ package core
 // real path is checked again (as pi_handoff checks the file it sends), so a link swapped in
 // after the check leads nowhere outside. Their text is never in an event or the log.
 
+import "base:runtime"
 import "core:fmt"
 import "core:hash"
 import "core:path/filepath"
@@ -89,16 +90,60 @@ web_file_dir :: proc(dir, name: string, caller: Caller) -> (fd: posix.FD, err: s
 	return fd, ""
 }
 
-// The file's bytes through the folder's descriptor: a regular file (not a link), not a
-// credentials file by inode, at most WEB_FILE_MAX.
+// What the last read of a file saw (its folder's real path and name): its inode, size, change
+// and modification times, and its hash. A poll that brings that hash, for a file whose fstat
+// still says the same, is answered "same" without reading it (an open 4 MB file was read and hashed
+// every 2.5 s). At most WEB_FILE_SEEN_MAX files; then it starts again.
 @(private = "file")
-web_file_bytes :: proc(dirfd: posix.FD, name: string) -> (data: []u8, st: posix.stat_t, err: string) {
+Web_File_Seen :: struct {
+	dev, ino:     u64,
+	size:         i64,
+	mtime, ctime: [2]i64,
+	hash:         string, // heap
+}
+@(private = "file")
+web_file_seen: map[string]Web_File_Seen // heap keys
+WEB_FILE_SEEN_MAX :: 64
+web_file_reads: int // the files read in full (tests)
+
+@(private = "file")
+web_file_seen_as :: proc(st: posix.stat_t, h: string) -> Web_File_Seen {
+	return {dev = u64(st.st_dev), ino = u64(st.st_ino), size = i64(st.st_size), mtime = {i64(st.st_mtim.tv_sec), i64(st.st_mtim.tv_nsec)}, ctime = {i64(st.st_ctim.tv_sec), i64(st.st_ctim.tv_nsec)}, hash = h}
+}
+
+@(private = "file")
+web_file_remember :: proc(key: string, st: posix.stat_t, h: string) {
+	context.allocator = runtime.heap_allocator()
+	if old, ok := web_file_seen[key]; ok {
+		delete(old.hash)
+		web_file_seen[key] = web_file_seen_as(st, strings.clone(h))
+		return
+	}
+	if len(web_file_seen) >= WEB_FILE_SEEN_MAX {
+		for k, v in web_file_seen {
+			delete(k)
+			delete(v.hash)
+		}
+		clear(&web_file_seen)
+	}
+	web_file_seen[strings.clone(key)] = web_file_seen_as(st, strings.clone(h))
+}
+
+// The file's bytes through the folder's descriptor: a regular file (not a link), not a
+// credentials file by inode, at most WEB_FILE_MAX. since/key: the hash the browser has and the
+// file's key (web_file_remember): the same file, as fstat says, is not read (same).
+@(private = "file")
+web_file_bytes :: proc(dirfd: posix.FD, name: string, since := "", key := "") -> (data: []u8, st: posix.stat_t, err: string, same: bool) {
 	fd := posix.openat(dirfd, strings.clone_to_cstring(name, context.temp_allocator), {.NOFOLLOW, .CLOEXEC, .NONBLOCK})
-	if fd < 0 do return nil, st, posix.errno() == .ELOOP ? "a link: open the file it points to" : "no such file"
+	if fd < 0 do return nil, st, posix.errno() == .ELOOP ? "a link: open the file it points to" : "no such file", false
 	defer posix.close(fd)
-	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return nil, st, "not a regular file"
-	if credential_inode(u64(st.st_dev), u64(st.st_ino)) do return nil, st, CREDENTIAL_REFUSED
-	if i64(st.st_size) > WEB_FILE_MAX do return nil, st, fmt.tprintf("too large to open in a browser (%.1f MB; at most %d MB)", f64(st.st_size) / (1 << 20), WEB_FILE_MAX >> 20)
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return nil, st, "not a regular file", false
+	if credential_inode(u64(st.st_dev), u64(st.st_ino)) do return nil, st, CREDENTIAL_REFUSED, false
+	if i64(st.st_size) > WEB_FILE_MAX do return nil, st, fmt.tprintf("too large to open in a browser (%.1f MB; at most %d MB)", f64(st.st_size) / (1 << 20), WEB_FILE_MAX >> 20), false
+	if since != "" {
+		if seen, ok := web_file_seen[key]; ok && seen == web_file_seen_as(st, since) do return nil, st, "", true
+	}
+	web_file_reads += 1
 	buf := make([]u8, int(st.st_size) + 1, context.temp_allocator)
 	n := 0
 	for n < len(buf) {
@@ -106,13 +151,13 @@ web_file_bytes :: proc(dirfd: posix.FD, name: string) -> (data: []u8, st: posix.
 		k := posix.read(fd, raw_data(buf[n:]), uint(rem))
 		if k < 0 {
 			if posix.errno() == .EINTR do continue
-			return nil, st, "cannot read it"
+			return nil, st, "cannot read it", false
 		}
 		if k == 0 do break
 		n += int(k)
 	}
-	if n > WEB_FILE_MAX do return nil, st, "too large to open in a browser"
-	return buf[:n], st, ""
+	if n > WEB_FILE_MAX do return nil, st, "too large to open in a browser", false
+	return buf[:n], st, "", false
 }
 
 @(private = "file")
@@ -139,10 +184,13 @@ file_read_apply :: proc(c: File_Read, caller: Caller) -> Result {
 	dirfd, derr := web_file_dir(dir, name, caller)
 	if derr != "" do return fail(derr)
 	defer posix.close(dirfd)
-	data, st, rerr := web_file_bytes(dirfd, name)
+	key := strings.concatenate({strings.trim_right(fd_real_path(dirfd), "/"), "/", name}, context.temp_allocator)
+	data, st, rerr, same := web_file_bytes(dirfd, name, c.since, key)
 	if rerr != "" do return fail(rerr)
+	if same do return {ok = true, data = strings.clone(web_file_json(p, st, c.since, nil))} // unchanged since its last read
 	if terr := web_file_text_err(data); terr != "" do return fail(terr)
 	h := web_file_hash(data)
+	web_file_remember(key, st, h)
 	if c.since != "" && c.since == h do return {ok = true, data = strings.clone(web_file_json(p, st, h, nil))}
 	return {ok = true, data = strings.clone(web_file_json(p, st, h, string(data)))}
 }
@@ -156,7 +204,7 @@ file_save_apply :: proc(c: File_Save, caller: Caller) -> Result {
 	if derr != "" do return fail(derr)
 	defer posix.close(dirfd)
 	// an existing regular file only (a new one: create_file), as it is now
-	now, st, rerr := web_file_bytes(dirfd, name)
+	now, st, rerr, _ := web_file_bytes(dirfd, name)
 	if rerr != "" do return fail(rerr)
 	if terr := web_file_text_err(now); terr != "" do return fail(terr) // forced too: what a read refuses is not replaced
 	if !c.force && c.base != web_file_hash(now) do return {error = "the file changed on disk since you opened it", data = strings.clone(`{"code":"changed"}`)}

@@ -51,6 +51,23 @@ web_files_read_and_save :: proc(t: ^testing.T) {
 	h := strings.clone(o["hash"].(json.String), context.temp_allocator)
 	o2, _ := read(fmt.tprintf("%s/src/a.ts", proj), web, h)
 	testing.expect(t, o2 != nil && o2["same"] != nil && o2["text"] == nil, "unchanged: no text")
+	// a poll with the hash it has: an unchanged file (fstat: inode, size, times) is not read again
+	reads0 := web_file_reads
+	for _ in 0 ..< 3 {
+		o3, _ := read(fmt.tprintf("%s/src/a.ts", proj), web, h)
+		testing.expect(t, o3 != nil && o3["same"] != nil, "unchanged")
+	}
+	testing.expect_value(t, web_file_reads, reads0)
+	// the same size and its old mtime put back: its ctime changed, so it is read (and not same)
+	ast: posix.stat_t
+	posix.stat(strings.clone_to_cstring(fmt.tprintf("%s/src/a.ts", proj), context.temp_allocator), &ast)
+	put(fmt.tprintf("%s/src/a.ts", proj), "let b = 1\n")
+	times := [2]posix.timespec{ast.st_atim, ast.st_mtim}
+	posix.utimensat(posix.AT_FDCWD, strings.clone_to_cstring(fmt.tprintf("%s/src/a.ts", proj), context.temp_allocator), &times, {})
+	o4, _ := read(fmt.tprintf("%s/src/a.ts", proj), web, h)
+	testing.expect(t, o4 != nil && o4["text"] != nil && o4["text"].(json.String) == "let b = 1\n", "changed in place: read")
+	testing.expect_value(t, web_file_reads, reads0 + 1)
+	put(fmt.tprintf("%s/src/a.ts", proj), "let a = 1\n")
 	md, _ := read(fmt.tprintf("%s/README.md", proj), web)
 	testing.expect(t, md != nil && md["markdown"].(json.Boolean), "Markdown")
 

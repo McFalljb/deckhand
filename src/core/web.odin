@@ -1,6 +1,6 @@
 package core
 
-// Web access (#148, docs/PROTOCOL.md §5c): a browser as the user's window. The core listens on
+// Web access (#148, docs/PROTOCOL.md §5b): a browser as the user's window. The core listens on
 // a configurable address over plain HTTP (web_http.odin), serves the web client (web_assets.odin),
 // pairs browsers with a one-time code and carries the framed wire over a WebSocket, one frame per
 // binary message, into the window's link (window_link.odin, `web` set).
@@ -609,6 +609,12 @@ when TEST_HOOKS {
 	web_device_count_for_test :: proc() -> int {
 		sync.guard(&web.mu)
 		return len(web.devices)
+	}
+	web_devices_for_test :: proc() -> []Web_Device {
+		sync.guard(&web.mu)
+		out := make([]Web_Device, len(web.devices), context.temp_allocator)
+		copy(out, web.devices[:])
+		return out
 	}
 	web_code_for_test :: proc() -> string {
 		sync.guard(&web.mu)

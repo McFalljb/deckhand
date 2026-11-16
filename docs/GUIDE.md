@@ -1590,6 +1590,33 @@ SSH**, your machines list, the pi extensions (guardrails among them) and the Cla
 Codex default flags; only you, at this Mac, change those (and your notifications). Allow only
 machines you trust as yourself.
 
+#### Web access
+
+**Web access** (off by default; it asks first) lets a browser on your phone or another computer
+show this machine's sessions: the sessions list, terminals, confirmations, new sessions and tabs,
+on this machine and on the machines it is linked to. A browser you pair acts as you here, as a
+machine you allow to connect does; it can't change the settings marked *Only you, at this Mac*,
+web access itself, or copy a control token. Browser, app, Markdown and editor tabs stay in the
+Mac's window.
+
+- **Listen address** (default `0.0.0.0:7433`: every network interface). Deckhand serves plain
+  HTTP, with no encryption of its own: anyone who can see the traffic can read your sessions and
+  take them over. Use it over Tailscale or another VPN, or behind an HTTPS proxy, and prefer that
+  interface's address alone (for Tailscale `100.x.y.z:7433`). Firewalls are yours to set.
+- **Pair a browser…** shows a code such as `ABCD-EFGH`. Open `http://<this machine's
+  address>:7433/` in the browser and type it: it works once, for 2 minutes, and five wrong tries
+  void it. The browser keeps a cookie for 60 days from its last use.
+- **Paired browsers** lists each one, when it was paired and last seen; **Revoke** signs it out
+  and closes its view.
+- One view at a time, as with another machine: a browser that opens takes the view from this
+  Mac's window, which shows **Viewed in a browser** with **Take Back**. Your sessions keep running
+  either way. While web access is on, Deckhand's background core keeps running without a window.
+- Plain HTTP away from `localhost` is not a secure context for the browser: no installing the page
+  as an app, no notifications and no clipboard reading there.
+- On a machine with no window (Linux), in a terminal there (not a Deckhand tab):
+  `deckhand-core-serve web on`, `web pair`, `web list`, `web revoke ID`, `web listen ADDRESS`,
+  `web off`. (Find the binary as `~/.local/share/deckhand/core/current/deckhand-core-serve`.)
+
 A Linux machine (x86_64) runs its core as your systemd user service `deckhand-core`, started when
 needed. Unless lingering is on for you there, it stops when you log out of that machine, and its
 jobs with it: `loginctl enable-linger` there keeps it running. Its sessions keep running when that

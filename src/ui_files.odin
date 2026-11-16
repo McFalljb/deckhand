@@ -1044,6 +1044,21 @@ settings_folder_button :: proc(path: string) -> bool {
 		}
 		return true
 	}
+	switch {
+	case path == core.WEB_ACCESS_ROW:
+		ui_do_menu(core.Set_Web_Access{on = !state.settings.web_access}, "Web access") // on: asks first
+		return true
+	case path == core.WEB_LISTEN_ROW:
+		settings_page_web_listen_edit()
+		return true
+	case path == core.WEB_PAIR_ROW:
+		web_pair_start()
+		return true
+	case strings.has_prefix(path, core.WEB_DEVICE_ROW):
+		r := ui_run(core.Web_Revoke{id = path[len(core.WEB_DEVICE_ROW):]})
+		toast_show(r.ok ? "Revoked: that browser is signed out" : r.error, !r.ok)
+		return true
+	}
 	if path == core.MACHINE_REACH_ROW {
 		ui_do_menu(core.Set_Machines_Reachable{on = !state.settings.machines_reachable}, "Allow other machines to connect") // on: asks first
 		return true

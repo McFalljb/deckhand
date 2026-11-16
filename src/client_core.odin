@@ -411,8 +411,9 @@ client_core_quit :: proc(why: string) {
 // window.request viewed_from: another machine's Deckhand (its hub link) took this core, the newest
 // connection winning (docs/plans/background-core.md §10.4). The connection ends next; the window
 // does not dial again until its user takes it back (client_core_tick asks).
-client_core_viewed :: proc(machine: string) {
-	fmt.eprintln("Deckhand: the background core is viewed from", machine)
+client_core_viewed :: proc(machine: string, browser := false) {
+	fmt.eprintln("Deckhand: the background core is viewed from", machine, browser ? "(a browser)" : "")
+	client.viewed_browser = browser
 	if core.autotest_active do fmt.println("[autotest] core: viewed from", machine)
 	delete(client.viewed_from, runtime.heap_allocator())
 	client.viewed_from = strings.clone(machine != "" ? machine : "another machine", runtime.heap_allocator())
@@ -426,7 +427,7 @@ client_core_tick :: proc() {
 	if !client.lost || core.app_quitting || client.gave_up do return
 	if client.viewed_from != "" {
 		if core.autotest_active do return // test mode never shows the modal: the scene's log says it
-		take := platform_ask(fmt.tprintf("Viewed from %s", client.viewed_from), fmt.tprintf("Deckhand on %s is showing this Mac's sessions now. They keep running. Take them back to show them here (%s's view lets go).", client.viewed_from, client.viewed_from), "Take Back", "Quit")
+		take := client.viewed_browser ? platform_ask("Viewed in a browser", fmt.tprintf("A browser (%s) is showing this Mac's sessions now, over web access. They keep running. Take them back to show them here (the browser's view lets go).", client.viewed_from), "Take Back", "Quit") : platform_ask(fmt.tprintf("Viewed from %s", client.viewed_from), fmt.tprintf("Deckhand on %s is showing this Mac's sessions now. They keep running. Take them back to show them here (%s's view lets go).", client.viewed_from, client.viewed_from), "Take Back", "Quit")
 		delete(client.viewed_from, runtime.heap_allocator())
 		client.viewed_from = ""
 		if !take {

@@ -1,6 +1,6 @@
 package core
 
-// Web access's listener (web.odin; docs/PROTOCOL.md §5c): a small hand-written HTTP/1.1 server.
+// Web access's listener (web.odin; docs/PROTOCOL.md §5b): a small hand-written HTTP/1.1 server.
 // One request per connection (Connection: close), GET and POST only, at most WEB_HEAD_MAX bytes of
 // request line and headers and WEB_BODY_MAX of body, all within WEB_READ_MS; at most
 // WEB_CONNS_MAX connections at once before an upgrade, WEB_RELAYS_MAX WebSockets.

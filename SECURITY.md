@@ -45,12 +45,18 @@ limits Deckhand sets, for example:
   Claude's default flags, notifications); this core forwarding a connected machine's commands on
   to a third machine; another machine's text (titles, errors, job output) acting as anything but
   data here;
+- web access ([docs/PROTOCOL.md](docs/PROTOCOL.md) §5b): a browser using this machine without a
+  code typed while one is open, a page of another site driving the pairing or the WebSocket, a
+  paired browser running what only the user at this Mac may run, or the code or a token reaching
+  a log, State or another process. Reading plain-HTTP traffic on the network is not in scope: it
+  is the documented cost of the setting;
 - **Continue this conversation on <machine>** moving a conversation *into* this Mac, or started by
   anyone but the user at this Mac's window.
 
 By design, a machine you allow to connect acts as you on this one: it can see and drive its
 sessions, as you can, and through Atlas or a shell here reach the machines this one reaches.
-Allow only machines you trust as yourself ([docs/ATLAS.md](docs/ATLAS.md) §7.1).
+Allow only machines you trust as yourself ([docs/ATLAS.md](docs/ATLAS.md) §7.1). The same holds for
+a browser you pair with web access, which Deckhand serves over plain HTTP.
 
 The design notes in [docs/BROWSER.md](docs/BROWSER.md), [docs/CLAUDE.md](docs/CLAUDE.md),
 [docs/CODEX.md](docs/CODEX.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md) (§5a, the hub) describe the intended boundaries.

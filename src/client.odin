@@ -77,6 +77,7 @@ Client :: struct {
 	reconnects_since: time.Tick,
 	handing_over: bool, // a core handover at attach: its connection's end is expected (client_core.odin)
 	viewed_from: string, // another machine's Deckhand took the core (window.request viewed_from; heap): no reconnect until Take back
+	viewed_browser: bool, // ...a paired browser did (web access): viewed_from is its name
 }
 
 client: Client

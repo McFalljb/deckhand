@@ -199,6 +199,36 @@ MACHINE_SSH_ROW :: "deckhand:machine-ssh" // Machines over SSH is off: Turn on
 // with Copy (the command, run in a shell tab there).
 MACHINE_CHECK_ROW :: "deckhand:machine-check:"
 
+// Web access (web.odin): the switch, the listen address, Pair a browser… and each paired browser
+// (WEB_DEVICE_ROW + its id: Revoke).
+WEB_ACCESS_ROW :: "deckhand:web-access"
+WEB_LISTEN_ROW :: "deckhand:web-listen"
+WEB_PAIR_ROW :: "deckhand:web-pair"
+WEB_DEVICE_ROW :: "deckhand:web-device:"
+WEB_PLAIN_HTTP_NOTE :: "Plain HTTP: use it over Tailscale, a VPN or an HTTPS proxy"
+
+@(private = "file")
+web_settings_rows :: proc(out: ^[dynamic]Settings_File_Row) {
+	on := state.settings.web_access
+	w := state.live.web
+	detail := "off · a browser you pair acts as you on this machine"
+	if on do detail = w.listening ? fmt.tprintf("ON · listening on %s", w.address) : w.error != "" ? fmt.tprintf("ON · cannot listen: %s", w.error) : "ON"
+	append(out, Settings_File_Row{group = "machines", label = "Web access", detail = detail, path = WEB_ACCESS_ROW, button = on ? "Turn off" : "Turn on…"})
+	append(out, Settings_File_Row{group = "machines", label = "Listen address", detail = fmt.tprintf("%s · %s", web_listen_address(), WEB_PLAIN_HTTP_NOTE), path = WEB_LISTEN_ROW, button = "Change…"})
+	if !on do return
+	append(out, Settings_File_Row{group = "machines", label = "Pair a browser…", detail = "A one-time code to type in the browser", path = WEB_PAIR_ROW, button = "Pair…"})
+	for d in w.devices {
+		append(out, Settings_File_Row{group = "machines", label = d.name, detail = fmt.tprintf("paired %s · last seen %s%s", web_day(d.paired), web_day(d.last_seen), d.linked ? " · viewing now" : ""), path = strings.concatenate({WEB_DEVICE_ROW, d.id}, context.temp_allocator), button = "Revoke"})
+	}
+}
+
+// A unix time as a day (temp): 2026-11-16.
+web_day :: proc(unix: i64) -> string {
+	if unix <= 0 do return "never"
+	y, m, d := time.date(time.unix(unix, 0))
+	return fmt.tprintf("%04d-%02d-%02d", y, int(m), d)
+}
+
 // A machine checklist row's machine and item (ok false: not one).
 machine_check_row :: proc(path: string) -> (no: u64, id: string, ok: bool) {
 	if !strings.has_prefix(path, MACHINE_CHECK_ROW) do return 0, "", false
@@ -411,6 +441,7 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		reach := state.settings.machines_reachable
 		detail := reach ? "ON · they can see and drive this Mac's sessions" : "off"
 		add(&out, {group = "machines", label = "Allow other machines to connect", detail = detail, path = MACHINE_REACH_ROW, button = reach ? "Turn off" : "Turn on…"})
+		web_settings_rows(&out)
 	}
 	return out[:]
 }

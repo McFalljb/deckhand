@@ -1346,7 +1346,7 @@ link_web_taken :: proc(by, name: string) {
 	link_send(strings.to_string(b))
 }
 
-// The data of the result a browser's hello gets (docs/PROTOCOL.md §5c): what the hello reply
+// The data of the result a browser's hello gets (docs/PROTOCOL.md §5b): what the hello reply
 // tells a window, for a browser: the core, its version and features, the commands it may send,
 // vt snapshots only.
 web_hello_data :: proc(name: string) -> string {

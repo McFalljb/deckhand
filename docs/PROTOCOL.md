@@ -89,8 +89,10 @@ The first message on a connection is `hello`:
   not, nor any command while this core's window link is a hub's: every `machine_*` command,
   `pi_handoff`, `holder_recover`, `show_no_session`, `set_sidebar_view` and `set_notifications`, and the
   settings that bound what other machines and agents may do here: `set_machines_reachable`,
-  `set_remote_machines`, `set_pi_extension` and `set_claude_default_flags`. A machine viewing this one can't change them, nor answer their
-  confirmation. Any other command a hub sends on behalf of its user (`ui`) gets the `ui`
+  `set_remote_machines`, `set_pi_extension` and `set_claude_default_flags`, and web access's
+  `set_web_access`, `set_web_listen`, `web_pair`, `web_devices` and `web_revoke`. A machine viewing this one can't change them, nor answer their
+  confirmation. A paired browser (§5b, `Caller.web`) is refused them too, but for `show_no_session`,
+  `set_sidebar_view` and `machine_connect`, and is refused `copy_control_token`. Any other command a hub sends on behalf of its user (`ui`) gets the `ui`
   caller's rules here.
 - **Where tokens come from.** Every pi tab Deckhand starts gets a fresh 256-bit random token
   (caller `panel`, that tab) in `DECKHAND_TOKEN`, with `DECKHAND_SOCKET`, and where app
@@ -268,6 +270,11 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `set_separate_core` | `on` | **user only**, on by default (`separate_core_default_on`; `state.settings.separate_core`, saved when it differs from the default): read at the next launch: on, the core is its own process, `deckhand-core-serve serve`, and the window its client over `core.sock` (§5a); off, the core runs in the window's process. A change takes effect once the running core has stopped |
 | `set_remote_machines` | `on` | **this Mac's user only** (`User_Here`: never an agent, a script, a pi tab or another machine's core), on by default since M6-F (`remote_machines_default_on`, `src/core/machines.odin`; `state.settings.remote_machines`, saved when it differs from the default, so off is an opt-out): Settings › Machines over SSH. On, a separate core keeps a link to each machine in `machines.json` (§5a, "The hub"); with none, nothing runs |
 | `set_machines_reachable` | `on`, `confirm`? | **this Mac's user only** (`User_Here`: never an agent, a script, a pi tab or another machine's core) (turning it on: the user confirms first, `needs_confirmation`, whatever the policy), off by default (`machines_reachable_default_on`, `src/core/machines.odin`; `state.settings.machines_reachable`, saved when it differs from the default): Settings › Machines › *Allow other machines to connect to this Mac*. Off, this core's hub door refuses every hub hello (§5a, "The hub"); on, another machine's core that logs in here over ssh as this user can view and drive this machine's sessions. Separate from `remote_machines`, which reaches out |
+| `set_web_access` | `on`, `confirm`? | **this Mac's user only** (`User_Here`, and never a paired browser) (turning it on: the user confirms first, `needs_confirmation`, whatever the policy; the terminal's `deckhand-core-serve web on` does not ask), off by default (`state.settings.web_access`, saved when on): Settings › Machines › *Web access*. On, a separate core listens on `web_listen` over plain HTTP and a paired browser may view and drive this machine's sessions (§5b); off, it stops listening and the browser's link closes |
+| `set_web_listen` | `address` | **this Mac's user only**: web access's listen address, `host:port` with an IPv4 address or a bracketed IPv6 one (`""` = `0.0.0.0:7433`); a host name is refused (`state.settings.web_listen`, saved when set) |
+| `web_pair` | | **this Mac's user only**, with web access on: opens a pairing code (§5b): `data` `{code, expires_in, until, address}`. Never in an event or the log |
+| `web_devices` | | **this Mac's user only**: the paired browsers, `data.devices` `[{id, name, paired, last_seen, linked}]` (unix seconds; `linked`: its link is the attached one). Never in an event |
+| `web_revoke` | `id` | **this Mac's user only**: forgets a paired browser (its token stops working) and closes its live link |
 | `machine_add` | `target`, `name`?, `via`? | **this Mac's user only** (`User_Here`), with `remote_machines` on: adds a machine to `<data>/machines.json` (0600; numbers from 1, never reused; `created_id` = its number). `target`: an `~/.ssh/config` alias or `user@host` (letters, digits and `. _ - @ :`, not starting with `-`; a leading `ssh ` or `ssh://` and a trailing `/` are dropped; a target already added is refused); `name`: one line, at most 64 bytes, unique; `""` or the target itself: the target's host part (`nuc` for `me@nuc.local`; an IP address whole), or the whole target when another machine has that name. `via`: a command run in place of `ssh … connect`, development and test builds only (refused in a release build) |
 | `machine_remove` | `no`, `confirm`? | **this Mac's user only** (`User_Here`), confirmed by the user first (`needs_confirmation`, whatever the policy): forgets a machine (its link ends; nothing on it is touched; an install running to it ends and removes what it copied). Its session on screen gives way to this Mac's last shown session |
 | `machine_rename` | `no`, `name` | **this Mac's user only** (`User_Here`): what Deckhand calls a machine (one line, at most 64 bytes, unique); its ssh target stays. A machine waiting for the user (`needs_login`, `refused`, `unsupported`) tries again |
@@ -1551,6 +1558,99 @@ by screen hash (the newest 2000 rows: once the scrollback is full, the two may k
 number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link
 (a terminal channel's by kind and size).
 
+## 5b. Web access (a browser's link)
+
+A paired browser is the user's window, over a WebSocket that carries the framed wire (§5a) one
+frame per message. Off by default; `src/core/web.odin`, `src/core/web_http.odin`,
+`src/core/web_assets.odin`. Users: [GUIDE.md](GUIDE.md#web-access).
+
+**Listening.** While `set_web_access` is on, a separate core (`deckhand-core-serve serve`) listens
+on `settings.web_listen` (`host:port`: IPv4, or `[IPv6]`; `""` = `0.0.0.0:7433`, every
+interface) and does not idle out (`core_idle_facts`). Plain HTTP/1.1: no TLS of its own, no
+accounts. One request per connection (`Connection: close`); `GET` and `POST` only; request line
+and headers at most 8 KiB, a body at most 4 KiB with `Content-Length` (no `Transfer-Encoding`),
+all within 10 s; at most 16 connections before an upgrade and 4 WebSockets. State shows it as
+`live.web` {`listening`, `address`, `error`, `pairing` (until, unix s; never the code), `devices`}.
+
+**Endpoints.**
+
+| Request | Answer |
+|---|---|
+| `GET /` | the web client (`web/dist/index.html`, embedded at build; a placeholder page when the core was built without it) |
+| `GET /assets/<name>` | `web/dist/<name>` (flat; `[A-Za-z0-9._-]`, not starting with `.`) |
+| `GET /api/whoami` | `200 {"paired":true,"name","core","version"}` and the cookie again (60 days from now), or `401 {"paired":false}` |
+| `POST /api/pair` `{"code","name"}` | `200 {"paired":true}` and `Set-Cookie: deckhand_web=<64 hex>; HttpOnly; SameSite=Strict; Path=/; Max-Age=5184000`; a wrong, used or expired code `403` |
+| `POST /api/unpair` | the caller's own token forgotten (its live link closes); `200`, the cookie cleared |
+| `GET /ws` | the WebSocket upgrade (RFC 6455, version 13, no extensions or subprotocols) |
+
+Every response: `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'
+'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none';
+form-action 'self'; frame-ancestors 'none'; connect-src 'self' ws://<Host> wss://<Host>`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+`Cache-Control: no-cache` (files) or `no-store` (`/api/`). No CORS headers at all. Every `POST`
+and the upgrade need an `Origin` of `http://` or `https://` plus exactly the `Host` header's
+`host:port`; the upgrade and `whoami` need the cookie.
+
+**Pairing.** `web_pair` (this machine's user: Settings › Machines › **Pair a browser…**, or
+`deckhand-core-serve web pair` in a terminal there) opens a code of 8 characters from
+`ABCDEFGHJKMNPQRSTUVWXYZ23456789`, shown `ABCD-EFGH`; typed with or without the dash, in either
+case. One code at a time; it lasts 2 minutes, works once and is void after 5 wrong tries;
+compared in constant time. A right code makes a 256-bit token. `<data>/web-devices.json` (0600)
+keeps each browser's id (12 hex), name (printable, at most 64 bytes), the token's SHA-256, paired
+and last seen (unix s); at most 32 browsers. A token unused for 60 days expires. `web_revoke`
+forgets one and closes its link. The code and tokens are never logged, never in State, never in
+an event: `web_pair`'s result goes to its caller only.
+
+**The handshake a browser performs.**
+
+1. `GET /api/whoami`: `401` → pair (`POST /api/pair`), then again.
+2. `GET /ws` with the cookie and `Origin`. A refused upgrade is an HTTP status (`400` bad upgrade,
+   `401` not paired, `403` wrong `Origin`, `503` too many), never a WebSocket.
+3. Every message either way is one binary WebSocket message holding exactly one frame:
+   `[channel u32 LE][kind u8][len u32 LE][payload]`, channel 0 DATA a JSON message. A text
+   message, a fragment, an unmasked frame, RSV bits, a message that is not exactly one frame or
+   over 9 B + 16 MiB closes the link. The core pings every 30 s and closes a browser silent for 90 s.
+4. The browser's first message: `{"v":1,"id":"hello","type":"hello"}` (other fields ignored). The
+   core answers `{"type":"result","id":"hello","result":{"ok":true,"data":{"app":"deckhand",
+   "caller":"ui","web":true,"framed":true,"name","generation","version","core","features",
+   "methods","machine":{"name","os","arch"},"snapshot":["vt"],"build"}}}`; `methods` are the
+   commands this browser may send. A changed `core` id is a restarted core: reload the page.
+5. `{"v":1,"type":"state.subscribe"}` → `state.full`, then `state.delta`s; commands, results,
+   `finished`, toasts, `confirmation.parked`, `term.*` and the terminal channels as a window's
+   (§5a). Snapshots are always the VT replay (`vt`), whatever `term.attach` asks.
+
+**What a browser may do.** Its commands run as `{kind = ui, web = true}` (`caller_from_web`,
+`web_may_run`): every `Anyone` and `User` command, and of the `User_Here` ones only the view
+state `show_no_session`, `set_sidebar_view` and `machine_connect`; never `copy_control_token` nor
+web access's own commands. Its commands on other linked machines' ids are forwarded as the
+user's (unlike a hub's). Caps as a hub's: `window.facts`, `window.tab_facts`, `window.command`,
+`tab_host.event`, `finished` and `script.core` are refused; no `tab_host.call` (browser, app,
+Markdown and editor views: `no_window`; agents' browser commands `browser_not_here`); of the
+`window.request`s only `clipboard_set`, `term_fit`, `changes_diff`, `notify` and `open_url` are
+sent (the rest answer as if no window were attached); it answers them with `window.reply`. A
+notification also shows as the core's own banner. `open_url` should open only on the user's tap.
+
+**One link per core.** The newest connection wins, as for a hub. A browser taking this Mac's
+window shows **Viewed in a browser** there with **Take Back**; a hub taken by it gets
+`hub.taken` `by` `"a browser"`. A browser's link taken by another gets
+`{"type":"web.taken","by":"window"|"machine"|"browser","name"}` and should wait for its user's
+Take back. `{"type":"web.revoked"}`: its token was revoked; `{"type":"web.closed"}`: web access
+was turned off. The link closes after each.
+
+**From a terminal.** `deckhand-core-serve web on|off|pair|list|revoke ID|listen ADDRESS` says a
+line hello on `core.sock`: `{"type":"hello","peer":"web-admin","token":<window token>,"op","arg"}`;
+one result, then the end. Checked as a window's hello minus the code check: the window token
+(0600, this user's), this user and still that process, and never a program in a Deckhand tab
+(`web_admin_check`). It runs with the internal caller, so `on` does not ask again.
+
+**Plain HTTP: what follows.** Anyone who can see the traffic reads every terminal and command and
+can copy the cookie, which is then as good as the user's. Use it over a network that encrypts
+(Tailscale, WireGuard, a VPN) or behind an HTTPS proxy, and bind to that interface
+(`100.x.y.z:7433`) rather than every one. Away from `localhost` the page is not a secure context:
+no service worker, install, push, or asynchronous clipboard. The `Origin` check stops other
+sites' pages from pairing or opening the socket; a site that rebinds its DNS name to this address
+has no cookie, so it can only guess codes while one is open (5 tries).
+
 ## 6. Redaction
 
 - Events and the command log never contain: `send_text` or `pi_prompt` text (replaced by
@@ -1579,6 +1679,7 @@ number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every fram
 | the window's link and the framed hello | `src/core/window_link.odin`, `src/core/window_sock.odin`, `src/corewire/`; the window's side `src/client.odin`, `src/client_core.odin` |
 | tab host routing (`tab_host.call`, `finished`, `tab_host.event`, `no_window`) | `src/core/tabhost_route.odin`; the window's side `src/tabhost_link.odin`, `src/tabhost.odin` |
 | CLI client | `deckhand --ctl` in `src/core/ctl.odin` |
+| web access (§5b): HTTP, WebSocket relay, pairing, the client's files | `src/core/web.odin`, `src/core/web_http.odin`, `src/core/web_assets.odin`; `deckhand-core-serve web` in `src/coremain/web_cli.odin` |
 
 Where each feature lives (status dots, hot reload, jobs, the bell, browser, Claude tabs,
 comments): [DEVELOPING.md](DEVELOPING.md) "Source map".

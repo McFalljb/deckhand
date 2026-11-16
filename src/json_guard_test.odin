@@ -665,6 +665,8 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/snapshot.odin", "snapshot_unpack", "json.unmarshal", "json_shape_ok", ""},
 		{"src/core/socket.odin", "app_conn_line", "json.parse_string", "json_valid", ""},
 		{"src/core/titles.odin", "title_line", "jg.parse", "transcript", ""},
+		{"src/core/web.odin", "web_devices_decode", "jg.parse_string", "", ""}, // web-devices.json
+		{"src/core/web_http.odin", "web_pair_body", "jg.parse_string", "", ""}, // a browser's /api/pair body (at most WEB_BODY_MAX)
 		{"src/core/update.odin", "update_load", "jg.parse", "", ""},
 		{"src/core/update_core.odin", "release_parse", "jg.parse_string", "", ""}, // the network
 		{"src/core/holder_adopt.odin", "handover_parse", "jg.parse_string", "custom", ""}, // MAC'd, then json_shape_ok's item count

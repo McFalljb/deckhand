@@ -138,8 +138,11 @@ function useFile(app: App, path: string) {
   const cur = useRef<FileData | null>(null);
   const editing = useRef(false);
   editing.current = draft !== null;
+  const reading = useRef(0); // reads on their way: a poll waits for them (a big file on a slow link: no second copy)
   const read = async (force = false) => {
-    const r = await app.link.run({ type: "file_read", path, since: force ? "" : cur.current?.hash ?? "" });
+    if (reading.current && !force) return;
+    reading.current++;
+    const r = await app.link.run({ type: "file_read", path, since: force ? "" : cur.current?.hash ?? "" }).finally(() => reading.current--);
     if (!r.ok) {
       setErr(r.error || "cannot read it");
       return;

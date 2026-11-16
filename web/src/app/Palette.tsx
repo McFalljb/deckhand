@@ -83,6 +83,8 @@ export const ACTIONS: Action[] = [
   { id: "notifications_clear", label: "Notifications: clear", run: (app) => app.run({ type: "notifications_clear" }) },
   { id: "toggle_left", label: "Toggle left column", keys: { k: "b" }, when: (app) => !app.phone, run: (app) => app.run({ type: "set_layout", left_open: !app.store.layout.left_open }) },
   { id: "toggle_right", label: "Toggle right panels", keys: { k: "b", alt: true }, when: (app) => !app.phone, run: (app) => app.run({ type: "set_layout", right_open: !app.store.layout.right_open }) },
+  { id: "settings", label: "Settings…", keys: { k: "," }, run: (app) => app.go({ screen: app.route.screen === "settings" ? "home" : "settings" }) },
+  { id: "job_new", label: "New job", run: (app) => app.setOverlay({ job: { job: "", for_project: "" }, palette: false }) },
   { id: "show_jobs", label: "Show jobs", run: (app) => app.run({ type: "set_left_tab", tab: "jobs" }) },
   { id: "jobs_pause_all", label: "Pause all jobs", run: (app) => app.run({ type: "jobs_pause" }) },
   { id: "jobs_resume_all", label: "Resume all jobs", run: (app) => app.run({ type: "jobs_resume" }) },

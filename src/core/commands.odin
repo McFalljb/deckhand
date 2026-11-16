@@ -576,6 +576,8 @@ Command :: union {
 	Web_Pair,
 	Web_Devices,
 	Web_Watch,
+	Web_Settings, // a browser's Settings page and job sheet (web_settings.odin, web_jobs.odin)
+	Job_Draft,
 	Web_Revoke,
 	Machine_Add,
 	Machine_Remove,
@@ -1663,6 +1665,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
 	case Set_Web_Access, Set_Web_Listen, Web_Pair, Web_Devices, Web_Revoke: return web_apply(cmd, caller) // web.odin
+	case Web_Settings, Job_Draft: return web_extra_apply(cmd, caller) // web_jobs.odin
 	case Web_Watch:
 		if !caller_from_web(caller) do return fail("only a browser lists projects this way"), false
 		return web_watch_apply(c), false // no State: its sections only (window_state_changed)

@@ -703,6 +703,8 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "web_pair":            cmd = Web_Pair{}
 	case "web_devices":         cmd = Web_Devices{}
 	case "web_watch":           cmd = Web_Watch{projects = get_ids(&r, "projects", WEB_WATCH_IN_MAX)}
+	case "web_settings":        cmd = Web_Settings{open = get_bool(&r, "open")}
+	case "job_draft":           cmd = job_draft_read(&r)
 	case "web_revoke":          cmd = Web_Revoke{id = get_str(&r, "id")}
 	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name", optional = true), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}
 	case "machine_remove":      cmd = Machine_Remove{no = get_u64(&r, "no"), confirm = get_str(&r, "confirm", optional = true)}
@@ -1277,4 +1279,12 @@ enum_of :: proc(r: ^Rd, k: string, names: [$E]string) -> (E, bool) {
 	if is do for name, e in names do if name == s do return e, true
 	if r.err == "" do r.err = strings.concatenate({k, " must be one of its names"}, context.temp_allocator)
 	return {}, false
+}
+
+// job_draft (web_jobs.odin): every field optional but op.
+@(private = "file")
+job_draft_read :: proc(r: ^Rd) -> Job_Draft {
+	c := Job_Draft{op = get_str(r, "op")}
+	for f, i in job_draft_strings(&c) do if i > 0 do f^ = get_str(r, JOB_DRAFT_FIELDS[i], optional = true)
+	return c
 }

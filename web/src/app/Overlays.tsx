@@ -105,11 +105,11 @@ export function Sheet() {
   );
 }
 
-// add_project: a path; rename_project:<id>: a name.
+// add_project: a path; rename_project:<id>: a name; claude_rename:<session id>: a Claude session's title.
 function Prompt({ what, body, done }: { what: string; body: string; done: () => void }) {
   const app = useApp();
   const [kind, id] = what.split(":");
-  const [v, setV] = useState(kind === "rename_project" ? body : "");
+  const [v, setV] = useState(kind === "rename_project" || kind === "claude_rename" ? body : "");
   const field = useRef<HTMLInputElement>(null);
   useEffect(() => field.current?.focus(), []);
   const go = async () => {
@@ -120,6 +120,9 @@ function Prompt({ what, body, done }: { what: string; body: string; done: () => 
       if (r.ok) done();
     } else if (kind === "rename_project") {
       const r = await app.run({ type: "rename_project", project_id: Number(id), name: text });
+      if (r.ok) done();
+    } else if (kind === "claude_rename") {
+      const r = await app.run({ type: "claude_rename", claude_session_id: id, title: text });
       if (r.ok) done();
     }
   };
@@ -140,7 +143,7 @@ function Prompt({ what, body, done }: { what: string; body: string; done: () => 
         spellcheck={false}
         autocomplete="off"
         autocapitalize="off"
-        placeholder={kind === "add_project" ? "~/code/my-project" : "Name (empty: the folder's)"}
+        placeholder={kind === "add_project" ? "~/code/my-project" : kind === "claude_rename" ? "Title (empty: Claude's own)" : "Name (empty: the folder's)"}
         onInput={(e) => setV((e.target as HTMLInputElement).value)}
         onKeyDown={(e) => e.key === "Escape" && done()}
       />

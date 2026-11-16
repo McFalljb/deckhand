@@ -129,6 +129,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Machines_Reachable: return Set_Machines_Reachable{on = c.on, confirm = s(c.confirm, allocator)}
 	case Set_Web_Access:      return Set_Web_Access{on = c.on, confirm = s(c.confirm, allocator)}
 	case Web_Watch:           return Web_Watch{projects = slice.clone(c.projects, allocator)}
+	case Web_Settings, Job_Draft: return web_extra_clone(cmd, allocator)
 	case Set_Web_Listen:      return Set_Web_Listen{address = s(c.address, allocator)}
 	case Web_Revoke:          return Web_Revoke{id = s(c.id, allocator)}
 	case Machine_Rename:      return Machine_Rename{no = c.no, name = s(c.name, allocator)}
@@ -311,6 +312,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Set_Machines_Reachable: delete(c.confirm, allocator)
 	case Set_Web_Access:      delete(c.confirm, allocator)
 	case Web_Watch:           delete(c.projects, allocator)
+	case Web_Settings, Job_Draft: web_extra_free(cmd, allocator)
 	case Set_Web_Listen:      delete(c.address, allocator)
 	case Web_Revoke:          delete(c.id, allocator)
 	case Machine_Rename:      delete(c.name, allocator)

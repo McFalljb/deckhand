@@ -1,7 +1,8 @@
 // The Jobs tab (src/ui_jobs.odin), from state.jobs: each job's schedule, its last run and what it
-// does now, with Run now and Stop. Editing a job's note stays in the window.
+// does now, with Run now and Stop; New job (+), and each job's menu (Edit…: the job sheet,
+// JobSheet.tsx; Delete…).
 
-import { useApp } from "./ctx.ts";
+import { menuAt, useApp, type App, type MenuItem } from "./ctx.ts";
 import { Icon, StatusMark } from "./icons.tsx";
 import { IconButton } from "./Sidebar.tsx";
 import type { Mark } from "../status.ts";
@@ -34,6 +35,7 @@ export function JobsPanel() {
       <div class="nav-header">
         <span class="nav-title static">JOBS</span>
         <span class="spacer" />
+        <IconButton small icon="plus" label="New job" run={() => app.setOverlay({ job: { job: "", for_project: "" } })} />
         <IconButton small icon="pause" label="Pause all jobs" run={() => app.run({ type: "jobs_pause" })} />
         <IconButton small icon="play" label="Resume all jobs" run={() => app.run({ type: "jobs_resume" })} />
       </div>
@@ -41,7 +43,7 @@ export function JobsPanel() {
         {jobs.length === 0 && others.length === 0 ? (
           <div class="empty-state">
             <div>No jobs yet</div>
-            <div class="muted small">A job is a note with a schedule and a prompt. Make one in the Deckhand window.</div>
+            <div class="muted small">New job (+) writes a job note</div>
           </div>
         ) : null}
         {jobs.map((j: any) => (
@@ -73,12 +75,20 @@ function JobRow({ j, remote }: { j: any; remote?: boolean }) {
               : "";
   const last = j.last_at ? `${j.last_status || "ran"} ${rel(j.last_at)}${j.last_headline ? " · " + j.last_headline : ""}` : "Never ran";
   return (
-    <div class="job-row">
+    <div
+      class="job-row"
+      onContextMenu={(e) => {
+        if (remote) return;
+        e.preventDefault();
+        menuAt(app, e, jobItems(app, j));
+      }}
+    >
       <div class="job-top">
         <StatusMark mark={jobMark(j)} />
         <span class="title">{j.name || j.id}</span>
         {j.unread ? <span class="badge inline">{j.unread}</span> : null}
         <span class="spacer" />
+        {remote ? null : <span class="job-more"><IconButton small icon="more" label="More" run={(e) => menuAt(app, e, jobItems(app, j))} /></span>}
         {remote ? (
           <span class="when">{app.store.machineName(j.machine)}</span>
         ) : j.running ? (
@@ -99,4 +109,19 @@ function JobRow({ j, remote }: { j: any; remote?: boolean }) {
       {j.needs_you?.length ? <div class="job-sub waiting-ink">Needs you: {j.needs_you[0]}</div> : null}
     </div>
   );
+}
+
+// A job's menu, as the window's (src/ui_jobs.odin): what it runs now, then Edit… and Delete….
+function jobItems(app: App, j: any): MenuItem[] {
+  const items: MenuItem[] = [];
+  if (j.running) items.push({ label: "Stop", run: () => app.run({ type: "job_stop", job: j.id }) });
+  else if (!j.err) items.push({ label: "Run now", run: () => app.run({ type: "job_run_now", job: j.id }) });
+  items.push(j.paused ? { label: "Resume", run: () => app.run({ type: "jobs_resume", job: j.id }) } : { label: "Pause", run: () => app.run({ type: "jobs_pause", job: j.id }) });
+  if (!j.err) items.push({ label: j.enabled ? "Disable" : "Enable", run: () => app.run({ type: "job_set_enabled", job: j.id, on: !j.enabled }) });
+  items.push({ sep: true });
+  items.push({ label: "Edit…", run: () => app.setOverlay({ job: { job: j.id, for_project: "" } }) });
+  if (j.unread > 0) items.push({ label: "Mark read", run: () => app.run({ type: "job_mark_read", job: j.id }) });
+  items.push({ sep: true });
+  items.push({ label: "Delete…", danger: true, run: () => app.run({ type: "job_delete", job: j.id }) });
+  return items;
 }

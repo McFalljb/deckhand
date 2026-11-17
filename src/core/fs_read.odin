@@ -47,6 +47,7 @@ fs_check_read :: proc(path: string, caller: Caller, allow_root := false) -> (abs
 @(private = "file")
 fs_read_checkout :: proc(dir: string) -> string {
 	home := os.get_env("HOME", context.temp_allocator)
+	if home == "" do return "" // where HOME is cannot be told: no checkout reads
 	homes := [2]string{home, fs_real(home)}
 	for d := dir; len(d) > 1; d = filepath.dir(d) {
 		if fs_read_home_or_above(d, homes) do return ""

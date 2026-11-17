@@ -188,8 +188,10 @@ fs_read_in_a_listed_checkout :: proc(t: ^testing.T) {
 		testing.expect(t, refused(run_command(Rename_Path{from = a, to = fmt.tprintf("%s/b.txt", wt)}, by)), "rename_path")
 		testing.expect(t, refused(run_command(Delete_Path{path = a}, by)), "delete_path")
 		testing.expect(t, refused(run_command(Fs_Copy{from = fmt.tprintf("%s/a.txt", proj), to = fmt.tprintf("%s/c.txt", wt)}, by)), "copy into it")
-		testing.expect(t, refused(run_command(Fs_Copy{from = a, to = fmt.tprintf("%s/c.txt", proj)}, by)), "copy out of it")
 	}
+	// copying out of it into the project: a browser never (the user here may copy in from anywhere:
+	// fs_copy_outside_source, a Finder drop's rule, not this one)
+	testing.expect(t, refused(run_command(Fs_Copy{from = a, to = fmt.tprintf("%s/c.txt", proj)}, web)), "copy out of it")
 	testing.expect(t, refused(run_command(File_Save{path = a, text = "changed\n", force = true}, web)), "file_save")
 	testing.expect(t, !os.exists(fmt.tprintf("%s/new.txt", wt)) && !os.exists(fmt.tprintf("%s/c.txt", wt)) && !os.exists(fmt.tprintf("%s/c.txt", proj)), "nothing made")
 	data, _ := os.read_entire_file(a, context.temp_allocator)
@@ -288,4 +290,10 @@ fs_read_only_from_a_repository_top :: proc(t: ^testing.T) {
 	// a pi tab's bridge: nothing beyond what it has today
 	_, _, pe := fs_check_read(wt, {kind = .Panel, tab_id = 1}, allow_root = true)
 	testing.expect_value(t, pe, FS_NOT_IN_PROJECT)
+	// HOME unset: where HOME is cannot be told, so no checkout reads at all
+	os.unset_env("HOME")
+	testing.expect_value(t, ls(wt, web).error, FS_NOT_IN_PROJECT)
+	testing.expect_value(t, ls(wt, user).error, FS_NOT_IN_PROJECT)
+	os.set_env("HOME", home)
+	testing.expect(t, ls(wt, web).ok, "HOME back")
 }

@@ -730,3 +730,77 @@ files_menu_counts_the_merged_batch :: proc(t: ^testing.T) {
 	core.files_sel_click(v, rows, 2, true, false) // to z.txt
 	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move 2 items to Trash…")
 }
+
+// The header's eye: ignored files show dimmed by default; hidden, they leave the tree and the
+// selection (nothing the user cannot see is trashed or moved), and the choice is saved.
+@(test)
+files_hide_ignored_rows_and_selection :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	if _, ok := core.git_run(dir, "init", "-q"); !ok do return // no git: nothing to check
+	fwrite(dir, ".gitignore", "build/\n*.log\n")
+	fwrite(dir, "a.txt", "")
+	fwrite(dir, "debug.log", "")
+	fwrite(dir, "build/out.bin", "")
+	testing.expect(t, core.run_command(core.Files_Expand{path = "build", expanded = true}, {kind = .UI}).ok)
+	core.files_rows(dir)
+	wait_git() // which rows are ignored is git's answer
+	testing.expect_value(t, tree(), "build/\n  out.bin\n.gitignore\na.txt\ndebug.log\n") // shown by default
+	testing.expect(t, !state.files.hide_ignored)
+	// a selection holding shown and ignored rows, the cursor on an ignored one
+	v := core.tree_view()
+	a, log, out := fmt.tprintf("%s/a.txt", dir), fmt.tprintf("%s/debug.log", dir), fmt.tprintf("%s/build/out.bin", dir)
+	core.files_select_in(v, out)
+	core.files_sel_set(v, {a, log, out})
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI}).ok)
+	testing.expect(t, state.files.hide_ignored)
+	testing.expect_value(t, tree(), ".gitignore\na.txt\n")
+	testing.expect(t, core.files_sel_has(v, a), "a shown row stays selected")
+	testing.expect(t, !core.files_sel_has(v, log) && !core.files_sel_has(v, out), "hidden rows leave the selection")
+	testing.expect(t, v.cursor != out && v.cursor != log && v.anchor != out, v.cursor)
+	sel := core.files_sel_paths(v, core.files_rows(dir))
+	testing.expect(t, len(sel) == 1 && sel[0] == a)
+	// saved, and in get_state
+	testing.expect_value(t, core.json_path(core.state_json(), "files.hide_ignored"), "true")
+	saved := strings.clone(core.workspace_json(), context.temp_allocator)
+	testing.expect(t, strings.contains(saved, `"hide_ignored":true`), "saved")
+	// the window's replica gets it
+	rep: core.State
+	testing.expect_value(t, core.replica_apply(&rep, core.state_full_json(state)), "")
+	testing.expect(t, rep.files.hide_ignored, "replicated")
+	core.replica_free(&rep, runtime.heap_allocator())
+	// shown again: dimmed rows back, the folder still open
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = false}, {kind = .UI}).ok)
+	testing.expect_value(t, tree(), "build/\n  out.bin\n.gitignore\na.txt\ndebug.log\n")
+	// the window's own preference: scripts, agents and browsers are refused
+	testing.expect(t, !core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .Script}).ok, "a script")
+	testing.expect(t, !core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .Control}).ok, "a control caller")
+	testing.expect(t, !core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI, web = true}).ok, "a browser")
+	testing.expect(t, !state.files.hide_ignored)
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI}).ok)
+	// and restored from the saved workspace
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = false}, {kind = .UI}).ok)
+	testing.expect_value(t, core.workspace_restore(saved), "")
+	testing.expect(t, state.files.hide_ignored, "restored")
+	state.files.hide_ignored = false
+}
+
+// "N more…" counts only rows that would show: hidden ignored entries are not in it.
+@(test)
+files_hide_ignored_more_count :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	if _, ok := core.git_run(dir, "init", "-q"); !ok do return
+	defer state.files.hide_ignored = false
+	fwrite(dir, ".gitignore", "*.log\n")
+	for i in 0 ..< core.FILES_DIR_MAX + 5 do fwrite(dir, fmt.tprintf("big/f%05d.txt", i), "")
+	for i in 0 ..< 7 do fwrite(dir, fmt.tprintf("big/z%d.log", i), "")
+	testing.expect(t, core.run_command(core.Files_Expand{path = "big", expanded = true}, {kind = .UI}).ok)
+	more :: proc(rows: []core.Files_Row) -> int {
+		for r in rows do if r.more > 0 do return r.more
+		return 0
+	}
+	testing.expect_value(t, more(core.files_rows(dir)), 5 + 7) // shown: the .log files are rows
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI}).ok)
+	testing.expect_value(t, more(core.files_rows(dir)), 5)
+}

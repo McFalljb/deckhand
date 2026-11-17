@@ -56,4 +56,17 @@ Icon :: enum u8 {
 	Mark_Error, // "!"
 	Eye, // an eye: Peek (ui_peek.odin)
 	Deck, // four cards, two by two: the Deck view (ui_deck.odin)
+	// the Files tree's rows (file_kinds.odin: file_kind_icon); .Folder and .Branch (git files) too
+	Folder_Open, // a folder with its front flap tipped open
+	File, // a page with a folded corner
+	File_Code, // "</>"
+	File_Doc, // a page with lines of text
+	File_Config, // braces
+	File_Image, // a frame with a hill and a sun
+	File_Shell, // a terminal: a box with a prompt
+	File_Package, // a box (a cube)
+	File_Env, // a key
+	File_Binary, // an archive box: a lid and a handle
+	File_Agent, // a four-pointed sparkle
+	Eye_Off, // an eye struck through: the Files tab's ignored files hidden
 }

@@ -599,3 +599,20 @@ claude_subagent_todos :: proc(t: ^testing.T) {
 	rows = f_rows(id, "subagents")
 	testing.expect(t, strings.contains(rows, "  Todos 0/30") && !strings.contains(rows, "○ t0"), rows)
 }
+
+// Audit: a subagent silent past CLAUDE_AGENT_STALE (its SubagentStop lost) no longer counts as
+// running: a queued restart of the tab is not held by it for ever.
+@(test)
+claude_subagent_lost_stop_frees_restart :: proc(t: ^testing.T) {
+	context.allocator = f_reset()
+	defer f_done()
+	_, id := f_claude(t, "agentlost")
+	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = id, event = "start", agent_id = "a1", agent_type = "Explore"}, F_SCRIPT).ok)
+	now := time.tick_now()
+	testing.expect_value(t, core.claude_subagents_running(id, now), 1)
+	testing.expect_value(t, core.claude_subagents_running(id, time.tick_add(now, core.CLAUDE_AGENT_STALE - time.Minute)), 1)
+	testing.expect_value(t, core.claude_subagents_running(id, time.tick_add(now, core.CLAUDE_AGENT_STALE + time.Second)), 0)
+	// a report from it again: running again
+	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = id, event = "tool", agent_id = "a1", tool_name = "Grep", seq = 1}, F_SCRIPT).ok)
+	testing.expect_value(t, core.claude_subagents_running(id), 1)
+}

@@ -256,11 +256,14 @@ work_of :: proc(tab_id: u64) -> ^Work {
 }
 
 // How many of a Claude tab's subagents run now (a restart waits for them: claude_reload.odin).
-claude_subagents_running :: proc(tab_id: u64) -> int {
+// One silent for CLAUDE_AGENT_STALE (its SubagentStop lost?) no longer counts: a queued restart
+// would wait for it for ever.
+claude_subagents_running :: proc(tab_id: u64, now := time.Tick{}) -> int {
 	w, has := claude_work[tab_id]
 	if !has do return 0
+	now := now == {} ? time.tick_now() : now
 	n := 0
-	for a in w.agents do if !a.done do n += 1
+	for a in w.agents do if !a.done && time.tick_diff(a.last, now) < CLAUDE_AGENT_STALE do n += 1
 	return n
 }
 

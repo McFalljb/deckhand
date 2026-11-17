@@ -255,7 +255,7 @@ fs_check :: proc(path: string, caller: Caller, allow_root := false) -> (abs, roo
 		if !within(full, r) do continue
 		if full == r && !allow_root do return "", "", "not on a project folder itself"
 		rel := full[len(r):]
-		if strings.contains(strings.concatenate({rel, "/"}, context.temp_allocator), "/.git/") do return "", "", "not inside .git"
+		if fs_in_git(rel) do return "", "", "not inside .git"
 		if caller.kind == .Panel && fs_outside_own(full, caller) do return "", "", "only inside this session's project folder"
 		return full, r, ""
 	}
@@ -739,8 +739,12 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 	_, _ = ra, rb
 	if !os.exists(a) do return "no such file or folder"
 	if os.exists(b) && !fs_case_only_rename(a, b) do return "the new name already exists"
-	if fs_credential_named(a) && !fs_credential_named(b) && !fs_user_here(caller) do return CREDENTIAL_RENAME_REFUSED
-	if who := fs_in_use_by(a); who != "" do return who
+	if !fs_user_here(caller) {
+		// the target by its name as typed: on a volume that ignores case, .ENV still leads to .env
+		if fs_credential_named(a) && !settings_credential_name(b) && !show_secret(b) do return CREDENTIAL_RENAME_REFUSED
+		if fs_credential_place(a) do return CREDENTIAL_PLACE_REFUSED
+	}
+	if who := fs_in_use_by(a, caller); who != "" do return who
 	if os.make_directory_all(filepath.dir(b)) != nil && path_kind(filepath.dir(b)) != .Dir do return "cannot create the target folder"
 	if rerr := os.rename(a, b); rerr != nil do return fmt.tprintf("cannot rename: %v", rerr)
 	fs_changed_ours(a)
@@ -755,7 +759,7 @@ fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 	p, _, e := fs_check_write(path, caller)
 	if e != "" do return e
 	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
-	if who := fs_in_use_by(p); who != "" do return who
+	if who := fs_in_use_by(p, caller); who != "" do return who
 	fs_trash_why = ""
 	if !fs_trash_fn(p) {
 		why := fs_trash_why
@@ -772,6 +776,8 @@ fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 fs_trash_why: string
 
 CREDENTIAL_RENAME_REFUSED :: "credentials file: only you, in Deckhand's window, may rename it to a name that is not a credential's"
+CREDENTIAL_PLACE_REFUSED :: "it holds a coding agent's sign-in (by where it is): only you, in Deckhand's window, may rename it"
+FS_IN_USE :: "a running terminal tab is in it: close it first"
 
 // A name file_read and `deckhand show` refuse by itself (settings_credential: .env, pi's sign-ins;
 // show_secret: keys, .netrc…). Renaming one to another name would make it readable.
@@ -797,17 +803,43 @@ fs_case_only_rename :: proc(a, b: string) -> bool {
 }
 
 // The running terminal tab on this machine whose folder is at or inside path, said as the refusal
-// ("" = none). A shell tab's own folder, else its session's. Cheap: one realpath per running tab.
-fs_in_use_by :: proc(path: string) -> string {
+// ("" = none): the tab and its session to the user here, FS_IN_USE to anyone else. A shell tab's
+// own folder, else its session's. Cheap: a realpath per running tab.
+fs_in_use_by :: proc(path: string, caller: Caller) -> string {
+	rp := fs_real(path) // another spelling of it (a volume that ignores case) is the same folder
 	for &s in state.open_sessions do for t in s.tabs {
 		if t.status != .Running || t.machine != 0 || !tab_is_terminal(t) do continue
 		cwd := s.cwd
 		if _, is := t.kind.(Shell_Tab); is && t.cwd != "" do cwd = t.cwd
 		if cwd == "" do continue
-		if !within(cwd, path) && !within(fs_real(cwd), path) do continue
+		rc := fs_real(cwd)
+		if !within(cwd, path) && !within(rc, path) && !within(rc, rp) do continue
+		if !fs_user_here(caller) do return FS_IN_USE
 		return fmt.tprintf("the tab \"%s\" (%s) is running in it: close that tab first", t.title != "" ? t.title : "terminal", open_session_title(&s, refresh = false))
 	}
 	return ""
+}
+
+// Whether a project path is inside .git, in any case (a volume that ignores case opens .GIT as .git).
+fs_in_git :: proc(rel: string) -> bool {
+	return strings.contains(strings.to_lower(strings.concatenate({"/", rel, "/"}, context.temp_allocator), context.temp_allocator), "/.git/")
+}
+
+// Whether path is at or above a place whose files are credentials by where they are, not by their
+// names (settings_credential): pi's agent dir, Claude's config folders, Codex's homes and its
+// sign-in's folder, a .codex folder holding auth.json. Renaming one would strip that protection.
+fs_credential_place :: proc(path: string) -> bool {
+	paths := [2]string{path, fs_real(path)}
+	places := make([dynamic]string, context.temp_allocator)
+	append(&places, pi_agent_dir())
+	for d in claude_config_dirs() do append(&places, d)
+	for d in claude_account_dirs(harness = .Codex) do append(&places, d)
+	if a := codex_auth_file(); a != "" do append(&places, filepath.dir(a))
+	for pl in places {
+		if pl == "" do continue
+		for x in ([2]string{strings.trim_right(pl, "/"), fs_real(pl)}) do for p in paths do if x != "" && within(x, p) do return true
+	}
+	return strings.equal_fold(filepath.base(path), ".codex") && os.exists(strings.concatenate({path, "/auth.json"}, context.temp_allocator))
 }
 
 fs_reveal_path :: proc(path: string, caller: Caller) -> string {

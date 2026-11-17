@@ -22,6 +22,7 @@ import "core:fmt"
 import "core:mem/virtual"
 import "core:path/filepath"
 import "core:strings"
+import "core:time"
 import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -116,6 +117,7 @@ Files_Ui :: struct {
 	count:      int, // rows in the list at the last layout (the new name's included)
 	reveal_new: bool, // scroll the new name's field into view at the next layout
 	reveal_near: bool, // the next reveal scrolls only as far as needed (a new file: no jump)
+	input_at:   time.Tick, // this window's last press or shortcut while the name field had the keyboard (files_note_event)
 	first:      int, // row index of slot 0
 	view_h:     f32, // the list's height at the last layout (logical px)
 	// a press on a row: acts on release unless it became a drag
@@ -226,6 +228,8 @@ files_panel :: proc(row_w_: f32) {
 		empty_state("No project", "Pick a project or open a session", row_w)
 		return
 	}
+	// a new name's folder that is no longer in this tree (another session or checkout shows): it ends
+	if (fu.edit == .New_File || fu.edit == .New_Folder) && !core.within(fu.target, root) do files_cancel_edit()
 	rows := core.tree_rows()
 	// New file / New folder: the name field is a row of the tree (its error one more), the first
 	// in the folder it goes in
@@ -942,7 +946,7 @@ files_commit_edit :: proc(blur := false) {
 	}
 	failed :: proc(err: string, blur: bool) {
 		if blur {
-			toast_show(fmt.tprintf("Not renamed: %s", err), true)
+			toast_show(fmt.tprintf("%s: %s", fu.edit == .Rename ? "Not renamed" : "Not created", err), true)
 			files_cancel_edit()
 			return
 		}
@@ -996,19 +1000,37 @@ files_cancel_edit :: proc() {
 	if state.focus_widget == "files_name" do ui_do(core.Set_Focus{"files"})
 }
 
-// The name field lost the keyboard (a click elsewhere): a rename to a changed name is made (as
-// Finder and VS Code do), anything else ends.
+// This window's own input that may take the keyboard from the name field: a press anywhere but
+// on the field, or a shortcut key (⌘ or ⌃) or Tab. Only a move that follows one commits the edit
+// (files_edit_check); set_focus is anyone's, so a focus change from a script, an agent or a
+// browser cancels it instead of renaming to a half-typed name with the user's authority.
+files_note_event :: proc(e: ^sapp.Event) {
+	if fu.edit == .None || state.focus_widget != "files_name" do return
+	#partial switch e.type {
+	case .MOUSE_DOWN:
+		if !inside(clay.ID("files_name_box"), e.mouse_x, e.mouse_y) do fu.input_at = time.tick_now()
+	case .KEY_DOWN:
+		if e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL) != 0 || e.key_code == .TAB do fu.input_at = time.tick_now()
+	}
+}
+
+// How long after this window's own press or shortcut a focus change counts as that input's (the
+// core's answer comes back within a few frames; a separate core within its 250 ms).
+FILES_BLUR_OWN :: 2 * time.Second
+
+// The name field lost the keyboard. After this window's own press or shortcut (files_note_event):
+// a changed name is renamed and a typed name is created (as Finder and VS Code do; an empty one
+// cancels). A focus change from anywhere else cancels.
 files_edit_check :: proc() {
 	if client.focus_wait != "" do return // a Set_Focus on its way (machine_edit_begin): not lost yet
-	if fu.edit != .None && state.focus_widget != "files_name" {
-		if fu.edit == .Rename {
-			files_commit_edit(blur = true)
-			return
-		}
-		fu.edit = .None
-		delete(fu.edit_err)
-		fu.edit_err = ""
+	if fu.edit == .None || state.focus_widget == "files_name" do return
+	own := fu.input_at != {} && time.tick_since(fu.input_at) < FILES_BLUR_OWN
+	fu.input_at = {}
+	if own && strings.trim_space(tf_text(&files_name_field)) != "" {
+		files_commit_edit(blur = true)
+		return
 	}
+	files_cancel_edit()
 }
 
 // Runs a command as the user now and returns its result (the inbox, as

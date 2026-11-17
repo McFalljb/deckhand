@@ -70,6 +70,16 @@ assert_state focus.id files
 key f2
 eventually
 assert_state focus.id files_name
+# a focus change from outside the window (set_focus is anyone's) cancels: nothing is renamed
+type half
+command {"type":"set_focus","widget":"files"}
+eventually
+assert_state focus.id files
+assert_files   notes.md\n
+assert_not_files half.md
+key f2
+eventually
+assert_state focus.id files_name
 assert_selection notes
 type todo
 shot files/rename

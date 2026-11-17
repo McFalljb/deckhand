@@ -104,6 +104,14 @@ fs_guard_running_tab_folder :: proc(t: ^testing.T) {
 	e = fs_delete(wt, UI)
 	testing.expect(t, strings.contains(e, "build shell"), e)
 	testing.expect(t, os.is_dir(wt), "not deleted")
+	// anyone else is not told which tab (nor its session)
+	e = fs_rename(wt, fmt.tprintf("%s/wt2", dir), Caller{kind = .Control})
+	testing.expect_value(t, e, FS_IN_USE)
+	// another spelling of the folder on a volume that ignores case is the same folder
+	if os.exists(fmt.tprintf("%s/WT", dir)) {
+		e = fs_rename(fmt.tprintf("%s/WT", dir), fmt.tprintf("%s/wt3", dir), UI)
+		testing.expect(t, strings.contains(e, "build shell"), e)
+	}
 	// a folder no running tab is in: fine; nor does an exited tab hold one
 	testing.expect_value(t, fs_rename(fmt.tprintf("%s/free", dir), fmt.tprintf("%s/free2", dir), UI), "")
 	state.open_sessions[0].tabs[1].status = .Exited
@@ -177,4 +185,87 @@ files_new_row_place :: proc(t: ^testing.T) {
 	testing.expect_value(t, i, -1)
 	i, d = files_new_row_at(nil, "/p", "/p")
 	testing.expect(t, i == 0 && d == 0, "an empty tree")
+}
+
+// A credential's name in another case is a credential's name: a case-only rename (.env to .ENV)
+// keeps it, and file_read refuses .ENV. The target is judged by its name as typed (on a volume
+// that ignores case, .ENV's real path is still .env until the rename).
+@(test)
+fs_credential_names_ignore_case :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := gsetup("credcase")
+	defer {os.remove_all(dir); state = State{}}
+	testing.expect(t, settings_credential(fmt.tprintf("%s/.ENV", dir)), ".ENV")
+	testing.expect(t, settings_credential(fmt.tprintf("%s/.Env.Local", dir)), ".Env.Local")
+	testing.expect(t, !settings_credential(fmt.tprintf("%s/.ENV.EXAMPLE", dir)), ".ENV.EXAMPLE is not one")
+	web := Caller{kind = .UI, web = true}
+	ctl := Caller{kind = .Control}
+	for pair in ([][2]string{{".env", ".ENV"}, {".env.local", ".ENV.LOCAL"}}) {
+		from, to := fmt.tprintf("%s/%s", dir, pair[0]), fmt.tprintf("%s/%s", dir, pair[1])
+		gwrite(from)
+		testing.expect_value(t, fs_rename(from, to, ctl), "")
+		testing.expect(t, listed(dir, pair[1]), pair[1])
+		r := run_command(File_Read{path = to}, web)
+		testing.expectf(t, !r.ok && strings.contains(r.error, "credentials"), "file_read %s: %v %q", pair[1], r.ok, r.error)
+		// and from there to a plain name: refused
+		testing.expect_value(t, fs_rename(to, fmt.tprintf("%s/plain.txt", dir), ctl), CREDENTIAL_RENAME_REFUSED)
+		os.remove(to)
+	}
+}
+
+// A folder at or above a place whose files are credentials by where they are (pi's agent dir, a
+// .codex folder holding auth.json) is renamed only by the user here.
+@(test)
+fs_rename_keeps_credential_places :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := gsetup("credplace")
+	defer {os.remove_all(dir); state = State{}}
+	old, had := os.lookup_env("PI_CODING_AGENT_DIR", context.temp_allocator)
+	defer {if had do os.set_env("PI_CODING_AGENT_DIR", old); else do os.unset_env("PI_CODING_AGENT_DIR")}
+	os.make_directory_all(fmt.tprintf("%s/tools/agent", dir))
+	os.set_env("PI_CODING_AGENT_DIR", fmt.tprintf("%s/tools/agent", dir))
+	gwrite(fmt.tprintf("%s/tools/agent/auth.json", dir))
+	os.make_directory_all(fmt.tprintf("%s/x/.codex", dir))
+	gwrite(fmt.tprintf("%s/x/.codex/auth.json", dir))
+	os.make_directory_all(fmt.tprintf("%s/free", dir))
+	ctl := Caller{kind = .Control}
+	testing.expect_value(t, fs_rename(fmt.tprintf("%s/tools", dir), fmt.tprintf("%s/tools2", dir), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_rename(fmt.tprintf("%s/tools/agent", dir), fmt.tprintf("%s/tools/a2", dir), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_rename(fmt.tprintf("%s/x/.codex", dir), fmt.tprintf("%s/x/codex", dir), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_rename(fmt.tprintf("%s/free", dir), fmt.tprintf("%s/free2", dir), ctl), "")
+	testing.expect_value(t, fs_rename(fmt.tprintf("%s/x/.codex", dir), fmt.tprintf("%s/x/codex", dir), Caller{kind = .UI}), "")
+}
+
+// .git in any case is .git (a volume that ignores case opens .GIT as .git).
+@(test)
+fs_check_git_any_case :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := gsetup("gitcase")
+	defer {os.remove_all(dir); state = State{}}
+	for p in ([]string{".GIT", ".Git/config", "sub/.gIt/HEAD"}) {
+		_, _, e := fs_check(fmt.tprintf("%s/%s", dir, p), Caller{kind = .UI})
+		testing.expect_value(t, e, "not inside .git")
+	}
+	_, e := fs_create_dir(fmt.tprintf("%s/.GIT", dir), Caller{kind = .UI})
+	testing.expect_value(t, e, "not inside .git")
+	_, _, e2 := fs_check(fmt.tprintf("%s/.github/x", dir), Caller{kind = .UI})
+	testing.expect_value(t, e2, "")
+}
+
+// The home trash is made with its parents (a fresh host has no ~/.local/share), 0700.
+@(test)
+fs_trash_xdg_makes_parents :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	scratch := fmt.tprintf("%s/dhx-xdgp-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+	os.make_directory_all(scratch)
+	defer os.remove_all(scratch)
+	old := os.get_env("XDG_DATA_HOME", context.temp_allocator)
+	os.set_env("XDG_DATA_HOME", fmt.tprintf("%s/fresh/.local/share", scratch))
+	defer {if old != "" do os.set_env("XDG_DATA_HOME", old); else do os.unset_env("XDG_DATA_HOME")}
+	f := fmt.tprintf("%s/a.txt", scratch)
+	gwrite(f)
+	testing.expect_value(t, trash_xdg(f), "")
+	testing.expect(t, os.exists(fmt.tprintf("%s/fresh/.local/share/Trash/files/a.txt", scratch)), "moved")
+	k, st := path_stat(fmt.tprintf("%s/fresh/.local/share/Trash/files", scratch))
+	testing.expect(t, k == .Dir && st.mode & 0o077 == 0, "0700")
 }

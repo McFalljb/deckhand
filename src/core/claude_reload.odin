@@ -156,7 +156,7 @@ under :: proc(p, dir: string) -> bool {return dir != "" && len(p) > len(dir) && 
 // p: clean and absolute (settings_credential also checks where it links to, and hard links by
 // inode).
 claude_credential :: proc(p: string) -> bool {
-	base := filepath.base(p)
+	base := strings.to_lower(filepath.base(p), context.temp_allocator) // any case: .CLAUDE.JSON is .claude.json on a volume that ignores it
 	if base == ".credentials.json" || base == ".claude.json" || strings.has_prefix(base, ".claude.json.") do return true
 	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
 	homes := [2]string{home, fs_real(home)}

@@ -13,6 +13,13 @@ import "core:strings"
 import "core:sys/posix"
 import "core:time"
 
+Trash_Rename :: enum u8 {
+	Ok,
+	Exists, // something is at the new name: try another
+	Other_Disk,
+	Failed,
+}
+
 TRASH_OTHER_DISK :: "it is on another disk than your Trash: not moved (and nothing deleted)"
 
 // The home trash folder ("" = no home folder).
@@ -32,9 +39,8 @@ trash_xdg :: proc(path: string) -> string {
 	if trash == "" do return "no home folder for the Trash"
 	files := strings.concatenate({trash, "/files"}, context.temp_allocator)
 	info := strings.concatenate({trash, "/info"}, context.temp_allocator)
-	for d in ([]string{trash, files, info}) {
-		posix.mkdir(strings.clone_to_cstring(d, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR}) // 0700; there already is fine
-	}
+	// with its parents (a fresh host has no ~/.local/share), each made 0700; there already is fine
+	for d in ([]string{files, info}) do os.make_directory_all(d, {.Read_User, .Write_User, .Execute_User})
 	if path_kind(files) != .Dir || path_kind(info) != .Dir do return "cannot make the Trash folder"
 	// one file system: a rename, never a copy (checked first, and again by rename's EXDEV)
 	sp, sf: posix.stat_t
@@ -65,13 +71,13 @@ trash_xdg :: proc(path: string) -> string {
 			posix.unlink(ipath)
 			return "cannot write to the Trash"
 		}
-		if posix.rename(strings.clone_to_cstring(path, context.temp_allocator), fpath) != 0 {
-			e := posix.errno()
-			posix.unlink(ipath)
-			if e == .EXDEV do return TRASH_OTHER_DISK
-			return fmt.tprintf("cannot move it to the Trash: %v", e)
+		// never over a file put at that name meanwhile (trash_rename_*.odin: no-replace)
+		switch trash_rename(strings.clone_to_cstring(path, context.temp_allocator), fpath) {
+		case .Ok:         return ""
+		case .Exists:     posix.unlink(ipath); continue
+		case .Other_Disk: posix.unlink(ipath); return TRASH_OTHER_DISK
+		case .Failed:     posix.unlink(ipath); return "cannot move it to the Trash"
 		}
-		return ""
 	}
 	return "the Trash has too many items of that name"
 }

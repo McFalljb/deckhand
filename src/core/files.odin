@@ -101,7 +101,7 @@ files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 			if !c.expanded do return fail("a tree's root is always open"), false
 			return {ok = true}, false // already open: a tree's root always is
 		}
-		if strings.contains(strings.concatenate({"/", rel, "/"}, context.temp_allocator), "/.git/") do return fail("not inside .git"), false
+		if fs_in_git(rel) do return fail("not inside .git"), false
 		if c.expanded && path_kind(p) != .Dir do return fail("not a folder"), false
 		if !files_set_expanded(root, rel, c.expanded) do return {ok = true}, false
 		return {ok = true}, true

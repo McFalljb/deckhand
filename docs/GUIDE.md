@@ -1431,15 +1431,18 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
 - **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
 - **New file / New folder**: the name field opens as the first row of the folder (the selected
   folder, the selected file's, else the project's), opened and scrolled to; an error shows under
-  it. Enter creates and selects it, Esc cancels.
+  it. Enter (or a click elsewhere) creates and selects it; Esc, or no name, cancels.
 - **Rename**: Enter or a click elsewhere renames, Esc cancels. Changing only the case
-  (`readme.md` → `README.md`) works.
+  (`readme.md` → `README.md`) works. Only your own click or shortcut commits; a focus change
+  from an agent or script cancels.
 - **Row menu** (**…** or right-click): Open, Open in preview, Open to the side (in a new pane on
   the right), New file…, New folder…, Rename…, Move to Trash…, Reveal in Finder, Copy path, Copy
   relative path, Open terminal here, and for `.md` files Open Markdown preview.
 - **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
-  the tab; close it first). Only you, in the window, can rename a credential's file (`.env`, a
-  key) to a name that is not a credential's; agents and browsers cannot.
+  the tab; close it first). It knows the folder a tab started in, not one a shell `cd`'d to later.
+  Only you, in the window, can rename a credential's file (`.env` in any case, a key) to a name
+  that is not a credential's, or a folder holding an agent's sign-in (pi's agent folder, a
+  `.codex` folder, Claude's config folders); agents and browsers cannot.
 - **Trash on a Linux core**: the XDG Trash (`~/.local/share/Trash`, where file managers restore
   from); a file on another disk is refused, never deleted for good.
 - **Filter**: type in the field above the tree to match paths loosely.

@@ -616,6 +616,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/claude_disk.odin", "found_cwd", "jg.parse", "", ""},
 		{"src/core/claude_disk.odin", "codex_first_line", "jg.parse", "", ""}, // a Codex rollout's first line (64 KB cap, json_depth_ok first)
 		{"src/core/claude_status.odin", "hints_load", "jg.parse", "", ""},
+		{"src/core/claude_reload.odin", "restart_keys_digest", "jg.parse", "", ""}, // a Claude settings file's enabledPlugins (at most 4 MB; only once its stamp changed)
 		{"src/core/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
 		{"src/core/ctl.odin", "json_path", "jg.parse_string", "", ""},
 		{"src/core/machines.odin", "machines_read", "jg.parse_string", "", ""},

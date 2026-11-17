@@ -726,8 +726,13 @@ claude_reload_sources :: proc(t: ^testing.T) {
 	testing.expect(t, has(src, fmt.tprintf("%s/CLAUDE.local.md", proj), proj), "CLAUDE.local.md")
 	testing.expect(t, has(src, fmt.tprintf("%s/.mcp.json", proj), proj), "the project's MCP servers")
 	testing.expect(t, has(src, fmt.tprintf("%s/.claude/commands/", proj), proj), "the project's commands")
+	// settings files: only their restart keys (enabledPlugins), never as a whole
+	testing.expect(t, has(src, fmt.tprintf("%s/settings.json#keys", cfg), ""), "the account's enabledPlugins")
+	testing.expect(t, has(src, fmt.tprintf("%s/.claude/settings.json#keys", proj), proj), "the project's enabledPlugins")
+	testing.expect(t, has(src, fmt.tprintf("%s/.claude/settings.local.json#keys", proj), proj), "the project's local enabledPlugins")
 	for k, _ in src {
-		for never in ([]string{"settings.json", "keybindings.json", ".credentials", ".claude.json", "/projects/-p", "history.jsonl", "/skills/s1"}) {
+		if strings.has_suffix(k, "settings.json#keys") || strings.has_suffix(k, "settings.local.json#keys") do continue
+		for never in ([]string{"settings.json", "keybindings.json", ".credentials", ".claude.json", "/projects/-p", "history.jsonl", "/skills/s1", "#keys"}) {
 			testing.expectf(t, !strings.contains(k, never), "never watched: %s", k)
 		}
 	}
@@ -750,6 +755,67 @@ claude_reload_sources :: proc(t: ^testing.T) {
 	// the bar's text, and no pi bar for it
 	testing.expect(t, claude_bar_shows(false))
 	testing.expect(t, !reload_bar_shows(), "pi's bar is pi's")
+}
+
+// Claude Code loads plugins only when it starts: a change to `enabledPlugins` in a settings file
+// shows the Restart bar, while the rest of the file stays live (no bar). The account's
+// settings.json and the project's .claude/settings{,.local}.json; the poll and an editor save.
+@(test)
+claude_reload_enabled_plugins :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	r_reset()
+	defer cr_done()
+	_, cfg, proj := cr_env("plugins")
+	user := fmt.tprintf("%s/settings.json", cfg)
+	local := fmt.tprintf("%s/.claude/settings.local.json", proj)
+	cr_w(user, `{"model":"x","enabledPlugins":{"a@m":true}}`)
+	cr_w(local, `{}`)
+	sess := cr_session(proj)
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
+	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	testing.expect(t, id != 0)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now()
+	testing.expect_value(t, len(state.reload.claude.changed), 0)
+	// another key: live, no bar (the same size would hide nothing: the stamp also has the time)
+	cr_w(user, `{"model":"yy","enabledPlugins":{"a@m":true}}`)
+	core.claude_reload_poll_now()
+	testing.expect_value(t, len(state.reload.claude.changed), 0)
+	// enabledPlugins: read at start only
+	cr_w(user, `{"model":"yy","enabledPlugins":{"a@m":false}}`)
+	core.claude_reload_poll_now()
+	testing.expect_value(t, len(state.reload.claude.changed), 1)
+	testing.expect(t, slice.contains(state.reload.claude.changed[:], user), "the account's settings.json")
+	_, tab, _ := core.find_tab(id)
+	testing.expect(t, tab.reload.stale, "the tab is stale")
+	testing.expect(t, claude_bar_shows(false))
+	// the same keys in another order: no change
+	core.run_command(core.Claude_Reload_Later{})
+	tab.reload.stale = false
+	cr_w(user, `{"enabledPlugins":{"a@m":false},"model":"yy"}`)
+	core.claude_reload_poll_now()
+	testing.expect(t, !tab.reload.stale, "the same plugins")
+	// a file that does not parse (mid-edit): no change either
+	cr_w(user, `{"enabledPlugins":{"a@m":tru`)
+	core.claude_reload_poll_now()
+	testing.expect(t, !tab.reload.stale, "unreadable: nothing said")
+	// the project's local settings: added there
+	cr_w(local, `{"enabledPlugins":{"b@m":true}}`)
+	core.claude_reload_poll_now()
+	testing.expect(t, tab.reload.stale, "the project's settings.local.json")
+	testing.expect(t, slice.contains(state.reload.claude.changed[:], local))
+	// an editor save shows the bar at once; a save of another key does not
+	core.run_command(core.Claude_Reload_Later{})
+	tab.reload.stale = false
+	cr_w(user, `{"enabledPlugins":{"a@m":false},"model":"zzz"}`)
+	core.claude_reload_note_save(user)
+	testing.expect_value(t, core.claude_reload_pending_count(), 0)
+	cr_w(user, `{"enabledPlugins":{"a@m":true},"model":"zzz"}`)
+	core.claude_reload_note_save(user)
+	testing.expect_value(t, core.claude_reload_pending_count(), 1)
+	core.claude_reload_flush()
+	testing.expect(t, tab.reload.stale, "the save's change")
+	testing.expect(t, claude_bar_shows(false))
 }
 
 // The bar's Restart: idle Claude tabs start again now with --resume (the user's flags only for

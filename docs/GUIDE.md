@@ -1721,7 +1721,7 @@ the project's `.claude/settings.json` (**Create** when missing), `.claude/settin
   [hot-reload bar](#hot-reload) shows at once and offers **Reload** for the running pi tabs that
   read it (after saving `ATLAS.md`, only Atlas). Claude Code applies its `settings.json` files and
   `keybindings.json` by itself; after saving a Claude file it reads only at start (`CLAUDE.md`,
-  `.mcp.json`…), the Claude bar shows at once.
+  `.mcp.json`, a `settings.json` whose `enabledPlugins` changed…), the Claude bar shows at once.
 
 ## Hot reload
 
@@ -1771,7 +1771,8 @@ files (permissions, hooks, env…), `keybindings.json`, skills and subagents. De
 alone. What a running Claude reads only when it starts: the `CLAUDE.md` and `CLAUDE.local.md`
 files (yours in `~/.claude`, the project's and the folders above it), rules, output styles and
 commands (`~/.claude/rules`, `output-styles`, `commands`, and the project's `.claude/` ones), the
-project's `.mcp.json`, a new `agents` or `skills` folder, and Deckhand's own Claude plugin.
+project's `.mcp.json`, a new `agents` or `skills` folder, the plugins turned on or off
+(`enabledPlugins` in a `settings.json`), and Deckhand's own Claude plugin.
 
 When one of those changes, a bar says "Claude Code settings changed — Restart 1 idle Claude tab".
 **Restart** starts each idle Claude tab again on the same conversation (`claude --resume`, with

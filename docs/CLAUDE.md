@@ -326,11 +326,14 @@ is valid; it learns nothing it can use from outside the tab.
   in the tab's folder and above it and the config folder's `CLAUDE.md`; `rules/`, `output-styles/`,
   `commands/` (config folder and the cwd's `.claude/`); the cwd's `.mcp.json`; `agents/` and
   `skills/` folders appearing (Claude Code only watches those that existed at its start); Deckhand's
-  plugin. Settings files, `keybindings.json` and skills/subagents in existing folders are applied
-  live by Claude Code: never watched, no bar (`claude_file_class`: Live / Restart / Ignored). The
-  config folder is `$CLAUDE_CONFIG_DIR` (as the children get it), else `~/.claude`. A stat poll
-  every 2 s while a Claude tab runs; folders by their entries' names, times and sizes. No file is
-  read.
+  plugin; and `enabledPlugins` in the config folder's `settings.json` and the cwd's
+  `.claude/settings.json` and `settings.local.json` (`CLAUDE_RESTART_KEYS`: plugins load at start).
+  The rest of the settings files, `keybindings.json` and skills/subagents in existing folders are
+  applied live by Claude Code: no bar (`claude_file_class`: Live / Restart / Ignored). The config
+  folder is `$CLAUDE_CONFIG_DIR` (as the children get it), else `~/.claude`. A stat poll every 2 s
+  while a Claude tab runs; folders by their entries' names, times and sizes. The only file read is
+  a settings file whose stamp changed, for `enabledPlugins` alone (a file that does not parse
+  changes nothing).
 - **Restart** (`claude_restart_changed`; `all`: every running Claude tab, changed or not, as pi's
   **Reload all pi tabs**; the palette's **Restart all Claude tabs** and the gear's row): idle tabs (hooks' turn idle, OSC 7501 not working or
   blocked, nothing typed or held, no subagent running) are stopped (hung up on, as a pi restart)

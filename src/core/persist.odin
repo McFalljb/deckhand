@@ -459,8 +459,8 @@ workspace_json :: proc() -> string {
 	close_obj(&w)
 
 	// the Files tab: expanded folders per tree root, most recent first (the
-	// filter is not saved); the checkout each project's tree shows
-	if len(state.files.expanded) > 0 || len(state.files.checkouts) > 0 {
+	// filter is not saved); the checkout each project's tree shows; ignored files hidden
+	if len(state.files.expanded) > 0 || len(state.files.checkouts) > 0 || state.files.hide_ignored {
 		strings.write_string(&w.b, ",\n")
 		w.first = true
 		k(&w, "files")
@@ -491,6 +491,7 @@ workspace_json :: proc() -> string {
 			}
 			strings.write_byte(&w.b, ']')
 		}
+		if state.files.hide_ignored do kb(&w, "hide_ignored", true)
 		close_obj(&w)
 	}
 
@@ -986,6 +987,7 @@ workspace_restore :: proc(text: string) -> string {
 	// the Files tab's expanded folders (ones gone since are dropped); the
 	// least recent root first, so the order comes back as it was
 	if fo, is := root["files"].(json.Object); is {
+		if b, bok := fo["hide_ignored"].(json.Boolean); bok do run(Set_Files_Hide_Ignored{hide = bool(b)})
 		// first the checkouts the trees show (worktrees: their folders become tree roots); gone ones are dropped
 		checkouts, _ := fo["checkouts"].(json.Array)
 		#reverse for cv in checkouts {

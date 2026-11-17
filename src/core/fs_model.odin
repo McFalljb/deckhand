@@ -993,22 +993,41 @@ fs_credential_place :: proc(path: string) -> bool {
 		for h in homes do if h != "" && within(h, d) do return true
 		return false
 	}
+	places := fs_credential_place_paths()
+	for p in ([2]string{path, fs_real(path)}) {
+		for x in places do if within(x, p) || within(p, x) do return true // at, above or inside
+		// inside (or at) a folder that is a place by what it holds
+		for d := p; !home_or_above(d, homes); d = filepath.dir(d) do if fs_credential_holder(d) do return true
+	}
+	return false
+}
+
+// The places fs_credential_place knows by where they are, as written and real, HOME and above
+// left out. A walk through many folders (a Files drag out, files_drag_out.odin) reads them once.
+// Temp allocator.
+fs_credential_place_paths :: proc() -> []string {
+	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
+	homes := [2]string{home, fs_real(home)}
 	places := make([dynamic]string, context.temp_allocator)
 	append(&places, pi_agent_dir())
 	for d in claude_config_dirs() do append(&places, d)
 	for d in claude_account_dirs(harness = .Codex) do append(&places, d)
 	if a := codex_auth_file(); a != "" do append(&places, filepath.dir(a))
-	for p in ([2]string{path, fs_real(path)}) {
-		for pl in places do for x in ([2]string{strings.trim_right(pl, "/"), fs_real(pl)}) {
-			if !home_or_above(x, homes) && (within(x, p) || within(p, x)) do return true // at, above or inside
-		}
-		// inside (or at) a folder that is a place by what it holds
-		for d := p; !home_or_above(d, homes); d = filepath.dir(d) {
-			if strings.equal_fold(filepath.base(d), ".codex") && os.exists(strings.concatenate({d, "/auth.json"}, context.temp_allocator)) do return true
-			if claude_marked_folder(d) do return true
-		}
+	out := make([dynamic]string, context.temp_allocator)
+	for pl in places do for x in ([2]string{strings.trim_right(pl, "/"), fs_real(pl)}) {
+		if x == "" || x == "/" || x == "." do continue
+		above := false // HOME or above: never a place
+		for h in homes do if h != "" && within(h, x) do above = true
+		if !above do append(&out, x)
 	}
-	return false
+	return out[:]
+}
+
+// Whether folder d is a place by what it holds: a .codex folder with auth.json, a Claude config
+// folder (.credentials.json or .claude.json in it). Not by where it is (fs_credential_place).
+fs_credential_holder :: proc(d: string) -> bool {
+	if strings.equal_fold(filepath.base(d), ".codex") && os.exists(strings.concatenate({d, "/auth.json"}, context.temp_allocator)) do return true
+	return claude_marked_folder(d)
 }
 
 fs_reveal_path :: proc(path: string, caller: Caller) -> string {

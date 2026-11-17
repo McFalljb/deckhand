@@ -457,7 +457,7 @@ running_claude :: proc() -> []Claude_Running {
 		if s.home do continue
 		for &t in s.tabs {
 			// not Codex tabs (codex.odin): Claude Code's files and version are not theirs
-			if ct, is := t.kind.(Claude_Tab); is && ct.harness != .Codex && t.status == .Running do append(&out, Claude_Running{&s, &t})
+			if ct, is := t.kind.(Claude_Tab); is && !harness_is_codex(ct.harness) && t.status == .Running do append(&out, Claude_Running{&s, &t})
 		}
 	}
 	return out[:]
@@ -619,7 +619,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		return {ok = true}, true
 	case Claude_Restart_Anyway:
 		_, t, ct := claude_tab_of(c.tab_id)
-		if ct == nil || ct.harness == .Codex do return fail("no such Claude tab"), false
+		if ct == nil || harness_is_codex(ct.harness) do return fail("no such Claude tab"), false
 		if t.status != .Running do return fail("Claude is not running in this tab"), false
 		if t.reload.queued != .Restart do return fail("no restart waits in this tab"), false
 		class := claude_restart_class(t)

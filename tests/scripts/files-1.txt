@@ -156,6 +156,12 @@ dragid frow 8 terminal
 eventually
 assert_screen /proj/main.c'
 key backspace
+# ---- drag to move: new.txt onto the folder row src moves it there (rename_path), the toast says so
+dragid frow @/new.txt frow @/src
+eventually
+assert_files   new.txt\n  util.c\n
+assert_not_files main.c\nnew.txt\n
+assert_toast Moved new.txt to src/
 # ---- the active editor file is revealed: collapse all, then switch to app.c's tab
 clickid filestool 2
 wait 200

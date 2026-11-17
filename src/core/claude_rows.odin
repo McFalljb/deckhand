@@ -158,7 +158,7 @@ claude_tab_tip :: proc(tab: Tab) -> string {
 	}
 	ct, is := tab.kind.(Claude_Tab)
 	if !is do return ""
-	who := ct.harness == .Codex ? "Codex" : "Claude Code"
+	who := harness_is_codex(ct.harness) ? "Codex" : "Claude Code"
 	// its permission mode when not the default (claude_mode.odin)
 	mode := claude_mode_tip(ct)
 	if ct.model == "" do return mode != "" ? fmt.tprintf("%s · %s", who, mode) : ""

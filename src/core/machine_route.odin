@@ -239,10 +239,10 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	// a Codex tab there: only to a core whose hello says it starts one (an older core would start
 	// Claude Code for it, or refuse it); refused here, before anything is sent
 	case New_Claude_Session:
-		if c.harness == .Codex && !machine_codex(no) do return codex_remote_old(no), true
+		if harness_is_codex(c.harness) && !machine_codex(no) do return codex_remote_old(no), true
 		if len(c.args) > 0 && !machine_takes_flags(no) do return flags_remote_old(no), true
 	case New_Claude_Tab:
-		if c.harness == .Codex && !machine_codex(no) do return codex_remote_old(no), true
+		if harness_is_codex(c.harness) && !machine_codex(no) do return codex_remote_old(no), true
 		if len(c.args) > 0 && !machine_takes_flags(no) do return flags_remote_old(no), true
 	case New_Chat:
 		if len(c.args) > 0 && !machine_takes_flags(no) do return flags_remote_old(no), true

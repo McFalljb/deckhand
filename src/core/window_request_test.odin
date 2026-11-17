@@ -98,6 +98,25 @@ window_hears_our_file_changes :: proc(t: ^testing.T) {
 	testing.expect_value(t, fw.last.path, fmt.tprintf("%s/sub", dir))
 }
 
+// A Changes action that ended (stage, unstage, discard, commit) tells the window to read its own
+// list of that checkout again now: a separate core's window otherwise waited for its watcher, and
+// with fseventsd behind (a busy Mac) its Unstage stayed off ("nothing staged") after a Stage (#160).
+@(test)
+window_hears_changes_actions :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	state = State{}
+	defer state = State{}
+	if !testing.expect(t, fw_attach()) do return
+	defer core_detach_window()
+	run_command(Changes_Op_Done{root = "/tmp/dh-not-a-checkout", what = "stage"}, {kind = .Internal}) // its worker's end
+	n := 0
+	for op in fw.ops do if op == .Path_Changed do n += 1
+	testing.expect_value(t, n, 1)
+	testing.expect_value(t, fw.last.op, Window_Op.Path_Changed)
+	testing.expect_value(t, fw.last.path, "/tmp/dh-not-a-checkout")
+	testing.expect_value(t, fw.last.count, 1) // read at once, not a file command's path
+}
+
 @(test)
 window_request_round_trips :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()

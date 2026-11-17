@@ -64,7 +64,8 @@ package main
 //                              added above it does not move the click
 //   assert_files TEXT          the Files tree's rows (indented names, "/" after open folders)
 //                              contain TEXT ("\n" = a line break); assert_not_files: do not
-//   dragid FROM INDEX TO       left drag from element FROM INDEX to element TO (centres)
+//   dragid FROM INDEX TO [INDEX]   left drag from element FROM INDEX to element TO (centres;
+//                              INDEX as clickid's, @PATH for a Files row)
 //   dragtab TAB WHERE [SLOT] [GAP] [esc|hold]   left drag of tab TAB (its index in the open
 //                              session's tabs) to WHERE: `strip SLOT GAP` (pane SLOT's strip, or
 //                              the title bar's with one pane, before its GAP-th tab), `centre SLOT`,
@@ -850,11 +851,14 @@ autotest_step :: proc() {
 			delete(autotest.clipboard)
 			autotest.clipboard = ""
 		case "dragid":
-			// a left drag from the centre of element FROM (index) to the centre of TO
+			// a left drag from the centre of element FROM INDEX to the centre of TO [INDEX] (each
+			// INDEX as clickid's: a number or a Files row's @PATH)
 			args := strings.fields(expand_vars(rest), context.temp_allocator)
-			from := clay.GetElementData(clay.ID(args[0], u32(num(args[1]))))
-			to := clay.GetElementData(clay.ID(args[2]))
-			if !from.found || !to.found {
+			fi, fok := script_index(args[:2])
+			ti, tok := script_index(args[2:])
+			from := clay.GetElementData(clay.ID(args[0], fi))
+			to := clay.GetElementData(clay.ID(args[2], ti))
+			if !fok || !tok || !from.found || !to.found {
 				if script_retry(idx) do return
 				script_fail("no element", rest)
 				continue

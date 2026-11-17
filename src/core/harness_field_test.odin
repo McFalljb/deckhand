@@ -137,3 +137,27 @@ harness_restore_session_clone :: proc(t: ^testing.T) {
 		testing.expect_value(t, c.tabs[1].harness, Harness.Claude)
 	}
 }
+
+// One rule for what a Claude tab's harness field runs (claude_kind_harness, harness_is_codex): every
+// Harness value is placed (this table must list each), .Pi (never a Claude tab's) runs as Claude
+// Code, and the places that hand the field on as a Harness (tab_harness, open_session_harness)
+// follow it rather than passing .Pi through as pi (#160).
+@(test)
+harness_claude_kind_one_rule :: proc(t: ^testing.T) {
+	want := [Harness]Harness {
+		.Pi     = .Claude,
+		.Claude = .Claude,
+		.Codex  = .Codex,
+	}
+	for h in Harness {
+		testing.expect_value(t, claude_kind_harness(h), want[h])
+		testing.expect_value(t, harness_is_codex(h), want[h] == .Codex)
+		tab := Tab{kind = Claude_Tab{harness = h}}
+		testing.expect_value(t, tab_harness(tab), want[h])
+		s := Open_Session{agent = .Claude}
+		s.tabs = make([dynamic]Tab, context.temp_allocator)
+		append(&s.tabs, tab)
+		testing.expect_value(t, open_session_harness(&s), want[h])
+	}
+	testing.expect_value(t, tab_harness(Tab{kind = Shell_Tab{}}), Harness.Pi) // not a Claude tab: the session's own (pi)
+}

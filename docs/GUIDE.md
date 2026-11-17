@@ -1358,7 +1358,8 @@ as it does anywhere else.
 - **To scroll**, use the wheel or trackpad (pi handles its own scrolling).
 - **To make the text bigger or smaller**, press ⌘+ or ⌘− (⌘0: back to the look's size), or use
   the View menu. It sets the terminals' and the editor's text size and is remembered.
-- **To paste a file's path**, drag its row from the Files tab onto the terminal.
+- **To paste a file's path**, drag its row from the Files tab onto the terminal (a selection of
+  several: all their paths, separated by spaces).
 - **Links**: hold **⌘** over a link to underline it and see where it goes (at the bottom of the
   terminal); **⌘-click** opens it in your default browser, and a mail link in your mail app.
   **⇧⌘-click** opens a web link in a new browser tab of the session, in front (in your default
@@ -1378,6 +1379,10 @@ as it does anywhere else.
 ## Editor tabs
 
 Deckhand has a small code editor with syntax highlighting.
+
+- **Highlighted languages**: C, C++, Objective-C, Odin, Go, Rust, Zig, Python, JavaScript,
+  TypeScript (and JSX/TSX), Lua, shell, Makefiles, Dockerfiles, HTML, CSS, JSON, YAML, TOML, INI
+  and Markdown, in editor tabs and in Markdown code blocks. Other files show as plain text.
 
 - **To open a file**, click it in the Files tab (a single click opens a *preview* tab that the
   next click replaces; double-click, Enter or editing keeps it), or press ⌘P and type part of its
@@ -1430,7 +1435,18 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
 - **Mouse**: a click opens a folder or previews a file; ⌘-click adds or removes a row, shift-click
   selects a range (neither opens anything); a right-click selects the row (one already selected
-  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path.
+  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path (or a
+  selection's paths).
+- **To move files**, drag a row (or a selection it is in) within the tree: onto a folder to move
+  it there, onto a file to move it next to that file, below the last row to move it to the top of
+  the project. The target folder is highlighted while you drag. Hold the pointer over a closed
+  folder to open it, or near the top or bottom of the list to scroll. **Esc** cancels the drag;
+  other keys and ⌘V do nothing until you let go.
+  Nothing asks first; a toast says where the items went ("Moved a.txt to src/"). Nothing moves
+  if the target is the item itself, a folder inside it, or the folder it is already in. Nothing
+  moves either if the target has an item with the same name; a toast says so. If a move is
+  refused part-way (a terminal working in that folder, for example), the toast names the item;
+  what already moved stays moved.
 - **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
   (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
   shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
@@ -2323,7 +2339,7 @@ when you have not edited it, and asks when you have. In the Files tab the arrows
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
 Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
-shown; git letters and colours are the window's. The Settings page shows every setting; the
+shown; git letters and colours are the window's. ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
 installed, once per account with the project's own first, the last used agent first; one starts
@@ -2824,7 +2840,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Space | Open in preview |
 | F2 | Files: rename |
 | ⌘⌫ | Files: move the selection to Trash (asks first, once) |
-| Esc | Clear a selection of several, else give the keyboard back |
+| Esc | Clear a selection of several, else give the keyboard back (while dragging: cancel the move) |
 
 **Atlas's drawer**: ⌃L opens pi's model selector (the Model button).
 

@@ -449,7 +449,7 @@ wire_write_struct :: proc(b: ^strings.Builder, data: rawptr, name: string, st: r
 		n += 1
 		if wire_codex_bool(name, st.names[k]) {
 			json_quote(b, STATE_WIRE_CODEX_KEY)
-			strings.write_string(b, (^Harness)(rawptr(uintptr(data) + st.offsets[k]))^ == .Codex ? ":true" : ":false")
+			strings.write_string(b, harness_is_codex((^Harness)(rawptr(uintptr(data) + st.offsets[k]))^) ? ":true" : ":false")
 			continue
 		}
 		json_quote(b, wire_key(st.names[k], st.tags[k]))

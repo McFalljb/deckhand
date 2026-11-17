@@ -93,7 +93,7 @@ claude_mode_set :: proc(ct: ^Claude_Tab, mode: string) -> bool {
 // plugin, an event without it), kept as it was; "default" clears it. A Codex tab's reports are
 // not looked at (Codex's hooks carry none). True if it changed.
 claude_mode_report :: proc(ct: ^Claude_Tab, reported: string) -> bool {
-	if ct.harness == .Codex do return false
+	if harness_is_codex(ct.harness) do return false
 	w := claude_mode_word(reported)
 	if w == "" do return false
 	return claude_mode_set(ct, w == "default" ? "" : w)

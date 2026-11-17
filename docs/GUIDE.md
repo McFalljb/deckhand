@@ -727,7 +727,9 @@ is waiting for you).
 - **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
-- **To pick up new sessions** started outside Deckhand, use the gear's "Rescan sessions".
+- **New sessions** started outside Deckhand (pi or Claude Code in a terminal) show when you come
+  back to the window, or a paired browser connects: Deckhand looks again then, at most once every
+  3 minutes. To look now, use the gear's "Rescan sessions".
 
 ### Chats settings
 

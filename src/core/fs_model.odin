@@ -1228,3 +1228,55 @@ editors_renamed :: proc(from, to: string) {
 	}
 	window_watch_sync()
 }
+
+// ---- find_files ----
+
+FIND_FILES_DEFAULT :: 100 // results when limit is not given
+FIND_FILES_MAX :: 500
+
+// find_files's data: the project's files (as the Files tree's filter lists them: git's list,
+// ignored ones left out; else a walk that skips hidden folders) that match every word of query,
+// best first (files_filter_match), relative to root: {root, paths, more?}. root: a known project
+// folder ("" = the caller's, as relative paths start: fs_base_for). Never inside .git; a file
+// settings_credential flags is left out for everyone; for anyone but the user here also anything
+// at or inside a credential place (fs_credential_place). Temp allocator.
+fs_find_files :: proc(root, query: string, limit: int, caller: Caller) -> (data: string, err: string) {
+	if strings.trim_space(query) == "" do return "", "query is empty"
+	base := root != "" ? root : fs_base_for(caller)
+	if base == "" do return "", "no project here: give root"
+	p, _, e := fs_check(base, caller, allow_root = true)
+	if e != "" do return "", e
+	if list_index(fs_roots(), p) < 0 do return "", "root must be a project folder"
+	n := limit <= 0 ? FIND_FILES_DEFAULT : min(limit, FIND_FILES_MAX)
+	user := fs_user_here(caller)
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"root":`)
+	json_quote(&b, p)
+	strings.write_string(&b, `,"paths":[`)
+	shown, more := 0, false
+	// a project that is itself in a credential place: nothing for anyone else
+	if user || !fs_credential_place(p) {
+		files := fs_project_files(p)
+		ids := credential_ids() // once for every result
+		none: [1]Cred_Id
+		if len(ids) == 0 do ids = none[:0]
+		for i in files_filter_match(files, query) {
+			rel := files[i]
+			if fs_in_git(rel) do continue
+			full := strings.concatenate({p, "/", rel}, context.temp_allocator)
+			if settings_credential(full, ids) do continue
+			if !user && fs_credential_place(full) do continue
+			if shown == n {
+				more = true
+				break
+			}
+			if shown > 0 do strings.write_byte(&b, ',')
+			json_quote(&b, rel)
+			shown += 1
+		}
+	}
+	strings.write_byte(&b, ']')
+	if more do strings.write_string(&b, `,"more":true`)
+	strings.write_byte(&b, '}')
+	return strings.to_string(b), ""
+}

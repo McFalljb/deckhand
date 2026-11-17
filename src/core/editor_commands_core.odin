@@ -107,6 +107,13 @@ Fs_Copy :: struct {
 	confirm:  string,
 }
 
+// The fuzzy file filter the Files tree has, for a browser (fs_find_files): root a project folder
+// ("" = the caller's), limit results (0 = 100, at most 500).
+Find_Files :: struct {
+	root, query: string,
+	limit:       int,
+}
+
 // Puts an item delete_path moved to the Trash back where it was, by the restore id its result
 // gave (fs_restore.odin). The user's at this window only.
 Restore_Path :: struct {
@@ -200,6 +207,10 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller, request_id: u64 = 0) -> (r
 	case Fs_Copy_Done:
 		fs_copy_done(c)
 		return {ok = true}, true
+	case Find_Files:
+		data, err := fs_find_files(c.root, c.query, c.limit, caller)
+		if err != "" do return fail(err), false
+		return {ok = true, data = strings.clone(data)}, false
 	case Restore_Path:
 		p, err := fs_restore(c.id, caller)
 		if err != "" do return fail(err), false
@@ -283,15 +294,32 @@ fs_copy_apply :: proc(c: Fs_Copy, caller: Caller, request_id: u64) -> (r: Result
 		virtual.arena_destroy(arena)
 		free(arena, runtime.heap_allocator())
 	}
-	plan, err := fs_copy_plan(c.from, c.to, c.unique, caller, virtual.arena_allocator(arena))
-	if err != "" do return fail(err), false
+	if fs_copy_in_flight() do return fail(FS_COPY_RUNNING), false
 	ch := false
-	if caller.kind == .Control && (fs_outside_own(plan.from, caller) || fs_outside_own(plan.to, caller)) {
-		// parked with the paths as checked (the target as asked: a unique name is picked when it runs)
-		a, b, _ := fs_copy_paths(c.from, c.to, caller)
-		gr, go_on, gch := confirm_gate(Fs_Copy{from = a, to = b, unique = c.unique}, .Fs_Write, caller, c.confirm, fmt.tprintf("copy %s to %s?", a, b))
+	plan: Fs_Copy_Plan
+	err: string
+	if c.confirm != "" {
+		// a confirmation (the bar's Confirm, a browser's, or a trusted asker's own token): the parked
+		// entry is used up, and the copy runs by the rules of whoever asked for it, not of who
+		// confirmed (an agent's copy confirmed by the user still refuses credentials)
+		asker := caller
+		for p in state.pending_confirmations do if p.token == c.confirm {
+			if _, is := p.command.(Fs_Copy); is do asker = p.caller
+		}
+		gr, go_on, gch := confirm_gate(Fs_Copy{from = c.from, to = c.to, unique = c.unique}, .Fs_Write, caller, c.confirm, "")
 		if !go_on do return gr, gch
 		ch = gch
+		plan, err = fs_copy_plan(c.from, c.to, c.unique, asker, virtual.arena_allocator(arena))
+		if err != "" do return fail(err), ch
+	} else {
+		plan, err = fs_copy_plan(c.from, c.to, c.unique, caller, virtual.arena_allocator(arena))
+		if err != "" do return fail(err), false
+		if caller.kind == .Control && (fs_outside_own(plan.from, caller) || fs_outside_own(plan.to, caller)) {
+			// parked with the paths as checked (the target as asked: a unique name is picked when it runs)
+			a, b, _ := fs_copy_paths(c.from, c.to, caller)
+			gr, _, gch := confirm_gate(Fs_Copy{from = a, to = b, unique = c.unique}, .Fs_Write, caller, "", fmt.tprintf("copy %s to %s?", a, b))
+			return gr, gch
+		}
 	}
 	keep = true
 	fs_copy_start(plan, arena, request_id)

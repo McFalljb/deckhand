@@ -240,6 +240,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Fs_Copy:             return Fs_Copy{from = s(c.from, allocator), to = s(c.to, allocator), unique = c.unique, confirm = s(c.confirm, allocator)}
 	case Fs_Copy_Done:        return Fs_Copy_Done{request_id = c.request_id, path = s(c.path, allocator), copied = c.copied, total = c.total, failed = s(c.failed, allocator), err = s(c.err, allocator), skipped = s(c.skipped, allocator)}
 	case Restore_Path:        return Restore_Path{id = s(c.id, allocator)}
+	case Find_Files:          return Find_Files{root = s(c.root, allocator), query = s(c.query, allocator), limit = c.limit}
 	case Git_Head_Done:       return Git_Head_Done{tab_id = c.tab_id, gen = c.gen, path = s(c.path, allocator), in_repo = c.in_repo, tracked = c.tracked, head = s(c.head, allocator)}
 	case Git_Status_Done:     return Git_Status_Done{root = s(c.root, allocator), gen = c.gen, ok = c.ok, out = s(c.out, allocator)}
 	case File_List_Done:      return File_List_Done{root = s(c.root, allocator), out = s(c.out, allocator)}
@@ -489,6 +490,9 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.err, allocator)
 		delete(c.skipped, allocator)
 	case Restore_Path:        delete(c.id, allocator)
+	case Find_Files:
+		delete(c.root, allocator)
+		delete(c.query, allocator)
 	case Git_Head_Done:
 		delete(c.path, allocator)
 		delete(c.head, allocator)

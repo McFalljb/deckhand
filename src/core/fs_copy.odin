@@ -15,6 +15,7 @@ package core
 import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
+import "core:os"
 import "core:path/filepath"
 import "core:slice"
 import "core:strings"
@@ -34,7 +35,10 @@ Fs_Copy_Done :: struct {
 
 FS_COPY_MAX_ENTRIES :: 20_000 // files, folders and links in one copy
 FS_COPY_MAX_BYTES :: i64(2) << 30 // regular files' bytes in one copy (2 GB)
-FS_COPY_MAX_DEPTH :: 64 // folders inside folders (each level holds two descriptors while it copies)
+FS_COPY_MAX_DEPTH :: 24 // folders inside folders: each level holds two descriptors while it copies, so
+// a copy holds at most about 50 (one copy at a time: FS_COPY_RUNNING), well under the usual limit
+FS_COPY_RUNNING :: "a copy is already running"
+FS_COPY_TOO_MANY :: "too many to copy: more than %d files and folders; nothing was copied"
 FS_COPY_NAMES_MAX :: 1000 // "name copy N" names tried
 
 FS_COPY_INTO_ITSELF :: "a folder cannot be copied into itself"
@@ -53,6 +57,7 @@ Fs_Copy_Item :: struct {
 	depth:    int, // 0 = the root
 	kind:     Fs_Copy_Kind,
 	mode:     u32, // permission bits (0o777)
+	size:     i64, // a file's bytes the checks counted: no more are copied
 	dev, ino: u64, // the source item the checks saw
 }
 
@@ -120,7 +125,8 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 	ids := credential_ids() // read once for the whole tree
 	none: [1]Cred_Id
 	if len(ids) == 0 do ids = none[:0] // no sign-in files: never nil (nil reads them again, per entry)
-	if cerr := copy_credential_check(a, ".", is_dir, user, true, ids); cerr != "" do return {}, cerr
+	home := fs_real(os.get_env("HOME", context.temp_allocator)) // show_secret's, once for the tree
+	if cerr := copy_credential_check(a, ".", is_dir, user, true, ids, home); cerr != "" do return {}, cerr
 	if user && settings_credential(a, ids) do return {}, "it is a credential: not copied"
 	// in a credential place (at, above or inside one; the user's only by now), every entry is
 	// checked by the full rule; else only below a folder that is one by what it holds, and links
@@ -144,7 +150,8 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 		append(&stack, Frame{a, "", 0, in_place || copy_marked_folder(a)})
 		for len(stack) > 0 {
 			f := pop(&stack)
-			names, lerr := copy_read_names(f.path)
+			names, lerr, over := copy_read_names(f.path, FS_COPY_MAX_ENTRIES - len(items))
+			if over do return {}, fmt.tprintf(FS_COPY_TOO_MANY, FS_COPY_MAX_ENTRIES)
 			if lerr != "" do return {}, fmt.tprintf("cannot list %s: %s", f.rel == "" ? "it" : f.rel, lerr)
 			subs := make([dynamic]Frame, context.temp_allocator)
 			for name in names {
@@ -158,7 +165,7 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 				}
 				d := posix.S_ISDIR(st.st_mode)
 				full_rule := f.place || posix.S_ISLNK(st.st_mode) // a link: where it leads decides too
-				if cerr := copy_credential_check(full, rel, d, user, full_rule, ids, &st); cerr != "" do return {}, cerr
+				if cerr := copy_credential_check(full, rel, d, user, full_rule, ids, home, &st); cerr != "" do return {}, cerr
 				if user && !d && copy_credential(full, full_rule, ids, &st) {
 					append(&skipped, Fs_Copy_Skip{strings.clone(rel, allocator), "a credential: not copied"})
 					continue
@@ -168,7 +175,7 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 					append(&skipped, Fs_Copy_Skip{strings.clone(rel, allocator), "not a file, folder or link: not copied"})
 					continue
 				}
-				if len(items) >= FS_COPY_MAX_ENTRIES do return {}, fmt.tprintf("too many to copy: more than %d files and folders; nothing was copied", FS_COPY_MAX_ENTRIES)
+				if len(items) >= FS_COPY_MAX_ENTRIES do return {}, fmt.tprintf(FS_COPY_TOO_MANY, FS_COPY_MAX_ENTRIES)
 				if it.kind == .File {
 					plan.bytes += i64(st.st_size)
 					if plan.bytes > FS_COPY_MAX_BYTES do return {}, "too big to copy: more than 2 GB; nothing was copied"
@@ -195,9 +202,9 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 // (show_secret) or a folder that is a credential place by what it holds refuses the whole copy.
 // The user's credentials are left out instead (fs_copy_plan).
 @(private = "file")
-copy_credential_check :: proc(full, rel: string, is_dir, user, full_rule: bool, ids: []Cred_Id, st: ^posix.stat_t = nil) -> string {
+copy_credential_check :: proc(full, rel: string, is_dir, user, full_rule: bool, ids: []Cred_Id, home: string, st: ^posix.stat_t = nil) -> string {
 	if user do return ""
-	if copy_credential(full, full_rule, ids, st) || show_secret(full) do return fmt.tprintf(FS_COPY_CREDENTIAL, rel)
+	if copy_credential(full, full_rule, ids, st) || show_secret(full, home) do return fmt.tprintf(FS_COPY_CREDENTIAL, rel)
 	if is_dir && copy_marked_folder(full) do return fmt.tprintf(FS_COPY_CREDENTIAL, rel)
 	return ""
 }
@@ -228,7 +235,7 @@ copy_credential :: proc(full: string, full_rule: bool, ids: []Cred_Id, st: ^posi
 
 @(private = "file")
 copy_item_of :: proc(st: ^posix.stat_t, name, rel: string, depth: int) -> (it: Fs_Copy_Item, ok: bool) {
-	it = {name = name, rel = rel, depth = depth, mode = u32(transmute(posix._mode_t)st.st_mode) & 0o777, dev = u64(st.st_dev), ino = u64(st.st_ino)}
+	it = {name = name, rel = rel, depth = depth, mode = u32(transmute(posix._mode_t)st.st_mode) & 0o777, size = i64(st.st_size), dev = u64(st.st_dev), ino = u64(st.st_ino)}
 	switch {
 	case posix.S_ISREG(st.st_mode): it.kind = .File
 	case posix.S_ISDIR(st.st_mode): it.kind = .Dir
@@ -238,11 +245,12 @@ copy_item_of :: proc(st: ^posix.stat_t, name, rel: string, depth: int) -> (it: F
 	return it, true
 }
 
-// A folder's names, sorted (temp). err: why it cannot be listed.
+// A folder's names, sorted (temp). err: why it cannot be listed. over: it has more than max
+// entries (read no further: a huge folder is refused without listing all of it).
 @(private = "file")
-copy_read_names :: proc(dir: string) -> (names: []string, err: string) {
+copy_read_names :: proc(dir: string, max: int) -> (names: []string, err: string, over: bool) {
 	d := posix.opendir(strings.clone_to_cstring(dir, context.temp_allocator))
-	if d == nil do return nil, strings.to_lower(string(posix.strerror(posix.errno())), context.temp_allocator)
+	if d == nil do return nil, strings.to_lower(string(posix.strerror(posix.errno())), context.temp_allocator), false
 	defer posix.closedir(d)
 	out := make([dynamic]string, context.temp_allocator)
 	for {
@@ -250,10 +258,11 @@ copy_read_names :: proc(dir: string) -> (names: []string, err: string) {
 		if ent == nil do break
 		n := string(cstring(raw_data(ent.d_name[:])))
 		if n == "." || n == ".." do continue
+		if len(out) >= max do return nil, "", true
 		append(&out, strings.clone(n, context.temp_allocator))
 	}
 	slice.sort_by(out[:], fs_name_less) // the tree's order
-	return out[:], ""
+	return out[:], "", false
 }
 
 // The items in depth-first order: the root, then each folder followed by everything in it (the
@@ -278,6 +287,9 @@ copy_preorder :: proc(items: []Fs_Copy_Item, allocator: runtime.Allocator) -> []
 	add(&out, items, children, 0)
 	return out[:]
 }
+
+// Whether a copy's worker is running (one at a time: FS_COPY_RUNNING).
+fs_copy_in_flight :: proc() -> bool {return len(fs_copy_busy) > 0}
 
 when TEST_HOOKS {
 	// Copies whose worker has not come back yet (tests).
@@ -421,6 +433,7 @@ fs_copy_run :: proc(plan: Fs_Copy_Plan) -> (copied: int, failed: string, err: st
 		return posix.fstat(fd, &st) == .OK && u64(st.st_dev) == it.dev && u64(st.st_ino) == it.ino
 	}
 	buf := make([]u8, 1 << 20, context.temp_allocator)
+	total: i64 // bytes copied so far: never past FS_COPY_MAX_BYTES, whatever grew since the checks
 	base_from, base_to := filepath.base(plan.from), filepath.base(plan.to)
 	for it in plan.items {
 		for len(levels) > it.depth + 1 do close_level(pop(&levels))
@@ -457,8 +470,10 @@ fs_copy_run :: proc(plan: Fs_Copy_Plan) -> (copied: int, failed: string, err: st
 			if d < 0 do return copied, it.rel, fmt.tprintf("cannot make the file: %s", errno_text())
 			copied += 1 // made, even if its bytes fail below: it stays, and says so
 			ok := true
-			for {
-				n := int(posix.read(s, raw_data(buf), uint(len(buf))))
+			left := it.size // a file that grew since the checks: only what they counted
+			grew := false
+			for left > 0 {
+				n := int(posix.read(s, raw_data(buf), uint(min(i64(len(buf)), left))))
 				if n < 0 && posix.errno() == .EINTR do continue
 				if n <= 0 {
 					ok = n == 0
@@ -475,12 +490,23 @@ fs_copy_run :: proc(plan: Fs_Copy_Plan) -> (copied: int, failed: string, err: st
 					w += m
 				}
 				if !ok do break
+				left -= i64(n)
+				total += i64(n)
+				if total > FS_COPY_MAX_BYTES {
+					grew = true
+					break
+				}
 			}
 			e := ok ? "" : errno_text()
 			posix.fchmod(d, transmute(posix.mode_t)posix._mode_t(it.mode))
 			posix.close(d)
 			if !ok do return copied, it.rel, fmt.tprintf("cannot copy its bytes: %s", e)
+			if grew do return copied, it.rel, "the files grew past 2 GB while copying"
 		case .Link:
+			lst: posix.stat_t
+			if posix.fstatat(l.src, sname, &lst, {.SYMLINK_NOFOLLOW}) != .OK || !posix.S_ISLNK(lst.st_mode) || u64(lst.st_dev) != it.dev || u64(lst.st_ino) != it.ino {
+				return copied, it.rel, "it changed while copying"
+			}
 			lbuf: [posix.PATH_MAX]u8
 			n := posix.readlinkat(l.src, sname, raw_data(lbuf[:]), len(lbuf) - 1)
 			if n < 0 do return copied, it.rel, "it changed while copying"

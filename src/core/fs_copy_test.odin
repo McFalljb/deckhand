@@ -462,12 +462,12 @@ restore_path_user_only_core_ids :: proc(t: ^testing.T) {
 	id := ids[f]
 	testing.expect(t, id != "" && !os.exists(f), "trashed, with a restore id")
 	// nobody but the user here: refused, the item stays in the Trash
-	for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}, {kind = .UI, hub = true}, {kind = .Internal}}) {
+	for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, hub = true}, {kind = .Panel, tab_id = 1}, {kind = .Internal}}) {
 		r := run_command(Restore_Path{id = id}, c)
 		testing.expect(t, !r.ok, "refused")
 		testing.expect(t, !os.exists(f), "not restored")
 	}
-	testing.expect_value(t, run_command(Restore_Path{id = id}, Caller{kind = .UI, web = true}).error, FS_RESTORE_USER_ONLY)
+	testing.expect_value(t, run_command(Restore_Path{id = id}, Caller{kind = .UI, hub = true}).error, FS_RESTORE_USER_ONLY)
 	// only an id the core issued: a Trash path, a made-up id, nothing
 	entries, _ := os.read_all_directory_by_path(outside, context.temp_allocator)
 	for x in ([]string{fmt.tprintf("%s/%s", outside, entries[0].name), "00000000-0000-0000-0000-000000000000", ""}) {
@@ -561,4 +561,203 @@ restore_path_xdg_trash :: proc(t: ^testing.T) {
 	testing.expect_value(t, cread(f), "doc")
 	testing.expect(t, !os.exists(info), "its info file is removed")
 	testing.expect(t, !os.exists(fmt.tprintf("%s/Trash/files/doc s.txt", outside)), "out of files/")
+}
+
+// ---- review fixes ----
+
+// The control asker's copy, confirmed with the token as the window's bar sends it: the entry is
+// used up, the copy runs by the asker's rules (a credential refuses it, not skipped), once.
+@(test)
+fs_copy_confirm_uses_the_askers_rules :: proc(t: ^testing.T) {
+	when TEST_HOOKS {
+		context.allocator = runtime.heap_allocator()
+		inbox_drain()
+		proj, _ := csetup("confirm")
+		defer {os.remove_all(tdir(proj)); state = State{}}
+		wait :: proc() {
+			for i := 0; i < 500 && fs_copy_running() > 0; i += 1 {
+				inbox_drain()
+				time.sleep(5 * time.Millisecond)
+			}
+			inbox_drain()
+		}
+		cwrite(fmt.tprintf("%s/c/ok.txt", proj), "ok")
+		from, to := fmt.tprintf("%s/c", proj), fmt.tprintf("%s/c2", proj)
+		r := run_command(Fs_Copy{from = from, to = to}, Caller{kind = .Control})
+		testing.expect_value(t, r.error, "needs_confirmation")
+		testing.expect_value(t, len(state.pending_confirmations), 1)
+		if len(state.pending_confirmations) != 1 do return
+		tok := strings.clone(state.pending_confirmations[0].token, context.temp_allocator)
+		// a credential put there while it waits: the asker's rules refuse it at the confirmation
+		cwrite(fmt.tprintf("%s/c/.claude.json.backup", proj), "{}")
+		// what the window's confirm_pending sends (main.odin), as the user
+		r = run_command(Fs_Copy{from = from, to = to, confirm = tok}, UI_HERE)
+		testing.expect_value(t, r.error, fmt.tprintf(FS_COPY_CREDENTIAL, ".claude.json.backup"))
+		testing.expect_value(t, len(state.pending_confirmations), 0)
+		wait()
+		testing.expect(t, !os.exists(to), "refused by the asker's rules, not copied with the credential left out")
+		// without the credential: confirmed once, copied once; the token again is refused
+		os.remove(fmt.tprintf("%s/c/.claude.json.backup", proj))
+		r = run_command(Fs_Copy{from = from, to = to}, Caller{kind = .Control})
+		testing.expect_value(t, r.error, "needs_confirmation")
+		tok = strings.clone(state.pending_confirmations[0].token, context.temp_allocator)
+		r = run_command(Fs_Copy{from = from, to = to, confirm = tok}, UI_HERE)
+		testing.expect(t, r.ok && r.pending, r.error)
+		testing.expect_value(t, len(state.pending_confirmations), 0)
+		wait()
+		testing.expect_value(t, cread(fmt.tprintf("%s/ok.txt", to)), "ok")
+		r = run_command(Fs_Copy{from = from, to = to, confirm = tok}, UI_HERE)
+		testing.expect_value(t, r.error, "unknown or expired confirmation token")
+		wait()
+		entries, _ := os.read_all_directory_by_path(proj, context.temp_allocator)
+		testing.expect_value(t, len(entries), 2) // c and c2: one copy only
+		// one copy at a time
+		cwrite(fmt.tprintf("%s/one/a.txt", proj), "a")
+		r = run_command(Fs_Copy{from = fmt.tprintf("%s/one", proj), to = fmt.tprintf("%s/one2", proj)}, UI_HERE)
+		testing.expect(t, r.pending, r.error)
+		r2 := run_command(Fs_Copy{from = fmt.tprintf("%s/one", proj), to = fmt.tprintf("%s/one3", proj)}, UI_HERE)
+		testing.expect_value(t, r2.error, FS_COPY_RUNNING)
+		wait()
+	}
+}
+
+@(test)
+fs_copy_depth_size_and_links_while_copying :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	proj, _ := csetup("depth")
+	defer {os.remove_all(tdir(proj)); state = State{}}
+	// 25 folders inside each other: refused (24 deep is the cap)
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "%s/deep", proj)
+	for _ in 0 ..= FS_COPY_MAX_DEPTH do strings.write_string(&b, "/d")
+	cwrite(fmt.tprintf("%s/f", strings.to_string(b)))
+	_, err, a := copy_now(fmt.tprintf("%s/deep", proj), fmt.tprintf("%s/deep2", proj), UI_HERE)
+	defer arena_done(a)
+	testing.expect_value(t, err, fmt.tprintf("too deep to copy: more than %d folders inside each other; nothing was copied", FS_COPY_MAX_DEPTH))
+	// a file that grew after the checks: only the bytes they counted
+	cwrite(fmt.tprintf("%s/g/grow.txt", proj), "abc")
+	cwrite(fmt.tprintf("%s/g/l", proj), "")
+	os.remove(fmt.tprintf("%s/g/l", proj))
+	posix.symlink("one", strings.clone_to_cstring(fmt.tprintf("%s/g/l", proj)))
+	arena := new(virtual.Arena)
+	_ = virtual.arena_init_growing(arena)
+	defer arena_done(arena)
+	plan, perr := fs_copy_plan(fmt.tprintf("%s/g", proj), fmt.tprintf("%s/g2", proj), false, UI_HERE, virtual.arena_allocator(arena))
+	testing.expect_value(t, perr, "")
+	cwrite(fmt.tprintf("%s/g/grow.txt", proj), "abcdefghij")
+	n, failed, rerr := fs_copy_run(plan)
+	testing.expect_value(t, rerr, "")
+	testing.expect_value(t, n, 3)
+	testing.expect_value(t, failed, "")
+	testing.expect_value(t, cread(fmt.tprintf("%s/g2/grow.txt", proj)), "abc")
+	// a link swapped for another after the checks: refused there, not copied
+	plan2, perr2 := fs_copy_plan(fmt.tprintf("%s/g", proj), fmt.tprintf("%s/g3", proj), false, UI_HERE, virtual.arena_allocator(arena))
+	testing.expect_value(t, perr2, "")
+	os.rename(fmt.tprintf("%s/g/l", proj), fmt.tprintf("%s/l.old", proj)) // kept: its inode is not reused
+	posix.symlink("/etc/passwd", strings.clone_to_cstring(fmt.tprintf("%s/g/l", proj)))
+	_, failed2, rerr2 := fs_copy_run(plan2)
+	testing.expect_value(t, failed2, "l")
+	testing.expect_value(t, rerr2, "it changed while copying")
+	testing.expect(t, !is_link(fmt.tprintf("%s/g3/l", proj)), "the new link is not copied")
+}
+
+@(test)
+restore_path_same_item_and_browser :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	proj, outside := csetup("same")
+	defer {os.remove_all(tdir(proj)); state = State{}}
+	old := os.get_env("XDG_DATA_HOME", context.temp_allocator)
+	os.set_env("XDG_DATA_HOME", outside)
+	defer {if old != "" do os.set_env("XDG_DATA_HOME", old); else do os.unset_env("XDG_DATA_HOME")}
+	saved := fs_trash_fn
+	defer fs_trash_fn = saved
+	fs_trash_fn = proc(path: string) -> bool {
+		why := trash_xdg(path)
+		fs_trash_why = why
+		return why == ""
+	}
+	// changed in the Trash since (its size and time; an inode reused for another file looks so)
+	f := fmt.tprintf("%s/a.txt", proj)
+	cwrite(f, "a")
+	id := delete_ids(t, f)[f]
+	in_trash := fmt.tprintf("%s/Trash/files/a.txt", outside)
+	time.sleep(10 * time.Millisecond)
+	cwrite(in_trash, "another")
+	testing.expect_value(t, run_command(Restore_Path{id = id}, UI_HERE).error, FS_RESTORE_GONE)
+	testing.expect(t, !os.exists(f), "not restored")
+	testing.expect_value(t, run_command(Restore_Path{id = id}, UI_HERE).error, FS_RESTORE_UNKNOWN) // dropped
+	// its info file changed (another item's info at that name): refused, the info file kept
+	g := fmt.tprintf("%s/b.txt", proj)
+	cwrite(g, "b")
+	gid := delete_ids(t, g)[g]
+	ginfo := fmt.tprintf("%s/Trash/info/b.txt.trashinfo", outside)
+	cwrite(ginfo, "[Trash Info]\nPath=/elsewhere/b.txt\nDeletionDate=2020-01-01T00:00:00\n")
+	testing.expect_value(t, run_command(Restore_Path{id = gid}, UI_HERE).error, FS_RESTORE_GONE)
+	testing.expect(t, os.exists(ginfo) && !os.exists(g), "nothing moved, nothing removed")
+	// a paired browser may restore (it acts as the user); another machine's core may not
+	h := fmt.tprintf("%s/c.txt", proj)
+	cwrite(h, "c")
+	hid := delete_ids(t, h)[h]
+	testing.expect_value(t, run_command(Restore_Path{id = hid}, Caller{kind = .UI, hub = true}).error, FS_RESTORE_USER_ONLY)
+	testing.expect_value(t, run_command(Restore_Path{id = hid}, Caller{kind = .UI, web = true, hub = true}).error, FS_RESTORE_USER_ONLY)
+	r := run_command(Restore_Path{id = hid}, Caller{kind = .UI, web = true})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, cread(h), "c")
+}
+
+@(test)
+find_files_filters_like_the_tree :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	proj, outside := csetup("find")
+	defer {os.remove_all(tdir(proj)); state = State{}}
+	_, gok := git_run(proj, "init", "-q")
+	testing.expect(t, gok, "git init")
+	cwrite(fmt.tprintf("%s/src/main.odin", proj), "m")
+	cwrite(fmt.tprintf("%s/src/main_test.odin", proj), "t")
+	cwrite(fmt.tprintf("%s/docs/main.md", proj), "d")
+	cwrite(fmt.tprintf("%s/notes/.claude.json.backup", proj), "{}") // a credential by name
+	cwrite(fmt.tprintf("%s/cfg/.credentials.json", proj), "{}") // makes cfg Claude's config folder
+	cwrite(fmt.tprintf("%s/cfg/history.jsonl", proj), "h") // a credential there
+	cwrite(fmt.tprintf("%s/cfg/settings.json", proj), "{}") // its config: not a credential, but in a credential place
+	state.selected_project = state.projects[0].id
+	ask :: proc(c: Find_Files, by: Caller) -> (paths: []string, more: bool, r: Result) {
+		r = run_command(c, by)
+		if !r.ok do return
+		v, _ := json.parse_string(r.data, allocator = context.temp_allocator)
+		o := v.(json.Object)
+		out := make([dynamic]string, context.temp_allocator)
+		for x in o["paths"].(json.Array) do append(&out, x.(json.String))
+		return out[:], o["more"] != nil, r
+	}
+	has :: proc(list: []string, x: string) -> bool {
+		for y in list do if y == x do return true
+		return false
+	}
+	paths, more, r := ask(Find_Files{query = "main"}, UI_HERE)
+	testing.expect(t, r.ok, r.error)
+	testing.expect(t, has(paths, "src/main.odin") && has(paths, "docs/main.md") && has(paths, "src/main_test.odin") && !more, r.data)
+	// credentials left out for everyone; .git never listed
+	paths, _, r = ask(Find_Files{root = proj, query = "json"}, UI_HERE)
+	testing.expect(t, !has(paths, "notes/.claude.json.backup") && !has(paths, "cfg/.credentials.json") && !has(paths, "cfg/history.jsonl"), r.data)
+	testing.expect(t, has(paths, "cfg/settings.json"), "the user sees its config file")
+	paths, _, r = ask(Find_Files{root = proj, query = "head"}, UI_HERE)
+	testing.expect(t, !has(paths, ".git/HEAD"), r.data)
+	// anyone else: nothing in a credential place either
+	for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}}) {
+		paths, _, r = ask(Find_Files{root = proj, query = "json"}, c)
+		testing.expect(t, r.ok && !has(paths, "cfg/settings.json") && !has(paths, "cfg/history.jsonl"), r.data)
+	}
+	// the limit, and more
+	paths, more, r = ask(Find_Files{root = proj, query = "main", limit = 2}, UI_HERE)
+	testing.expect(t, len(paths) == 2 && more, r.data)
+	// only a known project folder
+	testing.expect_value(t, run_command(Find_Files{root = outside, query = "x"}, UI_HERE).error, "only inside a project folder")
+	testing.expect_value(t, run_command(Find_Files{root = fmt.tprintf("%s/src", proj), query = "x"}, UI_HERE).error, "root must be a project folder")
+	testing.expect_value(t, run_command(Find_Files{root = proj, query = "  "}, UI_HERE).error, "query is empty")
+	// the wire
+	cmd, err := parse_command(`{"type":"find_files","query":"a b","limit":9999}`)
+	testing.expect_value(t, err, "")
+	if c, ok := cmd.(Find_Files); ok do testing.expect(t, c.query == "a b" && c.limit == FIND_FILES_MAX, "read back, limit capped")
 }

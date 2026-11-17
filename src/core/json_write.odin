@@ -286,6 +286,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Fs_Copy:             return "fs_copy"
 	case Fs_Copy_Done:        return "fs_copy_done"
 	case Restore_Path:        return "restore_path"
+	case Find_Files:          return "find_files"
 	case Git_Head_Done:       return "git_head_done"
 	case Git_Status_Done:     return "git_status_done"
 	case Reveal_In_Finder:    return "reveal_in_finder"
@@ -885,6 +886,10 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.err != "" do kv_str(&w, "err", c.err)
 	case Restore_Path:
 		kv_str(&w, "id", c.id)
+	case Find_Files:
+		if c.root != "" do kv_str(&w, "root", c.root)
+		kv_str(&w, "query", c.query)
+		if c.limit > 0 do kv_u64(&w, "limit", u64(c.limit))
 	case Git_Head_Done: // internal; the file's text stays out of events and the log
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_bool(&w, "tracked", c.tracked)

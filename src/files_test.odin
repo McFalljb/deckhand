@@ -693,17 +693,18 @@ files_menu_for_several_rows :: proc(t: ^testing.T) {
 		return strings.to_string(b)
 	}
 	a, b, c := fmt.tprintf("%s/a.txt", dir), fmt.tprintf("%s/b.txt", dir), fmt.tprintf("%s/c.txt", dir)
-	testing.expect_value(t, labels(a), "Move 2 items to Trash…|Copy paths|Copy relative paths|")
+	testing.expect_value(t, labels(a), "Move 2 items to Trash|Cut|Copy|Duplicate|Copy paths|Copy relative paths|")
 	items := make([dynamic]core.Menu_Item, context.temp_allocator)
 	files_menu_items(b, &items)
-	d, ok := items[0].cmd.(core.Delete_Path)
-	testing.expect(t, ok && len(d.paths) == 2 && d.paths[0] == a && d.paths[1] == b, "the batch, in row order")
+	testing.expect_value(t, items[0].files, core.Files_Step.Trash) // the tree's own delete (files_trash): the selection
+	multi := files_menu_multi(b)
+	testing.expect(t, len(multi) == 2 && multi[0] == a && multi[1] == b, "the batch, in row order")
 	testing.expect(t, files_step(b, .Copy_Path), "copied")
 	testing.expect_value(t, copied_text, fmt.tprintf("%s\n%s", a, b))
 	testing.expect(t, files_step(b, .Copy_Relative), "copied")
 	testing.expect_value(t, copied_text, "a.txt\nb.txt")
 	// a row outside the selection: its own menu
-	testing.expect(t, strings.contains(labels(c), "Rename…|Move to Trash…|"), labels(c))
+	testing.expect(t, strings.contains(labels(c), "Rename…|Move to Trash|"), labels(c))
 	delete(copied_text)
 	copied_text = ""
 }
@@ -726,7 +727,7 @@ files_menu_counts_the_merged_batch :: proc(t: ^testing.T) {
 		files_menu_items(path, &items)
 		return items[0].label
 	}
-	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move to Trash…")
+	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move to Trash")
 	core.files_sel_click(v, rows, 2, true, false) // to z.txt
-	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move 2 items to Trash…")
+	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move 2 items to Trash")
 }

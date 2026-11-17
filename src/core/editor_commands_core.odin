@@ -92,6 +92,7 @@ Delete_Path :: struct {
 	path:    string, // moved to the Trash; confirms (class delete)
 	paths:   []string, // a batch (path, if given, is one more): all checked before any moves, one confirmation (fs_delete_plan)
 	confirm: string,
+	undoable: bool, // the user's own delete in the window's Files tree: no confirmation when every item gets a restore id (fs_restore_promised; the window's Undo puts them back)
 }
 
 Reveal_In_Finder :: struct {
@@ -193,7 +194,7 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller, request_id: u64 = 0) -> (r
 		p, _, err := fs_check_write(c.path, caller)
 		if err != "" do return fail(err), false
 		if !os.exists(p) do return fail("no such file or folder"), false
-		gr, go_on, ch := confirm_gate(Delete_Path{path = p}, .Delete, caller, c.confirm, fmt.tprintf("move %s to the Trash?", p))
+		gr, go_on, ch := confirm_gate(Delete_Path{path = p}, .Delete, caller, c.confirm, fmt.tprintf("move %s to the Trash?", p), skip = files_delete_unasked(c, caller, []string{p}))
 		if !go_on do return gr, ch
 		checked, derr := fs_delete_check(p, caller)
 		id := ""
@@ -241,7 +242,7 @@ delete_batch_apply :: proc(c: Delete_Path, caller: Caller) -> (r: Result, change
 	if err != "" do return fail(err), false
 	// the checked paths park (one left after nesting: as a single delete_path)
 	parked := len(plan) == 1 ? Delete_Path{path = plan[0]} : Delete_Path{paths = plan}
-	gr, go_on, ch := confirm_gate(parked, .Delete, caller, c.confirm, fs_delete_summary(plan))
+	gr, go_on, ch := confirm_gate(parked, .Delete, caller, c.confirm, fs_delete_summary(plan), skip = files_delete_unasked(c, caller, plan))
 	if !go_on do return gr, ch
 	ids := make([]string, len(plan), context.temp_allocator)
 	for p, i in plan {

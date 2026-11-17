@@ -235,7 +235,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 			paths = make([]string, len(c.paths), allocator)
 			for p, i in c.paths do paths[i] = s(p, allocator)
 		}
-		return Delete_Path{path = s(c.path, allocator), paths = paths, confirm = s(c.confirm, allocator)}
+		return Delete_Path{path = s(c.path, allocator), paths = paths, confirm = s(c.confirm, allocator), undoable = c.undoable}
 	case Reveal_In_Finder:    return Reveal_In_Finder{path = s(c.path, allocator)}
 	case Fs_Copy:             return Fs_Copy{from = s(c.from, allocator), to = s(c.to, allocator), unique = c.unique, confirm = s(c.confirm, allocator)}
 	case Fs_Copy_Done:        return Fs_Copy_Done{request_id = c.request_id, path = s(c.path, allocator), copied = c.copied, total = c.total, failed = s(c.failed, allocator), err = s(c.err, allocator), skipped = s(c.skipped, allocator)}

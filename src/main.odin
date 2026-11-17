@@ -343,7 +343,7 @@ window_hooks_app :: proc() -> core.Window_Hooks {
 	return {
 		state_changed = proc() {app.redraw = true},
 		test_step = autotest_step,
-		test_event = autotest_on_event,
+		test_event = proc(ev: core.Event) {files_copy_on_event(ev); autotest_on_event(ev)}, // a Files copy's finished (ui_files_clip.odin)
 		test_facts = client.host ? client_test_facts : nil, // the unit tests' host link (client.odin)
 	}
 }
@@ -506,6 +506,7 @@ frame :: proc "c" () {
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
 	if files_drag_tick() do app.redraw = true // a Files drag: a held folder opens, edge scroll (ui_files.odin)
+	if files_copy_tick() do app.redraw = true // a Files paste's copy finished: the next one (ui_files_clip.odin)
 	holder_ask_tick() // a session holder from another build: asked once (below)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
 	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
@@ -692,6 +693,7 @@ event :: proc(e: ^sapp.Event) {
 	}
 	// a peek (ui_peek.odin) is for looking: like the bell's popover it takes the keys and clicks
 	// (nothing reaches its terminal or what is under it); a ⌘ chord not its own closes it and goes on
+	if toast_event(e) do return // a toast's Undo (toast.odin)
 	if peek_event(e) do return
 	// a Files drag takes every key, paste and dropped file until it ends (Esc cancels): before the
 	// global shortcuts, so none acts mid-drag and nothing reaches a terminal (ui_files.odin)

@@ -441,8 +441,12 @@ work only from Deckhand's own record, so a found row gives them nothing).
   a project added at `~` by hand is left as it is).
 - **Rows.** Only `<uuid>.jsonl` files (never `agent-*` or side-chain ones); title: a
   `custom-title` or the first real prompt (meta, command and reminder lines skipped), else
-  `ai-title` or `summary`; read from the first and last 64 KB only, within a per-frame budget
-  (the rest on a worker, cached by size and date), so scanning never blocks a frame. Sorted by the
+  `ai-title` or `summary`; read from the first and last 64 KB only. A line is parsed only when it
+  can still change something: in the tail, a title line; in the head, until the cwd, the side-chain
+  flag and the first prompt are known, then only title lines. At most 256 KB a listing is read on
+  the main thread (`CLAUDE_DISK_INLINE_BUDGET`: two transcripts), the rest on a worker (cached
+  by size and date), which has the rows made again when it has drained, or every 250 ms while it
+  drains (`FOUND_PUBLISH_EVERY`), never once per transcript. Sorted by the
   file's date; created from the file. Merged by id with Deckhand's record (one row each), under
   the MAX_SESSIONS cap. A line goes to the JSON
   parser only when it is at most 64 KB and nested at most 64 deep (the parser recurses). The

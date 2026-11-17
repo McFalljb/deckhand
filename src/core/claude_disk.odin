@@ -16,7 +16,7 @@ package core
 //     else the first real prompt (not meta, a command, a command's output, a system reminder or a
 //     sidechain; its first line, at most 80 characters), else Claude's own title (ai-title), else
 //     a summary. Read from the file's first and last 64 KB only, as Claude Code's own resume
-//     list does; within the listing's byte budget on the main thread (TITLE_INLINE_BUDGET), the
+//     list does; within the listing's byte budget on the main thread (CLAUDE_DISK_INLINE_BUDGET), the
 //     rest on a worker, then the rows are made again. Never saved, never given to agents beyond
 //     the row (id, title, times, account label): no path.
 //   - Deckhand's own history entries whose transcript is gone (Claude Code deletes transcripts
@@ -47,6 +47,11 @@ import "core:thread"
 import "core:time"
 
 CLAUDE_DISK_CHUNK :: 64 * 1024 // the head and the tail of a transcript read for its title (Claude Code's own)
+// Transcript bytes a listing reads on the main thread (a select): two transcripts' head and tail at
+// most; the rest on the worker.
+CLAUDE_DISK_INLINE_BUDGET :: 256 * 1024
+// How often the worker has the rows made again while it drains.
+FOUND_PUBLISH_EVERY :: 250 * time.Millisecond
 
 // A Claude transcript of the listed project's: a row of its own (listed), or what the scan knows
 // of one Deckhand's history has (its created date, or that its transcript is gone).
@@ -65,7 +70,7 @@ Claude_Disk :: struct {
 // The title cache's size (tests lower it).
 claude_disk_cache_max := 20_000
 // Bytes a listing reads on the main thread (tests lower it).
-claude_disk_inline_budget := i64(TITLE_INLINE_BUDGET)
+claude_disk_inline_budget := i64(CLAUDE_DISK_INLINE_BUDGET)
 
 // Whether the launch needs a Rescan for Claude's and Codex's projects (any account has a
 // projects/ folder, any Codex home a sessions/ folder):
@@ -79,6 +84,12 @@ claude_startup_rescan_due :: proc() -> bool {
 
 // Bytes read from Claude transcripts (tests).
 claude_disk_bytes_read: i64
+// Transcript lines handed to the JSON parser by the title read (tests).
+claude_disk_lines_parsed: i64
+// Times the found rows were made again (tests).
+claude_disk_rescans: int
+// Transcript bytes the listing read on the main thread (tests).
+claude_disk_inline_read: i64
 
 @(private = "file")
 found_arena: virtual.Arena
@@ -112,6 +123,7 @@ found_cache: struct {
 	queued:  map[string]bool,
 	running: bool,
 	changed: bool,
+	published: time.Tick, // when the worker last set changed
 }
 
 // A transcript line Deckhand hands to the JSON parser: at most one chunk long and nested at most
@@ -164,8 +176,14 @@ found_read :: proc(h: Harness, path: string, size: i64) -> (title, cwd: string, 
 			line := rest[:nl]
 			rest = rest[nl + 1:]
 			if len(line) < 2 || line[0] != '{' do continue
-			wanted := strings.contains(line, `"custom-title"`) || strings.contains(line, `"ai-title"`) || strings.contains(line, `"summary"`) || strings.contains(line, `"isSidechain"`) || strings.contains(line, `"cwd"`)
+			// parsed: a line with a title (anywhere), and in the head one that may still tell the cwd,
+			// the side-chain flag or the first prompt (until each is known); never the rest
+			titled := strings.contains(line, `"custom-title"`) || strings.contains(line, `"ai-title"`) || strings.contains(line, `"summary"`)
+			with_cwd, with_sc := strings.contains(line, `"cwd"`), strings.contains(line, `"isSidechain"`)
+			meta := in_head && ((cwd^ == "" && with_cwd) || (!decided^ && with_sc) || (first^ == "" && (with_cwd || with_sc) && strings.contains(line, `"user"`)))
+			wanted := titled || meta
 			if !wanted || !line_parsable(line) do continue
+			sync.atomic_add(&claude_disk_lines_parsed, 1)
 			v, perr := jg.parse(transmute([]u8)line, .JSON, false, context.temp_allocator) // strict: JSON5's quotes would hide brackets from line_parsable
 			if perr != nil do continue
 			o, ok := v.(json.Object)
@@ -277,6 +295,7 @@ found_info :: proc(h: Harness, path: string, size: i64, mtime: time.Time, budget
 		return "", "", false, false
 	}
 	budget^ -= cost
+	claude_disk_inline_read += cost
 	title, cwd, sidechain = found_read(h, path, size)
 	found_store(path, size, mtime._nsec, title, cwd, sidechain)
 	return title, cwd, sidechain, true
@@ -319,11 +338,18 @@ found_worker :: proc() {
 		}
 		sync.lock(&found_cache.mu)
 		delete_key(&found_cache.queued, path)
-		found_cache.changed = true
+		// the rows made again (a listing of the project and Chats) once drained, or every
+		// FOUND_PUBLISH_EVERY while draining: never once per transcript
+		now := time.tick_now()
+		if len(found_cache.queue) == 0 || found_cache.published == {} || time.tick_diff(found_cache.published, now) >= FOUND_PUBLISH_EVERY {
+			found_cache.changed = true
+			found_cache.published = now
+		}
+		publish := found_cache.changed
 		sync.unlock(&found_cache.mu)
 		delete(path, heap)
 		free_all(context.temp_allocator)
-		if platform.wake != nil do platform.wake()
+		if publish && platform.wake != nil do platform.wake()
 	}
 }
 
@@ -338,6 +364,13 @@ claude_disk_tick :: proc() {
 	if !changed do return
 	claude_disk_rescan()
 	window_state_changed()
+}
+
+// Whether the title worker has transcripts left (tests).
+claude_disk_busy :: proc() -> bool {
+	sync.lock(&found_cache.mu)
+	defer sync.unlock(&found_cache.mu)
+	return found_cache.running || len(found_cache.queue) > 0
 }
 
 // Tests: waits for the worker, then makes the rows again.
@@ -440,6 +473,7 @@ same_folder :: proc(a, b: string) -> bool {
 
 // The selected project's and Chats' found transcripts again (Select_Project, Rescan, the worker).
 claude_disk_rescan :: proc() {
+	claude_disk_rescans += 1
 	claude_disk_scan(find_project(state.selected_project), false)
 	claude_disk_scan(chats_project(), true)
 }

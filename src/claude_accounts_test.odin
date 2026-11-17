@@ -1158,6 +1158,97 @@ claude_review_cache_full :: proc(t: ^testing.T) {
 	}
 }
 
+// An assistant line as Claude Code writes them (cwd and isSidechain on every line), about n bytes.
+@(private = "file")
+ca_assistant :: proc(cwd: string, n: int) -> string {
+	return fmt.tprintf(`{{"parentUuid":"u1","isSidechain":false,"userType":"external","cwd":%q,"sessionId":"x","version":"2.1.317","type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":%q}}]}},"uuid":"a1","timestamp":"2026-11-01T10:00:00.000Z"}}`, cwd, strings.repeat("w", n, context.temp_allocator))
+}
+
+// Titles of found transcripts read with few lines parsed (fixtures, as Claude Code writes them):
+// the tail's lines are parsed only when they carry a title (custom-title, ai-title, summary), the
+// head's only until its cwd, side-chain flag and first prompt are known (then only title lines);
+// the titles are the same: a /rename in the tail wins, else the first real prompt, else ai-title.
+@(test)
+claude_disk_titles_few_parses :: proc(t: ^testing.T) {
+	env: Ca_Env
+	context.allocator = ca_reset(&env)
+	defer ca_done()
+	cfg := fmt.tprintf("%s/.claude", env.home)
+	ca_config(cfg)
+	core.claude_accounts_refresh()
+	proj := ca_dir("fewparse")
+	dir := ca_transcripts(cfg, proj)
+	body := make([dynamic]string, context.temp_allocator)
+	for _ in 0 ..< 400 do append(&body, ca_assistant(proj, 600)) // ~280 KB: a head and a tail
+	meta := ca_user(proj, "<command-name>/clear</command-name>")
+	renamed := `{"type":"custom-title","customTitle":"My rename","sessionId":"x"}`
+	ai := `{"type":"ai-title","aiTitle":"Claude's own","sessionId":"x"}`
+	join :: proc(parts: ..[]string) -> string {
+		all := make([dynamic]string, context.temp_allocator)
+		for p in parts do append(&all, ..p)
+		append(&all, "")
+		return strings.join(all[:], "\n", context.temp_allocator)
+	}
+	ca_write(fmt.tprintf("%s/71717171-0000-4000-8000-000000000001.jsonl", dir), join({meta, ca_user(proj, "the first prompt")}, body[:], {ai, renamed}, body[:20]))
+	ca_write(fmt.tprintf("%s/71717171-0000-4000-8000-000000000002.jsonl", dir), join({ca_user(proj, "only a prompt")}, body[:], {ai}))
+	ca_write(fmt.tprintf("%s/71717171-0000-4000-8000-000000000003.jsonl", dir), join({meta, ai}, body[:30]))
+	before := core.claude_disk_lines_parsed
+	inline_before := core.claude_disk_inline_read
+	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
+	core.run_command(core.Select_Project{project_id = pid}, CA_UI)
+	core.claude_disk_wait()
+	core.claude_disk_wait()
+	parsed := core.claude_disk_lines_parsed - before
+	inline := core.claude_disk_inline_read - inline_before
+	got := make(map[string]string, context.temp_allocator)
+	for f in state.claude_disk do if f.listed do got[f.id] = f.title
+	testing.expect_value(t, got["71717171-0000-4000-8000-000000000001"], "My rename")
+	testing.expect_value(t, got["71717171-0000-4000-8000-000000000002"], "only a prompt")
+	testing.expect_value(t, got["71717171-0000-4000-8000-000000000003"], "Claude's own")
+	fmt.eprintfln("claude_disk_titles_few_parses: %d lines parsed for 3 transcripts; %d bytes read on the main thread", parsed, inline)
+	testing.expectf(t, inline <= 256 * 1024, "%d bytes read on the main thread", inline)
+	testing.expectf(t, parsed <= 20, "%d lines parsed", parsed)
+}
+
+// The worker's titles make the rows again once it has drained, or at a bounded interval while it
+// drains, never once per transcript (each time is a listing of the project and Chats).
+@(test)
+claude_disk_rescans_bounded :: proc(t: ^testing.T) {
+	env: Ca_Env
+	context.allocator = ca_reset(&env)
+	defer ca_done()
+	old_budget := core.claude_disk_inline_budget
+	core.claude_disk_inline_budget = 0 // every title from the worker
+	defer core.claude_disk_inline_budget = old_budget
+	cfg := fmt.tprintf("%s/.claude", env.home)
+	ca_config(cfg)
+	core.claude_accounts_refresh()
+	proj := ca_dir("rescans")
+	dir := ca_transcripts(cfg, proj)
+	body := make([dynamic]string, context.temp_allocator)
+	for _ in 0 ..< 300 do append(&body, ca_assistant(proj, 600))
+	text := strings.join({ca_user(proj, "hello"), strings.join(body[:], "\n", context.temp_allocator), ""}, "\n", context.temp_allocator)
+	for i in 0 ..< 120 do ca_write(fmt.tprintf("%s/%08x-0000-4000-8000-000000000009.jsonl", dir, i), text)
+	before := core.claude_disk_rescans
+	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
+	core.run_command(core.Select_Project{project_id = pid}, CA_UI)
+	start := time.tick_now()
+	// frames while the worker drains
+	for _ in 0 ..< 20_000 {
+		core.claude_disk_tick()
+		if !core.claude_disk_busy() do break
+		time.sleep(500 * time.Microsecond)
+	}
+	took := time.tick_since(start)
+	core.claude_disk_wait()
+	rescans := core.claude_disk_rescans - before
+	titled := 0
+	for f in state.claude_disk do if f.listed && f.title == "hello" do titled += 1
+	testing.expect_value(t, titled, 120)
+	fmt.eprintfln("claude_disk_rescans_bounded: %d rescans while draining 120 transcripts in %v", rescans, took)
+	testing.expectf(t, rescans <= 4 + int(took / (250 * time.Millisecond)), "%d rescans in %v", rescans, took) // the first and the last, one per 250 ms, and slack (Codex's pass)
+}
+
 // Saving a config file of an account no Claude tab runs under shows no restart bar.
 @(test)
 claude_review_note_save :: proc(t: ^testing.T) {

@@ -264,3 +264,11 @@ test("status strip: a tab's own bars, then its harness's hot-reload bars; none f
   s.applyDelta({ version: 2, sections: { webbars: null } });
   assert.deepEqual(barsFor(s, tab(5, { claude_tab: {} })), []);
 });
+
+test("status strip: another machine's tab shows none of this machine's bars (#152 review)", () => {
+  const s = new Store();
+  s.applyFull({ version: 1, state: { webbars: [{ tab: 0, harness: "pi", kind: "reload", tone: "info", text: "pi settings changed", actions: [{ label: "Reload", command: { type: "pi_reload_all", only_changed: true } }] }] } });
+  const remote = { id: 9, machine: 2, kind: { pi_tab: {} }, title: "", status: "running", agent: "idle", waiting: false, question: false } as any;
+  assert.deepEqual(barsFor(s, remote), [], "a remote pi tab: its own core's bars, not this one's Reload");
+  assert.equal(barsFor(s, { ...remote, machine: 0 }).length, 1);
+});

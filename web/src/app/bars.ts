@@ -29,6 +29,9 @@ export function tabHarnessKey(t: Tab): string {
 // The bars over tab t, its own first, then the ones for every tab of its harness.
 export function barsFor(store: Store, t: Tab): WebBar[] {
   const all: WebBar[] = store.sections.get("webbars") ?? [];
+  // another machine's tab: its own core's bars, never this one's (a Reload here would reload this
+  // machine's tabs)
+  if (t.machine) return [];
   const h = tabHarnessKey(t);
   if (!h || !Array.isArray(all)) return [];
   return [...all.filter((b) => b.tab === t.id), ...all.filter((b) => b.tab === 0 && b.harness === h)];

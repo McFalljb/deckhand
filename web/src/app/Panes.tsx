@@ -18,7 +18,7 @@ export function fileTabPath(t: Tab): string {
   if (k.editor_tab && (k.editor_tab.view ?? "file") === "file") return String(k.editor_tab.path ?? "");
   return "";
 }
-import { newTabChoices } from "./harness.ts";
+import { modeBadge, newTabChoices } from "./harness.ts";
 import { TabBars } from "./TabBars.tsx";
 
 const KIND_WORDS: Record<string, string> = {
@@ -182,13 +182,14 @@ function TabStrip({ s, paneId, tabs, active, only }: { s: OpenSession; paneId: n
           const v = stripView(t);
           const h = tabHarness(t);
           const on = t.id === active;
+          const mode = modeBadge(t.kind);
           return (
             <div
               class={"tab" + (on ? " on" : "")}
               role="tab"
               aria-selected={on ? "true" : "false"}
               tabIndex={0}
-              title={tabTitle(t)}
+              title={mode ? `${tabTitle(t)} · ${mode.label} mode` : tabTitle(t)}
               onClick={() => {
                 app.wish(`tab:${s.id}:${paneId}`, t.id);
                 app.run({ type: "focus_tab", tab_id: t.id });
@@ -204,6 +205,7 @@ function TabStrip({ s, paneId, tabs, active, only }: { s: OpenSession; paneId: n
               {v.dot !== "none" ? <StatusMark mark={v.mark} progress={v.progress} /> : null}
               {h && h !== "shell" ? <HarnessIcon harness={h} size={13} /> : !h ? <Icon name={KIND_ICON[tabKind(t)] ?? "file"} size={13} /> : null}
               <span class="tab-title">{tabTitle(t)}</span>
+              {mode ? <span class={"tab-mode" + (mode.warn ? " warn" : "")}>{mode.label}</span> : null}
               {tabKind(t) !== "pi_tab" || tabs.length > 1 ? (
                 <button
                   type="button"

@@ -436,6 +436,8 @@ a { color: inherit; }
 .tab:hover { background: var(--hover); color: var(--text-secondary); }
 .tab.on { background: var(--selected); color: var(--text); }
 .tab-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-mode { flex: none; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.tab-mode.warn { color: var(--waiting); }
 .tab-close { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0; }
 .tab:hover .tab-close, .tab.on .tab-close { opacity: 1; }
 .tab-close:hover { background: var(--hover); color: var(--text); }

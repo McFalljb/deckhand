@@ -263,3 +263,57 @@ harness_flags_hooks_off_bar :: proc(t: ^testing.T) {
 	bar := core.claude_status_message(tab, later)
 	testing.expectf(t, strings.contains(bar, "hooks aren't running") && strings.contains(bar, "--settings"), "%q", bar)
 }
+
+// "… with flags…" in a project's menu and the New session picker (as in the tab strip's "+" and
+// the palette): a project's menu has New session with flags… and New Claude tab with flags…; the
+// picker ends with With flags…, which opens the flags picker; a Claude row asks in the palette.
+@(test)
+harness_flags_menus :: proc(t: ^testing.T) {
+	alloc, _ := hf_reset()
+	context.allocator = alloc
+	defer hf_done()
+	defer core.run_command(core.Set_Focus{""}, HF_UI)
+	defer if menu.open do menu_close()
+	dir := hf_dir("menus")
+	pid := core.run_command(core.Add_Project{cwd = dir}, HF_UI).created_id
+	core.run_command(core.Select_Project{pid}, HF_UI)
+	labels :: proc() -> string {
+		out := make([dynamic]string, context.temp_allocator)
+		for it in menu_items() do append(&out, it.sep ? "-" : it.label)
+		return strings.join(out[:], "|", context.temp_allocator)
+	}
+	at :: proc(label: string) -> int {
+		for it, i in menu_items() do if it.label == label do return i
+		return -1
+	}
+	menu_open(Menu_Project(pid), {0, 0})
+	joined := labels()
+	testing.expectf(t, strings.contains(joined, "New session|New session with flags…|New Claude tab|New Claude tab with flags…|Rename…"), "%s", joined)
+	// New Claude tab with flags…: the palette asks for a Claude tab in the project
+	menu_run(at("New Claude tab with flags…"))
+	core.inbox_drain()
+	c, is := palette.flags_for.(core.New_Claude_Tab)
+	testing.expect(t, palette_is_open() && is && c.project_id == pid && c.harness == .Claude, "a Claude tab's field")
+	core.run_command(core.Set_Focus{""}, HF_UI)
+	// New session with flags…: the flags picker
+	menu_open(Menu_Project(pid), {0, 0})
+	menu_run(at("New session with flags…"))
+	core.inbox_drain()
+	ns, open := menu.target.(core.Menu_New_Session)
+	testing.expect(t, menu.open && open && ns.flags, "the flags picker")
+	joined = labels()
+	testing.expectf(t, strings.contains(joined, "pi with flags…|Claude Code with flags…"), "%s", joined)
+	menu_close()
+	// the plain picker ends with With flags…
+	new_session_ui(pid)
+	joined = labels()
+	testing.expectf(t, strings.has_suffix(joined, "|pi|Claude Code|-|With flags…") || strings.has_suffix(joined, "|Claude Code|pi|-|With flags…"), "%s", joined)
+	menu_run(at("With flags…"))
+	core.inbox_drain()
+	ns, open = menu.target.(core.Menu_New_Session)
+	testing.expect(t, menu.open && open && ns.flags, "With flags…: the flags picker")
+	menu_run(at("pi with flags…"))
+	core.inbox_drain()
+	_, is = palette.flags_for.(core.New_Chat)
+	testing.expect(t, palette_is_open() && is, "pi's field")
+}

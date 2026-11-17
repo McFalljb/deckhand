@@ -11,7 +11,11 @@ package main
 //     says why first when the harness's rule (the core's own check) or the quoting refuses them.
 //   - Settings › Coding agents › Default flags… (each harness's card): the page's field, sent as
 //     set_harness_flags (this Mac's user's only); the core says why when it refuses.
-//   - Only a start on this Mac takes flags here (another machine's core checks its own).
+//   - Another machine's start (its project's or open session's ids) takes them too: sent as the
+//     start's `args` as typed, never this Mac's defaults; that machine's core checks them by its own
+//     rule and adds its own defaults (core/machine_route.odin), so the row checks only the quoting
+//     here. The palette keeps which run of that machine's core and which folder it asked for: a
+//     restart there since, and nothing starts (the ids may name something else now).
 
 import "base:runtime"
 import "core:fmt"
@@ -21,19 +25,34 @@ import "core"
 // The flags each harness was last started with from this window, as typed (this run; heap).
 flags_last: [core.Harness]string
 
-// The harness a start command runs, when it can take the user's flags from here (a start on this
-// Mac: new_chat, new_claude_session, new_claude_tab).
+// Another machine's start the palette asks flags for: its machine, the run of its core and the
+// project's folder when it asked (heap; machine 0: this Mac's).
+flags_remote: struct {
+	machine:     u64,
+	run, folder: string,
+}
+
+// The harness a start command runs, when it can take the user's flags from here (new_chat,
+// new_claude_session, new_claude_tab; on this Mac or another machine).
 flags_harness :: proc(cmd: core.Command) -> (h: core.Harness, ok: bool) {
 	#partial switch c in cmd {
-	case core.New_Chat:
-		if core.id_machine(c.project_id) != 0 do return
-		return .Pi, true
-	case core.New_Claude_Session:
-		if core.id_machine(c.project_id) != 0 do return
-		return c.harness, true
+	case core.New_Chat:           return .Pi, true
+	case core.New_Claude_Session: return c.harness, true
+	case core.New_Claude_Tab:     return c.harness, true
+	}
+	return
+}
+
+// The machine a start runs on (0: this Mac), and its project (temp).
+@(private = "file")
+flags_where :: proc(cmd: core.Command) -> (no: u64, p: ^core.Project) {
+	no, _ = core.command_machine(cmd)
+	#partial switch c in cmd {
+	case core.New_Chat:           p = core.find_project(c.project_id)
+	case core.New_Claude_Session: p = core.find_project(c.project_id)
 	case core.New_Claude_Tab:
-		if core.id_machine(c.session) != 0 || core.id_machine(c.project_id) != 0 do return
-		return c.harness, true
+		if c.project_id != 0 do p = core.find_project(c.project_id)
+		else if s := core.find_session(c.session); s != nil do p = core.find_project(s.project_id)
 	}
 	return
 }
@@ -44,6 +63,12 @@ flags_open :: proc(cmd: core.Command) {
 	if !ok do return
 	palette_reset()
 	palette.flags_for = core.command_clone(cmd, runtime.heap_allocator())
+	// another machine's: what it is now, checked again before the start goes
+	if no, p := flags_where(cmd); no != 0 {
+		run, folder := "", ""
+		if p != nil do run, folder = handoff_picker_identity(p^)
+		flags_remote = {machine = no, run = strings.clone(run, runtime.heap_allocator()), folder = strings.clone(folder, runtime.heap_allocator())}
+	}
 	tf_set(&palette.field, flags_last[h])
 	palette.was_open = true
 	ui_do(core.Set_Focus{"palette"})
@@ -54,15 +79,31 @@ flags_forget :: proc() {
 	if palette.flags_for == nil do return
 	core.command_free(palette.flags_for, runtime.heap_allocator())
 	palette.flags_for = nil
+	delete(flags_remote.run, runtime.heap_allocator())
+	delete(flags_remote.folder, runtime.heap_allocator())
+	flags_remote = {}
 }
 
 // What the field holds as args, and why it cannot start ("" = it can): the quoting, then the
-// harness's own rule (the core's check, its words). Temp.
+// harness's own rule (the core's check, its words). Another machine's start: the quoting only
+// (that machine's core checks them by its own rule, which may be newer or older). Temp.
 @(private = "file")
-flags_parse :: proc(h: core.Harness, text: string) -> (args: []string, why: string) {
+flags_parse :: proc(h: core.Harness, text: string, remote := false) -> (args: []string, why: string) {
 	args, why = core.flags_split(strings.trim_space(text))
-	if why != "" do return
+	if why != "" || remote do return
 	return args, core.harness_args_check(h, args)
+}
+
+// Why another machine's start cannot go now ("" = it can): it went offline, its core restarted
+// since the palette asked, or the project's folder is another one.
+@(private = "file")
+flags_remote_why :: proc(cmd: core.Command) -> string {
+	no, p := flags_where(cmd)
+	if no == 0 do return ""
+	if no != flags_remote.machine || p == nil do return HANDOFF_GONE
+	run, folder := handoff_picker_identity(p^)
+	if run != flags_remote.run || folder != flags_remote.folder do return HANDOFF_RESTARTED
+	return ""
 }
 
 // Flags mode: one row, the start with these flags (or why it cannot).
@@ -70,15 +111,18 @@ flags_palette_results :: proc(query: string) -> []Palette_Item {
 	out := make([dynamic]Palette_Item, context.temp_allocator)
 	h, ok := flags_harness(palette.flags_for)
 	if !ok do return out[:]
-	args, why := flags_parse(h, query)
+	no, _ := flags_where(palette.flags_for)
+	args, why := flags_parse(h, query, no != 0)
 	what := "tab"
 	#partial switch _ in palette.flags_for {
 	case core.New_Chat, core.New_Claude_Session: what = "session"
 	}
 	title := fmt.tprintf("Start a %s %s with %s", core.HARNESSES[h].name, what, len(args) == 0 ? "no extra flags" : "these flags")
+	if no != 0 do title = fmt.tprintf("%s on %s", title, core.machine_name(no))
 	detail := why
 	if why == "" && len(args) > 0 do detail = core.flags_join(args)
-	if why == "" && core.harness_default_args(h) != nil do detail = fmt.tprintf("%s · after your defaults", detail)
+	if why == "" && no != 0 do detail = detail != "" ? fmt.tprintf("%s · checked there, with its own defaults", detail) : "its own defaults"
+	else if why == "" && core.harness_default_args(h) != nil do detail = fmt.tprintf("%s · after your defaults", detail)
 	append(&out, Palette_Item{kind = .Flags, key = fmt.tprintf("flags:%s", core.HARNESS_KEYS[h]), title = title, detail = detail, why = why})
 	return out[:]
 }
@@ -90,7 +134,9 @@ flags_run :: proc(it: Palette_Item) {
 	h, ok := flags_harness(cmd)
 	if !ok do return
 	text := strings.trim_space(tf_text(&palette.field))
-	args, why := flags_parse(h, text)
+	no, _ := flags_where(cmd)
+	args, why := flags_parse(h, text, no != 0)
+	if why == "" do why = flags_remote_why(cmd) // another machine's: still the one it asked for
 	if why != "" || it.why != "" {
 		toast_show(why != "" ? why : it.why, err = true)
 		return

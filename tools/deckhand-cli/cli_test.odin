@@ -459,6 +459,29 @@ hook_stop_question_and_failure :: proc(t: ^testing.T) {
 	}
 }
 
+// Claude Code's permission mode (its hook input's permission_mode) goes with the turn and the
+// session, one word of letters only (the tab's badge); anything else is left out.
+@(test)
+hook_permission_mode :: proc(t: ^testing.T) {
+	cases := [][3]string {
+		{"stop", `{"hook_event_name":"Stop","permission_mode":"plan"}`, `{"type":"claude.turn","state":"idle","permission_mode":"plan"}`},
+		{"prompt-submit", `{"hook_event_name":"UserPromptSubmit","prompt":"hi","permission_mode":"bypassPermissions"}`, `{"type":"claude.turn","state":"submitted","title":"hi","permission_mode":"bypassPermissions"}`},
+		{"notification", `{"hook_event_name":"Notification","notification_type":"permission_prompt","permission_mode":"acceptEdits"}`, `{"type":"claude.turn","state":"waiting","permission_mode":"acceptEdits"}`},
+		{"stop", `{"hook_event_name":"Stop","permission_mode":"plan; rm"}`, `{"type":"claude.turn","state":"idle"}`},
+		{"stop", `{"hook_event_name":"Stop","permission_mode":7}`, `{"type":"claude.turn","state":"idle"}`},
+	}
+	for k in cases {
+		f: Fake
+		c := test_ctx(&f, stdin = k[1])
+		testing.expect_value(t, run(&c, {"hook", k[0]}), 0)
+		testing.expectf(t, len(f.sent) >= 1 && f.sent[0] == k[2], "%s: %v", k[1], f.sent)
+	}
+	f: Fake
+	c := test_ctx(&f, stdin = `{"session_id":"abc-1","source":"startup","permission_mode":"default"}`)
+	run(&c, {"hook", "session-start"})
+	testing.expectf(t, len(f.sent) >= 1 && strings.contains(f.sent[0], `"permission_mode":"default"`), "%v", f.sent)
+}
+
 // PostModelSwitch (async): the new model, cut short; never printed.
 @(test)
 hook_model_switch :: proc(t: ^testing.T) {

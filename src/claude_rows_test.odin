@@ -627,3 +627,76 @@ launch_start_codex_alone :: proc(t: ^testing.T) {
 	_, is_chat := launch_start(false, pid).(core.New_Chat)
 	testing.expect(t, is_chat, "a pi chat")
 }
+
+// The permission-mode badge (claude_mode.odin): from the tab's start flags (its own and the user's
+// defaults as they went), then what Claude Code's hooks report (Shift+Tab's switch, "default"
+// clears it); never guessed for Codex beyond its flags. On the tab's tooltip and in the snapshot.
+@(test)
+claude_rows_permission_mode :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	// the flags' modes
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, nil), "")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode", "plan"}), "plan")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode=acceptEdits"}), "acceptEdits")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode", "default"}), "")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--model", "x", "--dangerously-skip-permissions"}), "bypassPermissions")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--allow-dangerously-skip-permissions"}), "") // only allows it
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode", "x;y"}), "") // not a word
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--dangerously-bypass-approvals-and-sandbox"}), core.CODEX_MODE_BYPASS)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-s", "danger-full-access"}), core.CODEX_MODE_FULL_ACCESS)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-sread-only"}), core.CODEX_MODE_READ_ONLY)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--sandbox=workspace-write"}), "")
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--search"}), "")
+	// the labels: quiet ones, the warning's
+	for c in ([]struct {
+			mode, label: string,
+			warn:        bool,
+		}{{"", "", false}, {"default", "", false}, {"plan", "plan", false}, {"acceptEdits", "accept edits", false}, {"bypassPermissions", "bypass", true}, {core.CODEX_MODE_FULL_ACCESS, "full access", true}, {core.CODEX_MODE_BYPASS, "bypass", true}, {"newMode", "newMode", false}}) {
+		label, warn := core.claude_mode_label(c.mode)
+		testing.expect_value(t, label, c.label)
+		testing.expect_value(t, warn, c.warn)
+	}
+	dir := r_dir("mode")
+	pid := core.run_command(core.Add_Project{cwd = dir}, R_UI).created_id
+	// the start's flags: the tab's own
+	r := core.run_command(core.New_Claude_Session{project_id = pid, args = {"--permission-mode", "plan"}, harness = .Claude}, R_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := core.find_session(r.created_id).tabs[0].id
+	_, ttab, ct := core.claude_tab_of(tab)
+	testing.expect_value(t, ct.permission_mode, "plan")
+	tip := core.claude_tab_tip(ttab^)
+	testing.expectf(t, strings.contains(tip, "plan mode"), "%s", tip)
+	testing.expect(t, strings.contains(core.state_json(), `"permission_mode":"plan"`), "snapshot")
+	// the hooks say otherwise: they win; a report without it keeps it; "default" clears it
+	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "a9a9a9a9-0000-4000-8000-000000000001", source = "startup", permission_mode = "acceptEdits"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "acceptEdits")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "acceptEdits")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle", permission_mode = "bypassPermissions"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle", permission_mode = "a b"}, R_SCRIPT).ok) // a bad word is ignored, the report stands
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", permission_mode = "default"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "")
+	testing.expect_value(t, core.claude_tab_tip(ttab^), "")
+	// the wire: the plugin's JSON carries it
+	cmd, err := core.parse_command(`{"type":"claude.turn","tab_id":1,"state":"idle","permission_mode":"plan"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	if tr, is := cmd.(core.Claude_Turn_Report); testing.expect(t, is) do testing.expect_value(t, tr.permission_mode, "plan")
+	// the user's default (skip permissions) at a start the user makes: bypass; an agent's start: none
+	state.settings.claude_skip_permissions = true
+	defer state.settings.claude_skip_permissions = false
+	r = core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R_UI)
+	testing.expect(t, r.ok, r.error)
+	_, _, ct2 := core.claude_tab_of(core.find_session(r.created_id).tabs[0].id)
+	testing.expect_value(t, ct2.permission_mode, "bypassPermissions")
+	r = core.run_command(core.New_Claude_Tab{session = r.created_id, harness = .Claude}, R_CONTROL)
+	testing.expect(t, r.ok, r.error)
+	_, _, ct3 := core.claude_tab_of(r.created_id)
+	if testing.expect(t, ct3 != nil) do testing.expect_value(t, ct3.permission_mode, "")
+	// a Codex tab's hook report is not looked at (Codex reports none)
+	codex := core.Claude_Tab{harness = .Codex}
+	testing.expect(t, !core.claude_mode_report(&codex, "bypassPermissions"))
+	testing.expect_value(t, codex.permission_mode, "")
+}

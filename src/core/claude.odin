@@ -65,6 +65,7 @@ Claude_Tab :: struct {
 	account:    string, // its Claude Code account's config folder (a Codex tab's: its Codex home; claude_accounts.odin; "" = the default); saved
 	resume_path: string, // a transcript found on disk: --resume takes its absolute path (claude_disk.odin); "" = by id
 	harness:    Harness, // .Claude, or .Codex: a Codex CLI tab (codex.odin), codex instead of claude; saved (never .Pi)
+	permission_mode: string, // its permission mode, as the harness reported it, else as its start flags set it (claude_mode.odin); "" = the default or not known. Not saved
 }
 
 // A Claude Code session Deckhand ran, for Resume (the project's "…" menu) and restore.
@@ -134,6 +135,7 @@ Claude_Session_Report :: struct {
 	source:          string,
 	transcript_path: string, // kept only under Claude's config dir's projects/ (claude_transcript_ok)
 	model:           string,
+	permission_mode: string, // Claude Code's permission mode (claude_mode.odin); "" = not said
 }
 Claude_Turn_Report :: struct {
 	tab_id:   u64,
@@ -141,6 +143,7 @@ Claude_Turn_Report :: struct {
 	title:    string, // with submitted: the prompt's first line (history title); never logged
 	question: bool, // with idle: Claude's last answer ends with a question (Stop's last_assistant_message; never sent)
 	idle_prompt: bool, // with idle: Notification idle_prompt (not a Stop): the last turn's dot stays
+	permission_mode: string, // Claude Code's permission mode (claude_mode.odin); "" = not said
 }
 Claude_Comments :: struct {
 	tab_id: u64,
@@ -457,6 +460,12 @@ claude_tab_cmd :: proc(bin := "") -> string {
 // the command's refusal (a start that fails drops its tab, and a hub forwarding it sees only this).
 claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
 	claude_harness_check(ct.harness)
+	// the mode its flags set, as they go (its hooks may say otherwise later: claude_mode.odin)
+	{
+		margs := flags ? ct.args : nil
+		if defaults do margs = ct.harness == .Codex ? codex_with_defaults(margs) : claude_with_defaults(margs)
+		claude_mode_set(ct, claude_mode_of_args(ct.harness, margs))
+	}
 	switch ct.harness {
 	case .Codex:       return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule and account; no plugin
 	case .Claude, .Pi: // claude, below (.Pi: never, claude_harness_check)
@@ -902,6 +911,7 @@ tab_free_kind :: proc(tab: ^Tab) {
 	delete(ct.model)
 	delete(ct.account)
 	delete(ct.resume_path)
+	delete(ct.permission_mode)
 	for a in ct.args do delete(a)
 	delete(ct.args)
 	for h in ct.held {
@@ -1138,6 +1148,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if ct.harness == .Codex do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
 		defer if claude_status_turn(ts, tab, was, c.state, c.idle_prompt) do window_state_changed() // dots without OSC 7501 (claude_status.odin)
 		ended := claude_rows_turn(ct, c.state, c.question, c.idle_prompt) // the question and error dots (claude_rows.odin)
+		if claude_mode_report(ct, c.permission_mode) do ended = true // Shift+Tab's switch, at the next prompt or turn's end (claude_mode.odin)
 		switch c.state {
 		case "submitted":
 			ct.turn = .Working
@@ -1359,12 +1370,20 @@ claude_command_write :: proc(b: ^strings.Builder, cmd: Command, redact: bool) {
 			json_quote(b, c.model)
 		}
 		if c.transcript_path != "" do strings.write_string(b, `,"transcript_path":"<path>"`)
+		if c.permission_mode != "" {
+			strings.write_string(b, `,"permission_mode":`)
+			json_quote(b, c.permission_mode)
+		}
 	case Claude_Turn_Report:
 		fmt.sbprintf(b, `,"tab_id":%d,"state":`, c.tab_id)
 		json_quote(b, c.state)
 		if c.title != "" do fmt.sbprintf(b, `,"title":"<redacted %d bytes>"`, len(c.title))
 		if c.question do strings.write_string(b, `,"question":true`)
 		if c.idle_prompt do strings.write_string(b, `,"idle_prompt":true`)
+		if c.permission_mode != "" {
+			strings.write_string(b, `,"permission_mode":`)
+			json_quote(b, c.permission_mode)
+		}
 	case Claude_Comments:
 		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
 		if c.max != 0 do fmt.sbprintf(b, `,"max":%d`, c.max)
@@ -1399,8 +1418,8 @@ claude_command_clone :: proc(cmd: Command, allocator := context.allocator) -> Co
 	case New_Claude_Session:    return New_Claude_Session{project_id = c.project_id, cwd = s(c.cwd, allocator), args = ss(c.args, allocator), account = s(c.account, allocator), harness = c.harness}
 	case Claude_Rename:         return Claude_Rename{claude_session_id = s(c.claude_session_id, allocator), title = s(c.title, allocator)}
 	case Claude_Resume:         return Claude_Resume{claude_session_id = s(c.claude_session_id, allocator)}
-	case Claude_Session_Report: return Claude_Session_Report{tab_id = c.tab_id, session_id = s(c.session_id, allocator), cwd = s(c.cwd, allocator), source = s(c.source, allocator), transcript_path = s(c.transcript_path, allocator), model = s(c.model, allocator)}
-	case Claude_Turn_Report:    return Claude_Turn_Report{tab_id = c.tab_id, state = s(c.state, allocator), title = s(c.title, allocator), question = c.question, idle_prompt = c.idle_prompt}
+	case Claude_Session_Report: return Claude_Session_Report{tab_id = c.tab_id, session_id = s(c.session_id, allocator), cwd = s(c.cwd, allocator), source = s(c.source, allocator), transcript_path = s(c.transcript_path, allocator), model = s(c.model, allocator), permission_mode = s(c.permission_mode, allocator)}
+	case Claude_Turn_Report:    return Claude_Turn_Report{tab_id = c.tab_id, state = s(c.state, allocator), title = s(c.title, allocator), question = c.question, idle_prompt = c.idle_prompt, permission_mode = s(c.permission_mode, allocator)}
 	case Claude_Prompt:         return Claude_Prompt{tab_id = c.tab_id, text = s(c.text, allocator)}
 	case Claude_Held_Op:        return Claude_Held_Op{tab_id = c.tab_id, op = s(c.op, allocator)}
 	case Claude_Restore_History:
@@ -1437,9 +1456,11 @@ claude_command_free :: proc(cmd: Command, allocator := context.allocator) {
 		delete(c.source, allocator)
 		delete(c.transcript_path, allocator)
 		delete(c.model, allocator)
+		delete(c.permission_mode, allocator)
 	case Claude_Turn_Report:
 		delete(c.state, allocator)
 		delete(c.title, allocator)
+		delete(c.permission_mode, allocator)
 	case Claude_Readonly_Ack: delete(c.nonce, allocator)
 	case Claude_Prompt:  delete(c.text, allocator)
 	case Claude_Held_Op: delete(c.op, allocator)

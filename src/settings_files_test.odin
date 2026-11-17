@@ -1016,3 +1016,66 @@ settings_files_new_file_strict_umask :: proc(t: ^testing.T) {
 		testing.expectf(t, st.mode & 0o077 == 0, "a project file keeps the umask: %o", st.mode & 0o777)
 	}
 }
+
+// Codex's installed plugins (codex_plugins.odin): a read-only list under the Codex card, from the
+// names of plugins/cache/<marketplace>/<plugin>/<version>/ folders only. No file under plugins/ is
+// opened or listed (a secret in one never shows), a symlink at any level is not followed (nothing
+// outside the Codex home), odd names are left out. Under a temp HOME: never the real ~/.codex.
+@(test)
+settings_files_codex_plugins :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	os.unset_env("CODEX_HOME")
+	core.codex_plugins_forget()
+	defer core.codex_plugins_forget()
+	core.harness_installed_probe[.Codex] = proc() -> bool {return true}
+	defer core.harness_installed_probe[.Codex] = nil
+	cx := fmt.tprintf("%s/.codex", home)
+	cache := fmt.tprintf("%s/plugins/cache", cx)
+	os.make_directory_all(fmt.tprintf("%s/openai-curated/github/1a2b3c4/.codex-plugin", cache))
+	write_mode(fmt.tprintf("%s/config.toml", cx), "[plugins.\"github@openai-curated\"]\nenabled = true\n", 0o644)
+	write_mode(fmt.tprintf("%s/openai-curated/github/1a2b3c4/.mcp.json", cache), fmt.tprintf(`{{"token":"%s"}}`, SECRET), 0o600)
+	os.make_directory_all(fmt.tprintf("%s/openai-curated/linear/0.2.0", cache))
+	os.make_directory_all(fmt.tprintf("%s/openai-curated/linear/0.3.0", cache))
+	os.make_directory_all(fmt.tprintf("%s/mine/notes/local", cache))
+	os.make_directory_all(fmt.tprintf("%s/mine/.hidden/1", cache))
+	os.make_directory_all(fmt.tprintf("%s/mine/bad name/1", cache))
+	write_mode(fmt.tprintf("%s/mine/file-not-folder", cache), SECRET, 0o644)
+	// symlinks out of the Codex home: a marketplace, a plugin, a version, never followed
+	out := fmt.tprintf("%s/outside", home)
+	os.make_directory_all(fmt.tprintf("%s/evilplug/9.9.9", out))
+	os.symlink(out, fmt.tprintf("%s/linkedmk", cache))
+	os.symlink(fmt.tprintf("%s/evilplug", out), fmt.tprintf("%s/mine/linkedplug", cache))
+	os.symlink(fmt.tprintf("%s/evilplug/9.9.9", out), fmt.tprintf("%s/mine/notes/6.6.6", cache))
+	text :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for r in core.settings_file_rows() do if r.group == "codex-plugin" do fmt.sbprintf(&b, "%s|%s|%v\n", r.label, r.detail, r.button)
+		return strings.to_string(b)
+	}
+	got := text()
+	testing.expect_value(t, got, "github@openai-curated|version 1a2b3c4|\nlinear@openai-curated|versions 0.2.0, 0.3.0|\nnotes@mine|version local|\n")
+	for never in ([]string{SECRET, "evilplug", "9.9.9", "6.6.6", "linkedmk", "hidden", "bad name", "file-not-folder", "token", "enabled"}) do testing.expectf(t, !strings.contains(got, never), "%s shown:\n%s", never, got)
+	// each row stands for the Codex card's read-only list, which sends nothing
+	n := 0
+	for r in core.settings_file_rows() do if r.group == "codex-plugin" {
+		n += 1
+		s := core.setting_for_row(r.path)
+		testing.expectf(t, s != nil && s.id == "codex_plugins" && s.read_only && s.command == "" && r.button == "", "%s: a read-only row", r.label)
+		_, card, ok := core.settings_group_section(r.group)
+		testing.expect(t, ok && card == "Codex", "under Codex")
+	}
+	testing.expect_value(t, n, 3)
+	testing.expect_value(t, core.settings_group_label("codex-plugin", ""), "Codex plugins")
+	// plugins/ itself stays refused to open, as before
+	r := core.run_command(core.Open_File{path = fmt.tprintf("%s/openai-curated/github/1a2b3c4/.mcp.json", cache)}, ui)
+	testing.expect(t, !r.ok, "a plugin's file is not opened")
+	// plugins/ a symlink itself: nothing listed
+	core.codex_plugins_forget()
+	os.rename(fmt.tprintf("%s/plugins", cx), fmt.tprintf("%s/plugins-real", home))
+	os.symlink(fmt.tprintf("%s/plugins-real", home), fmt.tprintf("%s/plugins", cx))
+	testing.expect_value(t, text(), "")
+	// Codex not installed: none
+	core.codex_plugins_forget()
+	core.harness_installed_probe[.Codex] = proc() -> bool {return false}
+	testing.expect_value(t, text(), "")
+}

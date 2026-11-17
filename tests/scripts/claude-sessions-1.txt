@@ -15,7 +15,7 @@ shot claude-sessions/before
 # Claude Code (key 2): a session whose only tab is Claude
 clickid new
 eventually
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 key 2
 eventually
 assert_state open_sessions.# 1
@@ -151,7 +151,7 @@ shot claude-sessions/resumed
 # another Claude session in the selected project
 menu_key 45 n cmd shift menu
 eventually
-assert_menurows Claude Code|pi
+assert_menurows Claude Code|pi|-|With flags…
 key enter
 eventually
 assert_state open_sessions.# 2

@@ -1111,7 +1111,8 @@ strip_tabs :: proc(cs: ^core.Open_Session, p: ^core.Pane, room: f32) {
 		// the title is cut to the widest a tab may be; a short tab is padded to TAB_MIN_W
 		// squeezed: only the active tab keeps its close button (the others: ⌘W once active)
 		close := !squeezed || active
-		fixed := tab_fixed_w(ic, show_mark, dirty, extra, close)
+		badge, warn := tab_badge(tab) // a harness tab's permission mode, when not the default (claude_mode.odin)
+		fixed := tab_fixed_w(ic, show_mark, dirty, extra, close, badge)
 		room := max_tab + (close ? tab_close_w() : 0) - fixed
 		title := clip(label, room, font)
 		if clay.UI(id)({
@@ -1130,6 +1131,7 @@ strip_tabs :: proc(cs: ^core.Open_Session, p: ^core.Pane, room: f32) {
 			if tab.status != .Running do col = th.text_muted
 			if ic != .None do icon(ic, col, KIND_ICON)
 			clay.TextDynamic(title, txt(col, font))
+			if badge != "" do clay.TextDynamic(badge, txt(warn ? th.waiting : th.text_muted, FONT_UI_SMALL))
 			if extra != "" do clay.TextDynamic(extra, txt(th.text_muted))
 			spacer() // the close button sits at the right edge of a padded tab
 			if close {
@@ -1192,8 +1194,9 @@ tab_max_w :: proc(cs: ^core.Open_Session, room: f32, p: ^core.Pane = nil) -> (ma
 	for tab in cs.tabs {
 		if p != nil && tab.pane != p.id do continue
 		ic, label, extra := tab_label(cs, tab)
+		badge, _ := tab_badge(tab)
 		// as drawn (strip_tabs): its title up to TAB_MAX_W besides its parts, and its close button
-		natural += clamp(text_w(label) + tab_fixed_w(ic, tab_shows_mark(tab), false, extra), px(TAB_MIN_W), px(TAB_MAX_W) + tab_close_w())
+		natural += clamp(text_w(label) + tab_fixed_w(ic, tab_shows_mark(tab), false, extra, badge = badge), px(TAB_MIN_W), px(TAB_MAX_W) + tab_close_w())
 	}
 	if natural <= avail do return px(TAB_MAX_W), false
 	return clamp((avail - tab_close_w()) / n, px(TAB_MIN_W), px(TAB_MAX_W)), true
@@ -1219,9 +1222,19 @@ top_bar_fixed_w :: proc() -> f32 {
 // A tab's close button and the gap before it.
 tab_close_w :: proc() -> f32 {return px(TAB_H - SP_2 + SP_2)}
 
-// A tab's width besides its title: padding, icon, status mark, unsaved dot, note, close button, gaps.
-tab_fixed_w :: proc(ic: core.Icon, show_mark, dirty: bool, extra: string, close := true) -> f32 {
+// A harness tab's permission-mode badge ("" = none: the default, or not known; claude_mode.odin)
+// and whether it is the warning's (acts without asking).
+tab_badge :: proc(tab: core.Tab) -> (label: string, warn: bool) {
+	ct, is := tab.kind.(core.Claude_Tab)
+	if !is do return "", false
+	return core.claude_mode_label(ct.permission_mode)
+}
+
+// A tab's width besides its title: padding, icon, status mark, unsaved dot, mode badge, note, close
+// button, gaps.
+tab_fixed_w :: proc(ic: core.Icon, show_mark, dirty: bool, extra: string, close := true, badge := "") -> f32 {
 	w := px(SP_3 + SP_1) + px(SP_2) // padding, the gap before the spacer
+	if badge != "" do w += text_w(badge, FONT_UI_SMALL) + px(SP_2)
 	if close do w += tab_close_w()
 	if ic != .None do w += px(KIND_ICON + SP_2)
 	if show_mark do w += px(MARK + SP_2)

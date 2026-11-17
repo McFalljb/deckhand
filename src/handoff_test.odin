@@ -163,10 +163,10 @@ handoff_menus :: proc(t: ^testing.T) {
 	defer teardown(&f)
 	want := "New session on nuc in api|New session on box in api (~/work/api)|New session on box in api (/srv/api)"
 
-	// the project's menu: right after its New session
+	// the project's menu: right after its New session (and New session with flags…)
 	menu_open(Menu_Project(1), {})
 	all := labels(menu_items())
-	testing.expectf(t, strings.contains(all, strings.concatenate({"New session|", want}, context.temp_allocator)), "project menu: %q", all)
+	testing.expectf(t, strings.contains(all, strings.concatenate({"New session|New session with flags…|", want}, context.temp_allocator)), "project menu: %q", all)
 	// each row is that project's harness picker, with no folder of this Mac's
 	for it in menu_items() do if strings.has_prefix(it.label, "New session on ") {
 		ns, ok := it.picker.?
@@ -551,4 +551,45 @@ remote_project_claude_tab_by_its_checklist :: proc(t: ^testing.T) {
 	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	testing.expect(t, !has(pid(4, 7)), "box's project: not this Mac's Claude Code")
 	testing.expect(t, has(1), "this Mac's project")
+}
+
+// Flags for another machine's start (ui_flags.odin): its project's menu offers them while it has a
+// harness; the palette's row checks only the quoting here (that machine's core checks them by its
+// own rule and adds its own defaults) and says where it starts; if that machine's core restarted
+// since the palette asked, nothing starts.
+@(test)
+handoff_flags_remote :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	defer core.run_command(core.Set_Focus{""}, {kind = .UI})
+	remote := pid(3, 7) // nuc: pi and Claude Code (its checklist)
+	state.selected_project = remote
+	menu_open(Menu_Project(remote), {})
+	all := labels(menu_items())
+	testing.expectf(t, strings.contains(all, "New session|New session with flags…|"), "%s", all)
+	menu_close()
+	flags_open(core.New_Claude_Session{project_id = remote, harness = .Claude})
+	core.inbox_drain()
+	testing.expect(t, palette_is_open(), "the palette asks")
+	testing.expect_value(t, flags_remote.machine, 3)
+	testing.expect_value(t, flags_remote.run, "r-nuc-1")
+	testing.expect_value(t, flags_remote.folder, "/home/me/src/api")
+	// this Mac's rule does not decide: that machine's does
+	tf_set(&palette.field, "--resume abc")
+	rs := palette_results()
+	testing.expect(t, len(rs) == 1 && rs[0].why == "" && strings.contains(rs[0].title, "on nuc"), len(rs) == 1 ? rs[0].title : "no row")
+	tf_set(&palette.field, `--model "opus`)
+	rs = palette_results()
+	testing.expect(t, len(rs) == 1 && strings.contains(rs[0].why, "quote"), "the quoting still")
+	// its core restarted since: nothing starts, the toast says why
+	tf_set(&palette.field, "--model opus")
+	rs = palette_results()
+	state.machines[0].core_run = "r-nuc-2"
+	toast_clear()
+	if len(rs) == 1 do palette_run(rs[0])
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, HANDOFF_RESTARTED)
+	testing.expect_value(t, flags_last[.Claude], "")
 }

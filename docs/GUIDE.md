@@ -1139,9 +1139,10 @@ restarts never get it.
 **Flags for a tab.** To start Claude Code, Codex or pi with command-line flags of your own (a
 model, a permission mode, `--mcp-config`, Codex's `-m`, `-s`, `-a`, `-p`, `--search`, pi's
 `--model` or `--thinking`), use **New Claude tab with flags…** or **New Codex tab with flags…**
-(the tab strip's **+** and the palette, while that agent is installed) or **New session with
-flags…** (the **+** and the palette; with more than one agent installed it asks which: **pi with
-flags…**, **Claude Code with flags…**, **Codex with flags…**).
+(the tab strip's **+**, a project's menu and the palette, while that agent is installed) or **New
+session with flags…** (the **+**, a project's menu, the palette, and **With flags…** at the end of
+the New session picker; with more than one agent installed it asks which: **pi with flags…**,
+**Claude Code with flags…**, **Codex with flags…**).
 A one-line field opens, filled with the flags you last used for that agent in this window; type
 them as on a command line (quotes work, `"be brief"` is one word; nothing is expanded: no `$VAR`,
 `~` or globs) and press Enter. Each agent's own rule applies: flags Deckhand sets itself, or that
@@ -1152,7 +1153,10 @@ setting that turns hooks off (`disableAllHooks`) leaves the tab without Deckhand
 comments and held messages, and the bar over the tab says so. Claude and Codex
 tabs keep their flags (a resume, a restore and your Restart use them again); a pi session uses them
 when it starts (pi itself remembers the session's model when it resumes). These flags are yours
-only: Atlas, scripts and apps cannot pass them, and a tab another machine runs takes flags there.
+only: Atlas, scripts and apps cannot pass them. For another machine's project they go there as you
+typed them: that machine's Deckhand checks them and adds its own default flags, never this Mac's
+(its Deckhand must be 0.7.0 or later). A Claude or Codex tab whose permission mode is not the
+default says so after its title (**plan**, **accept edits**, **bypass** in the warning colour…).
 
 **Default flags.** Settings › Coding agents has a **Default flags…** row in each agent's card (in
 the palette: **Default Claude Code flags…**, **Default Codex flags…**, **Default pi flags…**): one line each, checked by the same rule
@@ -1653,7 +1657,9 @@ new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tab
 Once Codex is installed and has its folder (`~/.codex` or your `CODEX_HOME`): `config.toml`,
 `AGENTS.md`, `AGENTS.override.md`, and the folders `prompts`, `skills`, `rules`, each account's
 own, open and save like Claude Code's; `hooks.json` and `hooks/` show **read-only**. Its sign-in
-(`auth.json`), its sessions, history and `plugins/` are never listed, opened or saved over.
+(`auth.json`), its sessions and history are never listed, opened or saved over; **Plugins** lists
+the plugins Codex installed by name and version only (their folders' names; nothing in them is
+opened).
 
 ### Machines
 

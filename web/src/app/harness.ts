@@ -66,3 +66,25 @@ export function newTabChoices(store: Store, machine: number, target: { session: 
     cmd: { type: "new_claude_tab", ...target, ...(codex ? { harness: "codex" } : {}), ...(t.account ? { account: t.account } : {}) },
   }));
 }
+
+// A Claude or Codex tab's permission mode as its tab shows it (src/core/claude_mode.odin's
+// claude_mode_label): nothing for the default or an unknown one's absence; warn: acts without asking.
+const MODE_LABELS: Record<string, [string, boolean]> = {
+  plan: ["plan", false],
+  acceptEdits: ["accept edits", false],
+  bypassPermissions: ["bypass", true],
+  dontAsk: ["don't ask", false],
+  auto: ["auto", false],
+  "codex-bypass": ["bypass", true],
+  "codex-full-access": ["full access", true],
+  "codex-read-only": ["read-only", false],
+};
+export function modeBadge(kind: Record<string, unknown> | null | undefined): { label: string; warn: boolean } | null {
+  const ct = kind?.claude_tab as { permission_mode?: unknown } | undefined;
+  const m = typeof ct?.permission_mode === "string" ? ct.permission_mode : "";
+  if (!m || m === "default") return null;
+  const known = MODE_LABELS[m];
+  if (known) return { label: known[0], warn: known[1] };
+  // a newer Claude Code's mode: its own word (the core lets only letters through)
+  return /^[A-Za-z]{1,32}$/.test(m) ? { label: m, warn: false } : null;
+}

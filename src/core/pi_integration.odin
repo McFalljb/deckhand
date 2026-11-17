@@ -41,7 +41,7 @@ import "core:strings"
 import "core:time"
 
 PI_MIN_VERSION :: "1.4.0" // `-e` and the extension API the integration uses (docs/HARNESSES.md)
-PI_UPDATE_COMMAND :: "pi update"
+PI_UPDATE_COMMAND :: "pi " + PI_SELF_UPDATE_ARGS // the checklist's (harness_manifest.odin), for the pi on PATH
 
 // Tests: the integration's folder instead of the bundle's.
 pi_integration_override: string

@@ -700,3 +700,24 @@ wording_names_installed_harness :: proc(t: ^testing.T) {
 	testing.expect(t, !pop_item_shown(.Reload_Pi), "no pi tab: no reload row")
 	testing.expect(t, !pop_item_shown(.Restart_Claude), "no Claude tab: no restart row")
 }
+
+// Audit: the install and update commands the toasts and bars give are the checklist's own
+// (harness_manifest.odin): pi's installer and `pi update --self`, Claude Code's and Codex's.
+@(test)
+harness_texts_use_the_manifest_commands :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	for s in ([]string{core.NO_HARNESS, core.ATLAS_NEEDS_PI, core.JOBS_NEED_PI}) {
+		testing.expectf(t, strings.contains(s, core.PI_INSTALL_COMMAND), "pi's installer: %s", s)
+		testing.expectf(t, !strings.contains(s, "npm install -g @earendil-works"), "not npm: %s", s)
+	}
+	testing.expect(t, strings.contains(core.NO_HARNESS, core.CLAUDE_INSTALL_COMMAND), core.NO_HARNESS)
+	testing.expect(t, strings.contains(core.NO_HARNESS, core.CODEX_INSTALL_COMMAND), core.NO_HARNESS)
+	testing.expect_value(t, core.PI_UPDATE_COMMAND, "pi update --self")
+	r, _ := core.harness_row("pi")
+	testing.expect_value(t, r.update[.Managed], "{bin} update --self")
+	tab := core.Tab{id = 5152, kind = core.Pi_Tab{}, status = .Running}
+	tab.reload.version = "1.3.2"
+	core.pi_status_reset()
+	msg := core.pi_status_message(&tab)
+	testing.expect(t, strings.contains(msg, "(pi update --self,"), msg)
+}

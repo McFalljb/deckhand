@@ -196,7 +196,7 @@ is installed into pi or written to `~/.pi`: pi outside Deckhand runs exactly as 
 
 It needs **pi 1.4.0 or newer**. When Deckhand sees (from pi's files on disk; it never runs pi to
 ask) that your pi is older, it starts pi without the integration and a bar over the tab says so,
-with **Copy update command** (`pi update`) and **Dismiss**; the setup sheet says so too, with
+with **Copy update command** (`pi update --self`) and **Dismiss**; the setup sheet says so too, with
 **Update** for the layouts it can update. Update pi,
 then restart the tab.
 

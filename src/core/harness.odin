@@ -33,13 +33,13 @@ HARNESS_KEYS := [Harness]string {
 	.Codex  = "codex",
 }
 
-PI_INSTALL :: "npm install -g @earendil-works/pi-coding-agent"
-// What the user sees when no harness is installed: how to install either.
-NO_HARNESS :: "No coding agent is installed: install pi (`" + PI_INSTALL + "`, Node 22.19 or later) or Claude Code (`curl -fsSL https://claude.ai/install.sh | bash`, or `brew install --cask claude-code`), then use the gear's Refresh shell environment or restart Deckhand"
+// The install commands are the coding agents checklist's (harness_manifest.odin, codex.odin).
+// What the user sees when no harness is installed: how to install one.
+NO_HARNESS :: "No coding agent is installed: install pi (`" + PI_INSTALL_COMMAND + "`), Claude Code (`" + CLAUDE_INSTALL_COMMAND + "`, or `brew install --cask claude-code`) or Codex (`" + CODEX_INSTALL_COMMAND + "`), then use the gear's Refresh shell environment or restart Deckhand"
 // Atlas runs on pi (agent.odin).
-ATLAS_NEEDS_PI :: "Atlas needs pi, which is not installed: install it with `" + PI_INSTALL + "`, then use the gear's Refresh shell environment or restart Deckhand"
+ATLAS_NEEDS_PI :: "Atlas needs pi, which is not installed: install it with `" + PI_INSTALL_COMMAND + "`, then use the gear's Refresh shell environment or restart Deckhand"
 // Jobs run pi (jobs.odin).
-JOBS_NEED_PI :: "Jobs run pi, which was not found on the jobs' PATH or in pi's managed install: install it with `" + PI_INSTALL + "`, or set pi_path"
+JOBS_NEED_PI :: "Jobs run pi, which was not found on the jobs' PATH or in pi's managed install: install it with `" + PI_INSTALL_COMMAND + "`, or set pi_path"
 
 // An executable regular file `name` in the absolute folder dir (stat and access only).
 exe_in :: proc(dir, name: string) -> bool {

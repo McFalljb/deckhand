@@ -878,7 +878,7 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 			toast_show(r.error, true)
 			return false
 		}
-		if s, t, _ := core.find_tab(r.created_id); s != nil && core.pane_tab_count(s, t.pane) > 1 {
+		if s, t, _ := find_tab(r.created_id); s != nil && core.pane_tab_count(s, t.pane) > 1 {
 			ui_do_menu(core.Split_Pane{pane = t.pane, direction = .Right, tab_id = r.created_id}, "Open to the side")
 		}
 	case .Copy_Relative:

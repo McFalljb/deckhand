@@ -348,7 +348,7 @@ assert_clipboard sub
 assert_toast Path copied
 rclickid frow 1
 eventually
-assert_menurows Open|Open in preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+assert_menurows Open|Open in preview|Open to the side|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
 clipboard_clear
 clickmenu Copy path
 wait 300
@@ -361,7 +361,7 @@ eventually
 assert_revealed /code/alpha/a.txt
 rclickid frow 2
 eventually
-assert_menurows Open|Open in preview|Open Markdown preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+assert_menurows Open|Open in preview|Open to the side|Open Markdown preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
 clickmenu Open Markdown preview
 eventually
 assert_state open_sessions.2.tabs.# 4

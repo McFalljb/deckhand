@@ -1465,7 +1465,7 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   ⌘D duplicates the selection next to itself. ⌘C also puts the paths on the clipboard as text,
   quoted for a shell, so ⌘V in a terminal pastes them; text on the clipboard never pastes into the
   tree. One copy runs at a time: a toast says "Copying 3 items…", then what was copied, what was
-  left out ("2 skipped: .git, a credential": a `.git` folder and sign-in files are never copied),
+  left out (a `.git` folder and sign-in files are never copied; the toast counts them and names each `.git`, a sign-in only as "a credential"),
   or where it stopped; the copies are then selected. Pasting while a copy runs says "A copy is
   still running".
 - **Undo** (⌘Z while the tree has the keyboard, or the **Undo** button on the toast): undoes the

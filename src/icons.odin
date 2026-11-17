@@ -290,7 +290,7 @@ draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba, param: u8 = 0)
 		stroke_line(X(ox, s, sw, 10), P(oy, s, 4), X(ox, s, sw, 10), P(oy, s, 12), sw, col, false)
 	case .Mark_Idle, .Mark_Exited, .Mark_Working, .Mark_Progress, .Mark_Waiting, .Mark_Permission, .Mark_Question, .Mark_Auth, .Mark_Done, .Mark_Error:
 		draw_mark(ic, ox, oy, s, sw, col, param)
-	case .Eye:
+	case .Eye, .Eye_Off:
 		// two arcs meeting at the corners (the lids), a pupil in the middle
 		cx, cy := P(ox, s, 8), P(oy, s, 8)
 		r := 8.5 * s // the lids' circles, centred above and below so each spans 1.5..14.5 across
@@ -299,6 +299,118 @@ draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba, param: u8 = 0)
 		arc(cx, cy + d, r, math.PI / 2 - half, math.PI / 2 + half, sw, col) // the upper lid
 		arc(cx, cy - d, r, -math.PI / 2 - half, -math.PI / 2 + half, sw, col) // the lower lid
 		fill_disc(cx, cy, 2 * s, col)
+		// struck through, top left to bottom right
+		if ic == .Eye_Off do stroke_line(P(ox, s, 2.5), P(oy, s, 2.5), P(ox, s, 13.5), P(oy, s, 13.5), sw, col, true)
+	case .Folder_Open, .File, .File_Code, .File_Doc, .File_Config, .File_Image, .File_Shell, .File_Package, .File_Env, .File_Binary, .File_Agent:
+		draw_file_icon(ic, ox, oy, s, sw, col)
+	}
+}
+
+// The Files tree's row icons (core.file_kind_icon), on the 16-unit grid at (ox, oy), unit s px,
+// stroke sw px. Each fills about the same box as .Folder (1.5..14.5), so a row's names line up.
+@(private = "file")
+draw_file_icon :: proc(ic: core.Icon, ox, oy, s, sw: f32, col: core.Rgba) {
+	P :: proc(o, s, v: f32) -> f32 {return o + v * s}
+	snap :: proc(v, sw: f32) -> f32 {return int(sw) % 2 == 1 ? math.floor(v) + 0.5 : math.round(v)}
+	X :: proc(ox, s, sw, v: f32) -> f32 {return snap(ox + v * s, sw)}
+	// a polyline through grid points (round joints)
+	poly :: proc(ox, oy, s, sw: f32, col: core.Rgba, pts: [][2]f32) {
+		for i in 1 ..< len(pts) do stroke_line(ox + pts[i - 1].x * s, oy + pts[i - 1].y * s, ox + pts[i].x * s, oy + pts[i].y * s, sw, col, true)
+	}
+	#partial switch ic {
+	case .Folder_Open:
+		// the folder's back (tab top left), its front flap tipped forward
+		l, t, b := X(ox, s, sw, 1.5), X(oy, s, sw, 3.5), X(oy, s, sw, 13.5)
+		m, f, r := X(oy, s, sw, 5.5), X(oy, s, sw, 7.5), X(ox, s, sw, 12.5)
+		stroke_line(l, t, P(ox, s, 6), t, sw, col)
+		stroke_line(P(ox, s, 6), t, P(ox, s, 7.5), m, sw, col, true)
+		stroke_line(P(ox, s, 7.5), m, r, m, sw, col)
+		stroke_line(r, m, r, f, sw, col)
+		stroke_line(l, t, l, b, sw, col)
+		stroke_line(P(ox, s, 4), f, P(ox, s, 14.5), f, sw, col)
+		stroke_line(P(ox, s, 14.5), f, P(ox, s, 12), b, sw, col, true)
+		stroke_line(l, b, P(ox, s, 12), b, sw, col)
+		stroke_line(P(ox, s, 4), f, l, b, sw, col, true)
+	case .File, .File_Doc:
+		// a page with its top right corner folded
+		l, t, r, b := X(ox, s, sw, 3), X(oy, s, sw, 1.5), X(ox, s, sw, 13), X(oy, s, sw, 14.5)
+		fx, fy := X(ox, s, sw, 9), X(oy, s, sw, 5.5)
+		stroke_line(l, t, fx, t, sw, col)
+		stroke_line(fx, t, r, fy, sw, col, true)
+		stroke_line(r, fy, r, b, sw, col)
+		stroke_line(l, b, r, b, sw, col)
+		stroke_line(l, t, l, b, sw, col)
+		stroke_line(fx, t, fx, fy, sw, col)
+		stroke_line(fx, fy, r, fy, sw, col)
+		if ic == .File_Doc {
+			// two lines of text
+			y1, y2 := X(oy, s, sw, 8.5), X(oy, s, sw, 11.5)
+			stroke_line(X(ox, s, sw, 5.5), y1, X(ox, s, sw, 10.5), y1, sw, col)
+			stroke_line(X(ox, s, sw, 5.5), y2, X(ox, s, sw, 9), y2, sw, col)
+		}
+	case .File_Code:
+		// "</>"
+		poly(ox, oy, s, sw, col, {{5, 4.5}, {1.5, 8}, {5, 11.5}})
+		poly(ox, oy, s, sw, col, {{11, 4.5}, {14.5, 8}, {11, 11.5}})
+		poly(ox, oy, s, sw, col, {{9.5, 3}, {6.5, 13}})
+	case .File_Config:
+		// "{ }": straight sides on the pixel grid, pointed in the middle
+		for side in ([2]f32{-1, 1}) {
+			g :: proc(side, v: f32) -> f32 {return 8 + side * (8 - v)} // mirrored about the middle
+			x := X(ox, s, sw, g(side, 5))
+			t0, t1, m0, m1 := P(oy, s, 3.5), P(oy, s, 6.5), P(oy, s, 9.5), P(oy, s, 12.5)
+			stroke_line(P(ox, s, g(side, 7)), P(oy, s, 2.5), x, t0, sw, col, true)
+			stroke_line(x, t0, x, t1, sw, col, true)
+			stroke_line(x, t1, P(ox, s, g(side, 3)), P(oy, s, 8), sw, col, true)
+			stroke_line(P(ox, s, g(side, 3)), P(oy, s, 8), x, m0, sw, col, true)
+			stroke_line(x, m0, x, m1, sw, col, true)
+			stroke_line(x, m1, P(ox, s, g(side, 7)), P(oy, s, 13.5), sw, col, true)
+		}
+	case .File_Image:
+		// a frame, a hill in it and a sun
+		stroke_rect(X(ox, s, sw, 1.5), X(oy, s, sw, 2.5), X(ox, s, sw, 14.5), X(oy, s, sw, 13.5), sw, col)
+		poly(ox, oy, s, sw, col, {{3.5, 11.5}, {7, 7.5}, {10.5, 11.5}})
+		poly(ox, oy, s, sw, col, {{9.25, 10}, {10.75, 8.5}, {12.5, 10.5}})
+		fill_disc(P(ox, s, 10.75), P(oy, s, 5.5), max(1.25 * s, sw * 0.8), col)
+	case .File_Shell:
+		// a terminal: a box, a prompt and an underscore
+		stroke_rect(X(ox, s, sw, 1.5), X(oy, s, sw, 2.5), X(ox, s, sw, 14.5), X(oy, s, sw, 13.5), sw, col)
+		poly(ox, oy, s, sw, col, {{4.5, 5.75}, {7, 8}, {4.5, 10.25}})
+		u := X(oy, s, sw, 10.5)
+		stroke_line(X(ox, s, sw, 8.5), u, X(ox, s, sw, 11.5), u, sw, col)
+	case .File_Package:
+		// a box seen from a corner: a hexagon, its top face's edges meeting in the middle
+		xl, xc, xr := X(ox, s, sw, 2), X(ox, s, sw, 8), X(ox, s, sw, 14)
+		y0, y1, y2, y3, y4 := P(oy, s, 1.5), P(oy, s, 4.5), P(oy, s, 7.5), P(oy, s, 11.5), P(oy, s, 14.5)
+		stroke_line(xc, y0, xr, y1, sw, col, true)
+		stroke_line(xr, y1, xr, y3, sw, col, true)
+		stroke_line(xr, y3, xc, y4, sw, col, true)
+		stroke_line(xc, y4, xl, y3, sw, col, true)
+		stroke_line(xl, y3, xl, y1, sw, col, true)
+		stroke_line(xl, y1, xc, y0, sw, col, true)
+		stroke_line(xl, y1, xc, y2, sw, col, true)
+		stroke_line(xc, y2, xr, y1, sw, col, true)
+		stroke_line(xc, y2, xc, y4, sw, col, true)
+	case .File_Env:
+		// a key: a ring, its shaft to the right, two teeth down
+		cx, cy, r := P(ox, s, 5), X(oy, s, sw, 8), 3 * s
+		stroke_ring(cx, cy, r, sw, col)
+		stroke_line(cx + r, cy, P(ox, s, 14.5), cy, sw, col)
+		for tx in ([2]f32{11.5, 14}) do stroke_line(X(ox, s, sw, tx), cy, X(ox, s, sw, tx), P(oy, s, 10.75), sw, col)
+	case .File_Binary:
+		// an archive box: a lid, the box under it, a handle
+		l, r := X(ox, s, sw, 1.5), X(ox, s, sw, 14.5)
+		t, lid := X(oy, s, sw, 2.5), X(oy, s, sw, 5.5)
+		stroke_rect(l, t, r, lid, sw, col)
+		bl, br, b := X(ox, s, sw, 2.5), X(ox, s, sw, 13.5), X(oy, s, sw, 13.5)
+		stroke_line(bl, lid, bl, b, sw, col)
+		stroke_line(br, lid, br, b, sw, col)
+		stroke_line(bl, b, br, b, sw, col)
+		h := X(oy, s, sw, 8.5)
+		stroke_line(X(ox, s, sw, 6.5), h, X(ox, s, sw, 9.5), h, sw, col)
+	case .File_Agent:
+		// a four-pointed sparkle
+		poly(ox, oy, s, sw, col, {{8, 1.5}, {9.6, 6.4}, {14.5, 8}, {9.6, 9.6}, {8, 14.5}, {6.4, 9.6}, {1.5, 8}, {6.4, 6.4}, {8, 1.5}})
 	}
 }
 

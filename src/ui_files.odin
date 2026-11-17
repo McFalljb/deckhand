@@ -66,6 +66,7 @@ Files_Tool :: enum {
 	New_File,
 	New_Folder,
 	Collapse_All,
+	Ignored, // hide or show gitignored rows (its icon: an eye, struck through while hidden)
 	Refresh,
 	Reveal,
 }
@@ -77,6 +78,7 @@ FILES_TOOLS := [Files_Tool]struct {
 	.New_File     = {"files_new_file", .New_File},
 	.New_Folder   = {"files_new_folder", .New_Folder},
 	.Collapse_All = {"files_collapse_all", .Collapse_All},
+	.Ignored      = {"files_toggle_ignored", .Eye},
 	.Refresh      = {"files_refresh", .Refresh},
 	.Reveal       = {"files_reveal_finder", .Reveal},
 }
@@ -155,6 +157,7 @@ Files_Ui :: struct {
 	drop_gen:   u64, // and the listings' generation then (core.files_cache_gen)
 	drop_check: bool, // the rows changed under the pointer (spring, edge scroll): the drop again next frame
 	drag_root:  string, // owned: the tree's root at the press (another one ends the drag)
+	drag_hide:  bool, // whether ignored rows were hidden at the press (a change ends the drag)
 	drag_left:  bool, // the drag left the pressed row (until then its release is a click: no ghost, no drop)
 	multi:      bool, // several rows selected (drawn: the cursor's row ringed too)
 	// type-to-select: what was typed, the last key's time
@@ -247,7 +250,9 @@ files_panel :: proc(row_w_: f32) {
 				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 			}) {
 				col := enabled ? mix(th.text_muted, th.text, em) : with_alpha(th.text_muted, DISABLED_ALPHA)
-				icon(FILES_TOOLS[tool].icon, col, ICON_SIZE_SM)
+				ic := FILES_TOOLS[tool].icon
+				if tool == .Ignored && state.files.hide_ignored do ic = .Eye_Off
+				icon(ic, col, ICON_SIZE_SM)
 			}
 		}
 	}
@@ -263,6 +268,9 @@ files_panel :: proc(row_w_: f32) {
 	}
 	// a new name's folder that is no longer in this tree (another session or checkout shows): it ends
 	if (fu.edit == .New_File || fu.edit == .New_Folder) && !core.within(fu.target, root) do files_cancel_edit()
+	// a name field whose row or folder is hidden (ignored rows hidden meanwhile) ends: Enter never
+	// renames a row the user cannot see, nor creates inside a hidden folder
+	if fu.edit != .None && core.files_path_hidden(root, fu.target) do files_cancel_edit()
 	rows := core.tree_rows()
 	// New file / New folder: the name field is a row of the tree (its error one more), the first
 	// in the folder it goes in
@@ -352,8 +360,8 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 	if r.error != "" {
 		// a folder that could not be listed: why, and Retry (never an empty-looking folder)
 		retry_w := text_w("Retry", FONT_UI_SMALL) + px(2 * SP_2)
-		if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth) + SP_3), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
-			room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + SP_3 + SP_1) - retry_w
+		if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth) + FILES_NAME_X), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
+			room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + FILES_NAME_X + SP_1) - retry_w
 			clay.TextDynamic(clip(r.error, room, FONT_UI_SMALL), txt(th.error, FONT_UI_SMALL))
 			spacer()
 			rid := clay.ID("fretry", u32(slot))
@@ -371,7 +379,7 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 		return
 	}
 	if r.more > 0 {
-		if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth) + SP_3), 0, 0, 0}, childAlignment = {y = .Center}}}) {
+		if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth) + FILES_NAME_X), 0, 0, 0}, childAlignment = {y = .Center}}}) {
 			clay.TextDynamic(fmt.tprintf("%d more…", r.more), txt(th.text_muted, FONT_UI_SMALL))
 		}
 		return
@@ -403,13 +411,16 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 		}
 		code := core.fs_git_code_cached(r.path, r.kind == .Dir)
 		letter := core.files_git_letter(code, r.kind == .Dir)
-		col := files_git_color(letter)
-		if col == {} do col = mix(th.text_secondary, th.text, em)
+		// the icon in the row's text colour (dimmed as the name is); git's colour is the name's alone
+		ink := mix(th.text_secondary, th.text, em)
 		dot_file := strings.has_prefix(r.name, ".")
-		if r.ignored || dot_file do col = with_alpha(th.text_muted, r.ignored ? 0.7 : 1)
-		if active do col = th.text
+		if r.ignored || dot_file do ink = with_alpha(th.text_muted, r.ignored ? 0.7 : 1)
+		if active do ink = th.text
+		col := files_git_color(letter)
+		if col == {} || r.ignored || dot_file || active do col = ink
+		icon(core.file_kind_icon(core.file_kind(r.name, r.kind == .Dir), r.expanded), ink, FILES_KIND_ICON)
 		weight: u16 = active ? WEIGHT_BOLD : WEIGHT_REGULAR
-		room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + SP_3 + SP_1) - px(ROW_BUTTON + SP_1)
+		room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + FILES_NAME_X) - px(ROW_BUTTON + SP_1)
 		if fu.edit == .Rename && fu.target == r.path && state.focus_widget == "files_name" {
 			files_name_box(room)
 		} else if r.rel != "" {
@@ -501,13 +512,16 @@ files_new_slot :: proc(part, depth: int, row_w: f32) {
 	append(&fu.drawn, "")
 	append(&fu.drawn_dir, false)
 	append(&fu.drawn_row, -1)
-	room := row_w - px(2 * SP_2 + FILES_INDENT * f32(depth) + SP_3 + SP_1)
+	room := row_w - px(2 * SP_2 + FILES_INDENT * f32(depth) + FILES_NAME_X)
 	if clay.UI(clay.ID("fnew", u32(part)))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(depth)), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 	}) {
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(SP_3)), clay.SizingFit()}}}) {
 			if part == 0 && fu.edit == .New_Folder do clay.TextDynamic("▸", txt(th.text_muted, FONT_UI_SMALL))
 		}
+		// the icon column: a folder or a page beside the field, empty beside the error
+		if part == 0 do icon(fu.edit == .New_Folder ? .Folder : .File, th.text_muted, FILES_KIND_ICON)
+		else if clay.UI()({layout = {sizing = {clay.SizingFixed(px(FILES_KIND_ICON)), clay.SizingFit()}}}) {}
 		if part == 1 do clay.TextDynamic(clip(fu.edit_err, room, FONT_UI_SMALL), txt(th.error, FONT_UI_SMALL))
 		else do files_name_box(room, fu.edit == .New_File ? "File name" : "Folder name")
 	}
@@ -566,6 +580,11 @@ when core.TEST_HOOKS {
 	files_drop_for_test :: proc() -> core.Files_Drop {return files_drop_now()}
 }
 
+// A row's kind icon (core.file_kind_icon), between the chevron and the name: the web tree's size.
+FILES_KIND_ICON :: KIND_ICON
+// Where a row's name starts, past its indent: the chevron's column, the icon and the gaps after each.
+FILES_NAME_X :: SP_3 + SP_1 + FILES_KIND_ICON + SP_1
+
 // Hovering a closed folder this long while dragging opens it (spring-loaded, as Finder does).
 FILES_SPRING :: 600 * time.Millisecond
 // The band a drag's target folder shows in (the accent at this alpha).
@@ -594,11 +613,12 @@ files_drag_event :: proc(e: ^sapp.Event) -> bool {
 	return false
 }
 
-// The tree shows another root than the drag's (another session or checkout on screen): the drag
-// ends, nothing moves (files_drop_at refuses another tree's items too). True: it ended.
+// The tree shows another root than the drag's (another session or checkout on screen), or ignored
+// rows were hidden or shown meanwhile: the drag ends, nothing moves (files_drop_at refuses another
+// tree's items too; a hidden row is never moved). True: it ended.
 @(private = "file")
 files_drag_root_gone :: proc() -> bool {
-	if core.files_root() == fu.drag_root do return false
+	if core.files_root() == fu.drag_root && state.files.hide_ignored == fu.drag_hide do return false
 	files_drag_cancel()
 	return true
 }
@@ -611,6 +631,7 @@ files_drag_sources_set :: proc(paths: []string) {
 	for p in paths do append(&fu.drag_paths, strings.clone(p))
 	delete(fu.drag_root)
 	fu.drag_root = strings.clone(core.files_root()) // the tree they are in
+	fu.drag_hide = state.files.hide_ignored
 	files_drop_forget()
 }
 
@@ -963,6 +984,10 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 				if sapp.isvalid() do set_hover(nil, false) // no hover under a drag (no window: tests)
 			}
 			if fu.dragging {
+				if files_drag_out(e.mouse_x, e.mouse_y, fu.drag_root, fu.drag_paths[:]) { 	// out of the window: the system's drag (files_drag_out.odin)
+					files_drag_cancel()
+					return true
+				}
 				files_drag_update(e.mouse_x, e.mouse_y)
 				return true
 			}

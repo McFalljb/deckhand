@@ -19,16 +19,18 @@ export interface Listing {
 export type Edit = { kind: "file" | "dir"; dir: string; err: string } | { kind: "rename"; path: string; err: string };
 
 export type Row =
-  | { t: "entry"; path: string; e: Entry; depth: number }
+  | { t: "entry"; path: string; e: Entry; depth: number; ign?: boolean } // ign: ignored, or inside an ignored folder (shown dimmed)
   | { t: "new"; dir: string; kind: "file" | "dir"; depth: number }
   | { t: "err"; at: string; text: string; depth: number; edit?: boolean } // a folder (at) that cannot be listed, or the field's error (at: its folder or path)
   | { t: "wait"; at: string; depth: number }; // listing the folder at…
 
 // The rows: folders first as listed, an open folder's children under it; the new-name field as
-// the first child of its folder (the folder open), its error under it.
-export function treeRows(root: string, listed: Map<string, Listing>, open: Set<string>, edit: Edit | null): Row[] {
+// the first child of its folder (the folder open), its error under it. Ignored entries (and all
+// under an ignored folder) are marked ign; hideIgnored leaves them out (so never selected, trashed
+// or moved: what is not drawn is not in the selection).
+export function treeRows(root: string, listed: Map<string, Listing>, open: Set<string>, edit: Edit | null, hideIgnored = false): Row[] {
   const rows: Row[] = [];
-  const walk = (dir: string, depth: number) => {
+  const walk = (dir: string, depth: number, inIgnored: boolean) => {
     if (edit && edit.kind !== "rename" && edit.dir === dir) {
       rows.push({ t: "new", dir, kind: edit.kind, depth });
       if (edit.err) rows.push({ t: "err", at: dir, text: edit.err, depth, edit: true });
@@ -37,14 +39,82 @@ export function treeRows(root: string, listed: Map<string, Listing>, open: Set<s
     if (!l) return void rows.push({ t: "wait", at: dir, depth });
     if (l.err) return void rows.push({ t: "err", at: dir, text: l.err, depth });
     for (const e of l.entries) {
+      const ign = inIgnored || !!e.ignored;
+      if (ign && hideIgnored) continue;
       const path = dir + "/" + e.name;
-      rows.push({ t: "entry", path, e, depth });
+      rows.push(ign ? { t: "entry", path, e, depth, ign } : { t: "entry", path, e, depth });
       if (edit && edit.kind === "rename" && edit.path === path && edit.err) rows.push({ t: "err", at: path, text: edit.err, depth, edit: true });
-      if (e.kind === "dir" && open.has(path)) walk(path, depth + 1);
+      if (e.kind === "dir" && open.has(path)) walk(path, depth + 1, ign);
     }
   };
-  walk(root, 0);
+  walk(root, 0, false);
   return rows;
+}
+
+// Whether a folder is ignored or inside an ignored one, as listed (unknown: no). The tree asks such
+// an open folder (node_modules, build) again less often.
+export function inIgnored(root: string, dir: string, listed: Map<string, Listing>): boolean {
+  if (!dir.startsWith(root + "/")) return false;
+  let at = root;
+  for (const part of dir.slice(root.length + 1).split("/")) {
+    const e = listed.get(at)?.entries.find((x) => x.name === part);
+    if (!e) return false;
+    if (e.ignored) return true;
+    at += "/" + part;
+  }
+  return false;
+}
+
+// ---- file icons ----
+// One icon per kind of file, by its name (the native tree's kinds: folder closed and open, a generic
+// file, source code, Markdown and docs, config, images, shell scripts, lockfiles and package
+// manifests, git's files, .env files, binaries and archives, agent instructions). The names are
+// icons.tsx's.
+export type FileIcon =
+  | "folder" | "folder-open" | "file" | "file-code" | "file-doc" | "file-config" | "file-image" | "file-shell"
+  | "file-lock" | "file-git" | "file-env" | "file-binary" | "file-agent";
+
+const AGENT_NAMES = new Set(["agents.md", "claude.md", "claude.local.md", "gemini.md"]);
+const GIT_NAMES = new Set([".gitignore", ".gitattributes", ".gitmodules", ".gitkeep", ".git-blame-ignore-revs", ".mailmap"]);
+const MANIFEST_NAMES = new Set([
+  "package.json", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock",
+  "cargo.toml", "cargo.lock", "go.mod", "go.sum", "gemfile", "gemfile.lock", "pyproject.toml", "poetry.lock", "uv.lock",
+  "pipfile", "pipfile.lock", "requirements.txt", "composer.json", "composer.lock", "package.swift", "package.resolved",
+  "podfile", "podfile.lock", "mix.exs", "mix.lock", "flake.lock", "deno.lock", "build.zig.zon",
+]);
+const SHELL_NAMES = new Set([".bashrc", ".bash_profile", ".zshrc", ".zprofile", ".zshenv", ".profile", ".envrc"]);
+const CONFIG_NAMES = new Set([
+  "makefile", "dockerfile", "containerfile", ".editorconfig", ".prettierrc", ".eslintrc", ".npmrc", ".nvmrc",
+  ".dockerignore", ".tool-versions", "justfile", "procfile",
+]);
+const DOC_NAMES = new Set(["readme", "license", "licence", "changelog", "authors", "copying", "notice", "contributing"]);
+const EXT: Record<string, FileIcon> = {};
+const kinds: [FileIcon, string][] = [
+  ["file-code", "c h cc cpp cxx hpp hh m mm odin zig rs go py rb js mjs cjs jsx ts mts cts tsx java kt kts swift scala cs fs php pl lua dart ex exs erl hs ml clj vue svelte sql r jl nim v html htm css scss sass less glsl hlsl wgsl metal asm s"],
+  ["file-doc", "md markdown mdx txt rst adoc org tex pdf rtf doc docx"],
+  ["file-config", "json jsonc json5 yaml yml toml ini cfg conf properties xml plist mk cmake gradle nix"],
+  ["file-image", "png jpg jpeg gif webp bmp ico icns svg tif tiff heic avif psd"],
+  ["file-shell", "sh bash zsh fish ksh command bat cmd ps1"],
+  ["file-lock", "lock lockb"],
+  ["file-binary", "zip tar gz tgz bz2 xz zst 7z rar dmg pkg iso jar war exe dll so dylib a o obj bin wasm class pyc deb rpm app ttf otf woff woff2 mp3 mp4 mov wav sqlite db"],
+];
+for (const [k, list] of kinds) for (const x of list.split(" ")) EXT[x] = k;
+
+// The icon of a row: a folder by whether it is open; a file by its name (any case), then its
+// extension (the last one); else the generic file.
+export function fileIcon(name: string, kind: Entry["kind"], open = false): FileIcon {
+  if (kind === "dir") return open ? "folder-open" : "folder";
+  const n = name.toLowerCase();
+  if (AGENT_NAMES.has(n)) return "file-agent";
+  if (n === ".env" || n.startsWith(".env.") || n.endsWith(".env")) return "file-env";
+  if (GIT_NAMES.has(n)) return "file-git";
+  if (MANIFEST_NAMES.has(n)) return "file-lock";
+  if (SHELL_NAMES.has(n)) return "file-shell";
+  if (CONFIG_NAMES.has(n)) return "file-config";
+  const dot = n.lastIndexOf(".");
+  if (DOC_NAMES.has(dot > 0 ? n.slice(0, dot) : n)) return "file-doc";
+  if (dot <= 0) return "file";
+  return EXT[n.slice(dot + 1)] ?? "file";
 }
 
 export const isDir = (r: Row | undefined): boolean => r?.t === "entry" && r.e.kind === "dir";
@@ -330,7 +400,7 @@ export interface FolderRow {
   kids: boolean; // has folders inside (when listed), or not known yet
 }
 
-export function folderRows(root: string, listed: Map<string, Listing>, open: Set<string>): FolderRow[] {
+export function folderRows(root: string, listed: Map<string, Listing>, open: Set<string>, hideIgnored = false): FolderRow[] {
   const rows: FolderRow[] = [];
   const state = (d: string): FolderRow["state"] => {
     const l = listed.get(d);
@@ -338,13 +408,13 @@ export function folderRows(root: string, listed: Map<string, Listing>, open: Set
   };
   const kids = (d: string): boolean => {
     const l = listed.get(d);
-    return !l || (!l.err && l.entries.some((e) => e.kind === "dir"));
+    return !l || (!l.err && l.entries.some((e) => e.kind === "dir" && !(hideIgnored && e.ignored)));
   };
   const walk = (dir: string, depth: number) => {
     const l = listed.get(dir);
     if (!l || l.err) return;
     for (const e of l.entries) {
-      if (e.kind !== "dir") continue;
+      if (e.kind !== "dir" || (hideIgnored && e.ignored)) continue; // hidden: not a target (what is under it neither)
       const path = dir + "/" + e.name;
       const on = open.has(path);
       rows.push({ path, name: e.name, depth, open: on, state: state(path), kids: kids(path) });

@@ -19,6 +19,7 @@ export function fileTabPath(t: Tab): string {
   return "";
 }
 import { newTabChoices } from "./harness.ts";
+import { TabBars } from "./TabBars.tsx";
 
 const KIND_WORDS: Record<string, string> = {
   editor_tab: "an editor",
@@ -123,6 +124,7 @@ function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: 
   return (
     <section class={"pane" + (props.focused && !props.only ? " focused" : "")} onMouseDown={focusPane}>
       <TabStrip s={s} paneId={paneId} tabs={tabs} active={tab?.id ?? 0} only={props.only} />
+      {tab ? <TabBars tab={tab} /> : null}
       <div class="pane-body">
         {!tab ? (
           <div class="pane-note">No tabs here.</div>

@@ -95,7 +95,8 @@ export interface MachineView {
 // keyed so a delta carries only the rows that changed.
 //   web: the small part; webo:<id> an open session's row; webm other machines; webtree the
 //   Projects tree's order [[key, depth, kids, forced]]; webp:<key> a tree row; websl:<p> a
-//   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats.
+//   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats;
+//   webbars the tabs' bars as text (app/bars.ts).
 export interface WebProjectRow {
   key: string;
   id: number; // 0: a group row (its folder in path)

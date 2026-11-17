@@ -249,3 +249,18 @@ test("new session: one row per account, one choice starts at once, none says why
   assert.deepEqual(newTabChoices(s, 2, { project_id: 9 }, true, "New Codex tab").map((c) => c.cmd), [{ type: "new_claude_tab", project_id: 9, harness: "codex" }]);
   assert.deepEqual(newTabChoices(s, 3, { project_id: 10 }, false, "x"), [], "an unknown machine: none");
 });
+
+import { barsFor } from "../src/app/bars.ts";
+
+test("status strip: a tab's own bars, then its harness's hot-reload bars; none for other tabs", () => {
+  const s = new Store();
+  const bar = (tab: number, harness: string, kind: string) => ({ tab, harness, kind, tone: "waiting", text: kind, actions: [] });
+  s.applyFull({ version: 1, state: { webbars: [bar(5, "claude", "held"), bar(6, "codex", "status"), bar(0, "pi", "reload"), bar(0, "claude", "claude_reload")] } });
+  const tab = (id: number, kind: object) => ({ id, machine: 0, kind, title: "", status: "running", agent: "idle", waiting: false, question: false }) as any;
+  assert.deepEqual(barsFor(s, tab(5, { claude_tab: {} })).map((b) => b.kind), ["held", "claude_reload"]);
+  assert.deepEqual(barsFor(s, tab(6, { claude_tab: { codex: true } })).map((b) => b.kind), ["status"], "a Codex tab: not Claude Code's reload bar");
+  assert.deepEqual(barsFor(s, tab(7, { pi_tab: {} })).map((b) => b.kind), ["reload"]);
+  assert.deepEqual(barsFor(s, tab(8, { shell_tab: {} })), []);
+  s.applyDelta({ version: 2, sections: { webbars: null } });
+  assert.deepEqual(barsFor(s, tab(5, { claude_tab: {} })), []);
+});

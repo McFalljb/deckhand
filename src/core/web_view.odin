@@ -26,6 +26,8 @@ package core
 //   webs:<p>:<id> a session row: {label, open (open session id, 0), pin, hidden, dot, claude,
 //                 codex, modified (ns)}
 //   webcl, webc:<id>  the Chats, the same way
+//   webbars       the tabs' bars as text, with the actions a browser may take (tab_bars.odin:
+//                 web_bars_json)
 //
 // Computed only when something it reads changed (web_view_cached: a hash of the other sections,
 // the open sessions' file stamps and the watched lists), and never reading a disk on a flush:
@@ -52,6 +54,10 @@ ATTENTION_GROUP_NAMES := [Attention_Group]string {
 	.Working   = "working",
 	.Idle      = "idle",
 }
+
+// web_view_tick's last look at the bars (web_bars_json's hash)
+@(private = "file")
+web_bars_seen: u64
 
 // The page's open projects (web_watch): their sessions listed here (the selected project's are
 // state.sessions already).
@@ -149,6 +155,8 @@ web_view_cached :: proc(sections: [][2]string) -> [][2]string {
 	h = hash.fnv64a(mem.ptr_to_bytes(&gen), h)
 	nk := web_view_new_key()
 	h = hash.fnv64a(mem.ptr_to_bytes(&nk), h)
+	// the tabs' bars: some change with time alone (a Claude tab's hooks silent past their grace)
+	h = hash.fnv64a(transmute([]u8)web_bars_json(), h)
 	if web_view_last.builds > 0 && h == web_view_last.key do return web_view_last.sections[:]
 	heap := runtime.heap_allocator()
 	for x in web_view_last.sections {
@@ -178,6 +186,11 @@ web_view_tick :: proc() {
 	for &w in web_watch do if time.tick_since(w.at) >= WEB_WATCH_RESCAN do web_watch_list(&w)
 	changes_web_tick()
 	web_settings_tick()
+	// a bar that came or went with time alone (no command, no section change): a flush
+	if bh := hash.fnv64a(transmute([]u8)web_bars_json()); bh != web_bars_seen {
+		web_bars_seen = bh
+		window_state_changed()
+	}
 }
 
 @(private = "file")
@@ -297,6 +310,11 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 		web_view_session_rows(out, .Sessions, list, w.pid, fmt.tprintf("websl:%d", w.pid), fmt.tprintf("webs:%d:", w.pid))
 	}
 	web_view_session_rows(out, .Chats, state.chats[:], 0, "webcl", "webc:")
+
+	// ---- webbars: the tabs' bars as text (tab_bars.odin), the browser's status strip ----
+	b = strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, web_bars_json())
+	put(out, "webbars", &b)
 }
 
 // The New session picker's harnesses per machine (0 = this one) and kind of project, as the native

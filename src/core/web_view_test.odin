@@ -149,3 +149,51 @@ web_view_new_choices_section :: proc(t: ^testing.T) {
 	web_note_harness(New_Chat{project_id = 1}, {kind = .UI, web = true})
 	testing.expect_value(t, state.settings.last_harness, Harness.Pi)
 }
+
+// A browser's status strip ("webbars": tab_bars.odin): the native bars' text per tab, with only the
+// actions a browser may take (a command it may send, copying text, its Settings screen); the
+// hot-reload bars once for every tab of their harness; another machine's tabs none.
+@(test)
+web_view_bars_section :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	p := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-bars"}
+	append(&state.projects, p)
+	s := Open_Session{id = new_id(), project_id = p.id, pi_session_id = "pi-bars", cwd = p.cwd}
+	ct := Claude_Tab{}
+	append(&ct.held, Claude_Held{id = 1, text = "deploy\tit\nnow ‮" + "please", who = "Atlas"})
+	claude := Tab{id = new_id(), kind = ct, title = "Claude", status = .Running}
+	pi := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running}
+	pi.reload.version = "1.0.0" // older than PI_MIN_VERSION
+	append(&s.tabs, claude, pi)
+	s.active_tab = claude.id
+	append(&state.open_sessions, s)
+	state.reload.from_save = true // pi settings saved: the reload bar shows
+	v, err := json.parse_string(web_bars_json(), allocator = context.temp_allocator)
+	testing.expect(t, err == nil, "JSON")
+	bars := v.(json.Array)
+	b := strings.builder_make(context.temp_allocator)
+	for x in bars {
+		o := x.(json.Object)
+		fmt.sbprintf(&b, "%s/%s/%s tab=%v:", o["harness"].(json.String), o["kind"].(json.String), o["tone"].(json.String), o["tab"].(json.Float) != 0)
+		for a in o["actions"].(json.Array) {
+			ao := a.(json.Object)
+			what := "settings"
+			if c, is := ao["command"].(json.Object); is do what = string(c["type"].(json.String))
+			else if c, is := ao["copy"].(json.String); is do what = fmt.tprintf("copy %s", c)
+			fmt.sbprintf(&b, " [%s %s]", ao["label"].(json.String), what)
+		}
+		strings.write_byte(&b, '\n')
+	}
+	got := strings.to_string(b)
+	testing.expect_value(t, got, fmt.tprintf("claude/held/waiting tab=true: [Drop claude_held] [Send now claude_held]\npi/status/waiting tab=true: [Copy update command copy %s]\npi/reload/info tab=false: [Later pi_reload_later]\n", PI_UPDATE_COMMAND))
+	held := bars[0].(json.Object)["text"].(json.String)
+	testing.expect(t, strings.has_prefix(held, "1 message from Atlas waits: ") && strings.contains(held, "“deploy it now please”"), held)
+	testing.expect(t, !strings.contains(held, "‮") && !strings.contains_any(held, "\t\n"), "the preview is one plain line")
+	// another machine's tabs: their own core's bars
+	state.open_sessions[0].machine = 2
+	state.reload.from_save = false
+	testing.expect_value(t, web_bars_json(), "[]")
+}

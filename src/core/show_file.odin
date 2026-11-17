@@ -35,7 +35,7 @@ Show_File :: struct {
 
 // The session a caller's show_file goes to, or why not.
 @(private = "file")
-show_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
+show_session :: proc(caller: Caller, session: u64, path := "") -> (^Open_Session, string) {
 	s: ^Open_Session
 	switch caller.kind {
 	case .Panel:
@@ -45,6 +45,7 @@ show_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
 		s = own
 	case .UI, .Script:
 		s = session != 0 ? find_session(session) : cur()
+		if s == nil && session == 0 && caller.kind == .UI do return nil, no_session_for_file(path) // the user's (a paired browser's Files tree)
 		if s == nil do return nil, session != 0 ? "no such session" : "no session on screen"
 	case .Control, .Internal:
 		if session != 0 do s = find_session(session)
@@ -66,7 +67,7 @@ refuse :: proc(code, msg, hint: string) -> Result {
 }
 
 show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bool) {
-	s, serr := show_session(caller, c.session)
+	s, serr := show_session(caller, c.session, c.path)
 	if s == nil {
 		if caller.kind == .Panel && c.session != 0 do return refuse("other_session", serr, "leave session out: the file opens next to your own tab"), false
 		return fail(serr), false

@@ -717,7 +717,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if fu.press_dir {
 				if fu.press_clicks == 1 do files_toggle(p)
 			} else {
-				if core.path_kind(p) == .File do ui_do(core.Open_File{path = p, session = files_session(), preview = fu.press_clicks < 2})
+				if core.path_kind(p) == .File do files_open(p, preview = fu.press_clicks < 2)
 			}
 		}
 		return true
@@ -792,7 +792,7 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	case .ENTER, .KP_ENTER, .SPACE:
 		if i < 0 do break
 		if rows[i].kind == .Dir do files_toggle(rows[i].path)
-		else do ui_do(core.Open_File{path = rows[i].path, session = files_session(), preview = e.key_code == .SPACE})
+		else do files_open(rows[i].path, preview = e.key_code == .SPACE)
 	case .F2:
 		if i >= 0 do files_step(rows[i].path, .Rename)
 	case .BACKSPACE, .DELETE:

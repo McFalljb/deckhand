@@ -1165,6 +1165,7 @@ editor_command_tab :: proc(cmd: Command) -> u64 {
 file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Open_Session, p: string, err: string) {
 	s = session != 0 ? find_session(session) : caller_session(caller)
 	if s != nil && s.home && session == 0 do s = cur()
+	if s == nil && caller.kind == .UI do return nil, "", no_session_for_file(path) // the user (the Files tree, a paired browser's too)
 	if s == nil do return nil, "", "no open session to open the file in"
 	if s.home do return nil, "", "Home has only its pi tab"
 	if path == "" do return nil, "", "path is empty"
@@ -1183,6 +1184,21 @@ file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Ope
 	case .File, .Other: // other kinds open as a tab that says why
 	}
 	return s, p, ""
+}
+
+// What the user is told when a file has no session on screen to open in (the Files tree shows the
+// selected project's folder then): the project the file is in, else the selected one. The file
+// never goes to another project's session; it opens once a session of its project is on screen.
+no_session_for_file :: proc(path: string) -> string {
+	rp := filepath.is_abs(path) ? fs_real(path) : ""
+	best: ^Project
+	for &p in state.projects {
+		if p.group != .Projects || p.machine != 0 || rp == "" do continue
+		if within(rp, fs_real(p.cwd)) && (best == nil || len(p.cwd) > len(best.cwd)) do best = &p
+	}
+	if best == nil do if p := find_project(state.selected_project); p != nil && p.machine == 0 && p.group == .Projects do best = p
+	if best == nil do return "Open a session to open files"
+	return fmt.tprintf("Open a session in %s to open files", project_name(best^))
 }
 
 // The session's tab that shows file p: an editor's file view (editor) or a Markdown tab.

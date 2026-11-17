@@ -168,6 +168,8 @@ SETTINGS_FILE_GROUPS := [?]Setting_File_Group {
 	{"claude-accounts", .Agents, "Claude Code"},
 	{"claude-plugin", .Agents, "Claude Code"},
 	{"claude-mcp", .Agents, "Claude Code"},
+	{"codex", .Agents, "Codex"},
+	{"codex:", .Agents, "Codex"}, // one per account once there are several
 	{"codex-accounts", .Agents, "Codex"},
 	{"agents", .Agents, ""},
 	{"project", .Project, "pi"},

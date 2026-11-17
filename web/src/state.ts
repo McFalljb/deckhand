@@ -95,7 +95,8 @@ export interface MachineView {
 // keyed so a delta carries only the rows that changed.
 //   web: the small part; webo:<id> an open session's row; webm other machines; webtree the
 //   Projects tree's order [[key, depth, kids, forced]]; webp:<key> a tree row; websl:<p> a
-//   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats.
+//   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats;
+//   webbars the tabs' bars as text (app/bars.ts).
 export interface WebProjectRow {
   key: string;
   id: number; // 0: a group row (its folder in path)
@@ -143,6 +144,24 @@ export interface WebView {
   filtered: number;
   here: { name: string; label: string };
   watch: number[];
+  new?: WebNewChoices[]; // the New session picker's harnesses, per machine (web_view_new_choices)
+}
+export interface WebNewChoice {
+  harness: "pi" | "claude" | "codex";
+  label: string;
+  account?: string; // "" = the core's pick
+}
+export interface WebNewTab {
+  account: string; // "" = the core's pick
+  name: string; // the account's label while there are several, else ""
+}
+export interface WebNewChoices {
+  machine: number; // 0 = this machine
+  projects: WebNewChoice[];
+  chats: WebNewChoice[];
+  claude_tab?: WebNewTab[]; // New Claude tab there ([] = not installed)
+  codex_tab?: WebNewTab[];
+  note: string; // why a list is empty
 }
 
 export interface PaneLeaf {

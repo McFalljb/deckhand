@@ -871,6 +871,11 @@ codex_home :: proc() -> string {
 // or opened by Deckhand.
 CODEX_CONFIG_FILES := [?]string{"config.toml", "AGENTS.md", "AGENTS.override.md"}
 CODEX_CONFIG_FOLDERS := [?]string{"prompts", "skills", "rules"}
+// Codex's own hooks (its hooks.json, scripts in hooks/): the user's, shown, never written by
+// Deckhand, not even on the user's Save (the editor opens them read-only: codex_view_only).
+// plugins/ is not here: Codex fills it itself (installed plugins and their marketplaces).
+CODEX_VIEW_FILES := [?]string{"hooks.json"}
+CODEX_VIEW_FOLDERS := [?]string{"hooks"}
 
 // Whether p (clean, absolute) is Codex's sign-in or state rather than the user's config.
 // Codex's sign-in file as Codex finds it: $CODEX_HOME/auth.json (as tabs get it, absolute; HOME or
@@ -902,6 +907,8 @@ codex_credential :: proc(p: string) -> bool {
 			config := false
 			for f in CODEX_CONFIG_FOLDERS do if first == f do config = true
 			if rest == "" do for f in CODEX_CONFIG_FILES do if first == f do config = true
+			for f in CODEX_VIEW_FOLDERS do if first == f do config = true
+			if rest == "" do for f in CODEX_VIEW_FILES do if first == f do config = true
 			if !config do return true
 		}
 	}

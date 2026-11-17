@@ -342,7 +342,13 @@ Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/C
   `codex_account_last`, `codex_account_default`; the snapshot lists `codex_accounts` as
   `claude_accounts` (labels and folders, no secret).
 - Not done: the setup sheet's accounts step (Claude's lists found folders; Codex finds none),
-  per-account hot-reload or settings-file rows, and a copy button for the sign-in command.
+  per-account hot-reload, and a copy button for the sign-in command.
+- **Settings files** (Coding agents › Codex › Advanced): each home's `CODEX_CONFIG_FILES` and
+  `CODEX_CONFIG_FOLDERS` (one group per account once there are several), edited by the user as
+  Claude's; `CODEX_VIEW_FILES`/`CODEX_VIEW_FOLDERS` (`hooks.json`, `hooks/`) read-only in the editor
+  (`codex_view_only`); never a Create. A save is refused over a credentials or state file by any
+  name (`settings_credential` on the path and on where it leads at save time), so nothing outside
+  the allowlist in a Codex home is written. `plugins/` stays Codex's (not listed, refused).
 - Not checked without a real sign-in: that `codex login status` under an added home answers for
   that home, and that Codex's own sign-in screen in such a tab writes that home's `auth.json`.
 

@@ -477,7 +477,7 @@ claude_account_items :: proc(items: ^[dynamic]Menu_Item, label: string, cmd: Com
 		if s := find_session(c.session); s != nil do pid = s.project_id
 	}
 	if id_machine(pid) != 0 || id_machine(sid) != 0 {
-		append(items, Menu_Item{label = codex ? label : claude_label(label), cmd = cmd})
+		append(items, Menu_Item{label = label, cmd = cmd}) // its own install, not this Mac's (claude_offered, codex_offered)
 		return
 	}
 	accts := claude_accounts(codex)

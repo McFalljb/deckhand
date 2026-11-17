@@ -17,6 +17,7 @@ import { setTermFont, termFontSize, TermPane, type TermHandle } from "./Term.tsx
 import { agentName, AgentDrawer } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { storageGet, storageSet } from "../ui/dom.ts";
+import { TabBars } from "./TabBars.tsx";
 
 const enc = new TextEncoder();
 
@@ -169,6 +170,7 @@ export function PhoneSession({ id }: { id: number }) {
         <IconButton icon="more" label="Session menu" run={menu} />
       </header>
       <PhoneStrip s={s} active={tab?.id ?? 0} />
+      {tab && !files ? <TabBars tab={tab} /> : null}
       <div class="phone-term">
         {files ? (
           <div class="sidebar phone-files">

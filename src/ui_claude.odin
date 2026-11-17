@@ -60,38 +60,8 @@ held_tab :: proc(p: ^core.Pane) -> (^core.Tab, ^core.Claude_Tab) {
 	return t, ct
 }
 
-claude_held_message :: proc(tab: ^core.Tab, ct: ^core.Claude_Tab) -> string {
-	n := len(ct.held)
-	who := ct.held[0].who
-	_, why := core.claude_ready(tab, ct)
-	if why == "" do why = "sending"
-	return fmt.tprintf("%d %s from %s %s: %s · “%s”", n, n == 1 ? "message" : "messages", who, n == 1 ? "waits" : "wait", why, held_preview(ct.held[0].text))
-}
-
-// The first held text as one short line: control characters (tabs, escapes, line breaks) become
-// spaces, bidi and invisible characters dropped, at most HELD_PREVIEW_MAX bytes on a character boundary.
-@(private = "file")
-HELD_PREVIEW_MAX :: 48
-
-@(private = "file")
-held_preview :: proc(text: string) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	space := false
-	for r in text {
-		// bidi controls and invisible characters: dropped (they could disguise the text)
-		if (r >= 0x200b && r <= 0x200f) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) || r == 0xfeff do continue
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || r == 0x2028 || r == 0x2029 {
-			if !space do strings.write_byte(&b, ' ')
-			space = true
-			continue
-		}
-		strings.write_rune(&b, r)
-		space = r == ' '
-	}
-	line := strings.trim_space(strings.to_string(b))
-	if len(line) <= HELD_PREVIEW_MAX do return line
-	return strings.concatenate({core.cut_utf8(line, HELD_PREVIEW_MAX), "…"}, context.temp_allocator)
-}
+// The held texts' line is the core's (tab_bars.odin): a browser's strip shows the same.
+claude_held_message :: core.claude_held_message
 
 claude_bars :: proc(p: ^core.Pane) {
 	status_bar(p)

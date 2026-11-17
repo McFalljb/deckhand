@@ -733,7 +733,9 @@ is waiting for you).
 - **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
-- **To pick up new sessions** started outside Deckhand, use the gear's "Rescan sessions".
+- **New sessions** started outside Deckhand (pi or Claude Code in a terminal) show when you come
+  back to the window, or a paired browser connects: Deckhand looks again then, at most once every
+  3 minutes. To look now, use the gear's "Rescan sessions".
 
 ### Chats settings
 
@@ -1581,6 +1583,10 @@ These lists change only in Claude Code (`/plugin`, `claude mcp`).
 
 **Codex.** Its version and how it was installed, as the checklist has it, **Full access in
 new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tabs](#codex-tabs)).
+Once Codex is installed and has its folder (`~/.codex` or your `CODEX_HOME`): `config.toml`,
+`AGENTS.md`, `AGENTS.override.md`, and the folders `prompts`, `skills`, `rules`, each account's
+own, open and save like Claude Code's; `hooks.json` and `hooks/` show **read-only**. Its sign-in
+(`auth.json`), its sessions, history and `plugins/` are never listed, opened or saved over.
 
 ### Machines
 
@@ -2239,7 +2245,12 @@ drawer, Jobs and the job sheet, the Changes tab, the Files tab, and file tabs (M
 editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
 when you have not edited it, and asks when you have. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
-peeks at that session.
+peeks at that session. **New session** offers what the window's picker does there (the coding agents
+installed, once per account, the last used first; one starts at once). Over a Claude, Codex or
+pi tab, a strip shows the window's bars as text (held messages, hooks not running, an old
+version, Codex signed out, the hot-reload bars) with their buttons where a browser may use them
+(**Send now**, **Drop**, **Reload**, **Restart**, **Later**, copying the update command); their
+**Dismiss** and **Details** are the window's.
 
 **Not in a browser:** browser tabs and app tabs (they show a note there; open them at the Mac),
 adding or removing machines, **Continue this conversation on <machine>**, the Settings page's

@@ -974,3 +974,13 @@ a { color: inherit; }
 .peek-term { position: absolute; left: 0; top: 0; pointer-events: none; }
 .peek-foot { padding: 0 2px; }
 .card, .open-row { -webkit-touch-callout: none; }
+
+/* A tab's status strip (TabBars.tsx): the native window's bars over a tab, as text */
+.tab-bars { flex: none; border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
+.tab-bar { display: flex; align-items: center; gap: 8px; padding: 4px 12px; min-height: 30px; font-size: 12px; }
+.tab-bar + .tab-bar { border-top: 1px solid var(--border); }
+.tab-bar .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--waiting); }
+.tab-bar.error .dot { background: var(--error); }
+.tab-bar.info .dot { background: var(--accent); }
+.tab-bar-text { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.tab-bar .btn { flex: none; }

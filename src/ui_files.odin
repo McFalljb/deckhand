@@ -15,7 +15,9 @@ package main
 // Dragging a row (or the selection it is in) within the tree moves it: onto a folder row into
 // it, onto a file row into its folder, below the rows into the root (core files_drop_at; one
 // rename_path each); a closed folder held over opens, the list scrolls at its edges, Esc
-// cancels. Dragging a row onto a terminal pastes its quoted path. Keyboard (focus widget
+// cancels; keys and a paste do nothing meanwhile (files_drag_event). Dragging a row onto a
+// terminal pastes its quoted path (a selection's: all of them). ⌘V with the tree's keyboard
+// pastes nowhere. Keyboard (focus widget
 // "files"): ↑/↓ move (with shift: extend), ←/→ close/open or go to the
 // parent/child, Enter opens, Space previews, F2 renames, ⌘A selects every row,
 // ⌘⌫ moves the selection to the Trash (one confirmation), Esc clears a selection
@@ -152,6 +154,7 @@ Files_Ui :: struct {
 	drop_key:   string, // owned: what the drop was worked out for (the row, the root)
 	drop_gen:   u64, // and the listings' generation then (core.files_cache_gen)
 	drop_check: bool, // the rows changed under the pointer (spring, edge scroll): the drop again next frame
+	drag_root:  string, // owned: the tree's root at the press (another one ends the drag)
 	drag_left:  bool, // the drag left the pressed row (until then its release is a click: no ghost, no drop)
 	multi:      bool, // several rows selected (drawn: the cursor's row ringed too)
 	// type-to-select: what was typed, the last key's time
@@ -572,12 +575,42 @@ FILES_EDGE_SPEED :: 600
 // and only once the pointer has stayed at the edge this long
 FILES_EDGE_DELAY :: 300 * time.Millisecond
 
+// Every event while a Files drag is on, first in event() (main.odin), before the global
+// shortcuts: keys, a paste and files dropped from Finder go nowhere (Esc cancels the drag), so
+// none acts mid-drag or reaches a terminal; the window losing focus ends it. The pointer's
+// events go on to files_event. True: taken.
+files_drag_event :: proc(e: ^sapp.Event) -> bool {
+	if !fu.dragging do return false
+	#partial switch e.type {
+	case .KEY_DOWN:
+		if e.key_code == .ESCAPE do files_drag_cancel()
+		app.key_taken = true
+		return true
+	case .CHAR, .KEY_UP, .CLIPBOARD_PASTED, .FILES_DROPPED:
+		return true
+	case .UNFOCUSED:
+		files_drag_cancel()
+	}
+	return false
+}
+
+// The tree shows another root than the drag's (another session or checkout on screen): the drag
+// ends, nothing moves (files_drop_at refuses another tree's items too). True: it ended.
+@(private = "file")
+files_drag_root_gone :: proc() -> bool {
+	if core.files_root() == fu.drag_root do return false
+	files_drag_cancel()
+	return true
+}
+
 // What the drag moves: owned copies of paths.
 @(private = "file")
 files_drag_sources_set :: proc(paths: []string) {
 	for p in fu.drag_paths do delete(p)
 	clear(&fu.drag_paths)
 	for p in paths do append(&fu.drag_paths, strings.clone(p))
+	delete(fu.drag_root)
+	fu.drag_root = strings.clone(core.files_root()) // the tree they are in
 	files_drop_forget()
 }
 
@@ -634,6 +667,7 @@ files_drop_over :: proc(x, y: f32) -> (over: string, over_dir, ok: bool) {
 files_drag_update :: proc(x, y: f32) {
 	app.pointer = {x, y}
 	app.redraw = true
+	if files_drag_root_gone() do return
 	fu.drop_check = false
 	if !over_sidebar(x) {
 		// over the panes: onto a terminal it pastes the pressed row's path (files_event)
@@ -673,7 +707,7 @@ files_drag_update :: proc(x, y: f32) {
 // scrolls while the pointer is at its top or bottom edge, and the drop follows rows that moved
 // under a still pointer. True: draw again (a timer is running).
 files_drag_tick :: proc() -> bool {
-	if !fu.dragging do return false
+	if !fu.dragging || files_drag_root_gone() do return false
 	again := false
 	if fu.drop_check {
 		files_drag_update(app.pointer.x, app.pointer.y) // the rows the last frame laid out
@@ -841,19 +875,8 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 // Events for the Files tab and the tab switch, before the generic handling
 // (main.odin). True if consumed.
 files_event :: proc(e: ^sapp.Event) -> bool {
-	// a drag owns the keyboard until it ends: Esc cancels it, other keys do nothing (none reaches
-	// a terminal); the window losing focus ends it
 	if fu.dragging {
 		#partial switch e.type {
-		case .KEY_DOWN:
-			if e.key_code == .ESCAPE do files_drag_cancel()
-			app.key_taken = true
-			return true
-		case .CHAR, .KEY_UP:
-			return true
-		case .UNFOCUSED:
-			files_drag_cancel()
-			return false
 		case .MOUSE_DOWN:
 			files_drag_cancel() // another button: no drop
 			return true
@@ -950,6 +973,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		if fu.dragging {
 			// where it is dropped now (the rows may have moved since the last move)
 			files_drag_update(e.mouse_x, e.mouse_y)
+			if !fu.dragging do return true // the tree changed root: ended, nothing drops
 			if !fu.drag_left {
 				// it never left the pressed row: a click after all (below)
 				fu.dragging = false
@@ -967,9 +991,10 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			files_drop_set({})
 			files_drop_forget()
 			app.redraw = true
-			// onto a terminal: the pressed row's quoted path, as a dropped file. Inside the left
-			// column a drag only ever moves files: nothing reaches a pane
-			if !over_sidebar(e.mouse_x) do sidebar_drop({fu.drag_path}, e.mouse_x, e.mouse_y)
+			// onto a terminal: the quoted paths it carries (the pressed row's, or the selection's
+			// it was in), as dropped files, into the pane under the release. Inside the left column
+			// a drag only ever moves files: nothing reaches a pane
+			if !over_sidebar(e.mouse_x) do sidebar_drop(core.files_drag_paste_paths(fu.drag_path, fu.drag_paths[:]), e.mouse_x, e.mouse_y)
 			else if refused != "" do toast_show(fmt.tprintf("Not moved: %s", refused), err = true)
 			else if dir != "" && !noop do files_drop_run(dir)
 			return true
@@ -995,6 +1020,9 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		_, _, v.scroll = core.files_visible(max(fu.count, len(v.rows)), v.scroll, fu.view_h, FILES_ROW_H)
 		app.redraw = true
 		return true
+	case .CLIPBOARD_PASTED:
+		// ⌘V while the tree has the keyboard: nothing to paste into, and never the tab behind it
+		return state.focus_widget == "files"
 	case .KEY_DOWN, .CHAR, .KEY_UP:
 		// only while the tree has the keyboard: then no key it takes reaches a terminal or an agent
 		if state.focus_widget != "files" do return false

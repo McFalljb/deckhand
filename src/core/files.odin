@@ -750,6 +750,10 @@ files_drop_at :: proc(input: Files_Drop_Input) -> Files_Drop {
 	if input.over != "" do dir = input.over_dir ? input.over : filepath.dir(input.over)
 	if !within(dir, input.root) do return {}
 	srcs := files_drop_sources(input.sources)
+	// only this tree's items (the tree may show another root since the press), never the root
+	for s in srcs do if s == input.root || !within(s, input.root) {
+		return {dir = dir, refused = fmt.tprintf("%s is not in this tree", filepath.base(s))}
+	}
 	if len(srcs) == 1 && srcs[0] == input.over do return {dir = dir, noop = true}
 	for s in srcs do if within(dir, s) {
 		return {dir = dir, refused = fmt.tprintf("cannot move %s into itself", filepath.base(s))}
@@ -794,6 +798,15 @@ files_drop_moves :: proc(sources: []string, dir: string) -> []Files_Move {
 		append(&out, Files_Move{from = s, to = strings.concatenate({dir, "/", filepath.base(s)}, context.temp_allocator)})
 	}
 	return out[:]
+}
+
+// What a drag dropped on a terminal pastes: every item it carries (nested ones once) when the
+// pressed row is among them, else that row alone. Temp allocator.
+files_drag_paste_paths :: proc(pressed: string, sources: []string) -> []string {
+	for s in sources do if s == pressed do return files_drop_sources(sources)
+	out := make([]string, 1, context.temp_allocator)
+	out[0] = pressed
+	return out
 }
 
 // A folder as a drop's toast and refusal name it: relative to the root, with "/" ("src/x/");

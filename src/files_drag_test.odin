@@ -225,3 +225,115 @@ files_drag_selection_and_safety :: proc(t: ^testing.T) {
 	testing.expect(t, fd_exists(dir, "lib/x.go"), "nothing moved")
 	os.remove_all(dir)
 }
+
+// Review round 1: with the tree's keyboard and no drag, a paste goes nowhere (never the active
+// terminal); during a drag a paste, ⌘K and ⌘P go nowhere either.
+// Every send_text run (core.after_command_check), as "tab:text" lines.
+@(private = "file")
+fd_sent: [dynamic]string
+
+@(private = "file")
+fd_watch_sends :: proc() {
+	clear(&fd_sent)
+	core.after_command_check = proc(cmd: core.Command) {
+		if st, is := cmd.(core.Send_Text); is do append(&fd_sent, fmt.aprintf("%d:%s", st.tab_id, st.text, allocator = runtime.heap_allocator()))
+	}
+}
+
+@(test)
+files_drag_keys_go_nowhere :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	when !core.TEST_HOOKS do return
+	defer pk_reset()
+	dir := fd_setup()
+	fd_write(dir, "a.txt")
+	fd_write(dir, "lib/x.go")
+	win_os.get_clipboard = proc() -> string {return "pasted"}
+	defer win_os.get_clipboard = nil
+	paste := sapp.Event{type = .CLIPBOARD_PASTED}
+	fd_watch_sends()
+	defer core.after_command_check = nil
+	// the tree has the keyboard, no drag
+	ax, ay, _ := fd_row("/a.txt")
+	fd_ev(.MOUSE_DOWN, ax, ay)
+	fd_ev(.MOUSE_UP, ax, ay)
+	testing.expect_value(t, state.focus_widget, "files")
+	_ = pk_take(101)
+	event(&paste)
+	core.inbox_drain()
+	testing.expectf(t, len(fd_sent) == 0, "a paste with the tree's keyboard went to %v", fd_sent[:])
+	// mid-drag: a paste, ⌘K, ⌘P
+	lx, ly, _ := fd_row("/lib")
+	fd_press_move(ax, ay, lx, ly)
+	event(&paste)
+	drop := sapp.Event{type = .FILES_DROPPED, mouse_x = ax, mouse_y = ay}
+	event(&drop)
+	core.inbox_drain()
+	testing.expectf(t, len(fd_sent) == 0, "a paste mid-drag went to %v", fd_sent[:])
+	testing.expect_value(t, len(state.projects), 1)
+	cmdk := sapp.Event{type = .KEY_DOWN, key_code = .K, modifiers = sapp.MODIFIER_SUPER}
+	event(&cmdk)
+	cmdp := sapp.Event{type = .KEY_DOWN, key_code = .P, modifiers = sapp.MODIFIER_SUPER}
+	event(&cmdp)
+	core.inbox_drain()
+	testing.expect(t, !palette_is_open(), "⌘K and ⌘P did nothing mid-drag")
+	when core.TEST_HOOKS do testing.expect(t, files_dragging(), "the drag goes on")
+	fd_ev(.MOUSE_UP, lx, ly)
+	testing.expect(t, fd_exists(dir, "lib/a.txt"), "then it drops")
+	// a selection of several dropped on the terminal: every path, quoted, into that tab
+	fd_write(dir, "q r.txt")
+	fd_write(dir, "s.txt")
+	v := core.tree_view()
+	qp, sp := strings.concatenate({dir, "/q r.txt"}, context.temp_allocator), strings.concatenate({dir, "/s.txt"}, context.temp_allocator)
+	core.files_select_in(v, qp)
+	core.files_sel_set(v, {qp, sp})
+	ui_do(core.Focus_Tab{101}) // the terminal (the clicks above opened a preview tab over it)
+	core.inbox_drain()
+	qx, qy, _ := fd_row("/q r.txt")
+	qx -= 40 // not where the last press was (that would be a double-click)
+	tb := clay.GetElementData(clay.ID("terminal")).boundingBox // the terminal's area, laid out by fd_row
+	tx, ty := tb.x + tb.width / 2, tb.y + tb.height / 2
+	testing.expect(t, tb.width > 0 && !over_sidebar(tx), "the terminal is laid out")
+	if tv := term_views[101]; tv != nil do tv.x, tv.y, tv.w, tv.h = tb.x, tb.y, tb.width, tb.height // as drawing sets them
+	fd_press_move(qx, qy, tx, ty)
+	clear(&fd_sent)
+	fd_ev(.MOUSE_UP, tx, ty)
+	want := fmt.tprintf("101:'%s' '%s' ", qp, sp)
+	testing.expectf(t, len(fd_sent) == 1 && fd_sent[0] == want, "dropped on the terminal: %v, want %q", fd_sent[:], want)
+	os.remove_all(dir)
+}
+
+// Review round 1: a drag whose tree changes root mid-drag (another session on screen) ends: none
+// of the first project's files go into the second.
+@(test)
+files_drag_root_change_cancels :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	when !core.TEST_HOOKS do return
+	defer pk_reset()
+	dir := fd_setup()
+	fd_write(dir, "a.txt")
+	other := strings.concatenate({dir, "-b"})
+	os.make_directory_all(other)
+	fd_write(other, "lib/x.go")
+	ax, ay, _ := fd_row("/a.txt")
+	fd_ev(.MOUSE_DOWN, ax, ay)
+	fd_ev(.MOUSE_MOVE, ax, ay + 30, sapp.MODIFIER_LMB)
+	// the tree now shows another folder (the session's cwd changed)
+	delete(state.open_sessions[0].cwd)
+	state.open_sessions[0].cwd = strings.clone(other)
+	append(&state.projects, core.Project{id = 2, cwd = strings.clone(other), label = strings.clone("b")})
+	core.files_state_gen += 1
+	_ = ui_layout(FD_W, FD_H)
+	lx, ly, ok := fd_row("/lib")
+	testing.expect(t, ok, "the other tree shows")
+	fd_ev(.MOUSE_MOVE, lx, ly, sapp.MODIFIER_LMB)
+	fd_ev(.MOUSE_UP, lx, ly)
+	testing.expect(t, fd_exists(dir, "a.txt") && !fd_exists(other, "lib/a.txt"), "nothing crossed projects")
+	// and the pure rule: a source outside the root is refused
+	d := core.files_drop_at({sources = {strings.concatenate({dir, "/a.txt"}, context.temp_allocator)}, root = other, over = strings.concatenate({other, "/lib"}, context.temp_allocator), over_dir = true, exists = proc(p: string) -> bool {return false}})
+	testing.expect(t, d.dir == "" || d.refused != "", "refused")
+	os.remove_all(dir)
+	os.remove_all(other)
+}

@@ -693,6 +693,9 @@ event :: proc(e: ^sapp.Event) {
 	// a peek (ui_peek.odin) is for looking: like the bell's popover it takes the keys and clicks
 	// (nothing reaches its terminal or what is under it); a ⌘ chord not its own closes it and goes on
 	if peek_event(e) do return
+	// a Files drag takes every key, paste and dropped file until it ends (Esc cancels): before the
+	// global shortcuts, so none acts mid-drag and nothing reaches a terminal (ui_files.odin)
+	if files_drag_event(e) do return
 	// ⌘K opens the palette from anywhere, and closes it
 	if e.type == .KEY_DOWN && e.key_code == .K && only_cmd {
 		ime_cancel()

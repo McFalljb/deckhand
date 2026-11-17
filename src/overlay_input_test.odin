@@ -106,8 +106,9 @@ overlay_ends_key_repeat :: proc(t: ^testing.T) {
 	testing.expect_value(t, pk_take(101), "")
 }
 
-// A Files drag in progress when an overlay opens (here the palette, from ⌘K, and the bell's
-// popover) ends: its release, and the next click, drop nothing into the terminal.
+// A Files drag in progress when an overlay opens (the bell's popover) ends: its release, and the
+// next click, drop nothing into the terminal. ⌘K mid-drag opens nothing (a drag takes every key
+// but Esc: files_drag_event).
 @(test)
 overlay_cancels_files_drag :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -119,6 +120,7 @@ overlay_cancels_files_drag :: proc(t: ^testing.T) {
 	state.current_session = 100
 	_ = pk_view(101, 80, 24)
 	when core.TEST_HOOKS do for what in ([?]string{"palette", "notifications"}) {
+		defer files_drag_cancel()
 		files_drag_for_test("/tmp/pk-proj/a.txt")
 		move := sapp.Event{type = .MOUSE_MOVE, mouse_x = 700, mouse_y = 400, modifiers = sapp.MODIFIER_LMB}
 		event(&move)
@@ -127,10 +129,14 @@ overlay_cancels_files_drag :: proc(t: ^testing.T) {
 			e := sapp.Event{type = .KEY_DOWN, key_code = .K, modifiers = sapp.MODIFIER_SUPER}
 			event(&e)
 			core.inbox_drain()
-			testing.expect(t, palette_is_open(), "⌘K opened the palette")
-		} else do focus(what)
-		event(&move)
-		testing.expectf(t, !files_dragging(), "%s opened: the drag ended", what)
+			testing.expect(t, !palette_is_open(), "⌘K mid-drag: no palette")
+			testing.expect(t, files_dragging(), "⌘K mid-drag: the drag goes on")
+			files_drag_cancel()
+		} else {
+			focus(what)
+			event(&move)
+			testing.expectf(t, !files_dragging(), "%s opened: the drag ended", what)
+		}
 		focus("")
 		pk_mouse(.MOUSE_UP, 700, 400)
 		pk_mouse(.MOUSE_DOWN, 700, 400)

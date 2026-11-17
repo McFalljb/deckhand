@@ -126,3 +126,20 @@ files_drop_labels :: proc(t: ^testing.T) {
 	testing.expect(t, !files_drop_band(Files_Drop{dir = "/p/src", noop = true}, "/p/src"), "noop: none")
 	testing.expect(t, files_drop_band(Files_Drop{dir = "/p"}, "/p/z"), "the root: every row")
 }
+
+// Review round 1: every source must be inside the tree's root (a root switch mid-drag), never the
+// root itself; onto a terminal a drag pastes all it carries.
+@(test)
+files_drop_sources_in_root :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	d := drop({"/q/a.txt"}, "/p/lib", true)
+	testing.expect(t, d.refused != "" && !d.noop, "a source from another tree")
+	d = drop({"/p/b.txt", "/q/a.txt"}, "/p/lib", true)
+	testing.expect(t, d.refused != "", "one source from another tree refuses them all")
+	d = drop({"/p"}, "/p/lib", true)
+	testing.expect(t, d.refused != "", "the root itself")
+	// the paste onto a terminal: the pressed row, or every dragged one when it is among them
+	testing.expect_value(t, strings.join(files_drag_paste_paths("/p/a", {"/p/a", "/p/a/x", "/p/b"}), " ", context.temp_allocator), "/p/a /p/b")
+	testing.expect_value(t, strings.join(files_drag_paste_paths("/p/c", {"/p/c"}), " ", context.temp_allocator), "/p/c")
+	testing.expect_value(t, strings.join(files_drag_paste_paths("/p/c", {"/p/a", "/p/b"}), " ", context.temp_allocator), "/p/c")
+}

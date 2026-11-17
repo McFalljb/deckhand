@@ -807,6 +807,7 @@ Command :: union {
 	Claude_Reload_Later,
 	Claude_Reload_Watch,
 	Claude_Reload_Kick,
+	Claude_Restart_Anyway,
 }
 
 // Widgets that can take keyboard focus (editor_*: the editor's find,
@@ -2023,7 +2024,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return reload_apply(cmd, caller, request_id)
 	case Set_Pi_Extension:
 		return pi_integration_apply(cmd, caller)
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		return claude_reload_apply(cmd, caller, request_id)
 	case Restore_Session:
 		if c.home {
@@ -2323,6 +2324,9 @@ same_target :: proc(a, b: Command) -> bool {
 	case Claude_Restart_Changed:
 		y, ok := b.(Claude_Restart_Changed)
 		return ok && x.update == y.update && x.all == y.all
+	case Claude_Restart_Anyway:
+		y, ok := b.(Claude_Restart_Anyway)
+		return ok && x.tab_id == y.tab_id
 	// file commands are parked with absolute paths (editor_apply resolves them first)
 	case Machine_Remove:
 		y, ok := b.(Machine_Remove)

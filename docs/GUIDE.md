@@ -1779,8 +1779,11 @@ When one of those changes, a bar says "Claude Code settings changed — Restart 
 **Restart** starts each idle Claude tab again on the same conversation (`claude --resume`, with
 your extra flags); Deckhand asks first, because anything Claude runs in the background there
 (background shells, monitors) stops. A tab that is working, waiting for you, has something typed
-or a subagent running restarts once it is idle. **Details** lists the files and each Claude
-tab; **Later** hides the bar until the next change.
+or a subagent running restarts once it is idle. A subagent that has reported nothing for 2 hours
+may have lost its end report, or may still be in one long step, so its tab still waits: the bar
+then names the tab ("a subagent silent for 2h 05m") and offers **Restart anyway**, which restarts
+that tab now after you confirm; the other tabs restart without waiting for it. **Details** lists
+the files and each Claude tab; **Later** hides the bar until the next change.
 
 **After a Claude Code update.** Deckhand notes which Claude Code each Claude tab started with, by
 looking at where `claude` points (it never runs it). When Claude Code updates itself, a bar says

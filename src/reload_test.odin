@@ -1088,3 +1088,75 @@ claude_restart_all :: proc(t: ^testing.T) {
 	testing.expect_value(t, c.(core.Claude_Restart_Changed).all, true)
 	testing.expect(t, strings.contains(core.command_spec("claude_restart_changed").args, "all?"))
 }
+
+// Review: a queued restart held only by a subagent silent for CLAUDE_AGENT_STALE never restarts
+// the tab by itself (the subagent may be in one long step); the bar names it and offers Restart
+// anyway, the user's and confirmed. The other tabs of the same restart go without waiting for it.
+@(test)
+claude_restart_anyway_silent_subagent :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	r_reset()
+	defer cr_done()
+	when core.TEST_HOOKS {
+		defer core.claude_agents_clock_skew = 0
+	}
+	base, cfg, proj := cr_env("anyway")
+	args := fmt.tprintf("%s/args", base)
+	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
+	sess := cr_session(proj)
+	held := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	other := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	core.run_command(core.Claude_Session_Report{tab_id = held, session_id = "0c1a0de0-aaaa-4222-8333-444455556671", source = "startup"}, CR_SCRIPT)
+	core.run_command(core.Claude_Session_Report{tab_id = other, session_id = "0c1a0de0-aaaa-4222-8333-444455556672", source = "startup"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = held, state = "idle"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = other, state = "submitted"}, CR_SCRIPT)
+	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = held, event = "start", agent_id = "a1", agent_type = "general-purpose"}, CR_SCRIPT).ok)
+	core.claude_reload_tick()
+	core.run_command(core.Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}})
+	r := core.run_command(core.Claude_Restart_Changed{}, R_UI)
+	r = core.run_command(core.Claude_Restart_Changed{confirm = r.confirm_token}, R_UI)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, core.json_path(r.data, "queued.#"), "2")
+	_, ht, _ := core.find_tab(held)
+	testing.expect_value(t, ht.reload.queued, core.Reload_Op.Restart)
+	// not silent long: no Restart anyway
+	testing.expect_value(t, core.run_command(core.Claude_Restart_Anyway{tab_id = held}, R_UI).error, "this tab's restart waits until it is idle (a subagent runs)")
+	ts, _ := claude_reload_silent_tab(false)
+	testing.expect(t, ts == nil)
+	when core.TEST_HOOKS {
+		core.claude_agents_clock_skew = core.CLAUDE_AGENT_STALE + 5 * time.Minute
+	}
+	core.claude_reload_tick()
+	// still waiting: silence never restarts it by itself
+	_, ht, _ = core.find_tab(held)
+	testing.expect_value(t, ht.status, core.Tab_Status.Running)
+	testing.expect_value(t, ht.reload.queued, core.Reload_Op.Restart)
+	testing.expectf(t, strings.contains(ht.reload.note, "a subagent silent for 2h 05m"), "%q", ht.reload.note)
+	// the bar names it and offers Restart anyway
+	why: string
+	ts, why = claude_reload_silent_tab(false)
+	testing.expect(t, ts != nil && ts.id == held)
+	testing.expect_value(t, why, "a subagent silent for 2h 05m")
+	// the other tab of the same restart goes once idle, without waiting for it
+	core.run_command(core.Claude_Turn_Report{tab_id = other, state = "idle"}, CR_SCRIPT)
+	core.claude_reload_tick()
+	testing.expect(t, cr_running_again(other), "the other tab restarts")
+	_, ht, _ = core.find_tab(held)
+	testing.expect_value(t, ht.reload.queued, core.Reload_Op.Restart)
+	// Restart anyway: the user's only, always confirmed
+	testing.expect(t, !core.caller_may(CR_CONTROL, core.Claude_Restart_Anyway{tab_id = held}), "an agent never forces it")
+	testing.expect_value(t, core.command_spec("claude_restart_anyway").who, core.Command_Who.User)
+	ra := core.run_command(core.Claude_Restart_Anyway{tab_id = held}, R_UI)
+	testing.expect_value(t, ra.error, "needs_confirmation")
+	testing.expectf(t, strings.contains(ra.confirm_summary, "may still be working"), "%s", ra.confirm_summary)
+	c, err := core.parse_command(fmt.tprintf(`{{"type":"claude_restart_anyway","tab_id":%d}}`, held), context.temp_allocator)
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, c.(core.Claude_Restart_Anyway).tab_id, held)
+	os.remove(args)
+	ra = core.run_command(core.Claude_Restart_Anyway{tab_id = held, confirm = ra.confirm_token}, R_UI)
+	testing.expect(t, ra.ok, ra.error)
+	testing.expect(t, cr_running_again(held), "restarted anyway")
+	testing.expect(t, cr_has(args, "--resume\n0c1a0de0-aaaa-4222-8333-444455556671"))
+	_, ht, _ = core.find_tab(held)
+	testing.expect_value(t, ht.reload.queued, core.Reload_Op.None)
+}

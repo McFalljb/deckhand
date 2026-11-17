@@ -337,6 +337,11 @@ is valid; it learns nothing it can use from outside the tab.
   blocked, nothing typed or held, no subagent running) are stopped (hung up on, as a pi restart)
   and started again once the old process exited, through the dead tab's restart wait, with
   `--resume <session id>` and a new token; busy ones queue and go from the core's tick once idle.
+  A subagent counts as running until its SubagentStop, however long it is silent (one long step
+  looks the same as a lost stop). When every running subagent of a queued tab has reported nothing
+  for `CLAUDE_AGENT_STALE` (2 h), its note says so ("a subagent silent for 2h 05m") and the bar
+  offers **Restart anyway** (`claude_restart_anyway`: the user's, always confirmed) for that tab;
+  nothing restarts it by itself, and the other queued tabs go without it.
   A tab without a Claude session id is never restarted (no `--resume`: it would lose the
   conversation). Always confirmed: Claude's background shells and monitors stop; the confirmation
   names those Claude's last turn reported (§6b; a Claude Code without them: none named). Only the

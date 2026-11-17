@@ -631,19 +631,25 @@ f_last_bell :: proc(tab_id: u64) -> Maybe(core.Notice_Kind) {
 	return nil
 }
 
-// Audit: a subagent silent past CLAUDE_AGENT_STALE (its SubagentStop lost) no longer counts as
-// running: a queued restart of the tab is not held by it for ever.
+// Review: a subagent silent past CLAUDE_AGENT_STALE may be in one long tool call (silence never
+// proves it ended): it still counts as running, so a queued restart still waits for it.
 @(test)
-claude_subagent_lost_stop_frees_restart :: proc(t: ^testing.T) {
+claude_subagent_silent_still_blocks :: proc(t: ^testing.T) {
 	context.allocator = f_reset()
 	defer f_done()
 	_, id := f_claude(t, "agentlost")
 	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = id, event = "start", agent_id = "a1", agent_type = "Explore"}, F_SCRIPT).ok)
 	now := time.tick_now()
-	testing.expect_value(t, core.claude_subagents_running(id, now), 1)
-	testing.expect_value(t, core.claude_subagents_running(id, time.tick_add(now, core.CLAUDE_AGENT_STALE - time.Minute)), 1)
-	testing.expect_value(t, core.claude_subagents_running(id, time.tick_add(now, core.CLAUDE_AGENT_STALE + time.Second)), 0)
-	// a report from it again: running again
-	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = id, event = "tool", agent_id = "a1", tool_name = "Grep", seq = 1}, F_SCRIPT).ok)
+	later := time.tick_add(now, core.CLAUDE_AGENT_STALE + time.Second)
 	testing.expect_value(t, core.claude_subagents_running(id), 1)
+	// silent that long: still running, and how long it has been silent is known (Restart anyway)
+	testing.expect_value(t, core.claude_subagents_silent(id, time.tick_add(now, core.CLAUDE_AGENT_STALE - time.Minute)), time.Duration(0))
+	testing.expect(t, core.claude_subagents_silent(id, later) >= core.CLAUDE_AGENT_STALE)
+	// one that reported lately: not silent; ended: none
+	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = id, event = "start", agent_id = "a2", agent_type = "Explore"}, F_SCRIPT).ok)
+	testing.expect_value(t, core.claude_subagents_silent(id, time.tick_add(time.tick_now(), time.Hour)), time.Duration(0))
+	core.run_command(core.Claude_Subagent{tab_id = id, event = "stop", agent_id = "a1", agent_type = "Explore"}, F_SCRIPT)
+	core.run_command(core.Claude_Subagent{tab_id = id, event = "stop", agent_id = "a2", agent_type = "Explore"}, F_SCRIPT)
+	testing.expect_value(t, core.claude_subagents_running(id), 0)
+	testing.expect_value(t, core.claude_subagents_silent(id, later), time.Duration(0))
 }

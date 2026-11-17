@@ -263,8 +263,10 @@ either: its hooks are Deckhand's own CLI, passed per run (§5a).
 | `needs_harness` | a third-party item whose harness is missing or too old | Needs pi first |
 
 The checklist is looked at again when the sheet opens, on Settings' **Refresh**, after Refresh
-shell environment, and when a run ends (then the cached `pi_installed`, `claude_installed` and
-`codex_installed` answers are dropped too, and pi's version probed again). Test mode never looks at PATH
+shell environment, and when a run ends; after Refresh shell environment and a run's end the cached
+`pi_installed`, `claude_installed` and `codex_installed` answers are dropped too (after a run's
+end, pi's version is probed again as well), and a Claude or Codex tab whose command exits 127
+(not found) drops its own. Test mode never looks at PATH
 (`detect_path`), only the fake HOME's install folders.
 
 **Other machines** (Machines over SSH, [GUIDE.md](GUIDE.md)). Each machine's core checks its own

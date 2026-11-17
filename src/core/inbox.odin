@@ -277,7 +277,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return app_command_clone(cmd, allocator)
 	case Pi_Reload_All, Pi_Restart_Updated, Pi_Reload_Later, Reload_Watch, Reload_Kick:
 		return reload_clone(cmd, allocator)
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		return claude_reload_clone(cmd, allocator)
 	case Comment_Add:         return Comment_Add{source = c.source, tab_id = c.tab_id, what = s(c.what, allocator), text = s(c.text, allocator), crop = s(c.crop, allocator)}
 	case Comment_Edit:        return Comment_Edit{comment_id = c.comment_id, text = s(c.text, allocator)}
@@ -407,7 +407,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Set_Agent_Model:     delete(c.model, allocator)
 	case Pi_Reload:           delete(c.confirm, allocator)
 	case Pi_Reload_All, Pi_Restart_Updated, Reload_Watch: reload_free(cmd, allocator)
-	case Claude_Restart_Changed, Claude_Reload_Watch: claude_reload_free(cmd, allocator)
+	case Claude_Restart_Changed, Claude_Reload_Watch, Claude_Restart_Anyway: claude_reload_free(cmd, allocator)
 	case Bridge_Done:         delete(c.error, allocator)
 	case Panel_Set:
 		delete(c.panel, allocator)

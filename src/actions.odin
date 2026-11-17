@@ -135,6 +135,7 @@ ACTIONS := [?]Action {
 	{id = "new_claude_tab", label = "New Claude tab", keys = "⌥⌘T", title = proc() -> string {return core.claude_label("New Claude tab")}, make = proc() -> (core.Command, bool) {
 		cs := core.cur()
 		if cs == nil || cs.home || cs.missing do return nil, false // in chats too
+		if cs.machine != 0 && !core.claude_offered(cs.id) do return nil, false // another machine's: its Claude Code (harness.odin)
 		return core.New_Claude_Tab{session = cs.id}, true
 	}},
 	// Codex (codex.odin): codex in the session on screen's folder

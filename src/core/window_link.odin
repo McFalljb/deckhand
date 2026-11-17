@@ -1034,6 +1034,9 @@ link_message :: proc(text: string) -> (command: bool) {
 			link_reply_now(id, fail(err), 0)
 			return
 		}
+		// a browser's New session (its picker, web/src/app/harness.ts): that harness goes first next
+		// time, as the native picker's harness_used (a browser sends no window.command)
+		web_note_harness(cmd, caller)
 		link_run(cmd, caller, id, now, menu)
 	case "window.reply":
 		link_reply_in(obj)
@@ -1045,9 +1048,11 @@ link_message :: proc(text: string) -> (command: bool) {
 			log_ln("Deckhand: window.facts refused:", e)
 			return
 		}
+		was_active := link.has_facts && link.facts.active
 		wire_free(&link.facts, type_info_of(Window_Facts), heap)
 		link.facts, link.has_facts = f, true
 		hello_set(&f)
+		if f.active && !was_active do rescan_when_active() // sessions started outside Deckhand (commands.odin)
 		if link.sock != nil do link_layout_apply(&link.facts) // in process the layout writes them itself
 		if link.sock != nil do update_window_exe_set(f.exe) // the bundle a separate core's updates replace (update.odin)
 	case "window.tab_facts":

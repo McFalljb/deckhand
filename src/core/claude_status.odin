@@ -308,8 +308,8 @@ claude_status_dismiss :: proc(tab: ^Tab, now := time.Tick{}) {
 // claude.turn (claude.odin). A Stop's idle that came without a background snapshot ends the
 // unconfirmed launches (claude_panels.odin), on either path. For a tab whose Claude Code
 // reports no OSC 7501: a turn that starts clears the unseen dot; one that ends (idle or error,
-// not idle_prompt) while the user looks elsewhere leaves it, with a bell entry; a dialog makes
-// one too. Background work changes none of it. True when the tab's look changed.
+// not idle_prompt; from working or from a dialog in the turn) while the user looks elsewhere
+// leaves it, with a bell entry; a dialog makes one too. Background work changes none of it. True when the tab's look changed.
 claude_status_turn :: proc(s: ^Open_Session, tab: ^Tab, was: Claude_Turn, st: string, idle_prompt: bool) -> bool {
 	if tab.status != .Running do return false
 	changed := st == "idle" && !idle_prompt && claude_work_turn_end(tab)
@@ -322,7 +322,9 @@ claude_status_turn :: proc(s: ^Open_Session, tab: ^Tab, was: Claude_Turn, st: st
 	case "waiting":
 		if was != .Waiting do notify_session(s, tab, .Waiting, tab_shown = true)
 	case "idle", "error":
-		if idle_prompt || was != .Working do return changed
+		// a turn ended: working, or a dialog in it (no hook says it works again after the answer);
+		// not a second Stop, nor one with no turn heard before it
+		if idle_prompt || was == .Idle || was == .Unknown do return changed
 		if !status_on_screen(s, tab.id) do tab.unseen = true
 		notify_session(s, tab, st == "error" ? .Error : .Finished, tab_shown = true)
 		return true

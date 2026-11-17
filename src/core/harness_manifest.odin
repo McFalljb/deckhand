@@ -166,7 +166,8 @@ HARNESS_MANIFEST := [?]Harness_Row {
 // when needed). npm needs Node 22.19 or later first, so the installer is the one offered.
 PI_INSTALL_COMMAND :: "curl --proto '=https' --proto-redir '=https' -fsSL https://pi.dev/install.sh | sh"
 // pi updates itself for its own installer, npm, bun, pnpm and yarn (`--self`: pi only, not packages).
-PI_SELF_UPDATE :: "{bin} update --self"
+PI_SELF_UPDATE :: "{bin} " + PI_SELF_UPDATE_ARGS
+PI_SELF_UPDATE_ARGS :: "update --self" // also the old-pi bar's command (PI_UPDATE_COMMAND)
 // Claude Code's native installer (code.claude.com/docs/en/setup, "Native Install (Recommended)").
 CLAUDE_INSTALL_COMMAND :: "curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh | bash"
 

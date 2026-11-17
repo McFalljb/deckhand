@@ -280,18 +280,18 @@ claude_wait_of :: proc(tab: ^Tab, ct: ^Claude_Tab) -> Claude_Wait {
 		if !mode_on(t, 2004) do return .No_Paste
 		return .None
 	}
+	// Claude's own OSC 7501 working first: after a permission dialog is answered the hooks still
+	// say waiting until the Stop (no hook says it works again)
+	v := tab_status_view(tab^)
+	osc := v.source == .Osc7501
+	if osc && v.state == .Working do return .Working
 	switch ct.turn {
 	case .Unknown: return .Starting
 	case .Working: return .Working
 	case .Waiting: return .Waiting
 	case .Idle:
 	}
-	if v := tab_status_view(tab^); v.source == .Osc7501 {
-		#partial switch v.state {
-		case .Blocked: return .Waiting
-		case .Working: return .Working
-		}
-	}
+	if osc && v.state == .Blocked do return .Waiting
 	if rt.typed do return .Typing
 	t := term_of(tab.id)
 	if t == nil || !t.running do return .Not_Running

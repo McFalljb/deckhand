@@ -123,6 +123,7 @@ serve_main :: proc(args: []string) -> int {
 	if files do core.titles_load(core.data_dir(context.temp_allocator))
 	core.claude_accounts_refresh()
 	core.rescan_now(claude = false)
+	core.rescan_at = time.tick_now() // a Rescan when the window comes to the front waits from here (commands.odin)
 	// the window's token first: a window that sees core.sock answer finds the token too
 	if !core.window_token_publish(run) {
 		core.log_ln("deckhand-core serve: cannot write", run, "/", core.WINDOW_TOKEN_FILE)

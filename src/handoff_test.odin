@@ -528,3 +528,27 @@ pi_handoff_menu_rows :: proc(t: ^testing.T) {
 	core.inbox_drain()
 	testing.expect(t, strings.contains(toast.text, core.PI_HANDOFF_GONE), toast.text)
 }
+
+// New Claude tab in another machine's project: offered by that machine's checklist (as New Codex
+// tab), never by whether Claude Code is installed on this Mac; labelled plainly.
+@(test)
+remote_project_claude_tab_by_its_checklist :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	defer core.claude_installed_probe = nil
+	has :: proc(project: u64) -> bool {
+		menu_open(Menu_Project(project), {})
+		defer menu_close()
+		for it in menu_items() do if strings.has_prefix(it.label, "New Claude tab") do return it.label == "New Claude tab"
+		return false
+	}
+	// nuc has Claude Code; this Mac does not: offered there
+	core.claude_installed_probe = proc() -> bool {return false}
+	testing.expect(t, has(pid(3, 7)), "nuc's project: its Claude Code")
+	// box has none (no checklist yet); this Mac does: not offered there
+	core.claude_installed_probe = proc() -> bool {return true}
+	testing.expect(t, !has(pid(4, 7)), "box's project: not this Mac's Claude Code")
+	testing.expect(t, has(1), "this Mac's project")
+}

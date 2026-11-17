@@ -1,10 +1,11 @@
 package core
 
-// The coding agents ("harnesses") Deckhand can start in a session: pi and Claude Code (sidebar.odin:
-// Harness). Either may be missing: a Claude-only user has no pi, a pi user may have no Claude Code.
+// The coding agents ("harnesses") Deckhand can start in a session: pi, Claude Code and Codex
+// (sidebar.odin: Harness). Any may be missing: a Claude-only or Codex-only user has no pi, a pi
+// user may have neither of the others.
 //
-//   - Whether each is installed is looked for, never run: claude_installed (claude.odin) and
-//     pi_installed here, by stat on the PATH new tabs get (child_base_env) and in each one's own
+//   - Whether each is installed is looked for, never run: claude_installed (claude.odin),
+//     codex_installed (codex.odin) and pi_installed here, by stat on the PATH new tabs get (child_base_env) and in each one's own
 //     install folders. DECKHAND_CMD stands in for pi (tests, benchmarks): pi counts as installed.
 //   - The user's one "New session" (⌘N in Chats, ⇧⌘N, "+ New session", Chats' "+ New chat", a
 //     project's "+" and menu, a checkout's "New session here", the palette and the menu bar) goes
@@ -33,13 +34,13 @@ HARNESS_KEYS := [Harness]string {
 	.Codex  = "codex",
 }
 
-PI_INSTALL :: "npm install -g @earendil-works/pi-coding-agent"
-// What the user sees when no harness is installed: how to install either.
-NO_HARNESS :: "No coding agent is installed: install pi (`" + PI_INSTALL + "`, Node 22.19 or later) or Claude Code (`curl -fsSL https://claude.ai/install.sh | bash`, or `brew install --cask claude-code`), then use the gear's Refresh shell environment or restart Deckhand"
+// The install commands are the coding agents checklist's (harness_manifest.odin, codex.odin).
+// What the user sees when no harness is installed: how to install one.
+NO_HARNESS :: "No coding agent is installed: install pi (`" + PI_INSTALL_COMMAND + "`), Claude Code (`" + CLAUDE_INSTALL_COMMAND + "`, or `brew install --cask claude-code`) or Codex (`" + CODEX_INSTALL_COMMAND + "`), then use the gear's Refresh shell environment or restart Deckhand"
 // Atlas runs on pi (agent.odin).
-ATLAS_NEEDS_PI :: "Atlas needs pi, which is not installed: install it with `" + PI_INSTALL + "`, then use the gear's Refresh shell environment or restart Deckhand"
+ATLAS_NEEDS_PI :: "Atlas needs pi, which is not installed: install it with `" + PI_INSTALL_COMMAND + "`, then use the gear's Refresh shell environment or restart Deckhand"
 // Jobs run pi (jobs.odin).
-JOBS_NEED_PI :: "Jobs run pi, which was not found on the jobs' PATH or in pi's managed install: install it with `" + PI_INSTALL + "`, or set pi_path"
+JOBS_NEED_PI :: "Jobs run pi, which was not found on the jobs' PATH or in pi's managed install: install it with `" + PI_INSTALL_COMMAND + "`, or set pi_path"
 
 // An executable regular file `name` in the absolute folder dir (stat and access only).
 exe_in :: proc(dir, name: string) -> bool {
@@ -277,6 +278,17 @@ codex_offered :: proc(id: u64) -> bool {
 		return codex
 	}
 	return codex_installed()
+}
+
+// Whether New Claude tab is offered for id (a project's or an open session's): this Mac's, while
+// claude is installed here; another machine's, while its checklist says it has Claude Code
+// (machine_harnesses), never by this Mac's install.
+claude_offered :: proc(id: u64) -> bool {
+	if no := id_machine(id); no != 0 {
+		_, claude, _ := machine_harnesses(no)
+		return claude
+	}
+	return claude_installed()
 }
 
 // Whether machine no's core starts Codex tabs for this Mac (its hello's features: codex_tabs).

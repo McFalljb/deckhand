@@ -32,7 +32,7 @@ export interface App {
   store: Store;
   phone: boolean;
   run(command: object): Promise<Result>;
-  toast(text: string, err?: boolean): void;
+  toast(text: string, err?: boolean, action?: ToastAction): void;
   overlay: Overlay;
   setOverlay(o: Partial<Overlay>): void;
   // the session and tab the phone shows (the desktop follows the core's current session)
@@ -43,6 +43,12 @@ export interface App {
   unpair(): void;
   // Draws what a click asked for at once, before the core's state says it (wished).
   wish(key: string, value: unknown): void;
+}
+
+// A toast's button (Undo): text only.
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 export const AppCtx = createContext<App>(null as unknown as App);

@@ -18,7 +18,7 @@ foreign import foundation "system:Foundation.framework"
 @(default_calling_convention = "c")
 foreign shim {
 	dh_core_activity :: proc(on: c.int) ---
-	dh_core_trash :: proc(path: cstring) -> c.int ---
+	dh_core_trash :: proc(path: cstring, where_: [^]u8, where_len: c.int) -> c.int ---
 	dh_core_notify :: proc(title, body: cstring) -> c.int ---
 }
 _ :: foundation

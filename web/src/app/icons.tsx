@@ -9,7 +9,7 @@ export type IconName =
   | "search" | "compose" | "plus" | "chevron-down" | "chevron-right" | "sidebar-left" | "sidebar-right"
   | "sliders" | "close" | "more" | "check" | "folder" | "chat" | "sort" | "bell" | "alert" | "clock"
   | "play" | "pause" | "stop" | "info" | "eye" | "deck" | "split-right" | "split-down" | "refresh"
-  | "file" | "branch" | "pi" | "claude" | "codex" | "terminal" | "pin" | "keyboard" | "back" | "send" | "atlas" | "arrow-up" | "arrow-down";
+  | "file" | "new-file" | "new-folder" | "collapse-all" | "branch" | "pi" | "claude" | "codex" | "terminal" | "pin" | "keyboard" | "back" | "send" | "atlas" | "arrow-up" | "arrow-down";
 
 function paths(name: IconName): ComponentChildren {
   switch (name) {
@@ -73,6 +73,12 @@ function paths(name: IconName): ComponentChildren {
       return <><path d="M13 8a5 5 0 1 1-1.5-3.55" /><path d="M11.75 2v2.75H9" /></>;
     case "file":
       return <path d="M4 2.5h5l3 3V13a.5.5 0 0 1-.5.5h-7.5A.5.5 0 0 1 3.5 13V3a.5.5 0 0 1 .5-.5ZM9 2.5V5.5h3" />;
+    case "new-file":
+      return <><path d="M8.5 14.5H3a.5.5 0 0 1-.5-.5V2a.5.5 0 0 1 .5-.5h5l3.5 3.5v3.5M8 1.5V5h3.5" /><path d="M12.5 9.5v5M10 12h5" /></>;
+    case "new-folder":
+      return <><path d="M8.5 13.5H2a.5.5 0 0 1-.5-.5V4a.5.5 0 0 1 .5-.5h4l1.5 2h6.5a.5.5 0 0 1 .5.5v2.5" /><path d="M12.5 9.5v5M10 12h5" /></>;
+    case "collapse-all":
+      return <><rect x="2.5" y="2.5" width="11" height="11" rx="1" /><path d="M5.5 8h5" /></>;
     case "branch":
       return <><circle cx="5" cy="3.75" r="1.5" /><circle cx="5" cy="12.25" r="1.5" /><circle cx="11" cy="6" r="1.5" /><path d="M5 5.25v5.5M11 7.5c0 2.5-6 1.5-6 3.25" /></>;
     case "pi":

@@ -4,10 +4,12 @@
 
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { windowSlice } from "./windowing.ts";
 
 export interface WItem {
   key: string;
   h: number; // its height in px (rows: the row height; a divider: its own)
+  keep?: boolean; // drawn even out of view (a focused field: removing it would blur it)
   draw: () => ComponentChildren;
 }
 
@@ -49,28 +51,24 @@ export function Windowed({ items }: { items: WItem[] }) {
     const top = sc.scrollTop - (el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop);
     if (Math.abs(view.top - top) >= 40 || view.h !== sc.clientHeight) setView({ top, h: sc.clientHeight });
   });
-  let y = 0;
-  let before = 0;
-  const shown: WItem[] = [];
-  const lo = view.top - MARGIN;
-  const hi = view.top + view.h + MARGIN;
-  for (const it of items) {
-    const end = y + it.h;
-    if (end < lo) before = end;
-    else if (y <= hi) shown.push(it);
-    y = end;
-  }
-  const drawnH = shown.reduce((a, it) => a + it.h, 0);
-  const after = Math.max(0, y - before - drawnH);
+  const parts = windowSlice(items, view.top - MARGIN, view.top + view.h + MARGIN);
+  const total = items.reduce((a, it) => a + it.h, 0);
+  const top = parts.length ? parts[0].before : 0;
+  const bottom = parts.length ? parts[parts.length - 1].after : total;
   return (
     <div ref={box} class="windowed">
-      <div class="w-spacer" style={{ height: before + "px" }} />
-      {shown.map((it) => (
-        <div key={it.key} class="w-item" style={{ height: it.h + "px" }}>
-          {it.draw()}
-        </div>
-      ))}
-      <div class="w-spacer" style={{ height: after + "px" }} />
+      <div class="w-spacer" style={{ height: top + "px" }} />
+      {parts.map((p, n) => {
+        const it = items[p.i];
+        const item = (
+          <div key={it.key} class="w-item" style={{ height: it.h + "px" }}>
+            {it.draw()}
+          </div>
+        );
+        // a gap between drawn items (a kept one far from the view)
+        return n > 0 && p.before > 0 ? [<div key={"gap:" + it.key} class="w-spacer" style={{ height: p.before + "px" }} />, item] : item;
+      })}
+      <div class="w-spacer" style={{ height: bottom + "px" }} />
     </div>
   );
 }

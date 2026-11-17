@@ -1,119 +1,548 @@
 // The Files tab (the left column) and the session's editor and Markdown tabs in a browser.
 // The tree is the session's folder (else the selected project's), listed with list_dir (inside a
-// project, git status codes, .git and ignored left out), folders opened in the page itself. A click
-// opens the file as the window does (show_file: a Markdown tab for .md, an editor tab otherwise;
-// credentials and binaries refused). The tabs read and save the file with file_read / file_save
+// project, git status codes, .git and ignored left out; asked again every few seconds with the
+// listing's hash, so an unchanged folder sends nothing; not while the page is hidden), folders
+// opened in the page itself. One row is selected; the keys move it (arrows, Home, End), Enter opens
+// a file (show_file: a Markdown tab for .md, an editor tab otherwise; credentials and binaries
+// refused) or opens and closes a folder, F2 renames, Delete or ⌘⌫ moves to the Trash (delete_path:
+// the confirmation bar asks), Esc clears it. Right-click, the row's "…" or a long press (a phone:
+// a sheet) shows its menu. New file, New folder and Rename are typed in the tree, where the name
+// goes (filetree.ts); the core refuses what it refuses, shown under the field. The active file tab
+// is shown (its folders opened). The tabs read and save the file with file_read / file_save
 // (src/core/web_files.odin): line numbers, editing, ⌘S, a file changed on disk is followed when
 // nothing is edited and asked about when it is. Markdown renders with markdown.ts (no raw HTML).
 
 import type { ComponentChildren } from "preact";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { OpenSession, Tab } from "../state.ts";
-import { IS_MAC, shownSession, useApp, type App } from "./ctx.ts";
+import { IS_MAC, shownSession, useApp, type App, type MenuItem } from "./ctx.ts";
 import { Icon } from "./icons.tsx";
 import { parseMarkdown, safeHref, type Block, type Inline } from "./markdown.ts";
 import { Windowed, type WItem } from "./Windowed.tsx";
 import { FileReads, knowFile, knownFile } from "./filecache.ts";
+import { longPressProps } from "./Peek.tsx";
+import { fileTabPath } from "./Panes.tsx";
+import { gitLetter, gitTone, isEditRow, moveSel, newTarget, parentOf, parentsOf, relPath, rowKey, stemEnd, treeRows, type Edit, type Listing, type Row } from "./filetree.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
 
 // ---- the tree ----
 
-interface Entry {
-  name: string;
-  kind: "file" | "dir" | "symlink";
-  git?: string;
-}
-
 const open = new Set<string>(); // folders opened (the page's own)
-const listed = new Map<string, { entries: Entry[]; err: string }>();
+const listed = new Map<string, Listing>();
+const asking = new Set<string>(); // folders being listed now
+const again = new Set<string>(); // ... and to list once more when that answer comes
 let bump = () => {};
+let sel = ""; // the selected row's path
+let edit: Edit | null = null; // the name field (new file or folder, rename)
+let focusWanted = ""; // a row to focus once it is drawn
+let scrollWanted: { key: string; center: boolean } | null = null; // a row to bring into view once listed
 
 async function list(app: App, path: string) {
-  const r = await app.link.run({ type: "list_dir", path });
-  listed.set(path, r.ok ? { entries: json(r.data).entries ?? [], err: "" } : { entries: [], err: r.error || "cannot list it" });
+  if (asking.has(path)) return void again.add(path);
+  asking.add(path);
+  const had = listed.get(path);
+  try {
+    const r = await app.link.run({ type: "list_dir", path, ...(had?.hash && !had.err ? { since: had.hash } : {}) });
+    if (r.ok) {
+      const d = json(r.data);
+      if (d.same) return; // unchanged since the last listing
+      listed.set(path, { entries: d.entries ?? [], err: "", hash: d.hash });
+    } else {
+      if (had && r.error === "not connected") return;
+      listed.set(path, { entries: [], err: r.error || "cannot list it" });
+    }
+    bump();
+  } finally {
+    asking.delete(path);
+    if (again.delete(path)) list(app, path);
+  }
+}
+
+function refresh(app: App, root: string) {
+  if (!root) return;
+  list(app, root);
+  for (const d of open) if (d.startsWith(root + "/")) list(app, d);
+}
+
+function toggle(app: App, path: string) {
+  if (open.has(path)) open.delete(path);
+  else {
+    open.add(path);
+    list(app, path);
+  }
   bump();
 }
 
-export function FilesPanel() {
+
+let opened = () => {}; // a phone: back from the Files view to the tab
+
+function openFile(app: App, path: string, quiet = false) {
+  (quiet ? app.link.run({ type: "show_file", path }) : app.run({ type: "show_file", path })).then((r) => r.ok && opened());
+}
+
+// Open to the side: the file's tab, then split right with it (split_pane moves that tab).
+async function openSide(app: App, path: string) {
+  const r = await app.run({ type: "show_file", path });
+  if (r.ok && r.created_id) app.run({ type: "split_pane", direction: "right", tab_id: r.created_id });
+}
+
+function copyText(app: App, text: string) {
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(() => app.toast("Copied"), () => app.setOverlay({ copy: text }));
+  else app.setOverlay({ copy: text }); // no async clipboard off a secure context: the copy sheet
+}
+
+// Delete: the core always asks (the confirmation bar); the tree looks again when it is answered.
+function trash(app: App, path: string) {
+  app.run({ type: "delete_path", path });
+}
+
+function startNew(app: App, root: string, dir: string, kind: "file" | "dir") {
+  if (dir !== root && !open.has(dir)) {
+    open.add(dir);
+    list(app, dir);
+  }
+  edit = { kind, dir, err: "" };
+  scrollWanted = { key: "new:" + dir, center: false };
+  bump();
+}
+
+function startRename(path: string) {
+  edit = { kind: "rename", path, err: "" };
+  sel = path;
+  scrollWanted = { key: path, center: false };
+  bump();
+}
+
+function endEdit(back: string) {
+  edit = null;
+  if (back) focusWanted = back;
+  bump();
+}
+
+// The name typed: created or renamed by the core (its rules: inside the project, never .git…);
+// refused: the field stays, the reason under it.
+async function commitEdit(app: App, root: string, text: string) {
+  const e = edit;
+  if (!e) return;
+  const name = text.trim();
+  if (e.kind === "rename") {
+    const from = e.path;
+    if (!name || name === from.slice(from.lastIndexOf("/") + 1)) return endEdit(from);
+    const to = parentOf(from) + "/" + name;
+    const r = await app.link.run({ type: "rename_path", from, to });
+    if (edit !== e) return;
+    if (!r.ok && r.error !== "needs_confirmation") {
+      edit = { ...e, err: r.error || "Could not rename it" };
+      return bump();
+    }
+    // what was open under it follows it
+    for (const d of [...open]) if (d === from || d.startsWith(from + "/")) {
+      open.delete(d);
+      if (r.ok) open.add(to + d.slice(from.length));
+    }
+    for (const k of [...listed.keys()]) if (k === from || k.startsWith(from + "/")) listed.delete(k);
+    const now = r.ok ? to : from;
+    sel = now;
+    scrollWanted = { key: now, center: false };
+    endEdit(now);
+    refresh(app, root);
+    return;
+  }
+  if (!name) return endEdit(sel);
+  const r = await app.link.run({ type: e.kind === "dir" ? "create_dir" : "create_file", path: e.dir + "/" + name });
+  if (edit !== e) return;
+  if (!r.ok && r.error !== "needs_confirmation") {
+    edit = { ...e, err: r.error || "Could not create it" };
+    return bump();
+  }
+  const made = e.dir + "/" + name; // as the tree names it (the core's answer is resolved: a symlinked root differs)
+  for (const d of parentsOf(root, made)) open.add(d); // a/b/c.txt: its folders open
+  sel = made;
+  scrollWanted = { key: made, center: false };
+  endEdit(made);
+  refresh(app, root);
+  if (r.ok && e.kind === "file") openFile(app, made, true); // its tab, quietly (no session on screen: none)
+}
+
+function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[] {
+  const keys = (k: string) => (app.phone ? undefined : k);
+  const items: MenuItem[] = [];
+  if (dir) items.push({ label: open.has(path) ? "Collapse" : "Expand", keys: keys("↩"), run: () => toggle(app, path) });
+  else {
+    items.push({ label: "Open", keys: keys("↩"), run: () => openFile(app, path) });
+    if (!app.phone) items.push({ label: "Open to the side", run: () => openSide(app, path) });
+  }
+  items.push({ sep: true });
+  const into = dir ? path : parentOf(path);
+  items.push({ label: "New file…", run: () => startNew(app, root, into, "file") });
+  items.push({ label: "New folder…", run: () => startNew(app, root, into, "dir") });
+  items.push({ sep: true });
+  items.push({ label: "Rename…", keys: keys("F2"), run: () => startRename(path) });
+  items.push({ label: "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trash(app, path) });
+  items.push({ sep: true });
+  items.push({ label: "Copy path", run: () => copyText(app, path) });
+  items.push({ label: "Copy relative path", run: () => copyText(app, relPath(root, path)) });
+  return items;
+}
+
+function rootItems(app: App, root: string): MenuItem[] {
+  return [
+    { label: "New file…", run: () => startNew(app, root, root, "file") },
+    { label: "New folder…", run: () => startNew(app, root, root, "dir") },
+    { sep: true },
+    { label: "Collapse all", run: () => collapseAll(root) },
+    { label: "Refresh", run: () => refresh(app, root) },
+    { sep: true },
+    { label: "Copy path", run: () => copyText(app, root) },
+  ];
+}
+
+function collapseAll(root: string) {
+  for (const d of [...open]) if (d.startsWith(root + "/")) open.delete(d);
+  bump();
+}
+
+// A menu at the pointer on a desktop; a bottom sheet titled with the name on a phone.
+function showMenu(app: App, title: string, items: MenuItem[], at: { clientX: number; clientY: number }) {
+  if (app.phone) app.setOverlay({ menu: null, sheet: { title, items } });
+  else app.setOverlay({ menu: { items, x: at.clientX, y: at.clientY } });
+}
+
+export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   const app = useApp();
+  opened = onOpen ?? (() => {});
   const { store } = app;
   const [, set] = useState(0);
   bump = () => set((x) => x + 1);
+  const nav = useRef<HTMLDivElement>(null);
   const s = store.session(shownSession(app));
   const p = store.project(store.selectedProject);
   const root = s && !s.home && !s.machine ? s.cwd : p && !p.machine ? p.cwd : "";
-  // listed when shown, and again every few seconds while it shows (the files change)
+  // listed when shown, and again every few seconds while it shows and the page is seen (the files
+  // change; an unchanged folder answers "same")
   useEffect(() => {
     if (!root) return;
-    const again = () => {
-      list(app, root);
-      for (const d of open) if (d.startsWith(root + "/")) list(app, d);
+    const under = (x: string) => x === root || x.startsWith(root + "/");
+    if (edit && !under(edit.kind === "rename" ? edit.path : edit.dir)) edit = null;
+    refresh(app, root);
+    const t = window.setInterval(() => !document.hidden && refresh(app, root), 5000);
+    const seen = () => !document.hidden && refresh(app, root);
+    document.addEventListener("visibilitychange", seen);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", seen);
     };
-    again();
-    const t = window.setInterval(again, 5000);
-    return () => window.clearInterval(t);
   }, [root]);
-  if (!root) return <div class="files"><div class="empty-state"><div>No folder</div><div class="muted small">Open a session of this machine</div></div></div>;
-  const rowH = app.phone ? 40 : 26;
-  const items: WItem[] = [];
-  const walk = (dir: string, depth: number) => {
-    const l = listed.get(dir);
-    if (!l) return void items.push({ key: "l:" + dir, h: rowH, draw: () => <div class="row file-row muted-text" style={{ paddingLeft: 8 + depth * 16 + "px" }}>Listing…</div> });
-    if (l.err) return void items.push({ key: "e:" + dir, h: rowH, draw: () => <div class="row file-row error-ink" style={{ paddingLeft: 8 + depth * 16 + "px" }}>{l.err}</div> });
-    for (const e of l.entries) {
-      const path = dir + "/" + e.name;
-      const isDir = e.kind === "dir";
-      items.push({ key: path, h: rowH, draw: () => <FileRow app={app} e={e} path={path} depth={depth} /> });
-      if (isDir && open.has(path)) walk(path, depth + 1);
+  // a confirmation answered (a delete): look again, now and once it has run
+  const asks = store.confirmations.length;
+  const hadAsks = useRef(asks);
+  useEffect(() => {
+    if (asks < hadAsks.current) {
+      refresh(app, root);
+      const t = window.setTimeout(() => refresh(app, root), 800);
+      hadAsks.current = asks;
+      return () => window.clearTimeout(t);
     }
+    hadAsks.current = asks;
+  }, [asks]);
+  // the active file tab: its folders opened, its row selected and brought into view
+  const at = s ? store.tabs(s.id).find((t) => t.id === s.active_tab) : undefined;
+  const active = at ? fileTabPath(at) : "";
+  useEffect(() => {
+    if (!root || !active.startsWith(root + "/")) return;
+    for (const d of parentsOf(root, active)) if (!open.has(d)) {
+      open.add(d);
+      list(app, d);
+    }
+    // the keys act on the focused row: while focus is in the tree the selection stays where it is
+    if (!nav.current?.contains(document.activeElement)) {
+      sel = active;
+      scrollWanted = { key: active, center: true };
+    }
+    bump();
+  }, [active, root]);
+
+  const rowH = app.phone ? 44 : 26;
+  const rows = root ? treeRows(root, listed, open, edit) : [];
+  // a row wanted in view: scrolled to once it is listed (the windowed list then draws it)
+  useLayoutEffect(() => {
+    const el = nav.current;
+    if (!scrollWanted || !el) return;
+    const i = rows.findIndex((r) => rowKey(r) === scrollWanted!.key);
+    if (i < 0) return;
+    const top = i * rowH;
+    if (top < el.scrollTop || top + rowH > el.scrollTop + el.clientHeight) el.scrollTop = scrollWanted.center ? top - (el.clientHeight - rowH) / 2 : top < el.scrollTop ? top : top + rowH - el.clientHeight;
+    scrollWanted = null;
+  });
+
+  if (!root) return <div class="files"><div class="empty-state"><div>No folder</div><div class="muted small">Open a session of this machine</div></div></div>;
+
+  const selRow = rows.find((r) => r.t === "entry" && r.path === sel);
+  const go = (path: string) => {
+    if (!path) return;
+    sel = path;
+    focusWanted = path;
+    scrollWanted = { key: path, center: false };
+    bump();
   };
-  walk(root, 0);
+  const onKey = (e: KeyboardEvent) => {
+    if ((e.target as HTMLElement).tagName === "INPUT" || e.altKey) return;
+    // the row with focus is the one the keys act on (sel can have moved meanwhile)
+    const focused = (e.target as HTMLElement).closest<HTMLElement>(".file-row")?.dataset.path;
+    if (focused && focused !== sel) sel = focused;
+    const target = rows.find((r) => r.t === "entry" && r.path === sel);
+    const cur = target?.t === "entry" ? target : undefined;
+    const dir = cur?.e.kind === "dir";
+    const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+    if (mod && e.key !== "Backspace") return;
+    switch (e.key) {
+      case "ArrowDown": case "ArrowUp": case "Home": case "End":
+        go(moveSel(rows, sel, e.key, open));
+        break;
+      case "ArrowRight":
+        if (cur && dir && !open.has(cur.path)) toggle(app, cur.path);
+        else go(moveSel(rows, sel, e.key, open));
+        break;
+      case "ArrowLeft":
+        if (cur && dir && open.has(cur.path)) toggle(app, cur.path);
+        else go(moveSel(rows, sel, e.key, open));
+        break;
+      case "Enter":
+        if (!cur) return;
+        if (dir) toggle(app, cur.path);
+        else openFile(app, cur.path);
+        break;
+      case "F2":
+        if (!cur) return;
+        startRename(cur.path);
+        break;
+      case "Delete":
+        if (!cur || e.repeat) return;
+        trash(app, cur.path);
+        break;
+      case "Backspace":
+        if (!cur || !mod || e.repeat) return;
+        trash(app, cur.path);
+        break;
+      case "ContextMenu": {
+        if (!cur) return;
+        const r = (e.target as HTMLElement).getBoundingClientRect();
+        showMenu(app, cur.e.name, rowItems(app, root, cur.path, dir), { clientX: r.left + 24, clientY: r.bottom });
+        break;
+      }
+      case "Escape":
+        if (!sel) return;
+        sel = "";
+        bump();
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  // the row Tab reaches (one in the tree): the selected one, else the first
+  const first = rows.find((r) => r.t === "entry");
+  const stop = selRow ? sel : first ? rowKey(first) : "";
+  // the name field's row is always drawn: out of view it would be removed, and a removed field blurs
+  const items: WItem[] = rows.map((r) => ({ key: rowKey(r), h: rowH, keep: isEditRow(r, edit), draw: () => drawRow(app, root, r, active, rowKey(r) === stop) }));
+  const target = () => newTarget(root, sel, selRow?.t === "entry" && selRow.e.kind === "dir");
+  const name = root.slice(root.lastIndexOf("/") + 1);
   return (
     <div class="files">
       <div class="files-head">
         <Icon name="folder" size={14} class="muted" />
-        <span class="files-root" title={root}>{root.slice(root.lastIndexOf("/") + 1)}</span>
+        <span class="files-root" title={root}>{name}</span>
         <span class="spacer" />
-        <button type="button" class="icon-btn small" title="Collapse all" aria-label="Collapse all" onClick={() => { for (const d of [...open]) if (d.startsWith(root + "/")) open.delete(d); bump(); }}>
-          <Icon name="chevron-down" size={12} />
+        <button type="button" class="icon-btn small" title="New file" aria-label="New file" onClick={() => startNew(app, root, target(), "file")}>
+          <Icon name="new-file" size={13} />
+        </button>
+        <button type="button" class="icon-btn small" title="New folder" aria-label="New folder" onClick={() => startNew(app, root, target(), "dir")}>
+          <Icon name="new-folder" size={13} />
+        </button>
+        <button type="button" class="icon-btn small" title="Collapse all" aria-label="Collapse all" onClick={() => collapseAll(root)}>
+          <Icon name="collapse-all" size={13} />
+        </button>
+        <button type="button" class="icon-btn small" title="Refresh" aria-label="Refresh" onClick={() => refresh(app, root)}>
+          <Icon name="refresh" size={13} />
         </button>
       </div>
-      <div class="nav"><Windowed items={items} /></div>
+      <div
+        class="nav files-tree"
+        ref={nav}
+        role="tree"
+        aria-label={"Files in " + name}
+        onKeyDown={onKey}
+        onContextMenu={(e) => {
+          if ((e.target as HTMLElement).closest(".file-row")) return;
+          e.preventDefault();
+          showMenu(app, name, rootItems(app, root), e);
+        }}
+      >
+        <Windowed items={items} />
+      </div>
     </div>
   );
 }
 
-const GIT_CLASS: Record<string, string> = { M: "st-M", A: "st-A", D: "st-D", R: "st-R", U: "st-U", "?": "st-q", "??": "st-q" };
+function drawRow(app: App, root: string, r: Row, active: string, stop: boolean): ComponentChildren {
+  const pad = { paddingLeft: 8 + r.depth * 16 + "px" };
+  switch (r.t) {
+    case "wait":
+      return <div class="row file-row muted-text" style={pad}>Listing…</div>;
+    case "err":
+      return <div class={"row file-row error-ink" + (r.edit ? " file-err" : "")} style={r.edit ? { paddingLeft: 8 + r.depth * 16 + 32 + "px" } : pad} role={r.edit ? "alert" : undefined}>{r.text}</div>;
+    case "new":
+      return (
+        <div class="row file-row file-edit" style={pad}>
+          <span class="chev-gap" />
+          <Icon name={r.kind === "dir" ? "folder" : "file"} size={14} class="muted" />
+          <NameField app={app} root={root} initial="" dir={r.kind === "dir"} label={r.kind === "dir" ? "New folder name" : "New file name"} />
+        </div>
+      );
+    case "entry":
+      return <FileRow app={app} root={root} path={r.path} r={r} active={active === r.path} stop={stop} />;
+  }
+}
 
-function FileRow({ app, e, path, depth }: { app: App; e: Entry; path: string; depth: number }) {
+// The name field: Enter or leaving it commits (empty or unchanged: nothing), Esc cancels. A rename
+// selects the stem.
+function NameField({ app, root, initial, dir, label }: { app: App; root: string; initial: string; dir: boolean; label: string }) {
+  const field = useRef<HTMLInputElement>(null);
+  const busy = useRef(false);
+  const tried = useRef<string | null>(null); // the text the core refused (leaving it then cancels)
+  const mine = useRef(edit).current; // the edit this field is for
+  useLayoutEffect(() => {
+    const el = field.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    if (initial) el.setSelectionRange(0, stemEnd(initial, dir));
+  }, []);
+  const back = () => (edit?.kind === "rename" ? edit.path : sel);
+  const go = async (leaving: boolean) => {
+    if (busy.current || !edit) return;
+    const v = field.current?.value ?? "";
+    if (leaving && (!v.trim() || v === tried.current)) return endEdit("");
+    busy.current = true;
+    tried.current = v;
+    try {
+      await commitEdit(app, root, v);
+    } finally {
+      busy.current = false;
+    }
+  };
+  return (
+    <input
+      ref={field}
+      class="field file-name"
+      type="text"
+      defaultValue={initial}
+      aria-label={label}
+      spellcheck={false}
+      autocomplete="off"
+      autocapitalize="off"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          go(false);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          endEdit(back());
+        }
+      }}
+      onBlur={() =>
+        // after the event: a field removed from the page (its row gone) cancels, never commits
+        window.setTimeout(() => {
+          if (field.current?.isConnected) go(true);
+          else if (edit === mine) endEdit("");
+        }, 0)
+      }
+    />
+  );
+}
+
+function FileRow({ app, root, path, r, active, stop }: { app: App; root: string; path: string; r: Extract<Row, { t: "entry" }>; active: boolean; stop: boolean }) {
+  const { e, depth } = r;
   const isDir = e.kind === "dir";
   const on = isDir && open.has(path);
-  const git = (e.git ?? "").trim();
+  const letter = gitLetter(e.git, isDir);
+  const tone = gitTone(letter);
+  const me = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focusWanted === path && me.current) {
+      focusWanted = "";
+      me.current.focus({ preventScroll: true });
+    }
+  });
+  const renaming = edit?.kind === "rename" && edit.path === path;
+  const selected = sel === path;
+  const menu = (at: { clientX: number; clientY: number }) => {
+    sel = path;
+    bump();
+    showMenu(app, e.name, rowItems(app, root, path, isDir), at);
+  };
   return (
     <div
-      class="row file-row"
+      ref={me}
+      class={"row file-row" + (selected ? " sel" : "")}
       style={{ paddingLeft: 8 + depth * 16 + "px" }}
-      role="button"
-      tabIndex={0}
+      role="treeitem"
+      aria-level={depth + 1}
+      aria-selected={selected ? "true" : "false"}
+      aria-expanded={isDir ? (on ? "true" : "false") : undefined}
+      tabIndex={stop ? 0 : -1}
       title={path}
-      onClick={() => {
-        if (isDir) {
-          if (on) open.delete(path);
-          else {
-            open.add(path);
-            if (!listed.has(path)) list(app, path);
-          }
+      data-path={path}
+      onFocus={(ev) => {
+        if (ev.target === me.current && sel !== path) {
+          sel = path;
           bump();
-        } else app.run({ type: "show_file", path });
+        }
       }}
+      onClick={() => {
+        if (renaming) return;
+        sel = path;
+        if (isDir) toggle(app, path);
+        else {
+          bump();
+          openFile(app, path);
+        }
+      }}
+      onContextMenu={(ev) => {
+        ev.preventDefault();
+        if (!renaming) menu(ev);
+      }}
+      {...longPressProps(() => !renaming, (at) => menu({ clientX: at.x, clientY: at.y }))}
     >
       {isDir ? <Icon name={on ? "chevron-down" : "chevron-right"} size={12} class="chev" /> : <span class="chev-gap" />}
       <Icon name={isDir ? "folder" : "file"} size={14} class="muted" />
-      <span class={"title " + (GIT_CLASS[git] ?? "")}>{e.name}</span>
+      {renaming ? (
+        <NameField app={app} root={root} initial={e.name} dir={isDir} label={"Rename " + e.name} />
+      ) : (
+        <span class={"title " + (e.name.startsWith(".") ? "dot" : tone) + (active ? " active" : "")}>{e.name}</span>
+      )}
       <span class="spacer" />
-      {git ? <span class={"ch-letter " + (GIT_CLASS[git] ?? "")}>{git === "??" ? "?" : git}</span> : null}
+      {letter && !renaming ? <span class={"ch-letter " + tone}>{letter}</span> : null}
+      {!renaming ? (
+        <button
+          type="button"
+          class="icon-btn small file-more"
+          tabIndex={-1}
+          title="More"
+          aria-label={"More for " + e.name}
+          onClick={(ev) => {
+            ev.stopPropagation();
+            menu(ev);
+          }}
+        >
+          <Icon name="more" size={14} />
+        </button>
+      ) : null}
     </div>
   );
 }

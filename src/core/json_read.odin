@@ -784,7 +784,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "keep_buffer":         cmd = Keep_Buffer{tab_id = get_u64(&r, "tab_id")}
 	case "diff_file":           cmd = Diff_File{tab_id = get_u64(&r, "tab_id"), against = get_enum(&r, "against", EDITOR_VIEW_NAMES)}
 	case "set_wrap":            cmd = Set_Wrap{tab_id = get_u64(&r, "tab_id"), on = get_bool(&r, "on")}
-	case "list_dir":            cmd = List_Dir{path = get_str(&r, "path"), ignored = opt_bool(&r, "ignored").? or_else false}
+	case "list_dir":            cmd = List_Dir{path = get_str(&r, "path"), ignored = opt_bool(&r, "ignored").? or_else false, since = get_str(&r, "since", optional = true)}
 	case "create_file":         cmd = Create_File{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
 	case "create_dir":          cmd = Create_Dir{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
 	case "rename_path":         cmd = Rename_Path{from = get_str(&r, "from"), to = get_str(&r, "to"), confirm = get_str(&r, "confirm", optional = true)}

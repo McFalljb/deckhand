@@ -174,7 +174,7 @@ export function PhoneSession({ id }: { id: number }) {
       <div class="phone-term">
         {files ? (
           <div class="sidebar phone-files">
-            <FilesPanel />
+            <FilesPanel onOpen={() => setFiles(false)} />
           </div>
         ) : !tab ? (
           <div class="pane-note">No tabs.</div>

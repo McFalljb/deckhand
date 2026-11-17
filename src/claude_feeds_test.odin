@@ -600,6 +600,37 @@ claude_subagent_todos :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(rows, "  Todos 0/30") && !strings.contains(rows, "○ t0"), rows)
 }
 
+// Audit: a turn that went through a permission dialog, on a Claude Code without OSC 7501 (the
+// hooks only: no hook says it works again after the answer), still leaves the unseen dot and a
+// bell entry at its Stop.
+@(test)
+claude_dot_after_dialog_from_hooks :: proc(t: ^testing.T) {
+	context.allocator = f_reset()
+	defer f_done()
+	sess, id := f_claude(t, "dialogend")
+	pitab := core.find_session(sess).tabs[0].id
+	_, tab, _ := core.find_tab(id)
+	core.run_command(core.Focus_Tab{tab_id = pitab}, F_UI) // the user looks elsewhere
+	f_turn(id, "submitted")
+	f_turn(id, "waiting") // a permission dialog, answered in the tab
+	testing.expect(t, f_last_bell(id) == core.Notice_Kind.Waiting, "the dialog's entry")
+	f_turn(id, "idle")
+	testing.expect(t, tab.unseen, "unseen")
+	testing.expect_value(t, f_dot(id), core.Row_Status.Unseen)
+	testing.expect(t, f_last_bell(id) == core.Notice_Kind.Finished, "the session's entry, now finished")
+	// a Stop with no turn before it (idle already) is no end of a turn
+	tab.unseen = false
+	f_turn(id, "idle")
+	testing.expect(t, !tab.unseen, "a second Stop")
+}
+
+// The kind of the bell's newest entry for a tab (entries of one session coalesce: notify.odin).
+@(private = "file")
+f_last_bell :: proc(tab_id: u64) -> Maybe(core.Notice_Kind) {
+	#reverse for x in state.notices.items do if x.tab_id == tab_id do return x.kind
+	return nil
+}
+
 // Audit: a subagent silent past CLAUDE_AGENT_STALE (its SubagentStop lost) no longer counts as
 // running: a queued restart of the tab is not held by it for ever.
 @(test)

@@ -15,10 +15,17 @@ void dh_core_activity(int on) {
     }
 }
 
-int dh_core_trash(const char *path) {
+// Moves path to the Trash: 1 = moved. where (where_len bytes, NUL-terminated) gets the path the
+// Trash put it at ("" when it did not say or it does not fit): restore_path brings it back.
+int dh_core_trash(const char *path, char *where, int where_len) {
     @autoreleasepool {
+        if (where && where_len > 0) where[0] = 0;
         NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
-        return [[NSFileManager defaultManager] trashItemAtURL:url resultingItemURL:nil error:nil] ? 1 : 0;
+        NSURL *put = nil;
+        if (![[NSFileManager defaultManager] trashItemAtURL:url resultingItemURL:&put error:nil]) return 0;
+        const char *p = put.isFileURL ? put.fileSystemRepresentation : NULL;
+        if (where && p && (int)strlen(p) < where_len) memcpy(where, p, strlen(p) + 1);
+        return 1;
     }
 }
 

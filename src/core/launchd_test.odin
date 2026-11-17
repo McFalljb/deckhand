@@ -233,6 +233,18 @@ lt_loaded :: proc(label: string) -> bool {
 	return st == .Ok
 }
 
+// The job ran (RunAtLoad) and has ended: launchd's own record says so ("runs = N", N > 0, and
+// "state = not running"). A job not run yet, or still running, is neither: the sweep leaves a
+// running job alone, so a test that seeds one waits for this, never for a fixed time (#160: a
+// fixed 100 ms failed the 0.7.0 release run at load ~20; at load 25-58 the job still had a pid).
+@(private = "file")
+lt_ran_and_ended :: proc(label: string) -> bool {
+	out, st := run_group({"/bin/launchctl", "print", fmt.tprintf("gui/%d/%s", posix.getuid(), label)}, 10 * time.Second)
+	if st != .Ok || !strings.contains(out, "\tstate = not running\n") do return false
+	i := strings.index(out, "\truns = ")
+	return i >= 0 && !strings.has_prefix(out[i + len("\truns = "):], "0\n")
+}
+
 // The job as §6 has it: Interactive, RunAtLoad, no KeepAlive, the group abandoned, escaped.
 @(test)
 launchd_plist_keys :: proc(t: ^testing.T) {
@@ -322,7 +334,15 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	_ = os.write_entire_file(fmt.tprintf("%s/job.plist", old_dir), transmute([]byte)string("x"))
 	tv := [2]posix.timeval{{tv_sec = posix.time_t(time.now()._nsec / 1e9 - 3600)}, {tv_sec = posix.time_t(time.now()._nsec / 1e9 - 3600)}}
 	posix.utimes(strings.clone_to_cstring(old_dir, context.temp_allocator), &tv)
-	time.sleep(100 * time.Millisecond) // /usr/bin/true has run and ended
+	// /usr/bin/true has run and ended in both (the sweep boots out only a job that is not running)
+	for l in ([]string{old_label, new_label}) {
+		ended := false
+		for _ in 0 ..< 200 {
+			if ended = lt_ran_and_ended(l); ended do break
+			time.sleep(50 * time.Millisecond)
+		}
+		if !testing.expectf(t, ended, "the seeded job %s did not run and end in 10 s", l) do return
+	}
 
 	t0 := time.tick_now()
 	pid, label, ok, why := launchd_launch(bin, run, data, {"LT_MARK=yes", "PATH=/usr/bin:/bin"}, TEST_LABEL_PREFIX)

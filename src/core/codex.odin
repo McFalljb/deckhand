@@ -107,7 +107,7 @@ codex_id_ok :: proc(id: string) -> bool {
 
 // The tab's kind of id: a Codex tab's must be a UUID, a Claude tab's claude_id_ok.
 claude_tab_id_ok :: proc(ct: ^Claude_Tab, id: string) -> bool {
-	return ct.harness == .Codex ? codex_id_ok(id) : claude_id_ok(id)
+	return harness_is_codex(ct.harness) ? codex_id_ok(id) : claude_id_ok(id)
 }
 
 // ---- the command line ----
@@ -603,7 +603,7 @@ codex_command_text :: proc(text: string) -> string {
 
 // The rule for this tab's harness (claude_prompt, claude_paste_message).
 claude_tab_command_text :: proc(ct: ^Claude_Tab, text: string) -> string {
-	return ct.harness == .Codex ? codex_command_text(text) : claude_command_text(text)
+	return harness_is_codex(ct.harness) ? codex_command_text(text) : claude_command_text(text)
 }
 
 // ---- is Codex installed, which version, signed in? ----
@@ -766,14 +766,14 @@ CODEX_MISSING_HINT :: "Codex is still not installed (or not on your login PATH):
 
 // claude_installed_now or codex_installed_now, for the tab's harness.
 claude_tab_installed_now :: proc(tab: ^Tab) -> bool {
-	if ct, is := tab.kind.(Claude_Tab); is && ct.harness == .Codex do return codex_installed_now()
+	if ct, is := tab.kind.(Claude_Tab); is && harness_is_codex(ct.harness) do return codex_installed_now()
 	return claude_installed_now()
 }
 
 // Whether a tab is a Codex tab.
 tab_harness :: proc(tab: Tab) -> Harness {
 	ct, is := tab.kind.(Claude_Tab)
-	return is ? ct.harness : .Pi
+	return is ? claude_kind_harness(ct.harness) : .Pi
 }
 
 // A command that would start codex when it is not installed (as claude_missing).
@@ -970,7 +970,7 @@ claude_harness_missing :: proc(harness: Harness, caller: Caller) -> (r: Result, 
 // their text, never sent. Held prompts have their own, stricter path (Claude_Deliver).
 codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
 	ct, is := &tab.kind.(Claude_Tab)
-	if !is || ct.harness != .Codex do return ""
+	if !is || !harness_is_codex(ct.harness) do return ""
 	if !replica_process && codex_plain_version(tab.id) != "" do return CODEX_PLAIN_REFUSAL // nothing typed into a plain tab
 	if why := codex_command_text(text); why != "" do return why
 	w := replica_process ? tab.live.claude_wait : claude_wait_of(tab, ct) // a window's replica: the core's (Tab_Live)
@@ -984,8 +984,8 @@ codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
 // Whether id is a Claude Code conversation Deckhand can see: its history's, the disk index's, or a
 // transcript of p's (by stat, claude_disk_find; no scan). A Codex tab never claims one.
 claude_conversation_seen :: proc(p: ^Project, id: string) -> bool {
-	if r, _ := claude_record(id); r != nil && r.harness != .Codex do return true
-	if f := claude_disk_of(id); f != nil && f.harness != .Codex do return true
+	if r, _ := claude_record(id); r != nil && !harness_is_codex(r.harness) do return true
+	if f := claude_disk_of(id); f != nil && !harness_is_codex(f.harness) do return true
 	_, ok := claude_disk_find(p, id)
 	return ok
 }

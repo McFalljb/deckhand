@@ -521,7 +521,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	n := 0
 	for c in cands {
 		rec, _ := claude_record(c.id)
-		if rec != nil && rec.harness != .Codex { // a Codex claim on Claude Code's own transcript never hides it (codex_claim_drop)
+		if rec != nil && !harness_is_codex(rec.harness) { // a Codex claim on Claude Code's own transcript never hides it (codex_claim_drop)
 			// Deckhand's own: its row is the history's; only what the file tells
 			append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), modified = c.modified, created = c.created, harness = .Claude})
 			continue
@@ -562,7 +562,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
-		if r.project != p.cwd || r.harness == .Codex do continue // a Codex conversation has no Claude transcript (codex.odin)
+		if r.project != p.cwd || harness_is_codex(r.harness) do continue // a Codex conversation has no Claude transcript (codex.odin)
 		have := false
 		for f in out do if f.id == r.id do have = true
 		if have do continue
@@ -595,7 +595,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 codex_chats_refile :: proc(chats: ^Project) {
 	roots := codex_chat_roots_here()
 	for &r in state.claude_history {
-		if r.harness != .Codex || r.project == chats.cwd || !codex_chat_folder(r.project, roots) do continue
+		if !harness_is_codex(r.harness) || r.project == chats.cwd || !codex_chat_folder(r.project, roots) do continue
 		if project_by_cwd(r.project) != nil do continue // by text: an entry's project is its project's cwd
 		delete(r.project, runtime.heap_allocator())
 		r.project = strings.clone(chats.cwd, runtime.heap_allocator())
@@ -613,12 +613,12 @@ claude_disk_of :: proc(id: string) -> ^Claude_Disk {
 // A found transcript of project p's with this id: the listed rows first, else by stat in each
 // account's folders for p (an agent's open_session of a project not selected). Temp.
 claude_disk_lookup :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) {
-	if r, _ := claude_record(id); r != nil && r.harness != .Codex do return {}, false
+	if r, _ := claude_record(id); r != nil && !harness_is_codex(r.harness) do return {}, false
 	if f, ok = claude_disk_find(p, id); ok do return
 	// a Codex conversation listed for p (its scan's rows only: the selected project and Chats)
 	if p == nil do return {}, false
 	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
-	for x in list do if x.listed && x.harness == .Codex && x.id == id do return x, true
+	for x in list do if x.listed && harness_is_codex(x.harness) && x.id == id do return x, true
 	return {}, false
 }
 
@@ -626,7 +626,7 @@ claude_disk_lookup :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool
 claude_disk_find :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) {
 	if p == nil || !claude_id_ok(id) do return {}, false
 	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
-	for x in list do if x.listed && x.harness != .Codex && x.id == id do return x, true
+	for x in list do if x.listed && !harness_is_codex(x.harness) && x.id == id do return x, true
 	for a in claude_accounts(.Claude) {
 		root := strings.concatenate({a.dir, "/projects"}, context.temp_allocator)
 		if path_kind(root) != .Dir do continue
@@ -648,7 +648,7 @@ claude_disk_rows :: proc(p: Project, out: ^[dynamic]Session) {
 	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
 	for f in list {
 		if !f.listed || session_listed(out[:], f.id) do continue
-		append(out, Session{id = f.id, title = f.title, untitled = f.harness == .Codex ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(f.created), modified = f.modified, claude = true, codex = f.harness == .Codex, account = f.account, found = true})
+		append(out, Session{id = f.id, title = f.title, untitled = harness_is_codex(f.harness) ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(f.created), modified = f.modified, claude = true, codex = harness_is_codex(f.harness), account = f.account, found = true})
 	}
 }
 
@@ -673,7 +673,7 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 			strings.write_string(b, `,"account":`)
 			json_quote(b, tag)
 		}
-		if f.harness == .Codex do strings.write_string(b, `,"harness":"codex"`)
+		if harness_is_codex(f.harness) do strings.write_string(b, `,"harness":"codex"`)
 		strings.write_string(b, `,"found":true,"open":false}`)
 	}
 }
@@ -681,7 +681,7 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 // A found row clicked (open_session): resumed in a Claude-only session under its account, by
 // the transcript's path; the history keeps it from now on (with its title).
 claude_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Result, bool) {
-	if f.harness == .Codex {
+	if harness_is_codex(f.harness) {
 		r, ch := codex_disk_resume(p, f, caller)
 		// its title (session_index.jsonl) goes with it, as a Claude row's
 		if r.ok && f.title != "" do if rec, _ := claude_record(f.id); rec != nil && rec.title == "" do rec.title = strings.clone(f.title)
@@ -879,7 +879,7 @@ claude_scan_prepare :: proc() {
 claude_scan_projects :: proc(projects: ^[dynamic]Project) {
 	codex_homes := make([dynamic]Disk_Home, context.temp_allocator)
 	for sd in claude_scan_dirs {
-		if sd.harness == .Codex {
+		if harness_is_codex(sd.harness) {
 			append(&codex_homes, Disk_Home{account = sd.dir, root = sd.override})
 			continue
 		}

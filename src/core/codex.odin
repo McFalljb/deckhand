@@ -42,6 +42,12 @@ import "core:time"
 import "core:unicode/utf8"
 
 CODEX_MIN_VERSION :: "0.163.0" // OSC 7501 program status (and --no-daemon, 0.157)
+// The oldest Codex a tab starts at all (--no-daemon): from it up to CODEX_MIN_VERSION, as a plain tab
+// (codex_plain_version): `codex --no-daemon -C <cwd>` and the user's flags, no hooks, no MCP server,
+// no token, nothing typed into it by Deckhand, and a bar saying so (as an old pi starts without the
+// integration).
+CODEX_PLAIN_MIN_VERSION :: "0.157.0"
+CODEX_PLAIN_REFUSAL :: "this Codex is older than " + CODEX_MIN_VERSION + ": its tab runs without Deckhand's hooks and status, so Deckhand types nothing into it (update Codex, then Restart)"
 CODEX_HASH_PINNED :: "0.167.2" // the Codex whose hook-trust recipe codex_hook_hash follows (codex_test.odin)
 CODEX_INSTALL_COMMAND :: "npm install -g @openai/codex@latest"
 CODEX_MISSING :: "Codex is not installed: install it with `" + CODEX_INSTALL_COMMAND + "`, then use Refresh shell environment or restart Deckhand"
@@ -425,10 +431,15 @@ codex_with_defaults :: proc(args: []string) -> []string {
 // home the user added (none for the default), set again after the login profile.
 codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
 	bin := codex_binary()
+	codex_plain_forget(tab_id)
+	plain := ""
 	if v := codex_version_of(bin); claude_version_below(v, CODEX_MIN_VERSION) {
 		hint := codex_update_hint(bin)
-		term_note(t, codex_old_text(v, hint))
-		return false, fmt.tprintf("Codex %s is older than %s: update it %s", v, CODEX_MIN_VERSION, hint) // the refusal: short (a hub cuts it)
+		if claude_version_below(v, CODEX_PLAIN_MIN_VERSION) { 	// no --no-daemon: not at all
+			term_note(t, codex_old_text(v, hint))
+			return false, fmt.tprintf("Codex %s is older than %s: update it %s", v, CODEX_PLAIN_MIN_VERSION, hint) // the refusal: short (a hub cuts it)
+		}
+		plain = v // no OSC 7501: a plain tab
 	}
 	// its account (claude_accounts.odin): only a configured one starts
 	if ct.account != "" && !claude_account_known(ct.account, codex = true) {
@@ -444,7 +455,10 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 		return false, why
 	}
 	if defaults do user = codex_with_defaults(user)
-	args, awhy := codex_args(cli, cwd, ct.session_id, user)
+	args: []string
+	awhy: string
+	if plain != "" do args, awhy = codex_plain_args(cwd, ct.session_id, user)
+	else do args, awhy = codex_args(cli, cwd, ct.session_id, user)
 	if awhy != "" {
 		why = fmt.tprintf("Codex can't start: %s.", awhy)
 		term_note(t, why)
@@ -454,15 +468,74 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 	argv := shell_script_argv(login_shell(), cmd, "codex")
 	append(&argv, ..args)
 	env := make([dynamic]string, context.temp_allocator)
-	append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli)))
+	// a plain tab gets no token: nothing of it may reach Deckhand (no hooks, no MCP server)
+	if plain == "" do append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli)))
+	else {
+		socket_forget_tab(tab_id) // a token of an earlier run of this tab dies too
+		append(&env, ..pi_extra_env({}))
+	}
 	append(&env, ..claude_account_env(ct.account, codex = true)) // its account: CODEX_HOME (none for the default)
-	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Codex}) { // tokens.json: never adopted as a Claude tab
+	start := Held_Start{kind = .Codex} // tokens.json: never adopted as a Claude tab
+	if plain != "" do start.plain, _ = version_triple(plain) // and adopted plain again (holder_adopt)
+	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), start) {
 		socket_forget_tab(tab_id)
 		return false, ""
 	}
 	claude_run_started(tab_id, t, ct)
 	codex_login_check(ct.account)
+	if plain != "" do codex_plain_set(tab_id, plain)
 	return true, ""
+}
+
+// A plain Codex tab's command line (temp): the resume subcommand, the user's flags, then
+// `--no-daemon -C <cwd>`; no hooks, no MCP server (CODEX_PLAIN_MIN_VERSION).
+codex_plain_args :: proc(cwd, resume: string, user: []string = nil) -> (args: []string, why: string) {
+	if !filepath.is_abs(cwd) do return nil, "the tab's folder is not an absolute path"
+	if resume != "" && !codex_id_ok(resume) do return nil, "not a Codex session id"
+	if e := codex_args_check(user); e != "" do return nil, e
+	out := make([dynamic]string, context.temp_allocator)
+	if resume != "" do append(&out, "resume", resume)
+	append(&out, ..user)
+	append(&out, "--no-daemon", "-C", cwd)
+	return out[:], ""
+}
+
+// The running plain Codex tabs (codex_start): tab id -> its Codex's version (heap).
+@(private = "file")
+codex_plain: map[u64]string
+
+@(private = "file")
+codex_plain_set :: proc(tab_id: u64, v: string) {
+	codex_plain_forget(tab_id)
+	if codex_plain == nil do codex_plain = make(map[u64]string, runtime.heap_allocator())
+	codex_plain[tab_id] = strings.clone(v, runtime.heap_allocator())
+	window_state_changed()
+}
+
+// Forgets a tab's plain mark (a new start, its tab gone: claude_tab_gone).
+codex_plain_forget :: proc(tab_id: u64) {
+	if v, ok := codex_plain[tab_id]; ok {
+		delete(v, runtime.heap_allocator())
+		delete_key(&codex_plain, tab_id)
+	}
+}
+
+// A Codex tab adopted from the session holder (holder_adopt) that tokens.json says was started
+// plain (Held_Start.plain, its Codex's version): marked again, whatever its token trust and
+// whatever codex is on disk now.
+codex_plain_adopted :: proc(tab_id: u64, v: [3]u32) {
+	codex_plain_set(tab_id, fmt.tprintf("%d.%d.%d", v[0], v[1], v[2]))
+}
+
+// The version of a running plain Codex tab's Codex ("" = not one).
+codex_plain_version :: proc(tab_id: u64) -> string {
+	v, _ := codex_plain[tab_id]
+	return v
+}
+
+// The bar over a plain Codex tab (claude_status_message). hint: codex_update_hint's.
+codex_plain_text :: proc(v, hint: string) -> string {
+	return fmt.tprintf("Codex %s is older than %s: it runs here without Deckhand's hooks and status (no status mark, no row to resume, no held messages, comments or Deckhand's tools). Update it %s, then Restart the tab.", v, CODEX_MIN_VERSION, hint)
 }
 
 // ---- text Deckhand types into Codex's composer ----
@@ -655,7 +728,7 @@ codex_version :: proc() -> string {return codex_version_of(codex_binary())}
 
 // What a Codex too old for Deckhand says in the tab. hint: codex_update_hint's.
 codex_old_text :: proc(v, hint: string) -> string {
-	return fmt.tprintf("Codex %s is older than %s, which Deckhand needs (its status reports): update it %s, then open the tab again.", v, CODEX_MIN_VERSION, hint)
+	return fmt.tprintf("Codex %s is older than %s, the oldest Deckhand can start (it needs --no-daemon; %s for its status reports): update it %s, then open the tab again.", v, CODEX_PLAIN_MIN_VERSION, CODEX_MIN_VERSION, hint)
 }
 
 // How to update the codex at bin, for its install (install_layout): "with `<command>`" for npm,
@@ -878,6 +951,7 @@ claude_harness_missing :: proc(codex: bool, caller: Caller) -> (r: Result, missi
 codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
 	ct, is := &tab.kind.(Claude_Tab)
 	if !is || !ct.codex do return ""
+	if !replica_process && codex_plain_version(tab.id) != "" do return CODEX_PLAIN_REFUSAL // nothing typed into a plain tab
 	if why := codex_command_text(text); why != "" do return why
 	w := replica_process ? tab.live.claude_wait : claude_wait_of(tab, ct) // a window's replica: the core's (Tab_Live)
 	if tab.status != .Running do w = .Not_Running

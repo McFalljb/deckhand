@@ -73,7 +73,8 @@ above the tabs with **Cancel** and **Confirm**.
 - macOS 14 or later on Apple silicon (arm64). Intel Macs are not supported.
 - At least one coding agent: pi 1.4.0 or later, Claude Code 2.1.295 or later, or Codex 0.163.0 or
   later. An older pi runs without Deckhand's integration ([pi in Deckhand](#pi-in-deckhand)); an
-  older Claude Code runs with status from Deckhand's hooks only; an older Codex does not start.
+  older Claude Code runs with status from Deckhand's hooks only; an older Codex (0.157.0 or later)
+  runs as a plain terminal tab, and one older than that does not start.
   Atlas and jobs need pi. The [first run](#the-first-run) can install them.
 - Optional: [other machines](#machines) you reach with `ssh`: Macs on Apple silicon, or Linux on
   x86_64. Deckhand installs its core there for you.
@@ -505,7 +506,10 @@ Green is not a session's colour: it means a machine is online, or a job's last r
 pi tabs report through Deckhand's pi integration ([pi in Deckhand](#pi-in-deckhand)). Any other program in a terminal tab can report too, with
 the OSC 7501 program status protocol: Claude Code (2.1.295 or newer) does by itself. When both
 could speak for a pi tab, its bridge wins. Hover a mark's tab or row to see what it is in words,
-what it said, where it came from (pi bridge or OSC 7501) and for how long.
+what it said, where it came from (pi bridge or OSC 7501) and for how long. Hovering a pi tab also
+shows its model and thinking level ("pi · model anthropic/claude-sonnet-4-5 · thinking high"), as
+a Claude tab shows its model; after a switch in pi it follows (an older Deckhand pi integration
+reports none).
 
 Waiting work is never hidden: hidden rows, folded sections and filters always leave sessions
 that wait for you visible.
@@ -716,7 +720,9 @@ is waiting for you).
 - **To pin** a project or session to the top of its section, click the pin on its row or use
   **…** → Pin. Pinned rows get Move up / Move down in the same menu.
 - **To rename a project**, use **…** → Rename…, or the palette's "Rename project". A pi session
-  is named in pi: type `/name My title` in the session. A Claude row: **…** → Rename….
+  is named in pi: type `/name My title` in the session, or, while it is open here and pi is idle,
+  **…** → Rename… on its row (type the name, Enter): Deckhand asks that pi to name it, as `/name`
+  does, so pi's own session list shows the name too. A Claude row: **…** → Rename….
 - **To hide** a project or session, use **…** → Hide. Nothing is deleted.
 - **To see hidden rows**, click the sort button on a section heading and tick **Show hidden**
   (or the palette's "Show hidden projects and sessions"). Hidden rows then show, and their menu
@@ -1184,7 +1190,8 @@ A Codex tab runs the [Codex CLI](https://github.com/openai/codex) (`codex`) in a
 the session's folder, with your login shell's environment and **your own Codex settings**
 (`~/.codex/config.toml`: model, sandbox, approvals, profiles). Deckhand adds only its hooks, for
 that run, so it knows the conversation's id and when Codex is working or waiting for you; nothing
-is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
+is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed for all of this; an
+older one from 0.157.0 runs as a plain terminal tab (below).
 
 - **Start one**: **New session** and pick **Codex** (listed once Codex is installed), **New Codex
   tab** in a project's or session's menu, or the palette's **New Codex tab** (in the session on
@@ -1212,7 +1219,10 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   a `!` shell line, a `$skill` or an `@mention` into Codex: such a text is refused, with why.
 - **Bars over the tab**: *Codex is signed out* (sign in on Codex's own screen in the tab, or run
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
-  in a dialog). A Codex older than 0.163.0 does not start: the tab, and the refusal, say how to update
+  in a dialog). A Codex older than 0.163.0 (but 0.157.0 or later) starts as a plain tab: you use it
+  as in any terminal, without Deckhand's hooks and status (no status mark, no row to resume, no held
+  messages, comments or Deckhand's tools), and a bar says how to update; **Restart** the tab after
+  updating. A Codex older than 0.157.0 does not start: the tab, and the refusal, say how to update
   for how it was installed (`npm install -g @openai/codex@latest` for npm; Codex's own installer run
   again for its standalone install), as does Settings › **Coding agents**.
 - **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app
@@ -1490,14 +1500,14 @@ buttons), with a search box on top.
   editor tab of the session you opened the page from (this Mac's sessions only; otherwise a toast
   asks you to open a session on this Mac first). A missing file shows **Create**: it is made only
   when you click, then opened. Rarely used files are under **All files… (N more)**. Clicking a
-  folder (`prompts/`, `skills/`, `extensions/`…) shows its files in the search.
+  folder (`prompts/`, `skills/`, `extensions/`, `themes/`…) shows its files in the search.
 - **Search** ("Search settings and files") matches settings by their names, words and hints, and
   files by name and path, including the files inside the listed folders and in the project's
   `.pi/` (git-ignored ones too). It never finds credentials. Esc clears it.
 
 **Right-click a file or folder row** for the same menu as before: **Open**, **Open in preview**,
 **Open Markdown preview** (Markdown files), **New file…** and **New folder…** (inside `prompts/`
-and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`,
+and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`, `themes/`,
 `extensions/` and a project's `.pi/`, never pi's own config files; Trash asks first), **Reveal in
 Finder** and **Copy path**. A file still to create has only **Copy path**. New file, New folder
 and Rename open a name field at the top of the page: Enter saves, Esc cancels. A new file opens
@@ -1571,6 +1581,15 @@ then shows pi-kit's shell. Your pi tab starts either way.
 `--dangerously-skip-permissions`) with a warning line (see [Claude Code tabs](#claude-code-tabs)),
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.
+
+**Plugins** and **MCP servers (user)** list what Claude Code has, by name only (with several
+accounts, each row names its account). Plugins come from `enabledPlugins` in `settings.json`,
+each marked enabled or disabled; turn one on or off with `/plugin` in Claude Code, and running
+Claude tabs then offer **Restart** (plugins load when Claude starts). The MCP servers are your
+user-scope ones (`claude mcp add --scope user`), each with its transport (stdio, http, sse);
+Deckhand reads only their names and transport from Claude Code's account file, never their
+commands, URLs, headers or environment, and that file itself is still never shown or opened.
+These lists change only in Claude Code (`/plugin`, `claude mcp`).
 
 **Codex.** Its version and how it was installed, as the checklist has it, **Full access in
 new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tabs](#codex-tabs)).
@@ -1737,7 +1756,7 @@ the project's `.claude/settings.json` (**Create** when missing), `.claude/settin
   [hot-reload bar](#hot-reload) shows at once and offers **Reload** for the running pi tabs that
   read it (after saving `ATLAS.md`, only Atlas). Claude Code applies its `settings.json` files and
   `keybindings.json` by itself; after saving a Claude file it reads only at start (`CLAUDE.md`,
-  `.mcp.json`…), the Claude bar shows at once.
+  `.mcp.json`, a `settings.json` whose `enabledPlugins` changed…), the Claude bar shows at once.
 
 ## Hot reload
 
@@ -1787,7 +1806,8 @@ files (permissions, hooks, env…), `keybindings.json`, skills and subagents. De
 alone. What a running Claude reads only when it starts: the `CLAUDE.md` and `CLAUDE.local.md`
 files (yours in `~/.claude`, the project's and the folders above it), rules, output styles and
 commands (`~/.claude/rules`, `output-styles`, `commands`, and the project's `.claude/` ones), the
-project's `.mcp.json`, a new `agents` or `skills` folder, and Deckhand's own Claude plugin.
+project's `.mcp.json`, a new `agents` or `skills` folder, the plugins turned on or off
+(`enabledPlugins` in a `settings.json`), and Deckhand's own Claude plugin.
 
 When one of those changes, a bar says "Claude Code settings changed — Restart 1 idle Claude tab".
 **Restart** starts each idle Claude tab again on the same conversation (`claude --resume`, with

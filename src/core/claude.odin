@@ -893,8 +893,14 @@ claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool
 	return {ok = true, created_id = s.id}, true
 }
 
-// Frees a Claude tab's own data (its kind's strings and held texts).
+// Frees a Claude or pi tab's own data (its kind's strings and held texts).
 tab_free_kind :: proc(tab: ^Tab) {
+	if pt, is_pi := &tab.kind.(Pi_Tab); is_pi {
+		delete(pt.model)
+		delete(pt.thinking)
+		pt.model, pt.thinking = "", ""
+		return
+	}
 	ct, is := &tab.kind.(Claude_Tab)
 	if !is do return
 	delete(ct.session_id)
@@ -931,6 +937,7 @@ claude_tab_gone :: proc(tab: ^Tab) {
 	ct.ended = .None
 	window_state_changed()
 	delete_key(&claude_rt, tab.id)
+	codex_plain_forget(tab.id) // an old Codex's plain mark (codex.odin)
 	claude_work_reset(tab.id) // its panels went with the exit (Tab_Exited)
 	if r, _ := claude_record(ct.session_id); r != nil do r.used = time.now()._nsec / 1e9
 }
@@ -1164,6 +1171,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if ct == nil do return fail("no such Claude tab"), false
 		if owns_tab(caller, c.tab_id) do return fail("a caller cannot act on its own tab"), false
 		if tab.status != .Running do return fail("Claude is not running in this tab"), false
+		if codex_plain_version(c.tab_id) != "" do return fail(CODEX_PLAIN_REFUSAL), false // an old Codex: no status to hold it for
 		text := strings.trim_right(c.text, " \t\r\n")
 		if text == "" do return fail("text is empty"), false
 		if why := claude_tab_command_text(ct, text); why != "" do return fail(why), false

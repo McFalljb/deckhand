@@ -779,23 +779,83 @@ codex_status_bars :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.claude_status_message(tb, later), "")
 }
 
-// Too old (no OSC 7501), not installed: never started, with what to do.
+// Too old to start at all (no --no-daemon, before 0.157), not installed: never started, with what
+// to do.
 @(test)
 codex_too_old_and_missing :: proc(t: ^testing.T) {
-	context.allocator = cx_reset(version = "0.160.0")
+	context.allocator = cx_reset(version = "0.156.0")
 	defer cx_done()
-	testing.expect_value(t, core.codex_version(), "0.160.0")
+	testing.expect_value(t, core.codex_version(), "0.156.0")
 	dir := cx_dir("old")
 	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
 	r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_UI)
 	// #135: the reason, not only "could not start Codex" (a hub forwarding the start sees only this)
-	testing.expect_value(t, r.error, fmt.tprintf("Codex 0.160.0 is older than %s: update it with `npm install -g @openai/codex@latest`", core.CODEX_MIN_VERSION))
+	testing.expect_value(t, r.error, fmt.tprintf("Codex 0.156.0 is older than %s: update it with `npm install -g @openai/codex@latest`", core.CODEX_PLAIN_MIN_VERSION))
 	testing.expect_value(t, len(state.open_sessions), 0)
 	core.codex_installed_probe = proc() -> bool {return false}
 	defer core.codex_installed_probe = nil
 	r = core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_SCRIPT)
 	testing.expect_value(t, r.error, core.CODEX_MISSING)
 	testing.expect_value(t, core.codex_label("New Codex tab"), "New Codex tab — Codex not installed")
+}
+
+// Old enough to start (--no-daemon, 0.157) but without OSC 7501 (before 0.163): a plain tab, as an
+// old pi starts without the integration. Only `--no-daemon -C <cwd>` and the user's flags: no
+// hooks, no MCP server, no token in its environment; a bar says what is missing and how to update;
+// Deckhand types nothing into it.
+@(test)
+codex_too_old_plain :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	// the socket runs, so a Codex tab new enough gets its token (the control for what follows)
+	rt := cx_dir("rt")
+	os.set_env("DECKHAND_RUNTIME_DIR", rt)
+	rdir, rok := core.sock_runtime_dir(context.temp_allocator)
+	testing.expect(t, rok && core.socket_start(rdir), "socket_start")
+	defer core.socket_stop(proc() {core.inbox_drain()})
+	cmd :: proc(dir: string) -> string {
+		args := fmt.tprintf("%s/args", dir)
+		return fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; env > '%s/env'; mv '%s.tmp' '%s'; exec sleep 30`, args, dir, args, args)
+	}
+	newer := cx_dir("newer")
+	os.set_env("DECKHAND_CODEX_CMD", cmd(newer))
+	np := core.run_command(core.Add_Project{cwd = newer}, CX_UI).created_id
+	testing.expect(t, core.run_command(core.New_Claude_Session{project_id = np, codex = true}, CX_UI).ok)
+	testing.expect(t, strings.contains(cx_read_after(fmt.tprintf("%s/args", newer), 300), "hooks.SessionStart"), "the hooks")
+	testing.expect(t, strings.contains(cx_read_after(fmt.tprintf("%s/env", newer), 0), "DECKHAND_CLAUDE_TOKEN="), "a token")
+	// 0.160.0
+	os.set_env("DECKHAND_CODEX_BIN", cx_fake_install(cx_dir("oldbin"), "0.160.0"))
+	dir := cx_dir("plain")
+	args := fmt.tprintf("%s/args", dir)
+	envf := fmt.tprintf("%s/env", dir)
+	os.set_env("DECKHAND_CODEX_CMD", cmd(dir))
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	s := core.find_session(r.created_id)
+	testing.expect(t, s != nil)
+	if s == nil do return
+	tab := s.tabs[0].id
+	core.run_command(core.Focus_Session{session = s.id}, CX_UI)
+	got := cx_read_after(args, 300)
+	testing.expect_value(t, got, fmt.tprintf("--no-daemon\n-C\n%s\n", dir))
+	envs := cx_read_after(envf, 0)
+	for no in ([]string{"DECKHAND_CLAUDE_TOKEN", "DECKHAND_SOCKET", "PI_DESK_", "DECKHAND_CLAUDE_TAB"}) do testing.expectf(t, !strings.contains(envs, no), "%s in a plain tab's environment", no)
+	_, tb, _ := core.claude_tab_of(tab)
+	testing.expect_value(t, core.codex_plain_version(tab), "0.160.0")
+	msg := core.claude_status_message(tb)
+	testing.expectf(t, strings.contains(msg, "Codex 0.160.0 is older than 0.163.0") && strings.contains(msg, "npm install -g @openai/codex@latest"), "%q", msg)
+	testing.expect(t, strings.contains(core.state_json(), `"codex_version_old":"0.160.0"`), "in the snapshot")
+	// never silent hooks (it has none), even after a long while
+	later := time.tick_add(time.tick_now(), core.CLAUDE_HOOKS_GRACE + time.Second)
+	core.claude_status_tick(later)
+	testing.expect(t, !core.claude_hooks_silent(tb, later))
+	// Deckhand types nothing into it: no held prompts, no pastes
+	testing.expect_value(t, core.run_command(core.Claude_Prompt{tab_id = tab, text = "hello"}, CX_CONTROL).error, core.CODEX_PLAIN_REFUSAL)
+	testing.expect_value(t, core.codex_paste_refusal(tb, "hello"), core.CODEX_PLAIN_REFUSAL)
+	// Dismiss: gone for this run
+	core.claude_status_dismiss(tb)
+	testing.expect_value(t, core.claude_status_message(tb), "")
 }
 
 // #135: a standalone install (no npm or Homebrew path) gets its version from `codex --version`,

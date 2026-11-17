@@ -257,6 +257,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Pi_Reload:           return "pi_reload"
 	case Pi_Restart:          return "pi_restart"
 	case Pi_Wait_Idle:        return "pi_wait_idle"
+	case Pi_Rename:           return "pi_rename"
 	case Panel_Set:           return "panel.set"
 	case Panel_Remove:        return "panel.remove"
 	case Set_Panel_Collapsed: return "set_panel_collapsed"
@@ -686,6 +687,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "agent", AGENT_NAMES[c.agent])
 		kv_bool(&w, "waiting", c.waiting)
 		kv_bool(&w, "question", c.question)
+		if c.model != "" do kv_str(&w, "model", c.model)
+		if c.provider != "" do kv_str(&w, "provider", c.provider)
+		if c.thinking != "" do kv_str(&w, "thinking", c.thinking)
 		key(&w, "blockers")
 		// events and the log: what kind and which id only ("shell sh1"), never a command or a
 		// task, as panel rows are only counted; the state keeps the text (Tab.blockers)
@@ -710,6 +714,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Pi_Wait_Idle:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "timeout_ms", c.timeout_ms)
+	case Pi_Rename:
+		kv_str(&w, "pi_session_id", c.pi_session_id)
+		kv_str(&w, "name", redact ? fmt.tprintf("<redacted %d bytes>", len(c.name)) : c.name)
 	case Panel_Set:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_str(&w, "panel", c.panel)
@@ -1671,6 +1678,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_str(&to, "agent", AGENT_NAMES[t.agent])
 				kv_bool(&to, "waiting", t.waiting)
 				kv_bool(&to, "question", t.question)
+				if pt := t.kind.(Pi_Tab); pt.model != "" do kv_str(&to, "model", pt.model)
+				if pt := t.kind.(Pi_Tab); pt.thinking != "" do kv_str(&to, "thinking", pt.thinking)
 				key(&to, "blockers")
 				write_strings(b, t.blockers[:])
 				key(&to, "reload") // hot reload (reload.odin)

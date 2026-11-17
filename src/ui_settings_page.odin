@@ -1025,6 +1025,14 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 			if n == 0 do if sp_row("No paired browsers", "") {}
 		case "claude_accounts":
 			for r in rows do if r.group == "claude-accounts" do sp_list_row(r)
+		case "claude_plugins", "claude_mcp": // read-only (claude_lists.odin): a heading, then the names
+			used := false // only once Claude Code has a config folder (its files' rows are there)
+			for r in rows do if r.group == "claude" || strings.has_prefix(r.group, "claude:") do used = true
+			if !used do break
+			n := 0
+			for r in rows do if strings.has_prefix(r.path, s.row) do n += 1
+			if sp_row(label, n == 0 ? fmt.tprintf("None · %s", s.hint) : s.hint) {}
+			for r in rows do if strings.has_prefix(r.path, s.row) do sp_list_row(r)
 		case "codex_accounts":
 			for r in rows do if r.group == "codex-accounts" do sp_list_row(r)
 		case "subfolders":

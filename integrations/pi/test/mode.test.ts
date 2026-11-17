@@ -79,7 +79,7 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 				} else {
 					got.push(m);
 					for (const w of [...waiters]) w();
-					reply({ result: { ok: true } });
+					if (m.type !== "result") reply({ result: { ok: true } }); // the bridge's answers to our requests (send) are not answered
 				}
 			}
 		});
@@ -103,7 +103,11 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 			waiters.add(check);
 			check();
 		});
-	return { sock, hellos, got, waitFor, close };
+	/** A request from Deckhand to the bridge (as socket_bridge_send's), on every open connection. */
+	const send = (o: any) => {
+		for (const c of conns) if (!c.destroyed) c.write(JSON.stringify({ v: 1, ...o }) + "\n");
+	};
+	return { sock, hellos, got, waitFor, close, send };
 }
 
 /**
@@ -338,4 +342,96 @@ test("mode: next to another shell with our tool names (ours steps back) and no s
 test("mode (PI_KIT_DIR): next to pi-kit's shell (ours steps back) and no sidebar, pi-kit's running shell is a Shells panel row and a blocker", { skip: noKit }, async () => {
 	const kitShell = path.join(KIT, "shell/index.ts");
 	await shellReachesDeckhand([await fromFile(OUR_SHELL), await fromFile(kitShell)], kitShell);
+});
+
+/** The bridge, loaded and started with `model` (pi's ctx.model) and `thinking` (ctx.thinkingLevel) set first. */
+async function bridgeWithModel(model: unknown, thinking?: string) {
+	const pi = piRules();
+	live.push(pi);
+	Object.assign(pi.ctx.sessionManager, { getSessionId: () => "s1", getSessionFile: () => "" });
+	pi.ctx.model = model;
+	if (thinking) pi.ctx.thinkingLevel = thinking;
+	await pi.load("/deckhand/pi/extensions/bridge", (await import(`../extensions/bridge/index.ts?${Math.random()}`)).default);
+	assert.deepEqual(await pi.start(), { exitCode: 0, errors: [] });
+	return pi;
+}
+
+test("bridge: pi.status says pi's model, its provider and thinking level; a model or thinking switch says it again", async () => {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			const pi = await bridgeWithModel({ id: "claude-sonnet-9", provider: "anthropic", apiKey: "never-sent" }, "high");
+			const first = await dh.waitFor("pi.status with the model", (m) => m.type === "pi.status" && m.model === "claude-sonnet-9");
+			assert.equal(first.provider, "anthropic");
+			assert.equal(first.thinking, "high");
+			assert.ok(!JSON.stringify(dh.got).includes("never-sent"), "only the id and provider of the model");
+			pi.ctx.model = { id: "gpt-9", provider: "openai" };
+			await pi.fire("model_select", { type: "model_select", model: pi.ctx.model, previousModel: undefined, source: "set" });
+			await dh.waitFor("pi.status with the new model", (m) => m.type === "pi.status" && m.model === "gpt-9" && m.provider === "openai");
+			pi.ctx.thinkingLevel = "low";
+			await pi.fire("thinking_level_select", { type: "thinking_level_select", level: "low", previousLevel: "high" });
+			await dh.waitFor("pi.status with the new thinking level", (m) => m.type === "pi.status" && m.model === "gpt-9" && m.thinking === "low");
+		});
+	} finally {
+		dh.close();
+	}
+});
+
+test("bridge: with no model known (or a pi without ctx.model), pi.status has no model fields", async () => {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			await bridgeWithModel(undefined);
+			const st = await dh.waitFor("pi.status", (m) => m.type === "pi.status");
+			assert.ok(!("model" in st) && !("provider" in st) && !("thinking" in st), JSON.stringify(st));
+		});
+	} finally {
+		dh.close();
+	}
+});
+
+test("bridge: pi.name names the session with pi's setSessionName (as /name), trimmed; refused while pi is busy, for a bad name, or by a pi without it", async () => {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			const pi = piRules();
+			live.push(pi);
+			Object.assign(pi.ctx.sessionManager, { getSessionId: () => "s1", getSessionFile: () => "" });
+			const names: string[] = [];
+			await pi.load("/deckhand/pi/extensions/bridge", (await import(`../extensions/bridge/index.ts?${Math.random()}`)).default);
+			assert.deepEqual(await pi.start(), { exitCode: 0, errors: [] });
+			await dh.waitFor("pi.status", (m) => m.type === "pi.status");
+			// a pi without setSessionName (piRules' api has none): says to type /name
+			dh.send({ id: "d1", type: "pi.name", name: "x" });
+			const old = await dh.waitFor("an answer to d1", (m) => m.type === "result" && m.id === "d1");
+			assert.equal(old.result.ok, false);
+			assert.match(old.result.error, /\/name/);
+			// with it
+			const pi2 = piRules();
+			live.push(pi2);
+			Object.assign(pi2.ctx.sessionManager, { getSessionId: () => "s2", getSessionFile: () => "" });
+			const bridge = (await import(`../extensions/bridge/index.ts?${Math.random()}`)).default;
+			await pi2.load("/deckhand/pi/extensions/bridge", (api: any) => bridge({ ...api, setSessionName: (n: string) => void names.push(n) }));
+			await pi.fire("session_shutdown");
+			assert.deepEqual(await pi2.start(), { exitCode: 0, errors: [] });
+			await dh.waitFor("pi.session s2", (m) => m.type === "pi.session" && m.pi_session_id === "s2");
+			dh.send({ id: "d2", type: "pi.name", name: "  Fix the build  " });
+			const ok = await dh.waitFor("an answer to d2", (m) => m.type === "result" && m.id === "d2");
+			assert.deepEqual(ok.result, { ok: true });
+			assert.deepEqual(names, ["Fix the build"]);
+			for (const [id, name] of [["d3", ""], ["d4", "a\nb"], ["d5", 7], ["d6", "n".repeat(201)]] as const) {
+				dh.send({ id, type: "pi.name", name });
+				const r = await dh.waitFor(`an answer to ${id}`, (m) => m.type === "result" && m.id === id);
+				assert.equal(r.result.ok, false, id);
+			}
+			pi2.ctx.isIdle = () => false;
+			dh.send({ id: "d7", type: "pi.name", name: "later" });
+			const busy = await dh.waitFor("an answer to d7", (m) => m.type === "result" && m.id === "d7");
+			assert.equal(busy.result.ok, false);
+			assert.match(busy.result.error, /busy|idle/);
+			assert.deepEqual(names, ["Fix the build"], "nothing else named");
+		});
+	} finally {
+		dh.close();
+	}
 });

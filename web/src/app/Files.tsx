@@ -26,7 +26,7 @@ import { FileReads, knowFile, knownFile } from "./filecache.ts";
 import { CodeBlock, CodeEdit } from "./Code.tsx";
 import { longPressProps } from "./Peek.tsx";
 import { fileTabPath } from "./Panes.tsx";
-import { clickPick, entryPaths, extendPick, gitLetter, gitTone, isEditRow, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, prunePick, relPath, rowKey, stemEnd, TRASH_MAX, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
+import { clickPick, entryPaths, extendPick, gitLetter, gitTone, isEditRow, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -107,12 +107,12 @@ function trash(app: App, path: string) {
 }
 
 // Several rows: one delete_path with paths, one confirmation (the core checks every path first and
-// refuses the lot naming the first it refuses). One row: path, as an older core knows it. An older
-// core reads only path (empty here) and says so: never deleted one by one.
+// refuses the lot naming the first it refuses; at most 500: its words, shown as they come). One
+// row: path, as an older core knows it. An older core reads only path (empty here) and says so:
+// never deleted one by one.
 async function trashMany(app: App, paths: string[]) {
   if (paths.length === 1) return trash(app, paths[0]);
   if (!paths.length) return;
-  if (paths.length > TRASH_MAX) return app.toast(`At most ${TRASH_MAX} items can go to the Trash at once`, true);
   const r = await app.link.run({ type: "delete_path", path: "", paths });
   if (r.ok || r.error === "needs_confirmation" || r.error === "not connected") return;
   if ((r.error ?? "").startsWith("path is empty")) app.toast("Deckhand on that machine is too old to move several items to the Trash at once. Update it, or move them one at a time.", true);
@@ -289,6 +289,13 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     };
   }, [root]);
   // a confirmation answered (a delete): look again, now and once it has run
+  // a confirmed delete or rename has finished (ConfirmBar): look again (a batch that failed midway
+  // moved some)
+  useEffect(() => {
+    const again = () => refresh(app, root);
+    window.addEventListener("deckhand:fs-changed", again);
+    return () => window.removeEventListener("deckhand:fs-changed", again);
+  }, [root]);
   const asks = store.confirmations.length;
   const hadAsks = useRef(asks);
   useEffect(() => {
@@ -399,13 +406,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         break;
       case "Delete": case "Backspace":
         if (!cur || e.repeat || (e.key === "Backspace" && !mod)) return;
-        if (loose) {
-          // shown first, trashed on the next press
-          focusOne(cur.path);
-          bump();
-          break;
-        }
-        trashMany(app, outermost(order, new Set(chosen())));
+        trashMany(app, trashTargets(order, pick, sel));
         break;
       case "ContextMenu": {
         if (!cur) return;

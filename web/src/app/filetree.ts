@@ -233,5 +233,11 @@ export function typed(buf: { text: string; at: number }, ch: string, now: number
   return { text: (now - buf.at > TYPE_PAUSE ? "" : buf.text) + ch, at: now };
 }
 
-// At most this many rows trashed at once (the core's own limit).
-export const TRASH_MAX = 500;
+// What Delete trashes (as the window's tree, src/ui_files.odin files_key): the picked rows when
+// several are picked, or when the focus is off them (⌘-clicked out: what shows selected goes, and
+// the confirmation names it); else the focused row. Outermost only.
+export function trashTargets(order: string[], p: Pick, focus: string): string[] {
+  const loose = p.paths.size > 0 && !!focus && !p.paths.has(focus);
+  if (p.paths.size > 1 || loose) return outermost(order, p.paths);
+  return focus ? [focus] : [];
+}

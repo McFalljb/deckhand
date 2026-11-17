@@ -99,7 +99,7 @@ test("row keys: unique per folder (not by depth), stable for the edit rows", () 
 });
 
 // ---- several rows picked (phase 3) ----
-import { clickPick, entryPaths, extendPick, outermost, pickOne, prunePick, rangeOf, typeMatch, typed, TYPE_PAUSE } from "../src/app/filetree.ts";
+import { clickPick, entryPaths, extendPick, outermost, pickOne, prunePick, rangeOf, trashTargets, typeMatch, typed, TYPE_PAUSE } from "../src/app/filetree.ts";
 
 const big = new Map<string, Listing>([
   [R, { entries: [{ name: "src", kind: "dir" }, { name: "Alpha.md", kind: "file" }, { name: "apple.ts", kind: "file" }, { name: "beta", kind: "file" }], err: "" }],
@@ -187,4 +187,17 @@ test("type-to-select: the next name starting with the letters, any case; one let
   b = typed(b, "p", 5000 + TYPE_PAUSE - 1);
   assert.equal(b.text, "ap");
   assert.equal(typed(b, "b", b.at + TYPE_PAUSE + 1).text, "b");
+});
+
+test("Delete trashes the picked rows (as the window's tree), else the focused row", () => {
+  const p = { paths: new Set(P("src", "src/a.ts", "beta")), anchor: R + "/beta" };
+  // several picked, the focus on one: them (outermost)
+  assert.deepEqual(trashTargets(order, p, R + "/beta"), P("src", "beta"));
+  // the focus ⌘-clicked off them: still what shows selected, never the focused row
+  assert.deepEqual(trashTargets(order, p, R + "/apple.ts"), P("src", "beta"));
+  assert.deepEqual(trashTargets(order, pickOne(R + "/beta"), R + "/apple.ts"), P("beta"));
+  // one picked, focused: it; nothing picked: the focused row; nothing at all: none
+  assert.deepEqual(trashTargets(order, pickOne(R + "/beta"), R + "/beta"), P("beta"));
+  assert.deepEqual(trashTargets(order, pickOne(""), R + "/beta"), P("beta"));
+  assert.deepEqual(trashTargets(order, pickOne(""), ""), []);
 });

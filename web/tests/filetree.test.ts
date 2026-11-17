@@ -369,7 +369,7 @@ test("file icons: the window's rules (src/core/file_kinds.odin), and no Object m
     ["GNUmakefile", "file-config"], ["rules.mk", "file-config"], ["Dockerfile.dev", "file-config"], ["Containerfile", "file-config"], ["justfile", "file-config"], ["Procfile", "file-config"], ["flake.nix", "file-config"],
     ["poetry.lock", "file-lock"], ["pyproject.toml", "file-lock"], ["yarn.lock", "file-lock"], ["requirements.txt", "file-lock"],
     ["LICENSE.md", "file-doc"], ["license.json", "file-config"], ["CONTRIBUTING", "file-doc"], ["README.rst", "file-doc"], ["readme.ts", "file-code"], ["spec.docx", "file-doc"],
-    ["CMakeLists.txt", "file-code"], ["build.gradle", "file-code"], ["app.whl", "file-binary"],
+    ["CMakeLists.txt", "file-config"], ["build.gradle", "file-config"], ["Rakefile", "file-config"], ["x.cmake", "file-config"], ["notes.odt", "file-doc"], ["prod.ENV", "file-env"], ["Dockerfile", "file-config"], ["README.md.bak", "file"], ["app.whl", "file-binary"],
   ];
   for (const [name, want] of table) assert.equal(fileIcon(name, "file"), want, name);
 });

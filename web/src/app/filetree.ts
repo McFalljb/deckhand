@@ -74,51 +74,49 @@ export type FileIcon =
   | "folder" | "folder-open" | "file" | "file-code" | "file-doc" | "file-config" | "file-image" | "file-shell"
   | "file-lock" | "file-git" | "file-env" | "file-binary" | "file-agent";
 
-// The table mirrors the window's (src/core/file_kinds.odin FILE_KIND_NAMES, FILE_KIND_EXTS): change
-// both together. Maps, never plain objects: a file named "constructor" or "x.__proto__" is a file.
+// The table is the window's, entry for entry (src/core/file_kinds.odin FILE_KIND_NAMES,
+// FILE_KIND_PREFIXES, FILE_KIND_EXTS): change both together. Maps, never plain objects: a file named
+// "constructor" or "x.__proto__" is a file.
 const table = (rows: [FileIcon, string][]): Map<string, FileIcon> => new Map(rows.flatMap(([k, list]) => list.split(" ").map((x): [string, FileIcon] => [x, k])));
 
 // Whole names (lowercase), looked up first: package.json is a manifest, not config.
 const NAMES = table([
-  ["file-agent", "agents.md claude.md agents.override.md"],
+  ["file-agent", "agents.md agents.override.md claude.md"],
   ["file-git", ".gitignore .gitattributes .gitmodules .gitkeep .git-blame-ignore-revs .mailmap"],
-  ["file-lock", "package.json package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml pnpm-workspace.yaml bun.lockb deno.json cargo.toml go.mod go.sum go.work gemfile pipfile pyproject.toml requirements.txt composer.json podfile package.swift package.resolved mix.exs build.zig.zon"],
-  ["file-config", "makefile gnumakefile dockerfile containerfile justfile procfile .editorconfig .prettierrc .eslintrc .npmrc .nvmrc .tool-versions .dockerignore"],
-  ["file-code", "cmakelists.txt rakefile"],
+  ["file-lock", "package.json package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml cargo.lock poetry.lock gemfile.lock composer.lock pipfile.lock podfile.lock mix.lock flake.lock uv.lock deno.lock pnpm-workspace.yaml bun.lockb deno.json cargo.toml go.mod go.sum go.work gemfile pipfile pyproject.toml requirements.txt composer.json podfile package.swift package.resolved mix.exs build.zig.zon"],
+  ["file-config", "makefile gnumakefile justfile procfile cmakelists.txt rakefile"],
+  ["file-doc", "readme license licence copying changelog contributing authors notice"],
+  ["file-config", ".editorconfig .prettierrc .eslintrc .npmrc .nvmrc .tool-versions .dockerignore"],
   ["file-shell", ".bashrc .bash_profile .zshrc .zprofile .zshenv .profile .envrc"],
 ]);
 
+// Name prefixes (Dockerfile.dev, Containerfile-prod).
+const PREFIXES: [string, FileIcon][] = [["dockerfile", "file-config"], ["containerfile", "file-config"]];
+
 // Extensions (lowercase, no dot).
-const DOC_EXTS = "md markdown mdx txt rst adoc org tex rtf pdf doc docx";
 const EXTS = table([
-  ["file-code", "odin c h cc cpp cxx hpp hh m mm swift go rs zig py rb js mjs cjs jsx ts tsx mts cts java kt kts scala cs fs lua php pl r dart ex exs erl hs ml clj vue svelte css scss sass less html htm sql glsl hlsl metal wgsl vim el nim jl asm s cmake gradle"],
-  ["file-doc", DOC_EXTS],
-  ["file-config", "json jsonc json5 yaml yml toml ini cfg conf xml plist properties mk nix"],
+  ["file-code", "odin c h cc cpp cxx hpp hh m mm swift go rs zig py rb js mjs cjs jsx ts tsx mts cts java kt kts scala cs fs lua php pl r dart ex exs erl hs ml clj vue svelte css scss sass less html htm sql glsl hlsl metal wgsl vim el nim jl asm s"],
+  ["file-doc", "md markdown mdx txt rst adoc org tex rtf pdf doc docx odt"],
+  ["file-config", "json jsonc json5 yaml yml toml ini cfg conf xml plist properties nix mk cmake gradle"],
+  ["file-env", "env"],
   ["file-image", "png jpg jpeg gif webp svg ico icns bmp tif tiff heic avif psd"],
   ["file-shell", "sh bash zsh fish ps1 bat cmd command"],
   ["file-lock", "lock"],
   ["file-binary", "zip tar gz tgz bz2 xz zst 7z rar dmg pkg iso jar whl exe dll so dylib a o bin wasm class pyc deb rpm ttf otf woff woff2 mp3 wav mp4 mov sqlite db"],
 ]);
 
-// Prose by name: README, LICENSE... as the whole name or NAME.<a doc extension> (LICENSE.md, not
-// license.json).
-const DOC_STEMS = new Set(["readme", "license", "licence", "contributing", "copying", "changelog", "authors", "notice"]);
-const DOC_EXT_SET = new Set(DOC_EXTS.split(" "));
-// Build files by prefix: Dockerfile.dev, Containerfile-prod.
-const CONFIG_PREFIXES = ["dockerfile", "containerfile"];
-
-// The icon of a row: a folder by whether it is open; a file (any case) by its whole name, then
-// .env / .env.* / *.env, then README-like names, then its last extension (a dotfile's own dot is
-// not one); else the generic file.
+// The icon of a row: a folder by whether it is open; a file (any case) by its whole name, then a
+// name prefix, then .env / .env.*, then the text after its last dot (a dotfile's leading dot and a
+// trailing dot are not one); else the generic file. As file_kind (src/core/file_kinds.odin).
 export function fileIcon(name: string, kind: Entry["kind"], open = false): FileIcon {
   if (kind === "dir") return open ? "folder-open" : "folder";
+  if (!name) return "file";
   const n = name.toLowerCase();
   const named = NAMES.get(n);
   if (named) return named;
-  if (n === ".env" || n.startsWith(".env.") || n.endsWith(".env")) return "file-env";
+  for (const [pre, k] of PREFIXES) if (n.startsWith(pre)) return k;
+  if (n === ".env" || n.startsWith(".env.")) return "file-env";
   const dot = n.lastIndexOf(".");
-  if (DOC_STEMS.has(n) || (dot > 0 && DOC_STEMS.has(n.slice(0, dot)) && DOC_EXT_SET.has(n.slice(dot + 1)))) return "file-doc";
-  if (CONFIG_PREFIXES.some((x) => n.startsWith(x))) return "file-config";
   if (dot <= 0 || dot === n.length - 1) return "file";
   return EXTS.get(n.slice(dot + 1)) ?? "file";
 }

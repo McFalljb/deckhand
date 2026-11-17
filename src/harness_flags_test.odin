@@ -14,6 +14,7 @@ import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
+import gh "ghostty"
 
 @(private = "file")
 HF_UI :: core.Caller{kind = .UI}
@@ -233,4 +234,32 @@ harness_flags_settings_field :: proc(t: ^testing.T) {
 	sp_edit_commit()
 	testing.expect_value(t, state.settings.harness_flags[.Codex], "--search -m gpt-5")
 	testing.expect(t, spage.edit.kind == .None, "closed")
+}
+
+// Flags that turn Claude Code's hooks off (`--settings '{"disableAllHooks":true}'`: allowed, as the
+// user's own settings.json may do the same) leave the tab without Deckhand's hooks; it gets the
+// bar every hook-less tab gets, which says so.
+@(test)
+harness_flags_hooks_off_bar :: proc(t: ^testing.T) {
+	alloc, _ := hf_reset()
+	context.allocator = alloc
+	defer hf_done()
+	pid := core.run_command(core.Add_Project{cwd = hf_dir("hooksoff")}, HF_UI).created_id
+	sess := core.run_command(core.New_Chat{project_id = pid}, HF_UI).created_id
+	r := core.run_command(core.New_Claude_Tab{session = sess, args = {"--settings", `{"disableAllHooks":true}`}}, HF_UI)
+	testing.expect(t, r.ok, r.error)
+	_, tab, _ := core.find_tab(r.created_id)
+	if tab == nil do return
+	now := time.tick_add(time.tick_now(), -(core.CLAUDE_HOOKS_GRACE + 5 * time.Second))
+	core.claude_status_tick(now)
+	if tm := core.term_of(r.created_id); tm != nil { 	// Claude's prompt is up (bracketed paste on)
+		msg := "\x1b[?2004h"
+		gh.terminal_vt_write(tm.gt, raw_data(msg), len(msg))
+	}
+	core.claude_status_tick(now)
+	later := time.tick_now()
+	core.claude_status_tick(later)
+	testing.expect(t, core.claude_hooks_silent(tab, later), "no hook ever reports")
+	bar := core.claude_status_message(tab, later)
+	testing.expectf(t, strings.contains(bar, "hooks aren't running") && strings.contains(bar, "--settings"), "%q", bar)
 }

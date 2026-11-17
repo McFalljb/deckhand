@@ -155,6 +155,15 @@ Link_Reply :: struct {
 @(private = "file")
 link: ^Window_Link
 
+// Tests: stands in another attached link (a hub's, a browser's); returns the one before.
+when TEST_HOOKS {
+	window_link_swap_for_test :: proc(l: ^Window_Link) -> ^Window_Link {
+		old := link
+		link = l
+		return old
+	}
+}
+
 // The window is attached (test mode over core.sock: not while detach_window holds it off).
 window_attached :: proc() -> bool {return link != nil && !link.held_off}
 

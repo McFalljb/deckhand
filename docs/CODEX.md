@@ -134,13 +134,14 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   ignores an unknown name silently. A profile is the user's own config, like `config.toml`: it can
   turn hooks off (`features.hooks`, which Deckhand's "hooks silent" bar then reports) or bring hooks
   of its own, which Codex asks the user to review as it does for `config.toml`'s.
-- **Typing them** (the window, `ui_flags.odin`): **New Codex tab with flags…** and **New session
-  with flags…** → **Codex with flags…** open the palette as a one-line field (the flags last used
+- **Typing them** (the window, `ui_flags.odin`): **New Codex tab with flags…** (the tab strip's **+**,
+  the palette) and **New session with flags…** → **Codex with flags…** open the palette as a one-line field (the flags last used
   from that window), split as a shell splits words (quotes honoured, nothing expanded:
   `core.flags_split`), and send them as `args`; the row shows `codex_args_check`'s reason before
   anything starts. A start on another machine takes no flags from here.
 - **Default Codex flags** (`set_harness_flags` with `"harness": "codex"`, Settings › Coding agents ›
-  Codex › **Default Codex flags…**, `User_Here`): one line, checked by `codex_args_check` when set
+  Codex › **Default flags…**, the palette's **Default Codex flags…**; `User_Here`; blank in a hub's
+  or a browser's state stream): one line, checked by `codex_args_check` when set
   and again when used, put before the tab's own flags at each start the user makes (the same starts
   as full access below); a default flag the tab's flags name too (`-m` and `--model` are one, a `-c`
   by its key) is left out; never saved into a tab or its history entry

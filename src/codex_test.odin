@@ -203,7 +203,7 @@ codex_user_flags :: proc(t: ^testing.T) {
 	}
 	for a in ok do testing.expectf(t, core.codex_args_check(a) == "", "%v: %s", a, core.codex_args_check(a))
 	refused := [][2]string{
-		{"exec", `"exec" is not a flag: Codex would take it for a command or a prompt`},
+		{"exec", core.CODEX_NOT_A_FLAG},
 		{"--no-daemon", "--no-daemon is refused: Deckhand sets it (its hooks must run under the tab's own Codex)"},
 		{"-C", "-C is refused: Deckhand sets the tab's folder"},
 		{"--cd=/tmp", "--cd is refused: Deckhand sets the tab's folder"},
@@ -237,7 +237,7 @@ codex_user_flags :: proc(t: ^testing.T) {
 	pargs, pwhy := core.codex_args(CX_CLI, "/w/p", "", {"-p", "work"})
 	testing.expectf(t, pwhy == "" && len(pargs) > 4 && pargs[0] == "-p" && pargs[1] == "work" && pargs[2] == "--no-daemon", "%v %s", pargs, pwhy)
 	testing.expect_value(t, core.codex_args_check({"-c", "mcp_servers={}"}), "-c mcp_servers.deckhand is Deckhand's own MCP server")
-	testing.expect_value(t, core.codex_args_check({"-m", "o3", "login"}), `"login" is not a flag: Codex would take it for a command or a prompt`)
+	testing.expect_value(t, core.codex_args_check({"-m", "o3", "login"}), core.CODEX_NOT_A_FLAG)
 	// Deckhand's own arguments come after the user's: --no-daemon, -C and every -c of Deckhand's last
 	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad530"
 	args, why := core.codex_args(CX_CLI, "/w/p", sid, {"-m", "o3", "-c", `model_reasoning_effort="high"`})
@@ -645,7 +645,7 @@ codex_resume_from_row :: proc(t: ^testing.T) {
 	s, _, _ := core.find_tab(r.created_id)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, resume = sid}, CX_UI).error, "that id is another harness's conversation")
 	// accounts: refused for Codex; flags: Codex's own rule (codex_user_flags)
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"exec"}}, CX_UI).error, `"exec" is not a flag: Codex would take it for a command or a prompt`)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"exec"}}, CX_UI).error, core.CODEX_NOT_A_FLAG)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"-m", "o3"}}, CX_CONTROL).error, "only the user sets Codex's flags")
 	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = s.id, codex = true, account = "/x"}, CX_UI).ok)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, resume = "--last"}, CX_UI).error, "resume must be a Codex session id")

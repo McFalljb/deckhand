@@ -1124,20 +1124,23 @@ restarts never get it.
 **Flags for a tab.** To start Claude Code, Codex or pi with command-line flags of your own (a
 model, a permission mode, `--mcp-config`, Codex's `-m`, `-s`, `-a`, `-p`, `--search`, pi's
 `--model` or `--thinking`), use **New Claude tab with flags…** or **New Codex tab with flags…**
-(the tab strip's **+**, a project's **…** menu, the palette) or **New session with flags…** (the
-**+**, a project's **…** menu, the palette, and **With flags…** at the bottom of the New session
-picker, which then lists **pi with flags…**, **Claude Code with flags…**, **Codex with flags…**).
+(the tab strip's **+** and the palette, while that agent is installed) or **New session with
+flags…** (the **+** and the palette; with more than one agent installed it asks which: **pi with
+flags…**, **Claude Code with flags…**, **Codex with flags…**).
 A one-line field opens, filled with the flags you last used for that agent in this window; type
 them as on a command line (quotes work, `"be brief"` is one word; nothing is expanded: no `$VAR`,
 `~` or globs) and press Enter. Each agent's own rule applies: flags Deckhand sets itself, or that
 pick another session, print instead of opening the agent's screen, or would turn off Deckhand's
-hooks or tools are refused, and the field's row says why before anything starts. Claude and Codex
+hooks or tools are refused, and the field's row says why before anything starts (it names the
+flag, never its value). Claude Code's own `--settings` is allowed, as your `settings.json` is: a flag or
+setting that turns hooks off (`disableAllHooks`) leaves the tab without Deckhand's status, rows,
+comments and held messages, and the bar over the tab says so. Claude and Codex
 tabs keep their flags (a resume, a restore and your Restart use them again); a pi session uses them
 when it starts (pi itself remembers the session's model when it resumes). These flags are yours
 only: Atlas, scripts and apps cannot pass them, and a tab another machine runs takes flags there.
 
-**Default flags.** Settings › Coding agents has **Default Claude Code flags…**, **Default Codex
-flags…** and **Default pi flags…** (also in the palette): one line each, checked by the same rule
+**Default flags.** Settings › Coding agents has a **Default flags…** row in each agent's card (in
+the palette: **Default Claude Code flags…**, **Default Codex flags…**, **Default pi flags…**): one line each, checked by the same rule
 when you save it. They go before a tab's own flags each time you start that agent yourself (for
 Claude Code and Codex: a new tab, session or chat, your resume, a restored tab you show, your
 Restart; for pi: a new session), and a default the tab's own flags name too is left out, so

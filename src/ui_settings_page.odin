@@ -962,7 +962,7 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 		}
 		btn, hint := sp_button_text(s)
 		k := s.id == "machine_add" || strings.has_prefix(s.id, "web_") ? sp_item({do_ = .Row, path = s.row}) : sp_item({do_ = .Action, action = s.action})
-		if sp_row(label, hint, strings.has_prefix(s.id, "web_") ? nil : sp_badges(s), mono_hint = s.id == "chats_dir") { // web access's rows: its switch carries the badge
+		if sp_row(label, hint, strings.has_prefix(s.id, "web_") || strings.has_suffix(s.id, "_default_flags") ? nil : sp_badges(s), mono_hint = s.id == "chats_dir") { // web access's rows and Default flags: the card's switch carries the badge (no room beside Change…)
 			sp_button(k, btn)
 			if s.id == "chats_dir" && action_ok("chats_dir_default") do sp_button(sp_item({do_ = .Action, action = "chats_dir_default"}), "Default")
 			if s.id == "update_checks" do sp_button(sp_item({do_ = .Action, action = "check_updates"}), "Check now")

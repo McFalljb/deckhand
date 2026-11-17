@@ -134,6 +134,7 @@ PI_FLAGS_OK := [?]struct {
 	{"--no-mcp", false},
 }
 
+PI_NOT_A_FLAG :: "an argument that is not a flag: pi would take it for a prompt"
 PI_SESSION_WHY :: "Deckhand picks the session"
 PI_MODE_WHY :: "a pi tab runs pi's terminal UI"
 PI_EXT_WHY :: "Deckhand's pi integration loads as extensions"
@@ -176,8 +177,9 @@ pi_args_check :: proc(args: []string) -> string {
 	for a in args do if a == "" || len(a) > 1024 || strings.contains_any(a, "\x00\r\n") do return "an extra flag is empty, too long or has a line break"
 	for i := 0; i < len(args); i += 1 {
 		a := args[i]
-		if len(a) < 2 || a[0] != '-' || a == "--" do return fmt.tprintf("%q is not a flag: pi would take it for a prompt", a)
-		for r in PI_FLAGS_REFUSED do if a == r[0] do return fmt.tprintf("%s is refused: %s", a, r[1])
+		if len(a) < 2 || a[0] != '-' || a == "--" do return PI_NOT_A_FLAG
+		name, eq, _ := strings.partition(a, "=")
+		for r in PI_FLAGS_REFUSED do if name == r[0] do return fmt.tprintf("%s is refused: %s", r[0], r[1])
 		found := false
 		value := false
 		for f in PI_FLAGS_OK do if a == f.name {
@@ -185,9 +187,8 @@ pi_args_check :: proc(args: []string) -> string {
 			break
 		}
 		if !found {
-			name, eq, _ := strings.partition(a, "=")
-			if eq != "" do for f in PI_FLAGS_OK do if name == f.name do return fmt.tprintf("pi takes %s and its value as two words: %s <value>", name, name)
-			return fmt.tprintf("%s is not a pi flag Deckhand passes on", a)
+			if eq != "" do for f in PI_FLAGS_OK do if name == f.name do return fmt.tprintf("pi takes %s and its value as two words: %s <value>", f.name, f.name)
+			return fmt.tprintf("%s is not a pi flag Deckhand passes on", flag_shown(a))
 		}
 		if !value do continue
 		if i + 1 >= len(args) || strings.has_prefix(args[i + 1], "-") do return fmt.tprintf("%s needs a value", a)
@@ -264,4 +265,15 @@ harness_flags_apply :: proc(c: Set_Harness_Flags) -> (Result, bool) {
 	state.settings.harness_flags[c.harness] = strings.clone(text)
 	settings_gen += 1 // the Settings page's row
 	return {ok = true}, true
+}
+
+// A flag as a refusal may name it (temp): its text before `=` when that looks like a flag (`-` or
+// `--` then letters, digits and `-`, at most 40 characters), else "that flag". Never a value or
+// a word that is not a flag: refusals reach the log and agents' events.
+flag_shown :: proc(a: string) -> string {
+	name, _, _ := strings.partition(a, "=")
+	body := strings.trim_prefix(strings.trim_prefix(name, "-"), "-")
+	if !strings.has_prefix(name, "-") || body == "" || len(name) > 40 do return "that flag"
+	for ch in transmute([]u8)body do if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '-') do return "that flag"
+	return name
 }

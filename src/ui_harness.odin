@@ -406,7 +406,6 @@ new_session_menu_items :: proc(t: core.Menu_New_Session, items: ^[dynamic]core.M
 	}
 	append(items, core.Menu_Item{label = what, note = true})
 	append(items, ..core.new_session_choices(p, t.cwd))
-	if core.id_machine(p.id) == 0 && flags_picker_any(p.id, t.cwd) do append(items, core.Menu_Item{label = "With flags…", picker = core.Menu_New_Session{project_id = p.id, cwd = t.cwd, flags = true}})
 }
 
 // Where the picker opens without a click (a shortcut, the palette, the menu bar): under the top

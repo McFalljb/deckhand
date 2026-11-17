@@ -73,8 +73,8 @@ pi_args_rule :: proc(t: ^testing.T) {
 		{{"--model"}, "--model needs a value"},
 		{{"--model", "--offline"}, "--model needs a value"},
 		{{"--model=opus"}, "two words"},
-		{{"--offline", "hello"}, `"hello" is not a flag`},
-		{{"@notes.md"}, `"@notes.md" is not a flag`},
+		{{"--offline", "hello"}, "not a flag"},
+		{{"@notes.md"}, "not a flag"},
 		{{"--model", "a\nb"}, "line break"},
 	}
 	for r in refused {
@@ -192,6 +192,97 @@ new_chat_args_rule :: proc(t: ^testing.T) {
 	back, err := parse_command(text, context.temp_allocator)
 	nc, is := back.(New_Chat)
 	testing.expectf(t, err == "" && is && slice.equal(nc.args, []string{"--model", "o"}), "%s: %v", text, back)
+}
+
+// A refused flag's reason names the flag only (its text before `=`, when it looks like a flag),
+// never its value or a word that is not a flag: errors reach the log and agents' events. The
+// events carry the flags themselves by count or length only.
+@(test)
+harness_flags_no_secret_in_errors :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	hf_reset()
+	defer hf_reset()
+	SECRET :: "s3cr3tT0KEN"
+	checks := [?]string {
+		pi_args_check({"--api-key=" + SECRET}),
+		pi_args_check({"--model", "x", SECRET}),
+		pi_args_check({"--bogus=" + SECRET}),
+		pi_args_check({"--x:" + SECRET}),
+		pi_args_check({"--model=" + SECRET}),
+		codex_args_check({SECRET}),
+		codex_args_check({"--bogus=" + SECRET}),
+		codex_args_check({"--x:" + SECRET}),
+		codex_args_check({"-m", "o3", SECRET}),
+		codex_args_check({"--search=" + SECRET}),
+		codex_args_check({"--profile=../" + SECRET}),
+		claude_args_check({"--resume=" + SECRET}),
+	}
+	for e in checks do testing.expectf(t, e != "" && !strings.contains(e, SECRET), "%q", e)
+	testing.expect_value(t, pi_args_check({"--api-key=" + SECRET}), pi_args_check({"--api-key"})) // named, refused as itself
+	// through the commands: the error, and the event agents and the log see
+	for cmd in ([]Command{Set_Harness_Flags{harness = .Pi, flags = "--api-key=" + SECRET}, Set_Harness_Flags{harness = .Codex, flags = "--x:" + SECRET}, New_Chat{project_id = 1, args = {SECRET}}}) {
+		r := run_command(cmd, {kind = .UI})
+		testing.expectf(t, !r.ok && !strings.contains(r.error, SECRET), "%v: %q", cmd, r.error)
+	}
+	for cmd in ([]Command{Set_Harness_Flags{harness = .Pi, flags = "--model " + SECRET}, New_Chat{project_id = 1, args = {"--model", SECRET}}, New_Claude_Tab{session = 1, args = {"--x", SECRET}}, New_Claude_Session{project_id = 1, codex = true, args = {"-c", "k=" + SECRET}}}) {
+		ev := event_json(Command_Event{command = cmd, result = {error = "refused"}})
+		testing.expectf(t, !strings.contains(ev, SECRET), "%s", ev)
+		testing.expectf(t, !strings.contains(command_json(cmd, redact = true), SECRET), "the log: %v", cmd)
+	}
+	// the window's and a hub's own wire still carries them (the core needs them)
+	back, err := parse_command(command_wire_json(New_Chat{project_id = 1, args = {"--model", SECRET}}), context.temp_allocator)
+	nc, _ := back.(New_Chat)
+	testing.expect(t, err == "" && len(nc.args) == 2 && nc.args[1] == SECRET, "the wire")
+}
+
+// The default flags go to this Mac's own window only: never in a hub's or a paired browser's
+// state stream, nor in get_state's snapshot (agents).
+@(test)
+harness_flags_not_streamed_elsewhere :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	hf_reset()
+	defer hf_reset()
+	SECRET :: "s3cr3tDEFAULT"
+	state.settings.harness_flags[.Codex] = strings.clone("-c k=" + SECRET)
+	settings_of :: proc() -> string {
+		for x in state_sections(&state) do if x[0] == "settings" do return x[1]
+		return "<none>"
+	}
+	old := window_link_swap_for_test(nil)
+	defer window_link_swap_for_test(old)
+	testing.expect(t, strings.contains(settings_of(), SECRET), "this Mac's window")
+	hub := Window_Link{hub = true}
+	window_link_swap_for_test(&hub)
+	testing.expect(t, !strings.contains(settings_of(), SECRET), "a hub's stream")
+	web := Window_Link{web = true}
+	window_link_swap_for_test(&web)
+	testing.expect(t, !strings.contains(settings_of(), SECRET), "a browser's stream")
+	window_link_swap_for_test(nil)
+	testing.expect_value(t, state.settings.harness_flags[.Codex], "-c k=" + SECRET) // left as it was
+	testing.expect(t, !strings.contains(state_json(), SECRET), "agents' snapshot")
+}
+
+// Deckhand's history file: a Codex record's flags are checked by Codex's rule when it loads (a
+// profile, a -c), a Claude record's by Claude's.
+@(test)
+harness_flags_history_load :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	hf_reset()
+	defer hf_reset()
+	recs := []Claude_Record {
+		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad501", project = "/w/p", cwd = "/w/p", codex = true, args = {"-p", "work"}},
+		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad502", project = "/w/p", cwd = "/w/p", codex = true, args = {"-c", "model=o3"}},
+		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad503", project = "/w/p", cwd = "/w/p", args = {"--model", "opus"}},
+	}
+	run_command(Claude_Restore_History{records = recs}, {kind = .Internal})
+	testing.expect_value(t, len(state.claude_history), 3)
+	saved := workspace_json()
+	clear(&state.claude_history)
+	testing.expect_value(t, workspace_restore(saved), "")
+	for r in recs {
+		got, _ := claude_record(r.id)
+		testing.expectf(t, got != nil && slice.equal(got.args, r.args), "%s kept with its flags", r.id)
+	}
 }
 
 @(private = "file")

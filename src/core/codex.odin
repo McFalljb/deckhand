@@ -314,6 +314,7 @@ CODEX_FLAGS_REFUSED := [?]struct {
 	{"--version", 'V', "it prints and exits"},
 }
 
+CODEX_NOT_A_FLAG :: "an argument that is not a flag: Codex would take it for a command or a prompt"
 CODEX_FEATURES_WHY :: "Codex features are set in your ~/.codex/config.toml, not per tab"
 CODEX_PROFILES_WHY :: "choose a profile with -p NAME (Codex no longer reads -c profile)"
 CODEX_PROFILE_NAME_WHY :: "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"
@@ -357,7 +358,7 @@ codex_args_check :: proc(args: []string) -> string {
 	for a in args do if a == "" || len(a) > 1024 || strings.contains_any(a, "\x00\r\n") do return "an extra flag is empty, too long or has a line break"
 	for i := 0; i < len(args); i += 1 {
 		a := args[i]
-		if len(a) < 2 || a[0] != '-' || a == "--" do return fmt.tprintf("%q is not a flag: Codex would take it for a command or a prompt", a)
+		if len(a) < 2 || a[0] != '-' || a == "--" do return CODEX_NOT_A_FLAG
 		name, val: string
 		has_val := false
 		if a[1] == '-' {
@@ -371,8 +372,8 @@ codex_args_check :: proc(args: []string) -> string {
 		for f in CODEX_FLAGS_OK do if name == f.long || (f.short != 0 && len(name) == 2 && name[1] == f.short) do flag = f
 		f, ok := flag.?
 		if !ok {
-			for r in CODEX_FLAGS_REFUSED do if name == r.long || (r.short != 0 && len(name) == 2 && name[1] == r.short) do return fmt.tprintf("%s is refused: %s", name, r.why)
-			return fmt.tprintf("%s is not a Codex flag Deckhand passes on", name)
+			for r in CODEX_FLAGS_REFUSED do if name == r.long || (r.short != 0 && len(name) == 2 && name[1] == r.short) do return fmt.tprintf("%s is refused: %s", flag_shown(name), r.why)
+			return fmt.tprintf("%s is not a Codex flag Deckhand passes on", flag_shown(name))
 		}
 		if !f.value {
 			if has_val do return fmt.tprintf("%s takes no value", f.long)

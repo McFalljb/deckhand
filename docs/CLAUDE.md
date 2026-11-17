@@ -65,8 +65,8 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   `--permission-mode` or `--allow-dangerously-skip-permissions`, nor past `CLAUDE_ARGS_MAX`.
   Agents, scripts, panels and apps never get it.
 - **The user's flags from the window** (`ui_flags.odin`, `core/harness_flags.odin`). **New Claude
-  tab with flags…** (the tab strip's **+**, a project's menu, the palette) and **New session with
-  flags…** → **Claude Code with flags…** open the palette as a one-line field, prefilled with the
+  tab with flags…** (the tab strip's **+**, the palette) and **New session with flags…** →
+  **Claude Code with flags…** open the palette as a one-line field, prefilled with the
   flags last used from that window; Enter splits the line as a shell splits words (quotes
   honoured, nothing expanded: `flags_split`) and sends them as `args`. The row shows
   `claude_args_check`'s reason (or an open quote) before anything starts. Only a start on this Mac
@@ -76,14 +76,21 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   print, RPC or tool-switching flag; a pi session uses them when it starts, and pi keeps the
   session's model when it resumes).
 - **Default Claude Code flags** (`set_harness_flags` with `"harness": "claude"`, Settings › Coding
-  agents › Claude Code › **Default Claude Code flags…**, the palette; `User_Here`, like the switch
+  agents › Claude Code › **Default flags…**, the palette's **Default Claude Code flags…**; `User_Here`, like the switch
   above). One line, checked by `claude_args_check` when set and again when used, put BEFORE the
   tab's own flags at the same starts as skip-permissions (`harness_with_defaults`): a default whose
   flag the tab's flags name too is left out (with the words after it), so the tab's own wins; all
   of them past `CLAUDE_ARGS_MAX`. Skip-permissions still comes after, and not when a default sets
   `--permission-mode`. Never saved into a tab's or a record's flags; never an agent's, a script's,
-  a panel's or an app's start. Not in `get_state`'s snapshot (flags may hold a secret), and the
+  a panel's or an app's start. Not in `get_state`'s snapshot nor a hub's or a browser's state stream (flags may hold a secret), and the
   log has its length only.
+- **Refusals name the flag, never its value** (`flag_shown`: the text before `=` when it looks like
+  a flag), and a word that is not a flag is not quoted: errors reach the log and agents' events.
+- **Flags that turn hooks off are not refused.** `--settings` is allowed (the user's own
+  `settings.json` can do the same): `--settings '{"disableAllHooks":true}'` leaves the tab without
+  Deckhand's hooks, so no status from them, no row or resume for a new session, no comments, held
+  messages or panels; the "hooks aren't running" bar (`claude_status_message`) appears as for any
+  tab whose hooks never report, and names this flag as a likely cause.
 - **On another machine.** A Claude tab there runs on that machine's core: its `claude`, plugin,
   accounts and default flags, never this Mac's. A start this Mac forwards as the user's is the
   user's there (that machine's default flags apply). Only the tab's kind and status come back

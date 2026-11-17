@@ -1025,7 +1025,7 @@ workspace_restore :: proc(text: string) -> string {
 			codex, _ := o["codex"].(json.Boolean)
 			args := make([dynamic]string, context.temp_allocator)
 			if a, aok := o["args"].(json.Array); aok do for x in a do if xs, xok := x.(json.String); xok do append(&args, string(xs))
-			if id == "" || !strings.has_prefix(project, "/") || claude_args_check(args[:]) != "" do continue
+			if id == "" || !strings.has_prefix(project, "/") || (codex ? codex_args_check(args[:]) : claude_args_check(args[:])) != "" do continue // its harness's rule
 			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), account = string(acct), codex = bool(codex)})
 		}
 	}

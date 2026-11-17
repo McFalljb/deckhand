@@ -135,6 +135,16 @@ state_sections :: proc(s: ^State) -> [dynamic][2]string {
 	out := make([dynamic][2]string, context.temp_allocator)
 	for sec in STATE_SECTIONS {
 		b := strings.builder_make(context.temp_allocator)
+		if sec.name == "settings" && s == &state && (window_link_hub() || window_link_web()) {
+			// the default flags (harness_flags.odin) are this Mac's window's only: a hub's or a
+			// browser's stream gets them blank (they may hold a secret)
+			saved := s.settings.harness_flags
+			s.settings.harness_flags = {}
+			wire_write_fields(&b, s, type_info_of(State), sec.fields)
+			s.settings.harness_flags = saved
+			append(&out, [2]string{sec.name, strings.to_string(b)})
+			continue
+		}
 		wire_write_fields(&b, s, type_info_of(State), sec.fields)
 		append(&out, [2]string{sec.name, strings.to_string(b)})
 	}

@@ -27,8 +27,8 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   so its SessionStart hook, lazily: before that the tab has no session id and no row), titled by
   that prompt; **Resume** from the row runs `codex resume <id>`; a restored tab resumes when shown.
 - **Held prompts** (`claude_prompt`, Atlas, scripts), with a stricter rule than Claude's (below).
-- **Bars**: signed out, hooks not running; a Codex older than 0.163.0 is not started (§5); not
-  installed.
+- **Bars**: signed out, hooks not running; a Codex older than 0.163.0 runs as a plain tab with a
+  bar (0.157.0 or later; older ones are not started, §5); not installed.
 - **Dead tab**: Restart resumes the conversation (no "Restart with model…").
 - **Comments** (§2a): pending comments go with the user's next message as UserPromptSubmit's
   `additionalContext`, as for Claude; **Send now**, **Send and close** and Changes' **Ask Codex to
@@ -266,11 +266,22 @@ commands either.
   cached by its path, size, mtime and inode). Codex writes its helper links under
   `$CODEX_HOME/tmp/arg0` at every start, `--version` too, so that run gets `CODEX_HOME` set to a new
   empty 0700 folder in `$TMPDIR` (`deckhand-codex-XXXXXX`), removed right after: nothing under
-  `~/.codex` is written (#135). Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab
-  says how to update for its install (npm, Homebrew, bun or pnpm: that command; Codex's own
-  installer: run it again, `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the
-  command's refusal says the same in one line (`Codex 0.135.0 is older than 0.163.0: update it
-  with …`), and the checklist offers Update (for Codex's own installer: that command, to copy).
+  `~/.codex` is written (#135). Below **0.163.0** (OSC 7501) and from **0.157.0** (`--no-daemon`,
+  `CODEX_PLAIN_MIN_VERSION`) a Codex tab starts **plain**: `codex [resume <id>] <user flags>
+  --no-daemon -C <cwd>`, with no hooks, no `hooks.state`, no MCP server and **no token** in its
+  environment (nothing of it can reach Deckhand, so the process check has nothing to admit), and a
+  bar (`Codex 0.160.0 is older than 0.163.0: it runs here without Deckhand's hooks and status …
+  Update it with …, then Restart the tab`; Dismiss hides it for that run). Deckhand types nothing
+  into it: `claude_prompt` and every paste but the user's own are refused (`codex_paste_refusal`;
+  held prompts would wait forever for an OSC 7501 that never comes), and the "hooks silent" bar
+  never shows. The plain mark is the core's, per run (`codex_plain_version`; the snapshot's
+  `codex_version_old`); a plain tab adopted from the session holder after a relaunch (it has no
+  token) is marked again while the codex on disk is still in that range. Below **0.157.0** a
+  Codex tab does not start: the tab says how to update for its install (npm, Homebrew, bun or
+  pnpm: that command; Codex's own installer: run it again,
+  `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the command's refusal says
+  the same in one line (`Codex 0.135.0 is older than 0.157.0: update it with …`), and the
+  checklist offers Update (for Codex's own installer: that command, to copy).
 - **Signed out**: `codex login status` (exit 1), run once per recheck through the login shell on a
   worker when a Codex tab starts or the checklist looks, per Codex home: a tab of an account asks
   under its `CODEX_HOME` (set after the login profile, as the tab's), the checklist for the
@@ -392,7 +403,7 @@ tab, which that core checks under its own flag rule (§1a), as it would its own 
   know `harness` and would start Claude Code). A Codex row is listed only by a core that has
   Codex tabs, so its click is forwarded as any row's.
 - **What that machine says** comes back as for its Claude tabs: not installed (`"on <machine>:
-  Codex is not installed …"`), too old (`"on <machine>: Codex 0.135.0 is older than 0.163.0: update it with …"`), signed out as
+  Codex is not installed …"`), too old (`"on <machine>: Codex 0.135.0 is older than 0.157.0: update it with …"`; from 0.157.0 to 0.163.0 it starts plain there), signed out as
   Codex's own sign-in screen in the tab's relayed terminal; its checklist on the machine's row.
   The bars over a tab (signed out, hooks not running) are that machine's core's and are not
   mirrored, as for its Claude tabs; this Mac's own sign-in never puts one over it.

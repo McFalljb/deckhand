@@ -172,6 +172,7 @@ claude_status_tick :: proc(now := time.Tick{}) {
 claude_hooks_silent :: proc(tab: ^Tab, now := time.Tick{}) -> bool {
 	if replica_process do return tab.live.claude_quiet // the core's (Tab_Live)
 	ct, is := &tab.kind.(Claude_Tab)
+	if is && ct.codex && codex_plain_version(tab.id) != "" do return false // started without hooks (codex.odin): its bar says so
 	if is && ct.codex && tab.status == .Running {
 		// Codex: no hook in this run, CLAUDE_HOOKS_GRACE after its first turn began (OSC 7501)
 		r, has := status_rt[tab.id]
@@ -262,8 +263,9 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if ct := tab.kind.(Claude_Tab); ct.codex {
 		if rt_of(tab.id).dismissed do return ""
 		if codex_signed_out_due(tab) do return CODEX_SIGNED_OUT
+		if v := codex_plain_version(tab.id); v != "" do return codex_plain_text(v, codex_update_hint(codex_binary())) // started without its hooks (codex.odin)
 		if claude_hooks_silent(tab, now) do return CODEX_HOOKS_SILENT
-		return "" // a Codex too old never starts (codex_start)
+		return "" // a Codex too old to start at all never starts (codex_start)
 	}
 	old := old_version(tab)
 	if claude_hooks_silent(tab, now) {
@@ -351,6 +353,10 @@ claude_status_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 	if replica_process ? tab.live.codex_signed_out : codex_signed_out_due(&tab) do strings.write_string(b, `,"signed_out":true`) // a Codex tab behind its login screen (codex.odin; a window's replica: the core's Tab_Live)
 	if v := old_version(&tab); v != "" {
 		strings.write_string(b, `,"claude_version_old":`)
+		json_quote(b, v)
+	}
+	if v := replica_process ? "" : codex_plain_version(tab.id); v != "" { // an old Codex started without hooks (codex.odin)
+		strings.write_string(b, `,"codex_version_old":`)
 		json_quote(b, v)
 	}
 }

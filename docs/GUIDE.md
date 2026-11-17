@@ -73,7 +73,8 @@ above the tabs with **Cancel** and **Confirm**.
 - macOS 14 or later on Apple silicon (arm64). Intel Macs are not supported.
 - At least one coding agent: pi 1.4.0 or later, Claude Code 2.1.295 or later, or Codex 0.163.0 or
   later. An older pi runs without Deckhand's integration ([pi in Deckhand](#pi-in-deckhand)); an
-  older Claude Code runs with status from Deckhand's hooks only; an older Codex does not start.
+  older Claude Code runs with status from Deckhand's hooks only; an older Codex (0.157.0 or later)
+  runs as a plain terminal tab, and one older than that does not start.
   Atlas and jobs need pi. The [first run](#the-first-run) can install them.
 - Optional: [other machines](#machines) you reach with `ssh`: Macs on Apple silicon, or Linux on
   x86_64. Deckhand installs its core there for you.
@@ -1184,7 +1185,8 @@ A Codex tab runs the [Codex CLI](https://github.com/openai/codex) (`codex`) in a
 the session's folder, with your login shell's environment and **your own Codex settings**
 (`~/.codex/config.toml`: model, sandbox, approvals, profiles). Deckhand adds only its hooks, for
 that run, so it knows the conversation's id and when Codex is working or waiting for you; nothing
-is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
+is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed for all of this; an
+older one from 0.157.0 runs as a plain terminal tab (below).
 
 - **Start one**: **New session** and pick **Codex** (listed once Codex is installed), **New Codex
   tab** in a project's or session's menu, or the palette's **New Codex tab** (in the session on
@@ -1205,7 +1207,10 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   a `!` shell line, a `$skill` or an `@mention` into Codex: such a text is refused, with why.
 - **Bars over the tab**: *Codex is signed out* (sign in on Codex's own screen in the tab, or run
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
-  in a dialog). A Codex older than 0.163.0 does not start: the tab, and the refusal, say how to update
+  in a dialog). A Codex older than 0.163.0 (but 0.157.0 or later) starts as a plain tab: you use it
+  as in any terminal, without Deckhand's hooks and status (no status mark, no row to resume, no held
+  messages, comments or Deckhand's tools), and a bar says how to update; **Restart** the tab after
+  updating. A Codex older than 0.157.0 does not start: the tab, and the refusal, say how to update
   for how it was installed (`npm install -g @openai/codex@latest` for npm; Codex's own installer run
   again for its standalone install), as does Settings › **Coding agents**.
 - **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app

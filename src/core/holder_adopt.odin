@@ -385,7 +385,8 @@ holder_adopt_all :: proc(released: map[u32]bool = nil) {
 		if !adopt_tab(&s, &tab, id, snaps, saved, known) do continue
 		start := Held_Start{kind = kind, command = saved.command} // kept for the next relaunch
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi do start.extras = tab.reload.extras
-		if !socket_tokens_adopt(id, tab.id, start) && kind != .Shell do untrusted += 1
+		// a Codex tab without a token is a plain one (an old Codex, codex.odin): nothing to reconnect
+		if !socket_tokens_adopt(id, tab.id, start) && kind != .Shell && !(kind == .Codex && codex_plain_adopted(tab.id)) do untrusted += 1
 		if _, is_cl := tab.kind.(Claude_Tab); is_cl {
 			if t := term_of(tab.id); t != nil do socket_claude_pid(tab.id, t.pty.pid) // its hellos come from below it
 		}

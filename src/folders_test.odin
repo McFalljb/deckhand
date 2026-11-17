@@ -539,19 +539,19 @@ folders_detect_claude_md :: proc(t: ^testing.T) {
 	got, _ = core.setup_detect()
 	testing.expect_value(t, got, vault2)
 	// Claude Code's presence, for the sheet
-	defer core.claude_installed_probe = nil
-	defer core.pi_installed_probe = nil
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = proc() -> bool {return true}
+	defer core.harness_installed_probe[.Claude] = nil
+	defer core.harness_installed_probe[.Pi] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	testing.expect(t, strings.has_prefix(core.setup_claude_line(), "Claude Code is installed"), core.setup_claude_line())
 	testing.expect(t, strings.contains(core.setup_claude_line(), "New session asks which"), core.setup_claude_line()) // both: the picker
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	testing.expect(t, strings.has_prefix(core.setup_claude_line(), "Claude Code isn't installed"), core.setup_claude_line())
 	// pi-desk without pi (harness.odin): Claude Code alone, or nothing
-	core.pi_installed_probe = proc() -> bool {return false}
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	testing.expect(t, strings.has_prefix(core.setup_claude_line(), "Claude Code is installed"), core.setup_claude_line())
 	testing.expect(t, strings.contains(core.setup_claude_line(), "pi isn't installed"), core.setup_claude_line())
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	testing.expect_value(t, core.setup_claude_line(), core.NO_HARNESS)
 }

@@ -50,8 +50,8 @@ h_done :: proc() {
 	core.inbox_drain()
 	if menu.open do menu_close()
 	for _, t in core.terms do core.reader_stop_and_close(t)
-	core.pi_installed_probe = nil
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Pi] = nil
+	core.harness_installed_probe[.Claude] = nil
 	toast_clear()
 }
 
@@ -70,8 +70,8 @@ h_write :: proc(path, text: string, exec := false) {
 
 @(private = "file")
 h_both :: proc() {
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 }
 
 // ---- is pi installed? (looked for, never run) ----
@@ -84,23 +84,23 @@ pi_detect_places :: proc(t: ^testing.T) {
 	fake := "#!/bin/sh\nexit 1\n" // never run
 	onpath := fmt.tprintf("%s/bin", base)
 	os.make_directory_all(onpath)
-	testing.expect(t, !core.pi_detect(onpath, "", ""), "an empty folder")
+	testing.expect(t, core.harness_find(.Pi, onpath, "", "") == "", "an empty folder")
 	h_write(fmt.tprintf("%s/pi", onpath), fake)
-	testing.expect(t, !core.pi_detect(onpath, "", ""), "not executable")
+	testing.expect(t, core.harness_find(.Pi, onpath, "", "") == "", "not executable")
 	os.change_mode(fmt.tprintf("%s/pi", onpath), os.perm_number(0o755))
-	testing.expect(t, core.pi_detect(fmt.tprintf("/nowhere:%s", onpath), "", ""), "on PATH")
-	testing.expect(t, !core.pi_detect("bin", "", ""), "a relative PATH entry is never looked in")
+	testing.expect(t, core.harness_find(.Pi, fmt.tprintf("/nowhere:%s", onpath), "", "") != "", "on PATH")
+	testing.expect(t, core.harness_find(.Pi, "bin", "", "") == "", "a relative PATH entry is never looked in")
 	// pi's managed install: $PI_CODING_AGENT_DIR/bin, else ~/.pi/agent/bin
 	agent := fmt.tprintf("%s/agent", base)
 	os.make_directory_all(fmt.tprintf("%s/bin", agent))
 	h_write(fmt.tprintf("%s/bin/pi", agent), fake, exec = true)
-	testing.expect(t, core.pi_detect("/usr/bin", "", agent), "in $PI_CODING_AGENT_DIR/bin")
+	testing.expect(t, core.harness_find(.Pi, "/usr/bin", "", agent) != "", "in $PI_CODING_AGENT_DIR/bin")
 	home := fmt.tprintf("%s/home", base)
 	os.make_directory_all(fmt.tprintf("%s/.pi/agent/bin", home))
-	testing.expect(t, !core.pi_detect("/usr/bin", home, ""), "nothing in ~/.pi/agent/bin yet")
+	testing.expect(t, core.harness_find(.Pi, "/usr/bin", home, "") == "", "nothing in ~/.pi/agent/bin yet")
 	h_write(fmt.tprintf("%s/.pi/agent/bin/pi", home), fake, exec = true)
-	testing.expect(t, core.pi_detect("/usr/bin", home, ""), "in ~/.pi/agent/bin")
-	testing.expect(t, !core.pi_detect("/usr/bin", "relative", "agent"), "relative folders are never looked in")
+	testing.expect(t, core.harness_find(.Pi, "/usr/bin", home, "") != "", "in ~/.pi/agent/bin")
+	testing.expect(t, core.harness_find(.Pi, "/usr/bin", "relative", "agent") == "", "relative folders are never looked in")
 	// DECKHAND_CMD replaces pi: it counts as installed (scenes, benchmarks)
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	testing.expect(t, core.pi_installed(), "DECKHAND_CMD stands in for pi")
@@ -140,13 +140,13 @@ new_session_choices_installed :: proc(t: ^testing.T) {
 	testing.expect_value(t, labels(core.new_session_choices(p, "")), "Claude Code|pi")
 	state.settings.last_harness = .Pi
 	// one harness: only it
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	testing.expect_value(t, labels(core.new_session_choices(p, "")), "Claude Code")
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	testing.expect_value(t, labels(core.new_session_choices(p, "")), "pi")
 	// none
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	testing.expect_value(t, len(core.new_session_choices(p, "")), 0)
 	// a checkout of the project: pi there is a worktree session, Claude a session with that cwd
 	h_both()
@@ -165,8 +165,8 @@ new_session_ui_paths :: proc(t: ^testing.T) {
 	dir := h_dir("nsui")
 	pid := core.run_command(core.Add_Project{cwd = dir}, H_UI).created_id
 	// none installed: the install hints, nothing starts, no menu
-	core.pi_installed_probe = proc() -> bool {return false}
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	new_session_ui(pid)
 	core.inbox_drain()
 	testing.expect_value(t, toast.text, core.NO_HARNESS)
@@ -175,7 +175,7 @@ new_session_ui_paths :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.open_sessions), 0)
 	// one installed: it starts at once, no picker
 	toast_clear()
-	core.pi_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
 	new_session_ui(pid)
 	core.inbox_drain()
 	testing.expect(t, !menu.open, "no picker for one harness")
@@ -186,7 +186,7 @@ new_session_ui_paths :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, state.settings.last_harness, core.Harness.Pi)
 	// two: the picker, its first choice selected (Enter repeats the last used)
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	new_session_ui(pid)
 	testing.expect(t, menu.open, "the picker opens")
 	ns, is_ns := menu.target.(core.Menu_New_Session)
@@ -239,7 +239,7 @@ atlas_needs_pi :: proc(t: ^testing.T) {
 	defer h_done()
 	core.home_root = h_dir("atlas")
 	defer core.home_root = ""
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	r := core.run_command(core.Set_Home{open = true}, H_UI)
 	testing.expect(t, !r.ok, "refused")
 	testing.expect_value(t, r.error, core.ATLAS_NEEDS_PI)
@@ -247,7 +247,7 @@ atlas_needs_pi :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.open_sessions), 0)
 	testing.expect_value(t, toast.text, core.ATLAS_NEEDS_PI)
 	testing.expect(t, !action_ok("toggle_agent"), "not offered in the palette")
-	core.pi_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
 	testing.expect(t, action_ok("toggle_agent"), "offered with pi")
 }
 
@@ -422,9 +422,9 @@ claude_update_command_layouts :: proc(t: ^testing.T) {
 gear_reload_pi_row_needs_pi :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
 	defer h_done()
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	testing.expect(t, !pop_item_shown(.Reload_Pi), "no Reload all pi tabs without pi")
-	core.pi_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
 	testing.expect(t, !pop_item_shown(.Reload_Pi), "with pi but no pi tab running (wording_names_installed_harness)")
 	testing.expect(t, pop_item_shown(.Rescan), "other rows as ever")
 }
@@ -438,10 +438,10 @@ launch_dir_without_pi :: proc(t: ^testing.T) {
 	h_both()
 	_, is_pi := launch_start(false, pid).(core.New_Chat)
 	testing.expect(t, is_pi, "both: pi, as ever")
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	_, is_cl := launch_start(false, pid).(core.New_Claude_Session)
 	testing.expect(t, is_cl, "Claude Code alone: a Claude session")
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	_, is_pi = launch_start(false, pid).(core.New_Chat)
 	testing.expect(t, is_pi, "neither: pi (its tab says how to install it)")
 }
@@ -449,9 +449,9 @@ launch_dir_without_pi :: proc(t: ^testing.T) {
 // ---- review round 1 ----
 
 @(private = "file")
-h_wait_lookup :: proc() -> bool {
+h_wait_lookup :: proc(h := core.Harness.Pi) -> bool {
 	for _ in 0 ..< 500 {
-		if core.pi_lookup_state() != .Asking do return true
+		if core.harness_lookup_state(h) != .Asking do return true
 		time.sleep(10 * time.Millisecond)
 	}
 	return false
@@ -464,6 +464,8 @@ h_wait_lookup :: proc() -> bool {
 pi_detect_asks_login_shell :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
 	defer h_done()
+	core.harness_lookup_in_unit_tests = true // the login shell is asked (never otherwise in a unit test)
+	defer core.harness_lookup_in_unit_tests = false
 	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
 	defer os.set_env("PATH", old_path)
 	os.set_env("DECKHAND_CMD", "")
@@ -508,13 +510,15 @@ pi_detect_asks_login_shell :: proc(t: ^testing.T) {
 pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
 	defer h_done()
+	core.harness_lookup_in_unit_tests = true
+	defer core.harness_lookup_in_unit_tests = false
 	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
 	defer os.set_env("PATH", old_path)
 	os.set_env("DECKHAND_CMD", "")
 	defer os.set_env("DECKHAND_CMD", "sleep 30")
 	os.set_env("PI_CODING_AGENT_DIR", "")
-	old_cap := core.pi_lookup_timeout
-	defer core.pi_lookup_timeout = old_cap
+	old_cap := core.harness_lookup_timeout
+	defer core.harness_lookup_timeout = old_cap
 	// the cap: short only where the shell hangs, so a loaded machine's slow /bin/sh start is
 	// never taken for a timeout (h_wait_lookup gives up after 5 s)
 	SHORT_CAP :: 300 * time.Millisecond
@@ -534,14 +538,14 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 		sh := fmt.tprintf("%s/%s-sh", dir, c.name)
 		h_write(sh, c.script, exec = true)
 		os.set_env("SHELL", sh)
-		core.pi_lookup_timeout = c.name == "slow" ? SHORT_CAP : LONG_CAP
+		core.harness_lookup_timeout = c.name == "slow" ? SHORT_CAP : LONG_CAP
 		core.pi_recheck()
 		_ = core.pi_installed()
 		testing.expectf(t, h_wait_lookup(), "%s: the lookup ended", c.name)
 		testing.expectf(t, core.pi_installed(), "%s: no clean answer, so pi counts as there", c.name)
 	}
 	// a shell that cannot start at all
-	core.pi_lookup_timeout = LONG_CAP
+	core.harness_lookup_timeout = LONG_CAP
 	os.set_env("SHELL", fmt.tprintf("%s/no-such-shell", dir))
 	core.pi_recheck()
 	_ = core.pi_installed()
@@ -556,6 +560,86 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 		_ = core.pi_installed()
 		testing.expect(t, h_wait_lookup())
 		testing.expectf(t, !core.pi_installed(), "a clean no (%q)", script)
+	}
+}
+
+// Claude Code and Codex are looked for as pi is (harness_installed): one only the login shell finds
+// (nvm or fnm set up in a .zprofile, not on the PATH Deckhand has nor in an install folder) is
+// installed, and its version is read from what the shell named; while the shell is asked, it
+// counts as there; a clean "no" from the shell says no. Neither is ever run.
+@(test)
+claude_codex_found_through_login_shell :: proc(t: ^testing.T) {
+	context.allocator = h_reset()
+	defer h_done()
+	core.harness_lookup_in_unit_tests = true
+	defer core.harness_lookup_in_unit_tests = false
+	defer {
+		core.claude_recheck()
+		core.codex_recheck()
+	}
+	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
+	defer os.set_env("PATH", old_path)
+	old_cbin := strings.clone(os.get_env("DECKHAND_CLAUDE_BIN", context.temp_allocator))
+	defer os.set_env("DECKHAND_CLAUDE_BIN", old_cbin)
+	old_xbin := strings.clone(os.get_env("DECKHAND_CODEX_BIN", context.temp_allocator))
+	defer os.set_env("DECKHAND_CODEX_BIN", old_xbin)
+	os.unset_env("DECKHAND_CLAUDE_BIN")
+	os.unset_env("DECKHAND_CODEX_BIN")
+	dir := h_dir("shell-only")
+	empty := fmt.tprintf("%s/empty", dir)
+	os.make_directory_all(empty)
+	os.set_env("PATH", fmt.tprintf("%s:/usr/bin:/bin", empty)) // HOME (h_reset) has no install folders either
+	zbin := fmt.tprintf("%s/nvm/bin", dir)
+	os.make_directory_all(zbin)
+	h_write(fmt.tprintf("%s/claude", zbin), "#!/bin/sh\nexit 1\n", exec = true) // never run
+	h_write(fmt.tprintf("%s/codex", zbin), "#!/bin/sh\nexit 1\n", exec = true)
+	// the login shell: -l -c 'command -v <name>' sh
+	found := fmt.tprintf("%s/found-sh", dir)
+	h_write(found, fmt.tprintf("#!/bin/sh\necho 'rc noise'\ncase \"$3\" in *claude) echo '%s/claude';; *codex) echo '%s/codex';; *) exit 1;; esac\n", zbin, zbin), exec = true)
+	os.set_env("SHELL", found)
+	for h in ([]core.Harness{.Claude, .Codex}) {
+		core.harness_recheck(h)
+		testing.expectf(t, core.harness_binary(h) == "", "%v: not found by stat", h)
+		_, there := core.harness_installed(h)
+		testing.expectf(t, there, "%v: while the login shell is asked: there", h)
+		testing.expectf(t, h_wait_lookup(h), "%v: the login shell answered", h)
+		path, ok := core.harness_installed(h)
+		testing.expectf(t, ok, "%v: the login shell finds it", h)
+		testing.expect_value(t, path, fmt.tprintf("%s/%s", zbin, h == .Claude ? "claude" : "codex"))
+		testing.expect_value(t, core.harness_path(h), path) // its version is read from there
+	}
+	testing.expect(t, core.claude_installed() && core.codex_installed())
+	// a login shell without them: no, once it answered
+	none := fmt.tprintf("%s/none-sh", dir)
+	h_write(none, "#!/bin/sh\nexit 1\n", exec = true)
+	os.set_env("SHELL", none)
+	for h in ([]core.Harness{.Claude, .Codex}) {
+		core.harness_recheck(h)
+		_, _ = core.harness_installed(h)
+		testing.expectf(t, h_wait_lookup(h), "%v: answered", h)
+		_, ok := core.harness_installed(h)
+		testing.expectf(t, !ok, "%v: nowhere", h)
+		testing.expectf(t, !core.harness_installed_now(h), "%v: a re-look stats again, still none", h)
+	}
+}
+
+// The install folders Deckhand looks in (harness_folders) are the ones each tab's command falls
+// back to: a harness Deckhand counts as installed is one its tab starts.
+@(test)
+harness_folders_match_tab_commands :: proc(t: ^testing.T) {
+	cmds := [core.Harness]string {
+		.Pi     = core.PI_TAB_CMD,
+		.Claude = core.CLAUDE_TAB_CMD,
+		.Codex  = core.CODEX_TAB_CMD,
+	}
+	for h in core.Harness {
+		dirs := core.harness_folders(h, "/H", "/A")
+		for d in dirs {
+			sh, _ := strings.replace(d, "/H/", "$HOME/", 1, context.temp_allocator)
+			sh, _ = strings.replace(sh, "/A/", "$_pa/", 1, context.temp_allocator)
+			testing.expectf(t, strings.contains(cmds[h], sh), "%v: %s is in its tab's command", h, sh)
+		}
+		if h == .Codex do testing.expect_value(t, len(dirs), 0) // CODEX_TAB_CMD has no fallback folders
 	}
 }
 
@@ -586,8 +670,8 @@ new_session_ui_looks_again :: proc(t: ^testing.T) {
 	defer h_done()
 	dir := h_dir("again")
 	pid := core.run_command(core.Add_Project{cwd = dir}, H_UI).created_id
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = nil
 	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
 	defer os.set_env("HOME", old_home)
 	home := fmt.tprintf("%s/home", dir)
@@ -657,10 +741,10 @@ new_session_picker_project_gone :: proc(t: ^testing.T) {
 atlas_palette_needs_pi :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
 	defer h_done()
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	for id in ([]string{"toggle_agent", "ask_agent", "agent_model", "agent_model_pop"}) do testing.expect(t, !action_ok(id), id)
 	testing.expect(t, !pop_item_shown(.Agent_Model), "the gear's Atlas model row")
-	core.pi_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
 	for id in ([]string{"toggle_agent", "ask_agent", "agent_model"}) do testing.expect(t, action_ok(id), id)
 }
 
@@ -686,12 +770,12 @@ wording_names_installed_harness :: proc(t: ^testing.T) {
 		return false
 	}
 	// pi only
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	testing.expect(t, has_pi_rows(), "pi's files listed")
 	// Claude Code only: no pi rows, no pi in the words
-	core.pi_installed_probe = proc() -> bool {return false}
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	testing.expect(t, !has_pi_rows(), "no pi groups without pi")
 	h_both()
 	// details that named pi for everyone

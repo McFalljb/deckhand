@@ -332,31 +332,10 @@ harness_update_bare :: proc(r: Harness_Row, layout: Install_Layout, real: string
 
 // ---- detection (stat and read only) ----
 
-// The harness binary Deckhand would start, by stat: the PATH new tabs get (none in test mode,
-// detect_path), then each harness's install folders. "" = not found this way.
-harness_binary :: proc(h: Harness) -> string {
-	if h == .Codex do return codex_binary() // codex.odin
-	name := h == .Pi ? "pi" : "claude"
-	if h == .Claude {
-		if b := hook_env(.Claude_Bin); filepath.is_abs(b) do return b
-	}
-	for d in strings.split(detect_path(), ":", context.temp_allocator) do if exe_in(d, name) do return fmt.tprintf("%s/%s", strings.trim_right(d, "/"), name)
-	switch h {
-	case .Pi:
-		return pi_managed_path()
-	case .Claude:
-		home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
-		if !filepath.is_abs(home) do return ""
-		for d in ([]string{".local/bin", ".claude/local"}) {
-			dir := fmt.tprintf("%s/%s", home, d)
-			if exe_in(dir, name) do return fmt.tprintf("%s/%s", dir, name)
-		}
-	case .Codex:
-	}
-	return ""
-}
+// Where each harness is: harness_binary and harness_installed (harness.odin), one lookup for all.
 
-// A harness binary's version by looking at where it links to ("" = unknown).
+// A harness binary's version by looking at where it links to ("" = unknown): per harness, as each
+// has its own install layouts.
 harness_version_of :: proc(h: Harness, bin: string) -> string {
 	if bin == "" do return ""
 	switch h {
@@ -499,7 +478,7 @@ Harness_Item :: struct {
 
 // What the checklist looks at, gathered once (tests fill it by hand).
 Harness_Facts :: struct {
-	installed: [Harness]bool, // pi_installed / claude_installed (stat, and pi's login-shell answer)
+	installed: [Harness]bool, // harness_installed (stat, and the login shell's answer)
 	bin:       [Harness]string, // the binary found by stat ("" = none)
 	real:      [Harness]string, // where it links to
 	version:   [Harness]string,
@@ -507,7 +486,7 @@ Harness_Facts :: struct {
 	integration: [Harness]bool, // the bundled integration is in this build
 	packages:  map[string]Pi_Package_Found, // pi packages by name (temp)
 	codex_signed_out: bool, // `codex login status` said signed out (codex.odin)
-	pi_asking: bool, // pi counts as installed only because the login shell has not answered yet (pi_installed)
+	asking:    [Harness]bool, // counts as installed only because the login shell has not answered yet (harness_installed)
 }
 
 harness_facts_now :: proc() -> Harness_Facts {
@@ -516,22 +495,22 @@ harness_facts_now :: proc() -> Harness_Facts {
 	if r := fs_real(f.agent_dir); r != "" do f.agent_dir = r // binaries are compared by their real path
 	f.packages = make(map[string]Pi_Package_Found, allocator = context.temp_allocator)
 	for h in Harness {
-		switch h {
-		case .Pi:     f.installed[h] = pi_installed()
-		case .Claude: f.installed[h] = claude_installed()
-		case .Codex:  f.installed[h] = codex_installed()
-		}
+		_, f.installed[h] = harness_installed(h)
 		b := harness_binary(h)
 		f.bin[h] = b
-		if h == .Pi && b == "" && f.installed[h] && pi_found == .Unknown && pi_lookup_state() == .Asking do f.pi_asking = true
+		if b == "" && f.installed[h] && harness_found[h] == .Unknown && harness_lookup_state(h) == .Asking do f.asking[h] = true
 		if b != "" {
 			r := fs_real(b)
 			f.real[h] = r != "" ? r : b
 			f.version[h] = harness_version_of(h, b)
 			f.installed[h] = true
+		} else {
+			// found by the login shell only: its version from what the shell named (bin stays "":
+			// nothing for Deckhand to run an update against)
+			f.version[h] = harness_version_of(h, harness_shell_path(h))
 		}
 	}
-	if f.installed[.Pi] && f.version[.Pi] == "" do f.version[.Pi] = state.reload.pi_version // found by the login shell only
+	if f.installed[.Pi] && f.version[.Pi] == "" do f.version[.Pi] = state.reload.pi_version // pi's own version probe (reload.odin)
 	f.integration[.Pi] = pi_integration_dir() != ""
 	f.integration[.Claude] = claude_plugin_dir() != ""
 	f.integration[.Codex] = claude_cli_path() != "" // its hooks are the bundled CLI (codex.odin)
@@ -558,10 +537,10 @@ harness_checklist :: proc(f: Harness_Facts) -> []Harness_Item {
 				it.command, it.runnable = p.command, p.runnable
 				break
 			}
-			if h == .Pi && f.pi_asking {
-				// not known yet: never "ok" for a pi that may not be there (a hub shows this row);
-				// made again once the shell answers (harness_checklist_tick)
-				it.state, it.note = .Unchecked, "Looking for pi in the login shell…"
+			if f.asking[h] {
+				// not known yet: never "ok" for a harness that may not be there (a hub shows this
+				// row); made again once the shell answers (harness_checklist_tick)
+				it.state, it.note = .Unchecked, fmt.tprintf("Looking for %s in the login shell…", HARNESSES[h].name)
 				break
 			}
 			it.version, it.where_ = f.version[h], f.bin[h]
@@ -655,10 +634,10 @@ items_strings: [dynamic]string
 // Tests: stands in for harness_facts_now.
 harness_facts_probe: proc() -> Harness_Facts
 
-// full: the cached pi_installed and claude_installed answers are dropped too, the login shell's
-// about pi included (after an install or update ran: PATH may have changed); else they are kept
-// and the binaries are looked for again by stat (harness_facts_now), which finds a harness
-// installed since. bump: the Settings tab's rows are built again (not while they are being built).
+// full: the cached harness_installed answers are dropped too, the login shell's included (after
+// an install or update ran: PATH may have changed); else they are kept and the binaries are looked
+// for again by stat (harness_facts_now), which finds a harness installed since. bump: the
+// Settings tab's rows are built again (not while they are being built).
 harness_checklist_refresh :: proc(full := false, bump := true) {
 	if full {
 		pi_recheck()
@@ -666,7 +645,7 @@ harness_checklist_refresh :: proc(full := false, bump := true) {
 		codex_recheck()
 	}
 	f := harness_facts_probe != nil ? harness_facts_probe() : harness_facts_now()
-	items_pi_asking = harness_facts_probe == nil && pi_lookup_state() == .Asking
+	items_asking = harness_facts_probe == nil && harness_lookup_asking()
 	for s in items_strings do delete(s)
 	clear(&items_strings)
 	clear(&harness_items)
@@ -693,13 +672,13 @@ harness_checklist_forget :: proc() {
 	settings_gen += 1
 }
 
-// The checklist was made while the login shell was still being asked about pi (pi counted as
-// there): made again once it answered. Frame upkeep while the sheet or Settings shows it.
+// The checklist was made while the login shell was still being asked about a harness (it counted
+// as there): made again once it answered. Frame upkeep while the sheet or Settings shows it.
 @(private = "file")
-items_pi_asking: bool
+items_asking: bool
 
 harness_checklist_tick :: proc() {
-	if items_pi_asking && pi_lookup_state() != .Asking do harness_checklist_refresh()
+	if items_asking && !harness_lookup_asking() do harness_checklist_refresh()
 }
 
 // The cached item for a manifest id (nil = none).

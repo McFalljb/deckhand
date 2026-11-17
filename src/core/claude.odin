@@ -515,40 +515,18 @@ claude_shots_tidy :: proc() {
 
 // ---- is Claude Code installed? ----
 
-// Whether `claude` is there, cached (claude_installed). Unknown = look again at the next use.
-Claude_Found :: enum u8 {
-	Unknown,
-	Yes,
-	No,
-}
-claude_found: Claude_Found
-
 // What the user sees when Claude Code is not installed: how to install it (code.claude.com/docs/en/setup).
 CLAUDE_MISSING :: "Claude Code is not installed: install it with `curl -fsSL https://claude.ai/install.sh | bash` (or `brew install --cask claude-code`; npm or a managed install: code.claude.com/docs/en/setup), then use Refresh shell environment or restart Deckhand"
 // The note a menu row's label gets meanwhile ("New Claude tab — Claude Code not installed").
 CLAUDE_MISSING_NOTE :: " — Claude Code not installed"
 
-// Whether a `claude` that can run is on `path` (absolute entries only) or where its installers put
-// it (<home>/.local/bin, <home>/.claude/local; the places the tab's command also tries). By stat
-// and access(X_OK) only: claude is never run to find out.
-claude_detect :: proc(path, home: string) -> bool {
-	for dir in strings.split(path, ":", context.temp_allocator) do if exe_in(dir, "claude") do return true
-	if filepath.is_abs(home) {
-		for d in ([]string{".local/bin", ".claude/local"}) do if exe_in(strings.concatenate({home, "/", d}, context.temp_allocator), "claude") do return true
-	}
-	return false
-}
-
-// Whether Claude Code is installed, as new tabs would find it: the PATH new children get
-// (child_base_env: after Refresh shell environment, the refreshed one) and HOME. Cached;
-// claude_recheck drops the cache (a refresh, a Claude tab that exited 127, the user's click).
+// Whether Claude Code is installed, as new tabs would find it (harness_installed, harness.odin).
 claude_installed :: proc() -> bool {
-	if claude_installed_probe != nil do return claude_installed_probe()
-	if claude_found == .Unknown do claude_found = claude_detect(detect_path(), os.get_env("HOME", context.temp_allocator)) ? .Yes : .No // test mode: not PATH (harness.odin)
-	return claude_found == .Yes
+	_, found := harness_installed(.Claude)
+	return found
 }
 
-claude_recheck :: proc() {claude_found = .Unknown}
+claude_recheck :: proc() {harness_recheck(.Claude)}
 
 // The installed check for the harness of a tab's (claude_missing or codex_missing).
 claude_tab_missing :: proc(tab: ^Tab, caller: Caller) -> (r: Result, missing: bool) {
@@ -558,13 +536,7 @@ claude_tab_missing :: proc(tab: ^Tab, caller: Caller) -> (r: Result, missing: bo
 
 // claude_installed, with a cached "no" looked up again first: what a user's action asks (a Restart,
 // a click, a session shown: the user may have installed it since).
-claude_installed_now :: proc() -> bool {
-	if claude_found == .No do claude_recheck()
-	return claude_installed()
-}
-
-// Tests: stands in for the lookup (claude_extras_test.odin); nil = look.
-claude_installed_probe: proc() -> bool
+claude_installed_now :: proc() -> bool {return harness_installed_now(.Claude)}
 
 // A command that would start claude when it is not installed: the user is told how to install it
 // (the user may have just installed it: a cached "no" is looked up again first); everyone gets the

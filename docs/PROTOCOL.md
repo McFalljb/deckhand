@@ -568,8 +568,8 @@ session has `agent`: `pi` | `claude`; a Claude-only session's
 SessionStart hook reported), the id `set_pinned`, `set_hidden`, `set_unread` and `open_session`
 take for it. Top level: `pi_installed` (pi was found: by stat on the tabs' PATH or in pi's managed
 install, else the login shell's `command -v pi`; true while that is still asking; never run),
-`claude_installed` (Claude Code was found: `claude` on the login shell's
-PATH or in `~/.local/bin`, `~/.claude/local`; found by stat, never run); for the full snapshot
+`claude_installed` (Claude Code was found, the same way: `claude` on the tabs' PATH or in
+`~/.local/bin`, `~/.claude/local`, else the login shell's `command -v claude`; never run); for the full snapshot
 only (not a pi or Claude tab's own view): `claude_sessions`: `[{id, cwd, project, title, model?, used,
 open, account?, created?, gone?}]`, most recent first (at most 100): the rows of each project's
 session list; then the selected project's and Chats' conversations found on disk (`found: true`;

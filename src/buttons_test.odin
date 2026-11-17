@@ -711,11 +711,11 @@ new_chat_button_picker_at_button :: proc(t: ^testing.T) {
 	if !bt_ui() {
 		testing.fail_now(t, "no fonts")
 	}
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	defer {
-		core.pi_installed_probe = nil
-		core.claude_installed_probe = nil
+		core.harness_installed_probe[.Pi] = nil
+		core.harness_installed_probe[.Claude] = nil
 		if menu.open do menu_close()
 	}
 	// Chats needs a data dir; an empty pi store under a temp HOME (as buttons_reachable_in_layout)

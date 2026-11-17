@@ -44,7 +44,7 @@ r_reset :: proc() -> runtime.Allocator {
 	}
 	core.persist = {}
 	core.dead_tab_reset()
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	r_clip, r_revealed = "", ""
 	core.platform = {quit = proc() {}}
 	win_os = {set_clipboard = proc(s: string) {r_clip = strings.clone(s, runtime.heap_allocator())}, reveal = proc(p: string) {r_revealed = strings.clone(p, runtime.heap_allocator())}}
@@ -53,7 +53,7 @@ r_reset :: proc() -> runtime.Allocator {
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	// never the user's real Claude folder: a fake one (tests that need files make their own)
 	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/deckhand-cr-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
 	return runtime.heap_allocator()

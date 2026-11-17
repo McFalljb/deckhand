@@ -49,8 +49,8 @@ setup :: proc() -> (home, proj: string) {
 	os.unset_env("XDG_CONFIG_HOME")
 	os.unset_env("PI_KIT_NOTES_DIR") // the Folders group shows the user's own as a row
 	// pi's files and the Coding agents rows are listed as on a machine with pi and Claude Code
-	core.pi_installed_probe = stand_in_installed
-	core.claude_installed_probe = stand_in_installed
+	core.harness_installed_probe[.Pi] = stand_in_installed
+	core.harness_installed_probe[.Claude] = stand_in_installed
 	ad = fmt.tprintf("%s/.pi/agent", home)
 	write_mode(fmt.tprintf("%s/settings.json", ad), `{"defaultModel": "x", "packages": ["npm:pi-subagents@1.2.3", {"source": "../../pkgs/pi-kit"}]}`, 0o644)
 	write_mode(fmt.tprintf("%s/models.json", ad), `{"providers": {}}`, 0o600) // pi may make it private: still a config file

@@ -869,7 +869,7 @@ socket_claude_token_scope :: proc(t: ^testing.T) {
 	core.run_command(core.Focus_Session{session = sess}, sk_ui)
 	tokfile := fmt.tprintf("%s/claude-token-%d", dir, time.now()._nsec)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf %%s "$DECKHAND_CLAUDE_TOKEN" > %s; exec sleep 30`, tokfile))
-	core.claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
+	core.harness_found[.Claude] = .Yes // the stand-in for claude (claude.odin: claude_installed)
 	r := core.run_command(core.New_Claude_Tab{session = sess}, sk_ui)
 	testing.expect(t, r.ok, r.error)
 	ctab := r.created_id
@@ -980,7 +980,7 @@ os.rename(out + ".tmp", out)
 	ok_out, orphan_out := fmt.tprintf("%s/grandchild.json", dir), fmt.tprintf("%s/orphan.json", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`sh -c "sh -c 'python3 -I %s %s child'"; python3 -I %s %s orphan; exec sleep 30`, client, ok_out, client, orphan_out))
 	sess, _, _ := sk_pi_tab(t, dir)
-	core.claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
+	core.harness_found[.Claude] = .Yes // the stand-in for claude (claude.odin: claude_installed)
 	r := core.run_command(core.New_Claude_Tab{session = sess}, sk_ui)
 	testing.expect(t, r.ok, r.error)
 	read :: proc(path: string) -> string {

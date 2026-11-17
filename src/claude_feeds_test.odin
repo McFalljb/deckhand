@@ -36,7 +36,7 @@ f_reset :: proc() -> runtime.Allocator {
 	}
 	core.persist = {}
 	core.dead_tab_reset()
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	core.platform = {quit = proc() {}}
 	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
@@ -51,7 +51,7 @@ f_reset :: proc() -> runtime.Allocator {
 f_done :: proc() {
 	core.inbox_drain()
 	for _, t in core.terms do core.reader_stop_and_close(t)
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Claude] = nil
 	core.claude_wait_reset()
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 }

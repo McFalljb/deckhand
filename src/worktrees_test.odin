@@ -537,7 +537,7 @@ wt_claude_session_in_a_worktree :: proc(t: ^testing.T) {
 	defer os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	wt_scan_now(f.main)
 	p := state.projects[0]
 	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = p.id, cwd = fmt.tprintf("%s/home", f.root)}, {kind = .UI}).ok, "not elsewhere")

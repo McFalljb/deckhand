@@ -424,7 +424,7 @@ codex_with_defaults :: proc(args: []string) -> []string {
 // makes, with the default flags as set now (codex_with_defaults). Its account: CODEX_HOME for a
 // home the user added (none for the default), set again after the login profile.
 codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
-	bin := codex_binary()
+	bin := harness_path(.Codex) // by stat, else what the login shell named
 	if v := codex_version_of(bin); claude_version_below(v, CODEX_MIN_VERSION) {
 		hint := codex_update_hint(bin)
 		term_note(t, codex_old_text(v, hint))
@@ -499,43 +499,22 @@ claude_tab_command_text :: proc(ct: ^Claude_Tab, text: string) -> string {
 
 // ---- is Codex installed, which version, signed in? ----
 
-codex_found: Claude_Found
-
-// Tests: stands in for the lookup; nil = look.
-codex_installed_probe: proc() -> bool
-
-// The codex Deckhand would start, by stat: DECKHAND_CODEX_BIN (tests), else the PATH new tabs get
-// (never in test mode or a unit test: a codex the developer installed must not change what they
-// see). "" = not found this way.
-codex_binary :: proc() -> string {
-	if b := hook_env(.Codex_Bin); filepath.is_abs(b) do return b
-	when TEST_HOOKS {
-		if ODIN_TEST || test_mode() do return ""
-	}
-	for d in strings.split(detect_path(), ":", context.temp_allocator) do if exe_in(d, "codex") do return fmt.tprintf("%s/codex", strings.trim_right(d, "/"))
-	return ""
-}
-
-// Whether Codex is installed, as new tabs would find it (stat only, never run). Cached;
-// codex_recheck drops it (Refresh shell environment, a Codex tab that exited 127, the user's click).
+// Whether Codex is installed, as new tabs would find it (harness_installed, harness.odin).
 codex_installed :: proc() -> bool {
-	if codex_installed_probe != nil do return codex_installed_probe()
-	if codex_found == .Unknown do codex_found = codex_binary() != "" ? .Yes : .No
-	return codex_found == .Yes
+	_, found := harness_installed(.Codex)
+	return found
 }
 
+// Looked up again (Refresh shell environment, a Codex tab that exited 127), its sign-in too.
 codex_recheck :: proc() {
-	codex_found = .Unknown
+	harness_recheck(.Codex)
 	for &x in codex_login {
 		sync.atomic_add(&x.gen, 1)
 		sync.atomic_store(&x.state, .Unknown)
 	}
 }
 
-codex_installed_now :: proc() -> bool {
-	if codex_found == .No do codex_recheck()
-	return codex_installed()
-}
+codex_installed_now :: proc() -> bool {return harness_installed_now(.Codex)}
 
 // codex's version from where its binary links to: npm's package
 // (<…>/node_modules/@openai/codex/bin/codex.js -> its package.json), Homebrew's cask
@@ -651,7 +630,7 @@ codex_version_word :: proc(v: string) -> bool {
 }
 
 // The version of the codex new tabs start ("" = unknown or none).
-codex_version :: proc() -> string {return codex_version_of(codex_binary())}
+codex_version :: proc() -> string {return codex_version_of(harness_path(.Codex))}
 
 // What a Codex too old for Deckhand says in the tab. hint: codex_update_hint's.
 codex_old_text :: proc(v, hint: string) -> string {

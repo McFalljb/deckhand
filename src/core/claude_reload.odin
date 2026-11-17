@@ -247,24 +247,13 @@ claude_file_class :: proc(path: string) -> Claude_File_Class {
 
 // ---- claude's version, by looking only ----
 
-// Tests: the binary to look at instead of searching (DECKHAND_CLAUDE_BIN).
-// The `claude` a Claude tab would start ("" = none found, or tests replace claude): the
-// children's PATH, then ~/.local/bin and ~/.claude/local, as CLAUDE_TAB_CMD looks. Stat only.
+// The `claude` a Claude tab would start ("" = none found, or tests replace claude): harness_path
+// (harness.odin: the children's PATH, ~/.local/bin and ~/.claude/local, as CLAUDE_TAB_CMD looks,
+// else what the login shell named). Tests: DECKHAND_CLAUDE_BIN, the binary to look at. Stat only.
 claude_binary_path :: proc() -> string {
 	if b := hook_env(.Claude_Bin); filepath.is_abs(b) do return b
 	if hook_env(.Claude_Cmd) != "" do return ""
-	dirs := make([dynamic]string, context.temp_allocator)
-	if path, ok := env_lookup(child_base_env(), "PATH"); ok do for d in strings.split(path, ":", context.temp_allocator) do append(&dirs, d)
-	if h := os.get_env("HOME", context.temp_allocator); strings.has_prefix(h, "/") {
-		h = strings.trim_right(h, "/")
-		append(&dirs, fmt.tprintf("%s/.local/bin", h), fmt.tprintf("%s/.claude/local", h))
-	}
-	for d in dirs {
-		if !strings.has_prefix(d, "/") do continue
-		p := fmt.tprintf("%s/claude", strings.trim_right(d, "/"))
-		if path_kind(p) == .File do return p
-	}
-	return ""
+	return harness_path(.Claude)
 }
 
 // claude's version from where bin links to (never run): the native installer, Homebrew's cask, npm

@@ -907,10 +907,11 @@ Deckhand's own sh scripts run as `$SHELL -l -c SCRIPT` for a POSIX login shell, 
 `/bin/sh -c SCRIPT` in the imported environment for a known non-POSIX one (fish, nushell, xonsh,
 elvish, ysh, tcsh/csh, pwsh: `shell_is_posix`). Shell tabs still open `$SHELL -l`.
 
-**Whether pi is installed** (`pi_installed`): a stat of the new tabs' PATH and pi's managed
-install, else the login shell's `command -v pi` (on a worker, at most 10 s, pi never run). Until
-the shell answers, pi counts as there; only a clean "no" says it is missing, so a pi that only
-`.zprofile` adds is not reported missing after a timeout. `PI_CODING_AGENT_DIR` is read as pi
+**Whether a harness is installed** (`harness_installed`, the same for pi, Claude Code and Codex): a
+stat of the new tabs' PATH and the harness's own install folders, else the login shell's
+`command -v <name>` (on a worker, at most 10 s, the harness never run). Until the shell answers,
+it counts as there; only a clean "no" says it is missing, so one that only `.zprofile` adds is not
+reported missing after a timeout. `PI_CODING_AGENT_DIR` is read as pi
 reads it; a custom `sessionDir` is not followed.
 
 Unit tests: `src/core/login_env_test.odin` (fake shells, never yours).

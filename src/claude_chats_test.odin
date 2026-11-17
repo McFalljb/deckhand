@@ -56,7 +56,7 @@ ch_reset :: proc(env: ^Ch_Env, keep_dirs := false) -> runtime.Allocator {
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	if !keep_dirs {
 		env.home = ch_dir("home")
 		env.root = ch_dir("data")
@@ -171,12 +171,12 @@ ch_chats_offered :: proc(t: ^testing.T) {
 	context.allocator = ch_reset(&env)
 	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	testing.expect(t, action_ok("new_chat"), "New chat")
 	all_choices := ""
 	for it in core.new_session_choices(c, "") do all_choices = strings.concatenate({all_choices, it.label, "|"}, context.temp_allocator)
 	testing.expect(t, strings.contains(all_choices, "Claude Code"), all_choices)
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Claude] = nil
 	chat := core.run_command(core.New_Chat{project_id = c.id}, CH_UI).created_id
 	testing.expect(t, action_ok("new_claude_tab"), "with a chat on screen")
 	menu_open(Menu_Session{project_id = c.id, pi_session_id = core.find_session(chat).pi_session_id}, {})
@@ -186,9 +186,9 @@ ch_chats_offered :: proc(t: ^testing.T) {
 	all := strings.join(labels[:], "|", context.temp_allocator)
 	testing.expect(t, strings.contains(all, "New Claude tab"), all)
 	// not installed: not offered, and refused
-	core.claude_found = .No
-	core.claude_installed_probe = proc() -> bool {return false}
-	defer core.claude_installed_probe = nil
+	core.harness_found[.Claude] = .No
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Claude] = nil
 	for it in core.new_session_choices(c, "") do testing.expect(t, !strings.contains(it.label, "Claude"), it.label)
 	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI).ok)
 }

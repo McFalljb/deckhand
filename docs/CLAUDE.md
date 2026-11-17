@@ -69,9 +69,11 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   user's there (that machine's default flags apply). Only the tab's kind and status come back
   (`machine_mirror.odin`): that core's bars are not shown here. The shared rules: CODEX.md §8.
 - **Claude Code not installed.** `claude_installed()` looks for an executable `claude` (stat and
-  `access(X_OK)`, never run) on the PATH new tabs get and in `~/.local/bin` and `~/.claude/local`.
+  `access(X_OK)`, never run) on the PATH new tabs get and in `~/.local/bin` and `~/.claude/local`,
+  else asks the login shell (`command -v claude`, on a worker; there meanwhile): the one lookup
+  pi and Codex use too (`harness_installed`, [HARNESSES.md §6](HARNESSES.md#6-the-harness-manifest)).
   Cached; looked up again after **Refresh shell environment**, after a Claude tab exits 127, and at
-  the user's click while the cache says "no". While missing, every command that would start
+  the user's click while the cache says "no" (by stat: the login shell's answer is kept). While missing, every command that would start
   claude is refused with how to install it (`CLAUDE_MISSING`, a toast for the user); the menu,
   **+** and palette rows read "… — Claude Code not installed"; past Claude sessions still list;
   and a restored Claude tab shows as exited (127) with why, no bell entry and no retry. The
@@ -374,7 +376,7 @@ is valid; it learns nothing it can use from outside the tab.
   restart-class file shows the Claude bar at once.
 - **First run**: the notes folder may also be found in the config folder's `CLAUDE.md` (after
   pi's `AGENTS.md`; only the path is shown; the config folder itself never qualifies); step 3 says
-  whether Claude Code is installed (`claude_installed`, stat only).
+  whether Claude Code is installed (`claude_installed`, never run).
 
 ## 4b. Rows and tabs at parity with pi's
 

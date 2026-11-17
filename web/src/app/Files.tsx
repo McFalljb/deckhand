@@ -28,6 +28,9 @@ import { FileReads, knowFile, knownFile } from "./filecache.ts";
 import { CodeBlock, CodeEdit } from "./Code.tsx";
 import { longPressProps } from "./Peek.tsx";
 import { fileTabPath } from "./Panes.tsx";
+import { cancelCut, clipItems, confirmed as fsConfirmed, copyInto, created, deleting, hasClip, isCut, moved, resetFor, rootClipItems, take, treeKey, type Tree } from "./fileops.ts";
+import { planCopy } from "./fileclip.ts";
+import { ClipBar } from "./FileClipBar.tsx";
 import { clickPick, dragText, dropDir, entryPaths, extendPick, folderRows, gitLetter, gitTone, isEditRow, movedPath, moveResult, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, planMove, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
@@ -124,7 +127,7 @@ function copyText(app: App, text: string) {
 
 // Delete: the core always asks (the confirmation bar); the tree looks again when it is answered.
 function trash(app: App, path: string) {
-  app.run({ type: "delete_path", path });
+  app.run({ type: "delete_path", path }).then((r) => deleting(r, [path]));
 }
 
 // Several rows: one delete_path with paths, one confirmation (the core checks every path first and
@@ -135,6 +138,7 @@ async function trashMany(app: App, paths: string[]) {
   if (paths.length === 1) return trash(app, paths[0]);
   if (!paths.length) return;
   const r = await app.link.run({ type: "delete_path", path: "", paths });
+  deleting(r, paths);
   if (r.ok || r.error === "needs_confirmation" || r.error === "not connected") return;
   if ((r.error ?? "").startsWith("path is empty")) app.toast("Deckhand on that machine is too old to move several items to the Trash at once. Update it, or move them one at a time.", true);
   else app.toast(r.error || "Could not move them to the Trash", true);
@@ -200,6 +204,7 @@ async function commitEdit(app: App, root: string, text: string) {
       return bump();
     }
     follow(from, r.ok ? to : "");
+    if (r.ok) app.toast(`Renamed ${baseName(from)} to ${name}`, false, moved(treeOf(app, root), [{ from, to }], true));
     const now = r.ok ? to : from;
     focusOne(now);
     scrollWanted = { key: now, center: false };
@@ -221,6 +226,7 @@ async function commitEdit(app: App, root: string, text: string) {
   endEdit(made);
   refresh(app, root);
   if (r.ok && e.kind === "file") openFile(app, made, true); // its tab, quietly (no session on screen: none)
+  if (r.ok) created(treeOf(app, root), made, e.kind === "dir");
 }
 
 // What was open under a moved or renamed folder follows it (to "": closed); its listings go.
@@ -263,8 +269,9 @@ async function moveTo(app: App, root: string, sources: string[], dir: string) {
       for (const d of parentsOf(root, dir + "/x")) if (!open.has(d)) open.add(d);
       after = { paths: sources.map((s) => done.reduce((p, m) => movedPath(p, m.from, m.to), s)), until: performance.now() + 8000 };
     }
-    if (done.length || failed || waiting !== undefined) app.toast(moveResult(root, dir, done.map((m) => m.from), failed, waiting), !!failed);
+    if (done.length || failed || waiting !== undefined) app.toast(moveResult(root, dir, done.map((m) => m.from), failed, waiting), !!failed, moved(treeOf(app, root), done));
     refresh(app, root);
+    return done.length;
   } finally {
     moving = false;
     bump();
@@ -288,14 +295,14 @@ function startDrag(ev: DragEvent, root: string, path: string) {
   const sources = pick.paths.size > 1 ? outermost(order, pick.paths) : [path];
   const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
   drag = { sources, from: path, nonce, root };
-  dt.effectAllowed = "move";
+  dt.effectAllowed = "copyMove"; // Option/Alt at the drop copies
   dt.setData(DRAG_TYPE, nonce); // ours: only a drop carrying this drag's nonce moves (and only what is in memory)
   // paths shell-quoted a space apart, never contents, never a newline (dropped on a terminal: typed, not run)
   dt.setData("text/plain", dragText(sources));
   // the image: the name, or "N items" (text only)
   const img = document.createElement("div");
   img.className = "files-drag";
-  img.textContent = sources.length === 1 ? baseName(sources[0]) : `${sources.length} items`;
+  img.textContent = (ev.altKey ? "Copy " : "") + (sources.length === 1 ? baseName(sources[0]) : `${sources.length} items`);
   document.body.appendChild(img);
   dt.setDragImage(img, 12, 12);
   window.setTimeout(() => img.remove(), 0);
@@ -334,6 +341,24 @@ function endDrag() {
   bump();
 }
 
+// The tree as fileops.ts (copy, cut, paste, duplicate, undo) sees it.
+function treeOf(app: App, root: string): Tree {
+  return {
+    app,
+    root,
+    kindOf: (p) => listed.get(parentOf(p))?.entries.find((x) => x.name === baseName(p))?.kind ?? "",
+    select: (paths) => {
+      for (const p of paths) for (const d of parentsOf(root, p)) open.add(d);
+      after = { paths, until: performance.now() + 8000 };
+      bump();
+    },
+    follow,
+    refresh: () => refresh(app, root),
+    bump: () => bump(),
+    moveTo: (s, d) => moveTo(app, root, s, d),
+  };
+}
+
 function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[] {
   const keys = (k: string) => (app.phone ? undefined : k);
   const items: MenuItem[] = [];
@@ -342,6 +367,7 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
     // several rows: what acts on them all (no open, rename or new here)
     const out = outermost(order, new Set(many));
     items.push({ label: "Move to…", run: () => openMover(out) });
+    items.push(...clipItems(treeOf(app, root), out, "", false));
     items.push({ label: out.length > 1 ? `Move ${out.length} items to Trash` : "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trashMany(app, out) });
     items.push({ sep: true });
     items.push({ label: "Copy paths", run: () => copyPaths(app, root, many, false) });
@@ -361,6 +387,7 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
   items.push({ sep: true });
   items.push({ label: "Rename…", keys: keys("F2"), run: () => startRename(path) });
   items.push({ label: "Move to…", run: () => openMover([path]) });
+  items.push(...clipItems(treeOf(app, root), [path], into, dir));
   items.push({ label: "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trash(app, path) });
   items.push({ sep: true });
   items.push({ label: "Copy path", run: () => copyText(app, path) });
@@ -376,6 +403,7 @@ function rootItems(app: App, root: string): MenuItem[] {
     { label: "Collapse all", run: () => collapseAll(root) },
     { label: "Refresh", run: () => refresh(app, root) },
     { sep: true },
+    ...rootClipItems(treeOf(app, root)),
     { label: "Copy path", run: () => copyText(app, root) },
   ];
 }
@@ -401,6 +429,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   const s = store.session(shownSession(app));
   const p = store.project(store.selectedProject);
   const root = s && !s.home && !s.machine ? s.cwd : p && !p.machine ? p.cwd : "";
+  resetFor(`${s?.id ?? ""}|${store.selectedProject}|${root}`, root); // another tree: the clip and Undo cleared
   // listed when shown, and again every few seconds while it shows and the page is seen (the files
   // change; an unchanged folder answers "same")
   useEffect(() => {
@@ -429,7 +458,10 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   // a confirmed delete or rename has finished (ConfirmBar): look again (a batch that failed midway
   // moved some)
   useEffect(() => {
-    const again = () => refresh(app, root);
+    const again = (e: Event) => {
+      refresh(app, root);
+      fsConfirmed(treeOf(app, root), (e as CustomEvent).detail); // the tree's own delete: its Undo
+    };
     window.addEventListener("deckhand:fs-changed", again);
     return () => window.removeEventListener("deckhand:fs-changed", again);
   }, [root]);
@@ -534,6 +566,13 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
       e.stopPropagation();
       return;
     }
+    // ⌘/Ctrl-C, X, V, D, Z with a row focused (fileops.ts); never in the name field (above) nor
+    // outside the tree (the editor's own undo stays its own)
+    if (mod && !e.shiftKey && focused && treeKey(treeOf(app, root), e.key.toLowerCase(), chosen(), newTarget(root, sel, dir))) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (mod && e.key !== "Backspace") return;
     // the focus outside what is picked (⌘-clicked off): the keys never act on rows it is not on
     const loose = pick.paths.size > 0 && !!sel && !pick.paths.has(sel);
@@ -575,6 +614,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         break;
       }
       case "Escape":
+        if (cancelCut(treeOf(app, root))) break; // a cut called off first
         if (pick.paths.size > 1 || loose) focusOne(sel); // several: back to the focused row
         else if (sel) focusOne("");
         else return;
@@ -624,8 +664,9 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     const row = (e.target as HTMLElement).closest?.<HTMLElement>(".file-row");
     hoverOver(app, row?.dataset.dir === "1" ? row.dataset.path ?? "" : "");
     const dir = dropFolder(e);
-    const at = dir && !planMove(root, drag!.sources, dir, listed.get(dir)).why ? dir : "";
-    dt.dropEffect = at ? "move" : "none";
+    const copy = e.altKey; // Option/Alt held: a copy (into the items' own folder too: duplicates)
+    const at = dir && !(copy ? planCopy(root, drag!.sources, dir) : planMove(root, drag!.sources, dir, listed.get(dir))).why ? dir : "";
+    dt.dropEffect = at ? (copy ? "copy" : "move") : "none";
     if (at !== dropAt) {
       dropAt = at;
       bump();
@@ -647,6 +688,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     const dir = dropFolder(e);
     const onRow = (e.target as HTMLElement).closest?.<HTMLElement>(".file-row")?.dataset.path;
     endDrag();
+    if (e.altKey) return void (dir && onRow !== d.from && copyInto(treeOf(app, root), d.sources, dir));
     if (!dir || onRow === d.from || planMove(root, d.sources, dir, listed.get(dir)).noop) return;
     moveTo(app, root, d.sources, dir);
   };
@@ -670,6 +712,9 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         <button type="button" class="icon-btn small" title="Refresh" aria-label="Refresh" onClick={() => refresh(app, root)}>
           <Icon name="refresh" size={13} />
         </button>
+        <button type="button" class="icon-btn small" title="More" aria-label={"More for " + name} onClick={(e) => showMenu(app, name, rootItems(app, root), e)}>
+          <Icon name="more" size={13} />
+        </button>
       </div>
       <div
         class={"nav files-tree" + (drag && dropAt === root ? " drop-root" : "")}
@@ -690,6 +735,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         <Windowed items={items} />
       </div>
       {picking ? <PickBar app={app} root={root} /> : null}
+      {app.phone && !picking && hasClip() ? <ClipBar t={treeOf(app, root)} target={target()} /> : null}
       {mover ? <MovePicker key={mover.sources.join("\n")} app={app} root={root} sources={mover.sources} /> : null}
     </div>
   );
@@ -705,6 +751,9 @@ function PickBar({ app, root }: { app: App; root: string }) {
       <span class="spacer" />
       <button type="button" class="btn small" disabled={!out.length} onClick={() => openMover(out)}>Move to…</button>
       <button type="button" class="btn small danger" disabled={!out.length} onClick={() => trashMany(app, out)}>Move to Trash</button>
+      <button type="button" class="btn small" disabled={!out.length} onClick={() => ((picking = false), take(treeOf(app, root), "copy", out))}>Copy</button>
+      <button type="button" class="btn small" disabled={!out.length} onClick={() => ((picking = false), take(treeOf(app, root), "cut", out))}>Cut</button>
+      <button type="button" class="btn small" disabled={!out.length} onClick={() => void copyInto(treeOf(app, root), out, null)}>Duplicate</button>
       <button type="button" class="btn small" disabled={!many.length} onClick={() => copyPaths(app, root, many, false)}>Copy paths</button>
       <button
         type="button"
@@ -906,7 +955,7 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
   return (
     <div
       ref={me}
-      class={"row file-row" + (selected ? " sel" : "") + (inDrop ? " drop" : "")}
+      class={"row file-row" + (selected ? " sel" : "") + (inDrop ? " drop" : "") + (isCut(root, path) ? " cut" : "")}
       style={{ paddingLeft: 8 + depth * 16 + "px" }}
       role="treeitem"
       aria-level={depth + 1}

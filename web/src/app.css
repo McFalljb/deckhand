@@ -678,6 +678,9 @@ a { color: inherit; }
 .toasts { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; width: min(92vw, 420px); pointer-events: none; z-index: 40; }
 .toast { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); box-shadow: 0 4px 16px var(--shadow); animation: rise 160ms var(--ease); }
 .toast.err { border-color: var(--error); }
+.toast.has-act { display: flex; align-items: center; gap: 10px; }
+.toast.has-act .toast-text { flex: 1; min-width: 0; }
+.toast-act { pointer-events: auto; flex: none; }
 
 .confirm-bar {
   display: flex;
@@ -835,6 +838,11 @@ a { color: inherit; }
 .files-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 52px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg-elevated); }
 .files-pick-n { font-weight: 600; color: var(--text); white-space: nowrap; }
 .files-pick .btn.small { min-height: 36px; padding: 0 10px; font-size: 13px; }
+/* a cut row (Files tree clipboard): dimmed until pasted or Esc */
+.file-row.cut > .title, .file-row.cut > svg { opacity: 0.45; }
+/* toasts above a Files bar (selection, clipboard), never over its buttons */
+body:has(.files-clip) .toasts { bottom: calc(72px + env(safe-area-inset-bottom)); }
+body:has(.files-pick:not(.files-clip)) .toasts { bottom: calc(132px + env(safe-area-inset-bottom)); }
 .file-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-app); }
 .code-edit { flex: 1; min-height: 0; display: flex; font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; }
 .code-gutter { flex: none; overflow: hidden; padding: 8px 10px 8px 12px; color: var(--line-number); text-align: right; white-space: pre; user-select: none; border-right: 1px solid var(--border); }

@@ -1526,14 +1526,17 @@ launch_project :: proc(r: core.Result) -> u64 {
 	return r.ok ? r.created_id : 0
 }
 
-// What `deckhand DIR` starts in project pid once the pane has a size: a pi chat (a Claude session when
-// Claude Code is the only harness installed), or with --claude a
-// Claude session (the user's own launch: it comes to the front; without Claude Code a toast says
-// how to install it).
+// What `deckhand DIR` starts in project pid once the pane has a size: a pi chat (without pi, a
+// Claude session when Claude Code is installed, else a Codex session when Codex is), or with
+// --claude a Claude session (the user's own launch: it comes to the front; without Claude Code a
+// toast says how to install it).
 launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 	if pid == 0 || core.find_project(pid) == nil do return nil // never the project that happened to be selected
 	if claude do return core.New_Claude_Session{project_id = pid}
-	if !core.pi_installed() && core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code alone (harness.odin)
+	if !core.pi_installed() {
+		if core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code without pi (harness.odin)
+		if core.codex_installed() do return core.New_Claude_Session{project_id = pid, codex = true} // Codex alone
+	}
 	return core.New_Chat{pid}
 }
 

@@ -22,7 +22,7 @@ import { Windowed, type WItem } from "./Windowed.tsx";
 import { FileReads, knowFile, knownFile } from "./filecache.ts";
 import { longPressProps } from "./Peek.tsx";
 import { fileTabPath } from "./Panes.tsx";
-import { gitLetter, gitTone, moveSel, newTarget, parentOf, parentsOf, relPath, stemEnd, treeRows, type Edit, type Listing, type Row } from "./filetree.ts";
+import { gitLetter, gitTone, isEditRow, moveSel, newTarget, parentOf, parentsOf, relPath, rowKey, stemEnd, treeRows, type Edit, type Listing, type Row } from "./filetree.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -75,7 +75,6 @@ function toggle(app: App, path: string) {
   bump();
 }
 
-const rowKey = (r: Row): string => (r.t === "entry" ? r.path : r.t === "new" ? "new:" + r.dir : r.t + ":" + r.depth);
 
 let opened = () => {}; // a phone: back from the Files view to the tab
 
@@ -158,7 +157,7 @@ async function commitEdit(app: App, root: string, text: string) {
     edit = { ...e, err: r.error || "Could not create it" };
     return bump();
   }
-  const made: string = (r.ok && json(r.data).path) || e.dir + "/" + name;
+  const made = e.dir + "/" + name; // as the tree names it (the core's answer is resolved: a symlinked root differs)
   for (const d of parentsOf(root, made)) open.add(d); // a/b/c.txt: its folders open
   sel = made;
   scrollWanted = { key: made, center: false };
@@ -257,8 +256,11 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
       open.add(d);
       list(app, d);
     }
-    sel = active;
-    scrollWanted = { key: active, center: true };
+    // the keys act on the focused row: while focus is in the tree the selection stays where it is
+    if (!nav.current?.contains(document.activeElement)) {
+      sel = active;
+      scrollWanted = { key: active, center: true };
+    }
     bump();
   }, [active, root]);
 
@@ -287,7 +289,11 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   };
   const onKey = (e: KeyboardEvent) => {
     if ((e.target as HTMLElement).tagName === "INPUT" || e.altKey) return;
-    const cur = selRow?.t === "entry" ? selRow : undefined;
+    // the row with focus is the one the keys act on (sel can have moved meanwhile)
+    const focused = (e.target as HTMLElement).closest<HTMLElement>(".file-row")?.dataset.path;
+    if (focused && focused !== sel) sel = focused;
+    const target = rows.find((r) => r.t === "entry" && r.path === sel);
+    const cur = target?.t === "entry" ? target : undefined;
     const dir = cur?.e.kind === "dir";
     const mod = IS_MAC ? e.metaKey : e.ctrlKey;
     if (mod && e.key !== "Backspace") return;
@@ -313,11 +319,11 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         startRename(cur.path);
         break;
       case "Delete":
-        if (!cur) return;
+        if (!cur || e.repeat) return;
         trash(app, cur.path);
         break;
       case "Backspace":
-        if (!cur || !mod) return;
+        if (!cur || !mod || e.repeat) return;
         trash(app, cur.path);
         break;
       case "ContextMenu": {
@@ -339,8 +345,10 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   };
 
   // the row Tab reaches (one in the tree): the selected one, else the first
-  const stop = selRow ? sel : rowKey(rows.find((r) => r.t === "entry") ?? { t: "wait", depth: 0 });
-  const items: WItem[] = rows.map((r) => ({ key: rowKey(r), h: rowH, draw: () => drawRow(app, root, r, active, rowKey(r) === stop) }));
+  const first = rows.find((r) => r.t === "entry");
+  const stop = selRow ? sel : first ? rowKey(first) : "";
+  // the name field's row is always drawn: out of view it would be removed, and a removed field blurs
+  const items: WItem[] = rows.map((r) => ({ key: rowKey(r), h: rowH, keep: isEditRow(r, edit), draw: () => drawRow(app, root, r, active, rowKey(r) === stop) }));
   const target = () => newTarget(root, sel, selRow?.t === "entry" && selRow.e.kind === "dir");
   const name = root.slice(root.lastIndexOf("/") + 1);
   return (
@@ -406,6 +414,7 @@ function NameField({ app, root, initial, dir, label }: { app: App; root: string;
   const field = useRef<HTMLInputElement>(null);
   const busy = useRef(false);
   const tried = useRef<string | null>(null); // the text the core refused (leaving it then cancels)
+  const mine = useRef(edit).current; // the edit this field is for
   useLayoutEffect(() => {
     const el = field.current;
     if (!el) return;
@@ -446,7 +455,13 @@ function NameField({ app, root, initial, dir, label }: { app: App; root: string;
           endEdit(back());
         }
       }}
-      onBlur={() => go(true)}
+      onBlur={() =>
+        // after the event: a field removed from the page (its row gone) cancels, never commits
+        window.setTimeout(() => {
+          if (field.current?.isConnected) go(true);
+          else if (edit === mine) endEdit("");
+        }, 0)
+      }
     />
   );
 }
@@ -482,6 +497,7 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
       aria-expanded={isDir ? (on ? "true" : "false") : undefined}
       tabIndex={stop ? 0 : -1}
       title={path}
+      data-path={path}
       onFocus={(ev) => {
         if (ev.target === me.current && sel !== path) {
           sel = path;

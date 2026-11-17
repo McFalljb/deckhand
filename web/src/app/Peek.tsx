@@ -18,6 +18,7 @@ import { focusSession } from "./Sidebar.tsx";
 const HOVER_OPEN_MS = 450;
 const HOVER_CLOSE_MS = 220;
 const LONG_PRESS_MS = 480;
+const SWALLOW_MS = 600; // the click that ends a long press comes within this of the touch ending
 const PEEK_W = 640;
 const PEEK_H = 300;
 
@@ -46,6 +47,7 @@ let closeTimer = 0;
 let pressTimer = 0;
 let pressAt: { x: number; y: number } | null = null;
 let swallowClick = false;
+let swallowTimer = 0;
 let openedAt = 0;
 
 export function openPeek(app: App, session: number, tab: number | undefined, at: { x: number; y: number }) {
@@ -64,11 +66,20 @@ function leavePeek(app: App) {
   closeTimer = window.setTimeout(() => app.setOverlay({ peek: null }), HOVER_CLOSE_MS);
 }
 
+// The touch ended: a long press's own click is swallowed if it comes soon; later taps are not.
+function endPress() {
+  window.clearTimeout(pressTimer);
+  if (!swallowClick) return;
+  window.clearTimeout(swallowTimer);
+  swallowTimer = window.setTimeout(() => (swallowClick = false), SWALLOW_MS);
+}
+
 // A touch held still for LONG_PRESS_MS (a phone's long press): fire, and the tap that ends it goes
 // nowhere (no click, no mouse events). The Files tab's rows use it for their sheet.
 export function longPressProps(can: () => boolean, fire: (at: { x: number; y: number }) => void) {
   return {
     onPointerDown: (e: PointerEvent) => {
+      swallowClick = false; // a new touch: the last long press's tap is over
       if (e.pointerType !== "touch" || !can()) return;
       pressAt = { x: e.clientX, y: e.clientY };
       window.clearTimeout(pressTimer);
@@ -81,8 +92,8 @@ export function longPressProps(can: () => boolean, fire: (at: { x: number; y: nu
     onPointerMove: (e: PointerEvent) => {
       if (pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 8) window.clearTimeout(pressTimer);
     },
-    onPointerUp: () => window.clearTimeout(pressTimer),
-    onPointerCancel: () => window.clearTimeout(pressTimer),
+    onPointerUp: () => endPress(),
+    onPointerCancel: () => endPress(),
     // the long press fired: the touch's own mouse events and click go nowhere
     onTouchEnd: (e: TouchEvent) => {
       if (swallowClick) e.preventDefault();

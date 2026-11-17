@@ -21,8 +21,8 @@ export type Edit = { kind: "file" | "dir"; dir: string; err: string } | { kind: 
 export type Row =
   | { t: "entry"; path: string; e: Entry; depth: number }
   | { t: "new"; dir: string; kind: "file" | "dir"; depth: number }
-  | { t: "err"; text: string; depth: number; edit?: boolean } // a folder that cannot be listed, or the field's error
-  | { t: "wait"; depth: number }; // listing…
+  | { t: "err"; at: string; text: string; depth: number; edit?: boolean } // a folder (at) that cannot be listed, or the field's error (at: its folder or path)
+  | { t: "wait"; at: string; depth: number }; // listing the folder at…
 
 // The rows: folders first as listed, an open folder's children under it; the new-name field as
 // the first child of its folder (the folder open), its error under it.
@@ -31,15 +31,15 @@ export function treeRows(root: string, listed: Map<string, Listing>, open: Set<s
   const walk = (dir: string, depth: number) => {
     if (edit && edit.kind !== "rename" && edit.dir === dir) {
       rows.push({ t: "new", dir, kind: edit.kind, depth });
-      if (edit.err) rows.push({ t: "err", text: edit.err, depth, edit: true });
+      if (edit.err) rows.push({ t: "err", at: dir, text: edit.err, depth, edit: true });
     }
     const l = listed.get(dir);
-    if (!l) return void rows.push({ t: "wait", depth });
-    if (l.err) return void rows.push({ t: "err", text: l.err, depth });
+    if (!l) return void rows.push({ t: "wait", at: dir, depth });
+    if (l.err) return void rows.push({ t: "err", at: dir, text: l.err, depth });
     for (const e of l.entries) {
       const path = dir + "/" + e.name;
       rows.push({ t: "entry", path, e, depth });
-      if (edit && edit.kind === "rename" && edit.path === path && edit.err) rows.push({ t: "err", text: edit.err, depth, edit: true });
+      if (edit && edit.kind === "rename" && edit.path === path && edit.err) rows.push({ t: "err", at: path, text: edit.err, depth, edit: true });
       if (e.kind === "dir" && open.has(path)) walk(path, depth + 1);
     }
   };
@@ -48,6 +48,21 @@ export function treeRows(root: string, listed: Map<string, Listing>, open: Set<s
 }
 
 export const isDir = (r: Row | undefined): boolean => r?.t === "entry" && r.e.kind === "dir";
+
+// A row's key in the windowed list: unique in the tree.
+export function rowKey(r: Row): string {
+  switch (r.t) {
+    case "entry": return r.path;
+    case "new": return "new:" + r.dir;
+    case "err": return (r.edit ? "edit-err:" : "err:") + r.at;
+    case "wait": return "wait:" + r.at;
+  }
+}
+
+// The name field's row (a new name, or the row being renamed): always drawn (Windowed keep).
+export function isEditRow(r: Row, edit: Edit | null = null): boolean {
+  return r.t === "new" || (r.t === "entry" && edit?.kind === "rename" && edit.path === r.path);
+}
 
 // The folders between root and path (not path itself), outermost first: what to open to show it.
 export function parentsOf(root: string, path: string): string[] {

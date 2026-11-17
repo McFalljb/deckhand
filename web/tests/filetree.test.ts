@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { gitLetter, gitTone, moveSel, newTarget, parentsOf, relPath, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
+import { gitLetter, gitTone, isEditRow, moveSel, newTarget, parentsOf, relPath, rowKey, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
 
 const R = "/p";
 const listed = new Map<string, Listing>([
@@ -82,4 +82,18 @@ test("git letters and colours are the window's (files_git_letter, files_git_colo
     assert.equal(gitLetter(code, dir), letter, code + (dir ? " (folder)" : ""));
     assert.equal(gitTone(letter), tone, letter);
   }
+});
+
+test("row keys: unique per folder (not by depth), stable for the edit rows", () => {
+  const open = new Set([R + "/src", R + "/docs"]);
+  const two = new Map(listed);
+  two.delete(R + "/src"); // listing… under src, and an error under docs, at the same depth
+  const rows = treeRows(R, two, open, { kind: "file", dir: R, err: "bad" });
+  const keys = rows.map(rowKey);
+  assert.equal(new Set(keys).size, keys.length, keys.join(" "));
+  assert.ok(keys.includes("new:" + R));
+  assert.ok(keys.includes("wait:" + R + "/src") && keys.includes("err:" + R + "/docs"));
+  assert.ok(isEditRow(rows.find((r) => r.t === "new")!));
+  const ren = treeRows(R, listed, new Set(), { kind: "rename", path: R + "/a.txt", err: "" });
+  assert.ok(isEditRow(ren.find((r) => r.t === "entry" && r.path === R + "/a.txt")!, { kind: "rename", path: R + "/a.txt", err: "" }));
 });

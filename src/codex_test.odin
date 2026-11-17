@@ -78,7 +78,7 @@ cx_reset :: proc(version := "0.167.2") -> runtime.Allocator {
 	core.codex_login_set(.Signed_In) // never asks (a stand-in would only sleep)
 	core.claude_cli_override = CX_CLI
 	core.claude_status_reset()
-	core.codex_disk_cache_clear() // the found Codex rows (codex_disk.odin): every test reads its own CODEX_HOME
+	cx_cache_clear() // the found Codex rows (codex_disk.odin): every test reads its own CODEX_HOME
 	core.codex_disk_gap = 0
 	return runtime.heap_allocator()
 }
@@ -1114,6 +1114,51 @@ codex_only_folders_are_projects :: proc(t: ^testing.T) {
 	testing.expect(t, !has(cli) && has(ide), "dropped once no rollout records it")
 }
 
+// Folders where only Codex ran come from the found rows' saved cache: a Rescan reads no rollout the
+// cache knows (the rows' pass read it, or an earlier run saved it); never the home folder; a cwd
+// written with a trailing slash is the same folder for the project and its rows.
+@(test)
+codex_projects_from_cache :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("projcache")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	fake_home := cx_dir("fakehome")
+	os.set_env("HOME", fake_home)
+	data := cx_dir("projcache-data")
+	core.codex_disk_cache_at(data)
+	a, b := cx_dir("pc-a"), cx_dir("pc-b")
+	cx_rollout(home, "2026/11/12", cx_id(1), a, `"cli"`)
+	cx_rollout(home, "2026/11/11", cx_id(2), strings.concatenate({b, "/"}), `"vscode"`) // a trailing slash
+	cx_rollout(home, "2026/11/10", cx_id(3), fake_home, `"cli"`)
+	// the rows' pass reads every rollout once; the Rescan after it reads none
+	pid := core.run_command(core.Add_Project{cwd = a}, CX_UI).created_id
+	cx_disk_show(pid)
+	before := core.claude_disk_bytes_read
+	core.rescan_now()
+	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
+	testing.expect(t, core.project_by_cwd(b) != nil, "a Codex-only folder (its cwd cleaned)")
+	testing.expect(t, core.project_by_cwd(fake_home) == nil, "never the home folder")
+	// b's row: its rollout's cwd had a trailing slash
+	if p := core.project_by_cwd(b); p != nil {
+		cx_disk_show(p.id)
+		testing.expectf(t, cx_id(2) in cx_found(), "b's row: %v", cx_found())
+	}
+	// a relaunch: the saved cache, still nothing read
+	cx_cache_clear()
+	core.codex_disk_cache_at(data)
+	before = core.claude_disk_bytes_read
+	core.rescan_now()
+	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
+	testing.expect(t, core.project_by_cwd(b) != nil, "from the saved cache")
+}
+
 // A Codex rollout under home's sessions/<day> (a "YYYY/MM/DD" path) whose session_meta says cwd and
 // source (raw JSON). Its path.
 @(private = "file")
@@ -1165,7 +1210,7 @@ codex_disk_no_caps :: proc(t: ^testing.T) {
 	defer cx_done()
 	home, dir, pid := cx_disk_setup("nocaps")
 	defer os.unset_env("CODEX_HOME")
-	defer core.codex_disk_cache_clear()
+	defer cx_cache_clear()
 	for d in 0 ..< 70 do cx_rollout(home, fmt.tprintf("2026/%02d/%02d", 1 + d / 28, 1 + d % 28), cx_id(1000 + d), d == 0 ? dir : "/elsewhere", `"cli"`)
 	for i in 0 ..< 450 do cx_rollout(home, "2026/10/01", cx_id(i), i == 0 ? dir : "/elsewhere", `"cli"`)
 	cx_disk_show(pid)
@@ -1183,7 +1228,7 @@ codex_disk_source_filter :: proc(t: ^testing.T) {
 	defer cx_done()
 	home, dir, pid := cx_disk_setup("source")
 	defer os.unset_env("CODEX_HOME")
-	defer core.codex_disk_cache_clear()
+	defer cx_cache_clear()
 	sources := []string{`"cli"`, `"vscode"`, `"exec"`, `{"subagent":"review"}`, `"mcp"`, `"CLI"`, `""`, `7`}
 	for s, i in sources do cx_rollout(home, "2026/11/12", cx_id(i), dir, s)
 	cx_disk_show(pid)
@@ -1201,7 +1246,7 @@ codex_disk_cache_saved :: proc(t: ^testing.T) {
 	defer cx_done()
 	home, dir, pid := cx_disk_setup("saved")
 	defer os.unset_env("CODEX_HOME")
-	defer core.codex_disk_cache_clear()
+	defer cx_cache_clear()
 	data := cx_dir("saved-data")
 	core.codex_disk_cache_at(data)
 	a := cx_rollout(home, "2026/11/10", cx_id(1), dir, `"cli"`)
@@ -1216,7 +1261,7 @@ codex_disk_cache_saved :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.has_prefix(string(text), "deckhand codex sessions 1\n") && strings.count(string(text), "\n") == 4, "%q", string(text))
 
 	// a relaunch: nothing read again; then only what changed or is new
-	core.codex_disk_cache_clear()
+	cx_cache_clear()
 	core.codex_disk_gap = 0
 	core.codex_disk_cache_at(data)
 	before := core.claude_disk_bytes_read
@@ -1237,7 +1282,7 @@ codex_disk_cache_saved :: proc(t: ^testing.T) {
 	// corrupt, foreign or truncated: ignored (each file read again), never a crash
 	for junk in ([]string{"garbage\x00\xff\n\t\t\t", "deckhand codex sessions 1\n1\t2\n\t\t\t\t\t\t\t\nx\ty\tz\tcli\tid\t/a\t/b\t/c\n", "deckhand codex sessions 99\n", ""}) {
 		_ = os.write_entire_file(file, transmute([]u8)junk)
-		core.codex_disk_cache_clear()
+		cx_cache_clear()
 		core.codex_disk_gap = 0
 		core.codex_disk_cache_at(data)
 		cx_disk_show(pid)
@@ -1253,7 +1298,7 @@ codex_disk_titles :: proc(t: ^testing.T) {
 	defer cx_done()
 	home, dir, pid := cx_disk_setup("titles")
 	defer os.unset_env("CODEX_HOME")
-	defer core.codex_disk_cache_clear()
+	defer cx_cache_clear()
 	for i in 1 ..= 4 do cx_rollout(home, "2026/11/12", cx_id(i), dir, `"cli"`)
 	index := fmt.tprintf("%s/session_index.jsonl", home)
 	line :: proc(id, name: string) -> string {
@@ -1275,6 +1320,11 @@ codex_disk_titles :: proc(t: ^testing.T) {
 	testing.expect_value(t, cx_found()[cx_id(4)], "Four")
 	got, _ := os.read_entire_file(index, context.temp_allocator)
 	testing.expect(t, string(got) == text2, "never written")
+	// resumed: the history keeps the row's title, as a Claude row's
+	r := core.run_command(core.Open_Session_Cmd{project_id = pid, pi_session_id = cx_id(1)}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	rec, _ := core.claude_record(cx_id(1))
+	testing.expect(t, rec != nil && rec.title == "Renamed", rec != nil ? rec.title : "no record")
 }
 
 // ---- Codex accounts (claude_accounts.odin with codex; docs/CODEX.md §6a) ----
@@ -1454,4 +1504,10 @@ codex_accounts_found_session :: proc(t: ^testing.T) {
 	e := cx_wait_file(a.envf)
 	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
 	testing.expect(t, strings.has_prefix(cx_wait_file(a.argf), fmt.tprintf("resume\n%s\n", id)))
+}
+
+// The found Codex rows' cache forgotten (a test hook: a release build's tests have none).
+@(private = "file")
+cx_cache_clear :: proc() {
+	when core.TEST_HOOKS do core.codex_disk_cache_clear()
 }

@@ -226,12 +226,16 @@ the selected project and Chats. **Codex's files are read only, never written.**
   found in (refused once that account is removed); the history keeps it from then on.
   An agent's `open_session` finds only the rows listed for the selected project and Chats.
 - **Projects where only Codex ran** (`claude_scan_projects`, Claude's own path, on the Rescan
-  worker): the `cwd` of each rollout that lister lists and that first-line check keeps (cleaned,
-  absolute), merged by folder with pi's and Claude's; a folder no one else knows is a project
+  worker): the `cwd` of each listed rollout (source `"cli"` or `"vscode"`), from the found rows'
+  saved cache after a pass on the Rescan worker (`codex_disk_pass_now`, `codex_disk_folders`: a
+  Rescan reads no rollout the cache knows). The cwd is cleaned once, when it enters the cache, so
+  a project and its rows match byte for byte (a trailing slash is the same folder). Merged by
+  folder with pi's and Claude's (`found_project`); never the home folder itself (`HOME`, or its
+  real path: a session started in `~` makes no project; a project added there by hand is left as
+  it is); a folder no one else knows is a project
   found on disk only, exactly as a Claude-only folder is (`Project.claude`: saved; a Rescan that
   no longer finds it drops it unless you added, named or opened it; temp and missing folders are
-  hidden by the tidy rules, as any project's). Cached by path, size and date (one first line per
-  new or changed rollout); the launch's first scan reads no rollout, and a Rescan follows when a
+  hidden by the tidy rules, as any project's). The launch's first scan reads no rollout, and a Rescan follows when a
   Codex home has a `sessions/` folder (`claude_startup_rescan_due`). Each Codex home's sessions
   folder is taken on the main thread before the scan (`claude_scan_prepare`).
 

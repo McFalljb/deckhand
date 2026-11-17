@@ -1075,7 +1075,8 @@ your first message (or the name you or Claude Code gave the conversation), read 
 and end of the file only; nothing else of the transcript is read or shown, and agents never get
 its path. Subagent and side-chain files are never rows. Click one to resume it in a Claude
 session under its account. Folders where only Claude Code ran (by the folder each transcript
-records) show up as projects. A row whose transcript is gone is greyed and reads **transcript
+records) show up as projects, never your home folder itself (a project you add there yourself
+stays). A row whose transcript is gone is greyed and reads **transcript
 gone**. **Rescan sessions** looks again.
 
 #### Claude accounts
@@ -1195,7 +1196,8 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   with their date: a click resumes one. The first look reads each conversation's first line once,
   in the background; Deckhand remembers what it read, so later launches read only new ones. Only
   conversations you had with Codex (in a terminal or Codex Desktop) count, never `codex exec`
-  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude Code's do; **Rescan
+  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude Code's do (never your home
+  folder itself); **Rescan
   sessions** looks again and drops one no conversation records any more (unless you added or
   named it).
 - **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when

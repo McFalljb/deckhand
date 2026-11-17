@@ -646,6 +646,30 @@ claude_disk_projects :: proc(t: ^testing.T) {
 	testing.expect_value(t, ca_row_text(), "hello(c)[Work]")
 }
 
+// The home folder itself is never a project found on disk (a Claude session started in ~), from
+// Claude's discovery or Codex's (found_project); a project added there by hand stays as it was.
+@(test)
+claude_disk_projects_never_home :: proc(t: ^testing.T) {
+	env: Ca_Env
+	context.allocator = ca_reset(&env)
+	defer ca_done()
+	work := fmt.tprintf("%s/.claude-work", env.home)
+	ca_config(work)
+	core.claude_accounts_refresh()
+	other := ca_dir("not-home")
+	ca_write(fmt.tprintf("%s/%s.jsonl", ca_transcripts(work, env.home), "78787878-0000-4000-8000-0000000000a1"), strings.join({ca_user(env.home, "in home"), ""}, "\n", context.temp_allocator))
+	ca_write(fmt.tprintf("%s/%s.jsonl", ca_transcripts(work, other), "78787878-0000-4000-8000-0000000000a2"), strings.join({ca_user(other, "elsewhere"), ""}, "\n", context.temp_allocator))
+	core.rescan_now()
+	testing.expect(t, core.project_by_cwd(other) != nil, "a folder Claude ran in is a project")
+	testing.expect(t, core.project_by_cwd(env.home) == nil, "never the home folder")
+	// added by hand at ~: kept, and still the user's (not one found on disk)
+	r := core.run_command(core.Add_Project{cwd = env.home}, CA_UI)
+	testing.expect(t, r.ok, r.error)
+	core.rescan_now()
+	p := core.project_by_cwd(env.home)
+	testing.expect(t, p != nil && !p.claude, "the hand-added home project is untouched")
+}
+
 // A history entry whose transcript is gone (Claude Code's clean-up): greyed, by stat; its created
 // date is the transcript's while it is there.
 @(test)

@@ -437,7 +437,8 @@ work only from Deckhand's own record, so a found row gives them nothing).
   as Claude does: only with `CLAUDE_CONFIG_DIR` set, 1–64 of `[A-Za-z0-9_-]`). Names are lossy, so
   a file counts only when the `cwd` it records is the project's folder; a name is **never turned
   back into a path**. Projects where only Claude ran come from the same `cwd` (the newest files of
-  each folder, on the Rescan worker).
+  each folder, on the Rescan worker); never the home folder itself (`found_project`, shared with Codex's:
+  a project added at `~` by hand is left as it is).
 - **Rows.** Only `<uuid>.jsonl` files (never `agent-*` or side-chain ones); title: a
   `custom-title` or the first real prompt (meta, command and reminder lines skipped), else
   `ai-title` or `summary`; read from the first and last 64 KB only, within a per-frame budget

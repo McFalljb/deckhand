@@ -626,7 +626,12 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 // A found row clicked (open_session): resumed in a Claude-only session under its account, by
 // the transcript's path; the history keeps it from now on (with its title).
 claude_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Result, bool) {
-	if f.harness == .Codex do return codex_disk_resume(p, f, caller)
+	if f.harness == .Codex {
+		r, ch := codex_disk_resume(p, f, caller)
+		// its title (session_index.jsonl) goes with it, as a Claude row's
+		if r.ok && f.title != "" do if rec, _ := claude_record(f.id); rec != nil && rec.title == "" do rec.title = strings.clone(f.title)
+		return r, ch
+	}
 	if mr, missing := claude_missing(caller); missing do return mr, false
 	if !claude_account_known(f.account) do return fail("its Claude account is no longer in Settings → Claude accounts"), false
 	if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
@@ -695,11 +700,10 @@ transcript_cwd :: proc(path: string, size: i64) -> (cwd: string, sidechain, ok: 
 	return
 }
 
-// The cwd a conversation file of harness h records, and whether to skip it (Claude: a side
-// chain, transcript_cwd; another harness: what its reader reads, disk_first_line), cached by
-// path, size and date. Temp.
+// The cwd a Claude transcript records, and whether it is a side chain (transcript_cwd), cached by
+// path, size and date (Codex's rollouts: its own saved cache, codex_disk_folders). Temp.
 @(private = "file")
-found_cwd :: proc(path: string, size, mtime: i64, h := Harness.Claude) -> (cwd: string, sidechain: bool) {
+found_cwd :: proc(path: string, size, mtime: i64) -> (cwd: string, sidechain: bool) {
 	heap := runtime.heap_allocator()
 	sync.lock(&cwd_cache.mu)
 	if e, ok := cwd_cache.entries[path]; ok && e.size == size && e.mtime == mtime {
@@ -708,14 +712,8 @@ found_cwd :: proc(path: string, size, mtime: i64, h := Harness.Claude) -> (cwd: 
 		return
 	}
 	sync.unlock(&cwd_cache.mu)
-	if h != .Claude {
-		source: string
-		cwd, source, sidechain = disk_first_line(h, path)
-		if !codex_source_listed(source) do sidechain = true // only the found rows' kinds (codex_disk.odin)
-	} else {
-		ok: bool
-		if cwd, sidechain, ok = transcript_cwd(path, size); !ok do return
-	}
+	ok: bool
+	if cwd, sidechain, ok = transcript_cwd(path, size); !ok do return
 	sync.lock(&cwd_cache.mu)
 	defer sync.unlock(&cwd_cache.mu)
 	if cwd_cache.entries.allocator.procedure == nil do cwd_cache.entries = make(map[string]Cwd_Info, heap)
@@ -746,6 +744,10 @@ Claude_Scan_Dir :: struct {
 }
 claude_scan_dirs: [dynamic]Claude_Scan_Dir
 
+// The home folder (HOME, clean, and its real path), taken with claude_scan_dirs: never a project
+// found on disk (found_project). Heap.
+claude_scan_home: [2]string
+
 // The launch (main.odin, until the saved workspace is back): no transcript read on the main thread.
 claude_disk_launching: bool
 
@@ -774,14 +776,21 @@ claude_scan_prepare :: proc() {
 	for a in claude_accounts(codex = true) {
 		if s := codex_sessions_dir(a.dir); s != "" do append(&claude_scan_dirs, Claude_Scan_Dir{dir = strings.clone(a.dir, heap), override = strings.clone(s, heap), harness = .Codex})
 	}
+	for h in claude_scan_home do delete(h, heap)
+	claude_scan_home = {}
+	if h := os.get_env("HOME", context.temp_allocator); h != "" && filepath.is_abs(h) {
+		c, _ := filepath.clean(h, heap)
+		claude_scan_home = {c, strings.clone(fs_real(c), heap)}
+	}
 }
 
 // Adds the folders Claude or Codex ran in to scan.projects (allocated there), merged with pi's by
 // cwd. Any thread (reads only claude_scan_dirs, set before the scan).
 claude_scan_projects :: proc(projects: ^[dynamic]Project) {
+	codex_homes := make([dynamic]Disk_Home, context.temp_allocator)
 	for sd in claude_scan_dirs {
 		if sd.harness == .Codex {
-			codex_scan_projects(projects, sd)
+			append(&codex_homes, Disk_Home{account = sd.dir, root = sd.override})
 			continue
 		}
 		root := strings.concatenate({sd.dir, "/projects"}, context.temp_allocator)
@@ -811,27 +820,25 @@ claude_scan_projects :: proc(projects: ^[dynamic]Project) {
 			}
 		}
 	}
+	if len(codex_homes) > 0 do codex_scan_projects(projects, codex_homes[:])
 }
 
-// The folders Codex ran in, for claude_scan_projects: each interactive rollout's cwd (its first
-// line, codex_first_line: never a subagent's or `codex exec`'s), absolute; the rollouts the found
-// rows' lister lists (codex_disk_files_in). Any thread.
+// The folders Codex ran in, for claude_scan_projects: each listed rollout's cwd (source "cli" or
+// "vscode"), from the found rows' saved cache after a pass over homes (codex_disk_pass_now: only
+// new or changed rollouts read). Any thread.
 @(private = "file")
-codex_scan_projects :: proc(projects: ^[dynamic]Project, sd: Claude_Scan_Dir) {
-	files := make([dynamic]Disk_File, context.temp_allocator)
-	codex_disk_files_in(&files, sd.dir, sd.override)
-	for f in files {
-		cwd, skip := found_cwd(f.path, f.size, f.modified._nsec, .Codex)
-		if skip || cwd == "" || !filepath.is_abs(cwd) do continue
-		c, _ := filepath.clean(cwd, context.temp_allocator)
-		found_project(projects, c, f.modified, f.modified)
-	}
+codex_scan_projects :: proc(projects: ^[dynamic]Project, homes: []Disk_Home) {
+	codex_disk_pass_now(homes)
+	for f in codex_disk_folders(homes) do found_project(projects, f.cwd, f.newest, f.oldest)
 }
 
 // A folder a harness ran in (cwd, clean and absolute; its newest and oldest file's dates) into
-// projects: merged by cwd (dates widened), else a row found on disk only (claude = true).
+// projects: merged by cwd (dates widened), else a row found on disk only (claude = true). Never the
+// home folder (claude_scan_home): a session started in ~ makes no project, and one added there by
+// hand is left as it is.
 @(private = "file")
 found_project :: proc(projects: ^[dynamic]Project, c: string, newest, oldest: time.Time) {
+	for h in claude_scan_home do if h != "" && c == h do return
 	found := false
 	for &p in projects do if p.cwd == c {
 		if time.diff(p.newest, newest) > 0 do p.newest = newest

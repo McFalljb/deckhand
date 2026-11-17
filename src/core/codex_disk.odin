@@ -405,6 +405,69 @@ codex_disk_busy :: proc() -> bool {
 	return codex_cache.running
 }
 
+// A pass over homes now, on the calling thread (the Rescan's scan, claude_scan_projects), after
+// any pass already on; whatever the gap. With the cache warm it reads no rollout.
+codex_disk_pass_now :: proc(homes: []Disk_Home) {
+	heap := runtime.heap_allocator()
+	for {
+		sync.lock(&codex_cache.mu)
+		if !codex_cache.running {
+			for h in codex_cache.homes {
+				delete(h.account, heap)
+				delete(h.root, heap)
+			}
+			clear(&codex_cache.homes)
+			if codex_cache.homes.allocator.procedure == nil do codex_cache.homes = make([dynamic]Disk_Home, heap)
+			for h in homes do append(&codex_cache.homes, Disk_Home{account = strings.clone(h.account, heap), root = strings.clone(h.root, heap)})
+			codex_cache.running = true
+			codex_cache.started = time.tick_now()
+			sync.unlock(&codex_cache.mu)
+			break
+		}
+		sync.unlock(&codex_cache.mu)
+		time.sleep(5 * time.Millisecond)
+	}
+	// its own scratch: the caller's temp data stays
+	scratch: virtual.Arena
+	_ = virtual.arena_init_growing(&scratch)
+	defer virtual.arena_destroy(&scratch)
+	context.temp_allocator = virtual.arena_allocator(&scratch)
+	codex_pass_run()
+}
+
+// A folder Codex ran in (a listed rollout's cwd, clean and absolute) and its newest and oldest
+// rollout's dates. Temp.
+Codex_Folder :: struct {
+	cwd:            string,
+	newest, oldest: time.Time,
+}
+
+// The folders of the listed rollouts (codex_source_listed) of homes' accounts, from the cache only.
+// Any thread. Temp.
+codex_disk_folders :: proc(homes: []Disk_Home) -> []Codex_Folder {
+	out := make([dynamic]Codex_Folder, context.temp_allocator)
+	sync.lock(&codex_cache.mu)
+	defer sync.unlock(&codex_cache.mu)
+	at := make(map[string]int, context.temp_allocator) // cwd -> its index in out
+	for _, e in codex_cache.entries {
+		if !codex_source_listed(e.source) || e.cwd == "" do continue
+		mine := false
+		for h in homes do if h.account == e.account do mine = true
+		if !mine do continue
+		t := time.Time{_nsec = e.mtime}
+		if i, ok := at[e.cwd]; ok {
+			f := &out[i]
+			if t._nsec > f.newest._nsec do f.newest = t
+			if t._nsec < f.oldest._nsec do f.oldest = t
+			continue
+		}
+		c := strings.clone(e.cwd, context.temp_allocator)
+		at[c] = len(out)
+		append(&out, Codex_Folder{cwd = c, newest = t, oldest = t})
+	}
+	return out[:]
+}
+
 @(private = "file")
 meta_free :: proc(m: ^Codex_Meta) {
 	heap := runtime.heap_allocator()
@@ -447,9 +510,16 @@ codex_publish :: proc() {
 	if platform.wake != nil do platform.wake()
 }
 
-// One pass (codex_disk_refresh). The worker.
+// The worker of codex_disk_refresh: one pass.
 @(private = "file")
 codex_pass :: proc() {
+	codex_pass_run()
+	free_all(context.temp_allocator)
+}
+
+// One pass, by the thread that set running (codex_disk_refresh's worker, codex_disk_pass_now). Temp.
+@(private = "file")
+codex_pass_run :: proc() {
 	heap := runtime.heap_allocator()
 	sync.lock(&codex_cache.mu)
 	homes := make([]Disk_Home, len(codex_cache.homes), context.temp_allocator)
@@ -507,6 +577,7 @@ codex_pass :: proc() {
 			context.temp_allocator = virtual.arena_allocator(&scratch)
 			cwd, source, skip := disk_first_line(.Codex, f.path)
 			if skip do cwd, source = "", ""
+			else do cwd, _ = filepath.clean(cwd, context.temp_allocator) // as a project's cwd (a trailing slash, "/./")
 			sync.lock(&codex_cache.mu)
 			meta_put(f, cwd, source)
 			sync.unlock(&codex_cache.mu)
@@ -516,7 +587,6 @@ codex_pass :: proc() {
 		if (i + 1) % CODEX_BATCH == 0 || i == len(todo) - 1 do codex_publish()
 	}
 	if dirty && file != "" do codex_cache_save(file)
-	free_all(context.temp_allocator)
 	sync.lock(&codex_cache.mu)
 	codex_cache.running = false
 	sync.unlock(&codex_cache.mu)
@@ -549,6 +619,7 @@ codex_cache_read :: proc(file: string) -> map[string]Codex_Meta {
 		if !ok1 || !ok2 || !ok3 || size < 0 || !codex_id_ok(id) || !filepath.is_abs(path) || !filepath.is_abs(account) do continue
 		if source_kept(source) != source || strings.index_byte(line, 0) >= 0 do continue
 		if cwd != "" && (!filepath.is_abs(cwd) || len(cwd) > CODEX_CWD_MAX) do continue
+		if cwd != "" do cwd, _ = filepath.clean(cwd, context.temp_allocator)
 		out[path] = {size = size, mtime = mtime, created = created, id = id, cwd = cwd, source = source, account = account}
 	}
 	return out

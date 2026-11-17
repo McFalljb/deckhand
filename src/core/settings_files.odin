@@ -1074,11 +1074,7 @@ settings_watch: bool
 // project's folder and .pi/ are looked at; one whose time changed is listed
 // again (the page's search finds its files). A few stats, no watcher on ~/.pi.
 settings_poll :: proc() {
-	// Claude Code's plugins and MCP servers, read on a worker (claude_lists.odin): new rows
-	if claude_lists_tick() {
-		settings_gen += 1
-		window_state_changed()
-	}
+	claude_lists_poll()
 	if !settings_watch do return
 	if time.tick_since(sf_poll_at) < EDITOR_POLL do return
 	sf_poll_at = time.tick_now()
@@ -1086,6 +1082,16 @@ settings_poll :: proc() {
 		settings_gen += 1
 		window_state_changed()
 	}
+}
+
+// Claude Code's plugins and MCP servers, read on a worker (claude_lists.odin): new rows for the
+// window's Settings page (settings_gen) and a browser's (web_settings_stale). From the window's
+// tick (settings_poll) and a browser's (web_settings_tick, a core without a window too).
+claude_lists_poll :: proc() {
+	if !claude_lists_tick() do return
+	settings_gen += 1
+	web_settings_stale()
+	window_state_changed()
 }
 
 // The poll now (tests).

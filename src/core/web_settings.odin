@@ -81,7 +81,14 @@ web_settings_sections_for :: proc(out: ^[dynamic][2]string, serial: u64) {
 // web_view_tick: the flag goes with its link (a takeover, a detach). No rebuild here: the page is
 // built on open and when a section it reads changes, so no disk work runs on a timer.
 web_settings_tick :: proc() {
+	if web_set.link != 0 do claude_lists_poll() // the lists read on a worker since (settings_files.odin)
 	if web_set.link != 0 && (!window_link_web() || window_link_serial() != web_set.link) do web_settings_reset()
+}
+
+// Something the page lists changed outside the sections its key hashes (claude_lists.odin's
+// plugins and MCP servers, read on a worker): built again at the next flush.
+web_settings_stale :: proc() {
+	web_set.key = 0
 }
 
 web_settings_reset :: proc() {

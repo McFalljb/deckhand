@@ -87,13 +87,15 @@ tdir :: proc(p: string) -> string {
 }
 
 // Whether the item of a record is still the one the Trash was given: the same file (device and
-// inode), size and modification time, and (the XDG Trash) its info file as the core wrote it.
+// inode), a file's size and modification time, and (the XDG Trash) its info file as the core wrote it.
 @(private = "file")
 trashed_same :: proc(t: Fs_Trashed) -> bool {
 	st: posix.stat_t
 	if posix.lstat(strings.clone_to_cstring(t.trashed, context.temp_allocator), &st) != .OK do return false
 	s := stamp_of_stat(&st)
-	if s.dev != t.dev || s.inode != t.ino || s.size != t.size || s.mtime != t.mtime do return false
+	if s.dev != t.dev || s.inode != t.ino do return false
+	// a folder's size and time change when Finder opens it in the Trash (.DS_Store): a file's only
+	if !posix.S_ISDIR(st.st_mode) && (s.size != t.size || s.mtime != t.mtime) do return false
 	if t.info != "" {
 		data, err := os.read_entire_file(t.info, context.temp_allocator)
 		if err != nil || string(data) != t.info_text do return false

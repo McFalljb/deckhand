@@ -296,7 +296,7 @@ files_panel :: proc(row_w_: f32) {
 	if overflow do row_w -= px(FILES_SCROLL_THUMB + 2)
 	if clay.UI(clay.ID("files_list"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, childGap = pu(2)}}) {
 		// a drag into the root: the whole list is the drop's band (a folder's: its rows, files_row)
-		into_root := fu.dragging && fu.drop_dir == root && core.files_drop_band(files_drop_now(), root)
+		into_root := (fu.dragging && fu.drop_dir == root && core.files_drop_band(files_drop_now(), root)) || files_finder_band(root, true) // or Finder's (ui_files_drops.odin)
 		if clay.UI(clay.ID("files_rows"))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = {0, -px(offset)}},
@@ -384,7 +384,7 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 	active := r.path == v.active_file
 	bg, em := overlay(id, selected, hovered)
 	// a drag's target folder: its row and the rows inside it, one band (the root's: the list's)
-	band := fu.dragging && fu.drop_dir != core.files_root() && core.files_drop_band(files_drop_now(), r.path)
+	band := (fu.dragging && fu.drop_dir != core.files_root() && core.files_drop_band(files_drop_now(), r.path)) || files_finder_band(r.path, false)
 	if band && !selected do bg = cc(with_alpha(th.accent, FILES_DROP_TINT))
 	// the keyboard's row: the accent ring while the tree has the keyboard; among several selected
 	// rows, a muted ring otherwise
@@ -649,7 +649,6 @@ files_drag_cursor :: proc(c: sapp.Mouse_Cursor) {
 // The tree's row under (x, y), from the last layout, as a drop sees it: a row's path and whether
 // it is a folder; over = "" with ok: the empty space below the rows (the root). ok false: no
 // drop there (outside the list, the new name's field, an error or "N more…" row).
-@(private = "file")
 files_drop_over :: proc(x, y: f32) -> (over: string, over_dir, ok: bool) {
 	if !files_shown() || core.files_root() == "" || !over_sidebar(x) do return "", false, false
 	clay.SetPointerState({x, y}, false)
@@ -670,11 +669,11 @@ files_drag_update :: proc(x, y: f32) {
 	if files_drag_root_gone() do return
 	fu.drop_check = false
 	if !over_sidebar(x) {
-		// over the panes: onto a terminal it pastes the pressed row's path (files_event)
+		// over the panes: the pane under the pointer takes it (files_pane_drop, ui_files_drops.odin)
 		fu.drag_left = true
 		files_drop_set({})
 		files_drop_forget()
-		files_drag_cursor(.DEFAULT)
+		files_drag_cursor(files_pane_target(x, y).action != .None ? .DEFAULT : .NOT_ALLOWED)
 		return
 	}
 	over, over_dir, ok := files_drop_over(x, y)
@@ -792,6 +791,8 @@ files_drag_layout :: proc() {
 	th := theme()
 	n := len(core.files_drop_sources(fu.drag_paths[:]))
 	name := n > 1 ? fmt.tprintf("%d items", n) : filepath.base(n == 1 ? core.files_drop_sources(fu.drag_paths[:])[0] : fu.drag_path)
+	files_pane_drop_layout() // the pane under the pointer ringed (ui_files_drops.odin)
+	if label := files_pane_drop_label(); label != "" do name = fmt.tprintf("%s: %s", label, name)
 	if clay.UI(clay.ID("files_drag"))({
 		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
@@ -991,10 +992,10 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			files_drop_set({})
 			files_drop_forget()
 			app.redraw = true
-			// onto a terminal: the quoted paths it carries (the pressed row's, or the selection's
-			// it was in), as dropped files, into the pane under the release. Inside the left column
+			// over the panes: the paths it carries (the pressed row's, or the selection's it was
+			// in) go to the pane under the release only (files_pane_drop). Inside the left column
 			// a drag only ever moves files: nothing reaches a pane
-			if !over_sidebar(e.mouse_x) do sidebar_drop(core.files_drag_paste_paths(fu.drag_path, fu.drag_paths[:]), e.mouse_x, e.mouse_y)
+			if !over_sidebar(e.mouse_x) do files_pane_drop(core.files_drag_paste_paths(fu.drag_path, fu.drag_paths[:]), e.mouse_x, e.mouse_y)
 			else if refused != "" do toast_show(fmt.tprintf("Not moved: %s", refused), err = true)
 			else if dir != "" && !noop do files_drop_run(dir)
 			return true

@@ -525,7 +525,7 @@ client_on_frames :: proc() {
 				core.result_free(old)
 				client.results[m.id] = r
 			} else do client.results[strings.clone(m.id, heap)] = r
-			if m.result.pending && m.request_id != 0 && client.sock != nil && !(m.id in client.pending) {
+			if m.result.pending && m.request_id != 0 && !(m.id in client.pending) { // in process too (ui_files_drops.odin)
 				if client.pending == nil do client.pending = make(map[string]u64, heap)
 				client.pending[strings.clone(m.id, heap)] = m.request_id
 			}

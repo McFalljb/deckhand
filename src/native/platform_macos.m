@@ -774,3 +774,45 @@ void dh_mac_terminate_hook(int (*cb)(int logout)) {
     SEL sel = @selector(applicationShouldTerminate:);
     class_replaceMethod([d class], sel, (IMP)should_terminate, "Q@:@");
 }
+
+// ---- files dragged in from Finder: where they hover (the Files tree's drop band) ----
+//
+// sokol's window takes file drops (registerForDraggedTypes:, performDragOperation:) but says only
+// where the drop lands. Its draggingEntered:/draggingUpdated: are wrapped (sokol's own still
+// answer: copy), and draggingExited:/draggingEnded: added to it, to report the pointer: x, y in
+// the window's points from its top-left; on 0 when the drag left or ended.
+
+static void (*file_drag_cb)(float x, float y, int on);
+static IMP orig_drag_entered, orig_drag_updated;
+
+static void file_drag_report(NSWindow* w, id<NSDraggingInfo> sender, int on) {
+    if (!file_drag_cb) return;
+    NSPoint p = sender ? sender.draggingLocation : NSZeroPoint;
+    file_drag_cb((float)p.x, (float)(w.contentView.bounds.size.height - p.y), on);
+}
+static NSDragOperation file_drag_entered(id self, SEL _cmd, id<NSDraggingInfo> sender) {
+    NSDragOperation op = ((NSDragOperation (*)(id, SEL, id))orig_drag_entered)(self, _cmd, sender);
+    file_drag_report(self, sender, 1);
+    return op;
+}
+static NSDragOperation file_drag_updated(id self, SEL _cmd, id<NSDraggingInfo> sender) {
+    NSDragOperation op = ((NSDragOperation (*)(id, SEL, id))orig_drag_updated)(self, _cmd, sender);
+    file_drag_report(self, sender, 1);
+    return op;
+}
+static void file_drag_exited(id self, SEL _cmd, id<NSDraggingInfo> sender) { file_drag_report(self, nil, 0); }
+static void file_drag_ended(id self, SEL _cmd, id<NSDraggingInfo> sender) { file_drag_report(self, nil, 0); }
+
+void dh_mac_watch_file_drag(void (*cb)(float x, float y, int on)) {
+    if (file_drag_cb || !win) return;
+    Class cls = [win class];
+    Method me = class_getInstanceMethod(cls, @selector(draggingEntered:));
+    Method mu = class_getInstanceMethod(cls, @selector(draggingUpdated:));
+    if (!me || !mu) return; // not sokol's window: no hover, the drop still works
+    file_drag_cb = cb;
+    orig_drag_entered = method_setImplementation(me, (IMP)file_drag_entered);
+    orig_drag_updated = method_setImplementation(mu, (IMP)file_drag_updated);
+    // on sokol's class only (class_addMethod never touches NSWindow's own)
+    class_addMethod(cls, @selector(draggingExited:), (IMP)file_drag_exited, "v@:@");
+    class_addMethod(cls, @selector(draggingEnded:), (IMP)file_drag_ended, "v@:@");
+}

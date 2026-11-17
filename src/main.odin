@@ -108,6 +108,7 @@ init :: proc "c" () {
 	client_call(core.System_Appearance{light = platform_system_light()}, .Internal) // before the attach: straight in
 	if !fallback {
 		platform_watch_appearance()
+		finder_drag_watch() // a Finder drag hovering the Files tree (files_drops_darwin.odin)
 		autotest_init()
 	}
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
@@ -214,6 +215,7 @@ init_separate :: proc(note := "") -> bool {
 	platform_terminate_hook(on_terminate)
 	menubar_install()
 	platform_watch_appearance()
+	finder_drag_watch() // a Finder drag hovering the Files tree (files_drops_darwin.odin)
 	autotest_init()
 	script_drain = client_drain // the script's commands go over core.sock
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
@@ -343,7 +345,7 @@ window_hooks_app :: proc() -> core.Window_Hooks {
 	return {
 		state_changed = proc() {app.redraw = true},
 		test_step = autotest_step,
-		test_event = autotest_on_event,
+		test_event = proc(ev: core.Event) {files_drops_on_event(ev); autotest_on_event(ev)}, // a Finder drop's copies (ui_files_drops.odin)
 		test_facts = client.host ? client_test_facts : nil, // the unit tests' host link (client.odin)
 	}
 }
@@ -506,6 +508,7 @@ frame :: proc "c" () {
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
 	if files_drag_tick() do app.redraw = true // a Files drag: a held folder opens, edge scroll (ui_files.odin)
+	if files_drops_tick() do app.redraw = true // a Finder drop's next copy, a Finder drag's hover (ui_files_drops.odin)
 	holder_ask_tick() // a session holder from another build: asked once (below)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
 	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)

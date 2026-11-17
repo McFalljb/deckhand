@@ -1730,13 +1730,15 @@ add_project_dialog :: proc() {
 	})
 }
 
-// Files dropped on the window at (x, y) framebuffer px. On the left column
-// folders become projects (files are ignored; the last one is selected). On
+// Files dropped on the window at (x, y) framebuffer px. On the Files tab's list they are copied
+// into the folder under the drop (files_finder_drop, ui_files_drops.odin); elsewhere on the left
+// column folders become projects (files are ignored; the last one is selected). On
 // the current tab's terminal the paths are pasted shell-quoted,
 // as other terminals do. Anywhere else: nothing.
 sidebar_drop :: proc(paths: []string, x, y: f32) {
 	if job_sheet_open() do return // the job sheet is modal: nothing behind it takes files
 	if over_sidebar(x) {
+		if files_finder_drop(paths, x, y) do return
 		for p in paths do if os.is_dir(p) do ui_do(core.Add_Project{cwd = p})
 		return
 	}

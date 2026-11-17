@@ -8,12 +8,16 @@ package main
 // Every action is a command (ui_do) or an action from actions.odin, and has
 // a button: the header's, the row's "…" and the right-click menu.
 //
-// Mouse: a click selects; on release a folder opens or closes and a file
-// opens in a preview tab (a double-click or Enter keeps it). Dragging a row
-// onto a terminal pastes its quoted path. Keyboard (focus widget "files"):
-// ↑/↓ move, ←/→ close/open or go to the parent/child, Enter opens, Space
-// previews, F2 renames, ⌘⌫ deletes (it asks first), Esc gives the keyboard
-// back. Renaming is inline (focus widget "files_name"; Enter or a click elsewhere
+// Mouse: a press selects; on release a folder opens or closes and a file
+// opens in a preview tab (a double-click or Enter keeps it). ⌘-click adds or
+// takes out a row, shift-click selects a range (core files_sel_*); neither opens
+// anything. A plain press inside a selection of several keeps it until the release.
+// Dragging a row onto a terminal pastes its quoted path. Keyboard (focus widget
+// "files"): ↑/↓ move (with shift: extend), ←/→ close/open or go to the
+// parent/child, Enter opens, Space previews, F2 renames, ⌘A selects every row,
+// ⌘⌫ moves the selection to the Trash (one confirmation), Esc clears a selection
+// of several, else gives the keyboard back; letters jump to the next row whose
+// name starts with them (files_type). Renaming is inline (focus widget "files_name"; Enter or a click elsewhere
 // renames, Esc cancels); a new file or folder's name field is a row of its own, the first in its
 // folder (files_new_row_at), with the error under it. Right-click selects the row first.
 
@@ -23,6 +27,7 @@ import "core:mem/virtual"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
+import "core:unicode/utf8"
 import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -126,8 +131,15 @@ Files_Ui :: struct {
 	press_dir:  bool,
 	press_at:   [2]f32,
 	press_clicks: int,
+	press_mods: bool, // the press had ⌘ or shift: it changed the selection; its release opens nothing
+	press_keep: bool, // a plain press on a row of a selection of several: kept until the release
 	dragging:   bool,
 	drag_path:  string, // owned
+	multi:      bool, // several rows selected (drawn: the cursor's row ringed too)
+	// type-to-select: what was typed, the last key's time
+	typed:      [64]u8,
+	typed_n:    int,
+	typed_at:   time.Tick,
 }
 
 @(private = "file")
@@ -241,6 +253,7 @@ files_panel :: proc(row_w_: f32) {
 	}
 	n := len(rows) + ph_n
 	fu.count = n
+	fu.multi = len(v.selected) > 1
 	if d := clay.GetElementData(clay.ID("files_list")); d.found do fu.view_h = d.boundingBox.height / app.dpi
 	if fu.view_h <= 0 do fu.view_h = 600
 	if v.reveal {
@@ -341,15 +354,20 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 	v := core.tree_view()
 	more_hover := ui_hover == Hit(Hit_Files{what = .More, index = slot})
 	hovered := ui_hover == Hit(Hit_Files{what = .Row, index = slot}) || more_hover
-	selected := r.path == v.cursor
+	selected := core.files_sel_has(v, r.path)
+	is_cursor := r.path == v.cursor
 	active := r.path == v.active_file
 	bg, em := overlay(id, selected, hovered)
-	focused := state.focus_widget == "files" && selected
+	// the keyboard's row: the accent ring while the tree has the keyboard; among several selected
+	// rows, a muted ring otherwise
+	ring: core.Rgba
+	if is_cursor && state.focus_widget == "files" do ring = th.accent
+	else if is_cursor && fu.multi do ring = th.text_muted
 	if clay.UI(id)({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth)), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 		backgroundColor = bg,
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-		border = {color = cc(focused ? th.accent : {}), width = clay.BorderOutside(pu(focused ? core.BORDER_W : 0))},
+		border = {color = cc(ring), width = clay.BorderOutside(pu(ring != {} ? core.BORDER_W : 0))},
 	}) {
 		chev := r.kind == .Dir ? (r.expanded ? "▾" : "▸") : ""
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(SP_3)), clay.SizingFit()}}}) {
@@ -616,7 +634,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		right := e.mouse_button == .RIGHT || (e.mouse_button == .LEFT && e.modifiers & sapp.MODIFIER_CTRL != 0)
 		if right {
 			if (h.what == .Row || h.what == .More) && fu.drawn[h.index] != "" {
-				files_mark(fu.drawn[h.index]) // the row the menu is for shows selected
+				files_mark_for_menu(fu.drawn[h.index]) // the row the menu is for shows selected (a selection it is in stays)
 				files_menu_at(fu.drawn[h.index], app.pointer)
 			} else if h.what == .List do files_menu_at(core.files_root(), app.pointer)
 			return true
@@ -639,15 +657,24 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if r, ok := files_error_row(h.index); ok do core.files_retry(r.path)
 		case .More:
 			if d := clay.GetElementData(clay.ID("fmore", u32(h.index))); d.found {
-				files_mark(fu.drawn[h.index])
+				files_mark_for_menu(fu.drawn[h.index])
 				b := d.boundingBox
 				files_menu_at(fu.drawn[h.index], {b.x, b.y + b.height})
 			}
 		case .Row:
 			p := fu.drawn[h.index]
 			if p == "" do return true
-			core.files_select_in(core.tree_view(), p)
-			core.tree_view().reveal = false
+			v := core.tree_view()
+			rows := core.tree_rows()
+			shift, cmd := e.modifiers & sapp.MODIFIER_SHIFT != 0, e.modifiers & sapp.MODIFIER_SUPER != 0
+			fu.typed_n = 0
+			fu.press_mods = shift || cmd
+			// a plain press on a row of a selection of several keeps it (a drag of them all, later);
+			// the release selects that row alone
+			fu.press_keep = !fu.press_mods && len(v.selected) > 1 && core.files_sel_has(v, p) && app.clicks == 1
+			if fu.press_mods do core.files_sel_click(v, rows, core.files_row_of(rows, p), shift, cmd)
+			else if !fu.press_keep do core.files_select_in(v, p)
+			v.reveal = false
 			if state.focus_widget != "files" do ui_do(core.Set_Focus{"files"})
 			delete(fu.press_path)
 			fu.press_path = strings.clone(p)
@@ -683,8 +710,10 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if !over_sidebar(e.mouse_x) do sidebar_drop({fu.drag_path}, e.mouse_x, e.mouse_y)
 			return true
 		}
+		if fu.press_mods do return true // ⌘ or shift changed the selection: nothing opens
 		{
 			p := fu.press_path
+			if fu.press_keep do files_mark(p) // the press kept a selection of several: this row alone now
 			if fu.press_dir {
 				if fu.press_clicks == 1 do files_toggle(p)
 			} else {
@@ -703,40 +732,55 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .KEY_DOWN, .CHAR, .KEY_UP:
+		// only while the tree has the keyboard: then no key it takes reaches a terminal or an agent
 		if state.focus_widget != "files" do return false
+		if e.type == .CHAR && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL) == 0 {
+			files_type(rune(e.char_code))
+			return true
+		}
 		if e.type != .KEY_DOWN do return e.modifiers & sapp.MODIFIER_SUPER == 0
 		return files_key(e)
 	}
 	return false
 }
 
-// A key while the tree has the keyboard. ⌘ shortcuts other than ⌘⌫ pass.
+// A key while the tree has the keyboard. ⌘ shortcuts other than ⌘⌫, ⌘A and ⌘↑/↓ pass.
 @(private = "file")
 files_key :: proc(e: ^sapp.Event) -> bool {
 	cmd := e.modifiers & sapp.MODIFIER_SUPER != 0
-	if cmd && e.key_code != .BACKSPACE && e.key_code != .UP && e.key_code != .DOWN do return false
+	if cmd && e.key_code != .BACKSPACE && e.key_code != .UP && e.key_code != .DOWN && e.key_code != .A do return false
 	if cmd && e.modifiers & sapp.MODIFIER_ALT != 0 do return false // ⌥⌘↑ ⌥⌘↓: sessions (menubar.odin)
 	app.redraw = true
 	rows := core.tree_rows()
-	i := core.files_row_of(rows, core.tree_view().cursor)
-	move :: proc(rows: []core.Files_Row, to: int, back := false) {
+	v := core.tree_view()
+	i := core.files_row_of(rows, v.cursor)
+	// a key that is not typed text ends type-to-select's word (Space, while typing, is part of it)
+	typing := fu.typed_n > 0 && time.tick_since(fu.typed_at) < FILES_TYPE_RESET
+	if e.key_code == .SPACE && typing do return true // its CHAR follows (files_type)
+	if !(e.key_code >= .SPACE && e.key_code <= .GRAVE_ACCENT) || cmd do fu.typed_n = 0
+	shift := e.modifiers & sapp.MODIFIER_SHIFT != 0
+	move :: proc(rows: []core.Files_Row, to: int, back := false, extend := false) {
 		k := files_move_target(rows, to, back)
 		if k < 0 do return
-		core.files_select_in(core.tree_view(), rows[k].path)
+		if extend do core.files_sel_range(core.tree_view(), rows, k) // shift: from the anchor to it
+		else do core.files_select_in(core.tree_view(), rows[k].path)
 		core.tree_view().reveal = false
 		files_scroll_to(k, len(rows))
 	}
 	page := max(int(fu.view_h / FILES_ROW_H) - 1, 1)
 	#partial switch e.key_code {
-	case .ESCAPE: ui_do(core.Set_Focus{""})
+	case .A:
+		if cmd do core.files_sel_all(v, rows)
+	case .ESCAPE:
+		if !core.files_sel_collapse(v) do ui_do(core.Set_Focus{""}) // several selected: the cursor's row alone first
 	case .UP:
 		// up past a heading: the row above it
-		move(rows, cmd ? 0 : (i < 0 ? 0 : i - 1), back = true)
-	case .DOWN:   move(rows, cmd ? len(rows) - 1 : i + 1)
-	case .HOME:   move(rows, 0)
-	case .END:    move(rows, len(rows) - 1)
-	case .PAGE_UP: move(rows, i - page, back = true)
-	case .PAGE_DOWN: move(rows, i + page)
+		move(rows, cmd ? 0 : (i < 0 ? 0 : i - 1), back = true, extend = shift)
+	case .DOWN:   move(rows, cmd ? len(rows) - 1 : i + 1, extend = shift)
+	case .HOME:   move(rows, 0, back = true, extend = shift)
+	case .END:    move(rows, len(rows) - 1, extend = shift)
+	case .PAGE_UP: move(rows, i - page, back = true, extend = shift)
+	case .PAGE_DOWN: move(rows, i + page, extend = shift)
 	case .LEFT:
 		if i < 0 do break
 		if rows[i].kind == .Dir && rows[i].expanded do files_toggle(rows[i].path)
@@ -752,9 +796,40 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	case .F2:
 		if i >= 0 do files_step(rows[i].path, .Rename)
 	case .BACKSPACE, .DELETE:
-		if i >= 0 && (cmd || e.key_code == .DELETE) do ui_do(core.Delete_Path{path = rows[i].path})
+		if !(cmd || e.key_code == .DELETE) do break
+		if sel := core.files_sel_paths(v, rows); len(sel) > 1 do ui_do(core.Delete_Path{paths = sel}) // one confirmation for them all
+		else if i >= 0 do ui_do(core.Delete_Path{path = rows[i].path})
 	}
 	return true
+}
+
+// Type-to-select resets after this long without a key.
+FILES_TYPE_RESET :: time.Second
+
+// A character typed while the tree has the keyboard: added to what was typed (a new word after
+// FILES_TYPE_RESET), and the cursor goes to the next row whose name starts with it (core
+// files_type_match). Never opens anything. Space alone is the preview key (files_key).
+@(private = "file")
+files_type :: proc(c: rune) {
+	if c < ' ' || c == 0x7f do return
+	if fu.typed_n > 0 && time.tick_since(fu.typed_at) >= FILES_TYPE_RESET do fu.typed_n = 0
+	if c == ' ' && fu.typed_n == 0 do return
+	buf, n := utf8.encode_rune(c)
+	if fu.typed_n + n > len(fu.typed) do return
+	copy(fu.typed[fu.typed_n:], buf[:n])
+	fu.typed_n += n
+	fu.typed_at = time.tick_now()
+	rows := core.tree_rows()
+	v := core.tree_view()
+	i := core.files_row_of(rows, v.cursor)
+	// a new word looks from the row after the cursor; a longer one may stay on it
+	from := i < 0 ? 0 : (fu.typed_n == n ? i + 1 : i)
+	j := core.files_type_match(rows, from, string(fu.typed[:fu.typed_n]))
+	if j < 0 do return
+	core.files_select_in(v, rows[j].path)
+	v.reveal = false
+	files_scroll_to(j, len(rows))
+	app.redraw = true
 }
 
 // Selects the row at path where the pointer is (a click, its menu), without scrolling.
@@ -762,6 +837,22 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 files_mark :: proc(path: string) {
 	core.files_select_in(core.tree_view(), path)
 	core.tree_view().reveal = false
+}
+
+// A row's menu: a row of the selection keeps it (the menu acts on them all); another row is
+// selected alone.
+@(private = "file")
+files_mark_for_menu :: proc(path: string) {
+	if !core.files_sel_has(core.tree_view(), path) do files_mark(path)
+}
+
+// The paths path's menu acts on: the selection that shows, when path is one of several
+// selected; nil otherwise (temp allocator).
+files_menu_multi :: proc(path: string) -> []string {
+	v := core.tree_view()
+	if len(v.selected) < 2 || !core.files_sel_has(v, path) do return nil
+	sel := core.files_sel_paths(v, core.tree_rows())
+	return len(sel) > 1 ? sel : nil
 }
 
 // Opens or closes a folder; a failure shows (never a click that does nothing).
@@ -834,6 +925,16 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 	is_dir := core.path_kind(path) == .Dir
 	is_root := path == root
 	sep :: proc(items: ^[dynamic]core.Menu_Item) {append(items, core.Menu_Item{sep = true})}
+	if multi := files_menu_multi(path); multi != nil {
+		// several rows: only what acts on them all (no open, new, rename, reveal)
+		// the count after nesting (a folder and what is in it: one), as the confirmation says
+		n := len(core.fs_delete_merge(multi))
+		append(items, core.Menu_Item{label = n == 1 ? "Move to Trash…" : fmt.tprintf("Move %d items to Trash…", n), keys = "⌘⌫", cmd = core.Delete_Path{paths = multi}})
+		sep(items)
+		append(items, core.Menu_Item{label = "Copy paths", files = .Copy_Path})
+		append(items, core.Menu_Item{label = "Copy relative paths", files = .Copy_Relative})
+		return
+	}
 	if !is_dir {
 		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path, session = files_session()}})
 		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, session = files_session(), preview = true}})
@@ -873,7 +974,8 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 		if dot := strings.last_index_byte(name, '.'); dot > 0 do files_name_field.cursor, files_name_field.anchor = dot, 0
 	case .Copy_Path:
 		if path == "" || win_os.set_clipboard == nil do return false
-		win_os.set_clipboard(path)
+		if multi := files_menu_multi(path); multi != nil do win_os.set_clipboard(strings.join(multi, "\n", context.temp_allocator)) // one per line
+		else do win_os.set_clipboard(path)
 		return true
 	case .Open_Side:
 		// open_file, then that tab in a new pane on the right (a pane holding only it shows it already)
@@ -886,8 +988,21 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 			ui_do_menu(core.Split_Pane{pane = t.pane, direction = .Right, tab_id = r.created_id}, "Open to the side")
 		}
 	case .Copy_Relative:
-		rel := path
-		if strings.has_prefix(path, root) && len(path) > len(root) do rel = path[len(root) + 1:]
+		relative :: proc(path, root: string) -> string {
+			if strings.has_prefix(path, root) && len(path) > len(root) do return path[len(root) + 1:]
+			return path
+		}
+		if multi := files_menu_multi(path); multi != nil {
+			if win_os.set_clipboard == nil do return false
+			b := strings.builder_make(context.temp_allocator)
+			for p, k in multi {
+				if k > 0 do strings.write_byte(&b, '\n')
+				strings.write_string(&b, relative(p, root))
+			}
+			win_os.set_clipboard(strings.to_string(b))
+			return true
+		}
+		rel := relative(path, root)
 		if rel == "" || win_os.set_clipboard == nil do return false
 		win_os.set_clipboard(rel)
 		return true

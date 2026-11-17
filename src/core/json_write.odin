@@ -864,7 +864,11 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "to", c.to)
 		token(&w, c.confirm, redact)
 	case Delete_Path:
-		kv_str(&w, "path", c.path)
+		if c.path != "" || len(c.paths) == 0 do kv_str(&w, "path", c.path)
+		if len(c.paths) > 0 {
+			key(&w, "paths")
+			write_strings(w.b, c.paths)
+		}
 		token(&w, c.confirm, redact)
 	case Reveal_In_Finder:
 		kv_str(&w, "path", c.path)

@@ -1424,11 +1424,14 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
   (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
-- **Mouse**: a click opens a folder or previews a file; a right-click selects the row, then opens
-  its menu; drag a row onto a terminal to paste its path.
-- **Keyboard** (while the tree has focus): ↑/↓ move, ←/→ close or open (or go to the parent or
-  child), Enter opens, Space previews, F2 renames, ⌘⌫ moves to the Trash (it asks first), Esc
-  gives the keyboard back.
+- **Mouse**: a click opens a folder or previews a file; ⌘-click adds or removes a row, shift-click
+  selects a range (neither opens anything); a right-click selects the row (one already selected
+  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path.
+- **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
+  (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
+  shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
+  Esc clears a selection of several, else gives the keyboard back. Typing letters jumps to the next
+  row whose name starts with them (a pause of a second starts over); they never reach a terminal.
 - **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
 - **New file / New folder**: the name field opens as the first row of the folder (the selected
   folder, the selected file's, else the project's), opened and scrolled to; an error shows under
@@ -1438,7 +1441,8 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   from an agent or script cancels.
 - **Row menu** (**…** or right-click): Open, Open in preview, Open to the side (in a new pane on
   the right), New file…, New folder…, Rename…, Move to Trash…, Reveal in Finder, Copy path, Copy
-  relative path, Open terminal here, and for `.md` files Open Markdown preview.
+  relative path, Open terminal here, and for `.md` files Open Markdown preview. On a selection of
+  several: Move N items to Trash…, Copy paths and Copy relative paths (one per line).
 - **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
   the tab; close it first). It knows the folder a tab started in, not one a shell `cd`'d to later.
   Only you, in the window, can rename a credential's file (a sign-in, in any case; a key) to a
@@ -2807,11 +2811,14 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Shortcut | Action |
 |---|---|
 | ↑ ↓ ← → | Move, close or open folders |
+| ⇧↑ ⇧↓ | Extend the selection |
+| ⌘A | Select every row shown |
+| Letters | Jump to the next row whose name starts with them |
 | Enter | Open |
 | Space | Open in preview |
 | F2 | Files: rename |
-| ⌘⌫ | Files: move to Trash (asks first) |
-| Esc | Give the keyboard back |
+| ⌘⌫ | Files: move the selection to Trash (asks first, once) |
+| Esc | Clear a selection of several, else give the keyboard back |
 
 **Atlas's drawer**: ⌃L opens pi's model selector (the Model button).
 

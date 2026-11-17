@@ -155,7 +155,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "create_file", args = "path, confirm?", does = "create an empty file inside a project (and its folders); data.path. A control caller outside its own project confirms", who = .Anyone, confirm = .Fs_Write},
 	{type = "create_dir", args = "path, confirm?", does = "create a folder inside a project; data.path. A control caller outside its own project confirms", who = .Anyone, confirm = .Fs_Write},
 	{type = "rename_path", args = "from, to, confirm?", does = "rename or move a file or folder inside a project; open editor tabs follow it. A control caller outside its own project confirms", who = .Anyone, confirm = .Fs_Write},
-	{type = "delete_path", args = "path, confirm?", does = "move a file or folder inside a project to the Trash", who = .Anyone, confirm = .Delete},
+	{type = "delete_path", args = "path | paths, confirm?", does = "move a file or folder inside a project to the Trash; paths: several (at most 500), all checked before any moves, one confirmation", who = .Anyone, confirm = .Delete},
 	{type = "reveal_in_finder", args = "path", does = "show a file or folder inside a project in Finder", who = .Anyone},
 	{type = "set_left_tab", args = "tab", does = "what the left column shows: sessions, files (the file tree of the project on screen) or jobs; settings (the old Settings tab) shows sessions: Settings is a page only the user opens (⌘,)", who = .Anyone},
 	{type = "files_expand", args = "path, expanded", does = "expand or collapse a folder in the Files tree (inside a project)", who = .Anyone},

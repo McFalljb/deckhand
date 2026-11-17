@@ -251,7 +251,10 @@ fs_check :: proc(path: string, caller: Caller, allow_root := false) -> (abs, roo
 	parent := fs_real(filepath.dir(abs))
 	full, _ := filepath.join({parent, filepath.base(abs)}, context.temp_allocator)
 	if allow_root do full = fs_real(abs)
-	for r in fs_roots() {
+	roots := fs_roots()
+	// any project's own folder, also one inside another project (whose root would match first)
+	if !allow_root do for r in roots do if full == r do return "", "", "not on a project folder itself"
+	for r in roots {
 		if !within(full, r) do continue
 		if full == r && !allow_root do return "", "", "not on a project folder itself"
 		rel := full[len(r):]
@@ -756,11 +759,155 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 
 // Moves to the Trash (the platform's; fails where there is none).
 fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
-	p, _, e := fs_check_write(path, caller)
+	p, e := fs_delete_check(path, caller)
 	if e != "" do return e
-	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
-	if !fs_user_here(caller) && fs_credential_place(p) do return CREDENTIAL_PLACE_REFUSED // a caller may delete without asking (confirm: auto)
-	if who := fs_in_use_by(p, caller); who != "" do return who
+	return fs_trash_checked(p)
+}
+
+// fs_delete's rules, nothing moved: inside a project (fs_check_write: never its folder, never .git),
+// there, not a credential place (but for the user here), no running terminal tab in it. p: the
+// checked absolute path.
+fs_delete_check :: proc(path: string, caller: Caller) -> (p: string, err: string) {
+	e: string
+	p, _, e = fs_check_write(path, caller)
+	if e != "" do return "", e
+	if path_kind(p) == .Missing && !os.exists(p) do return "", "no such file or folder" // os.exists: a dangling link
+	if !fs_user_here(caller) && fs_credential_place(p) do return "", CREDENTIAL_PLACE_REFUSED // a caller may delete without asking (confirm: auto)
+	if who := fs_in_use_by(p, caller); who != "" do return "", who
+	return p, ""
+}
+
+// At most this many paths in one delete_path (paths).
+FS_DELETE_MAX :: 500
+// Names a batch's confirmation shows before "and N more".
+FS_DELETE_NAMED :: 5
+// Bytes of one name, and of the project folder, a batch's confirmation shows (longer: cut, "…"),
+// so the whole summary stays within FS_DELETE_SUMMARY_MAX: the count, "and N more" and the
+// project fit the confirmation bar's lines.
+FS_DELETE_NAME_SHOWN :: 24
+FS_DELETE_ROOT_SHOWN :: 80
+FS_DELETE_SUMMARY_MAX :: 310
+
+// A batch delete's paths, checked: every one by fs_delete_check before anything moves (the first
+// refusal names its path, and nothing moves), then merged (fs_delete_merge). Temp allocator.
+fs_delete_plan :: proc(paths: []string, caller: Caller) -> (plan: []string, err: string) {
+	if len(paths) == 0 do return nil, "path or paths is needed"
+	if len(paths) > FS_DELETE_MAX do return nil, fmt.tprintf("too many at once: %d (at most %d); nothing was moved", len(paths), FS_DELETE_MAX)
+	checked := make([]string, len(paths), context.temp_allocator)
+	for path, i in paths {
+		p, e := fs_delete_check(path, caller)
+		if e != "" do return nil, fmt.tprintf("%s: %s; nothing was moved", path == "" ? "(an empty path)" : path, e)
+		checked[i] = p
+	}
+	return fs_delete_merge(checked), ""
+}
+
+// The outermost of paths, in their order: a path inside another one of them goes with it, and the
+// same file again (another spelling of it on a volume that ignores case) is moved once. By the file
+// itself (device and inode: lstat for the paths, stat for the folders above them), and by the
+// path as written for what cannot be looked at. Two hard links to one file are two names: both
+// go. Temp allocator.
+fs_delete_merge :: proc(paths: []string) -> []string {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	File_Id :: struct {
+		dev, ino: u64,
+	}
+	id_of :: proc(p: string, follow: bool) -> (id: File_Id, dir, ok: bool) {
+		st: posix.stat_t
+		c := strings.clone_to_cstring(p, context.temp_allocator)
+		if (follow ? posix.stat(c, &st) : posix.lstat(c, &st)) != .OK do return {}, false, false
+		return {u64(st.st_dev), u64(st.st_ino)}, posix.S_ISDIR(st.st_mode), true
+	}
+	Seen :: struct {
+		index:  int,
+		parent: File_Id,
+		name:   string,
+	}
+	folders := make(map[File_Id]int, context.temp_allocator) // a folder of the batch: its index
+	files := make(map[File_Id]Seen, context.temp_allocator) // the first of each file
+	keep := make([]bool, len(paths), context.temp_allocator)
+	for p, i in paths {
+		keep[i] = true
+		id, dir, ok := id_of(p, false)
+		if !ok do continue
+		parent, _, _ := id_of(filepath.dir(p), true)
+		if s, dup := files[id]; dup && s.parent == parent && strings.equal_fold(s.name, filepath.base(p)) {
+			keep[i] = false // the same name again, in any case
+			continue
+		}
+		if id not_in files do files[id] = {i, parent, filepath.base(p)}
+		if dir && id not_in folders do folders[id] = i
+	}
+	for p, i in paths {
+		if !keep[i] do continue
+		// inside a folder of the batch: by its path as written, else by the folders above it on disk
+		for q, j in paths do if i != j && keep[j] && within(p, q) && (p != q || j < i) do keep[i] = false
+		for a := filepath.dir(p); keep[i] && len(a) > 1; a = filepath.dir(a) {
+			id, _, ok := id_of(a, true)
+			if !ok do continue
+			if j, in_batch := folders[id]; in_batch && j != i && keep[j] do keep[i] = false
+		}
+	}
+	out := make([dynamic]string, context.temp_allocator)
+	for p, i in paths do if keep[i] do append(&out, p)
+	return out[:]
+}
+
+// A batch's confirmation: how many, folders and files apart, then folders' names first (relative
+// to their project when all are in one; folders end in /), at most FS_DELETE_NAMED, then "and N
+// more", then the project: "Move 8 items to the Trash (3 folders, 5 files)? src/, docs/, .github/,
+// a.txt, b.txt, and 3 more (in /proj)". Every name on one line, nothing hidden or reordering
+// (one_line), cut to FS_DELETE_NAME_SHOWN; a name with a space, comma or quote in quotes (a file
+// named "and 3 more" cannot pass for the tail). One path: as delete_path's.
+fs_delete_summary :: proc(plan: []string) -> string {
+	if len(plan) == 1 do return fmt.tprintf("move %s to the Trash?", plan[0])
+	root := ""
+	for r in fs_roots() do if within(plan[0], r) && len(r) > len(root) do root = r
+	for p in plan do if root != "" && !within(p, root) do root = ""
+	shown :: proc(s: string, max: int, tail := false) -> string {
+		s := one_line(s, context.temp_allocator)
+		if len(s) <= max do return s
+		if !tail do return strings.concatenate({cut_utf8(s, max - len("…")), "…"}, context.temp_allocator)
+		i := len(s) - (max - len("…"))
+		for i < len(s) && s[i] & 0xC0 == 0x80 do i += 1
+		return strings.concatenate({"…", s[i:]}, context.temp_allocator)
+	}
+	dirs, files := make([dynamic]string, context.temp_allocator), make([dynamic]string, context.temp_allocator)
+	for p in plan {
+		if path_kind(p) == .Dir do append(&dirs, p)
+		else do append(&files, p)
+	}
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "move %d items to the Trash (", len(plan))
+	if len(dirs) > 0 do fmt.sbprintf(&b, "%d folder%s", len(dirs), len(dirs) == 1 ? "" : "s")
+	if len(dirs) > 0 && len(files) > 0 do strings.write_string(&b, ", ")
+	if len(files) > 0 do fmt.sbprintf(&b, "%d file%s", len(files), len(files) == 1 ? "" : "s")
+	strings.write_string(&b, ")? ")
+	n := 0
+	for group, g in ([2][]string{dirs[:], files[:]}) do for p in group {
+		if n == FS_DELETE_NAMED do break
+		if n > 0 do strings.write_string(&b, ", ")
+		n += 1
+		name := shown(root != "" && p != root ? p[len(root) + 1:] : p, FS_DELETE_NAME_SHOWN)
+		if g == 0 do name = strings.concatenate({name, "/"}, context.temp_allocator)
+		if !strings.contains_any(name, " ,\"") {
+			strings.write_string(&b, name)
+			continue
+		}
+		strings.write_byte(&b, '"')
+		for r in name {
+			if r == '"' do strings.write_byte(&b, '\'')
+			else do strings.write_rune(&b, r)
+		}
+		strings.write_byte(&b, '"')
+	}
+	if len(plan) > FS_DELETE_NAMED do fmt.sbprintf(&b, ", and %d more", len(plan) - FS_DELETE_NAMED)
+	if root != "" do fmt.sbprintf(&b, " (in %s)", shown(root, FS_DELETE_ROOT_SHOWN, tail = true))
+	return strings.to_string(b)
+}
+
+// Moves a checked path (fs_delete_check) to the Trash; what changed is told.
+fs_trash_checked :: proc(p: string) -> (err: string) {
 	fs_trash_why = ""
 	if !fs_trash_fn(p) {
 		why := fs_trash_why

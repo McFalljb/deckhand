@@ -2358,7 +2358,9 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok && x.on == y.on
 	case Delete_Path:
 		y, ok := b.(Delete_Path)
-		return ok && x.path == y.path
+		if !ok || x.path != y.path || len(x.paths) != len(y.paths) do return false
+		for p, i in x.paths do if p != y.paths[i] do return false
+		return true
 	case Create_File:
 		y, ok := b.(Create_File)
 		return ok && x.path == y.path

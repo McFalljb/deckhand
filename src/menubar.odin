@@ -81,12 +81,12 @@ MENUBAR := [?]Bar_Item {
 		{action = "save_file", ok = proc() -> bool {return editor_dirty(tab_editor())}},
 	}},
 	{title = "Edit", sub = []Bar_Item {
-		{id = "undo", title = "Undo", keys = "⌘Z", ok = edit_undo_ok},
+		{id = "undo", title = "Undo", keys = "⌘Z", ok = proc() -> bool {return edit_undo_ok() || files_undo_ok()}}, // the Files tree's too (ui_files_undo.odin)
 		{id = "redo", title = "Redo", keys = "⇧⌘Z", ok = edit_undo_ok},
 		SEP,
-		{id = "cut", title = "Cut", keys = "⌘X", ok = proc() -> bool {return edit_target() == .Field || edit_target() == .Editor && !tab_editor().readonly}},
-		{id = "copy", title = "Copy", keys = "⌘C", ok = proc() -> bool {return edit_target() != .None}},
-		{id = "paste", title = "Paste", keys = "⌘V", ok = proc() -> bool {t := edit_target(); return t == .Field || t == .Terminal || t == .Editor && !tab_editor().readonly}},
+		{id = "cut", title = "Cut", keys = "⌘X", ok = proc() -> bool {return edit_target() == .Field || edit_target() == .Editor && !tab_editor().readonly || files_tree_keys()}},
+		{id = "copy", title = "Copy", keys = "⌘C", ok = proc() -> bool {return edit_target() != .None || files_tree_keys()}},
+		{id = "paste", title = "Paste", keys = "⌘V", ok = proc() -> bool {t := edit_target(); return t == .Field || t == .Terminal || t == .Editor && !tab_editor().readonly || files_tree_keys() && files_clip_has()}},
 		{id = "select_all", title = "Select all", keys = "⌘A", ok = proc() -> bool {t := edit_target(); return t == .Field || t == .Editor}},
 		SEP,
 		{action = "find_in_file", title = "Find…"},

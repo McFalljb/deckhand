@@ -2154,7 +2154,8 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 // use it (the user, or a caller trusted for this class). With a token: it must
 // match a parked command with the same target, and the resending caller must
 // be the user or that same trusted caller.
-confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false) -> (r: Result, proceed: bool, changed: bool) {
+confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false, skip := false) -> (r: Result, proceed: bool, changed: bool) {
+	if skip && token == "" && !force_ask do return {}, true, false // the command's own rule says no confirmation (files_delete_unasked)
 	mode := force_ask ? Confirm_Mode.Ask : confirm_mode(caller, class) // force_ask: the user confirms, whatever the policy
 	if mode == .Auto do return {}, true, false
 	summary := asked_by(caller, what)

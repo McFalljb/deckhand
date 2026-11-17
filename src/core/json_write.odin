@@ -876,6 +876,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 			key(&w, "paths")
 			write_strings(w.b, c.paths)
 		}
+		if c.undoable do kv_bool(&w, "undoable", true)
 		token(&w, c.confirm, redact)
 	case Reveal_In_Finder:
 		kv_str(&w, "path", c.path)

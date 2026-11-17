@@ -2293,11 +2293,11 @@ editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file
 when you have not edited it, and asks when you have. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
-installed, once per account, the last used first; one starts at once). Over a Claude, Codex or
-pi tab, a strip shows the window's bars as text (held messages, hooks not running, an old
-version, Codex signed out, the hot-reload bars) with their buttons where a browser may use them
-(**Send now**, **Drop**, **Reload**, **Restart**, **Restart anyway**, **Later**, copying the
-update command); their **Dismiss** and **Details** are the window's.
+installed, once per account with the project's own first, the last used agent first; one starts
+at once). Over a Claude, Codex or pi tab, a strip shows the window's bars as text (held messages,
+hooks not running, an old version, Codex signed out, the hot-reload bars) with their buttons where
+a browser may use them (**Send now**, **Drop**, **Reload**, **Restart**, **Restart anyway**,
+**Later**, copying the update command); their **Dismiss** and **Details** are the window's.
 
 **Not in a browser:** browser tabs and app tabs (they show a note there; open them at the Mac),
 adding or removing machines, **Continue this conversation on <machine>**, the Settings page's

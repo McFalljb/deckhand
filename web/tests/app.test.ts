@@ -265,6 +265,19 @@ test("status strip: a tab's own bars, then its harness's hot-reload bars; none f
   assert.deepEqual(barsFor(s, tab(5, { claude_tab: {} })), []);
 });
 
+test("new session: a project whose picker differs (its last used account) gets its own rows, first as the native picker's", () => {
+  const s = new Store();
+  const work = { harness: "claude", label: "Claude Code · work", account: "/h/.claude-work" };
+  const home = { harness: "claude", label: "Claude Code · home", account: "/h/.claude" };
+  s.applyFull({ version: 1, state: {
+    projects: { projects: [{ id: 7, group: "projects", machine: 0 }, { id: 8, group: "projects", machine: 0 }] },
+    web: { watch: [], new: [{ machine: 0, projects: [work, home], chats: [work, home], note: "", claude_tab: [], codex_tab: [], project_rows: [{ project: 7, rows: [home, work] }] }] },
+  } });
+  assert.deepEqual(newSessionChoices(s, 7).map((c) => c.label), ["Claude Code · home", "Claude Code · work"], "project 7: its last used first");
+  assert.deepEqual(newSessionChoices(s, 7)[0].cmd, { type: "new_claude_session", project_id: 7, account: "/h/.claude" });
+  assert.deepEqual(newSessionChoices(s, 8).map((c) => c.label), ["Claude Code · work", "Claude Code · home"], "another project: its kind's list");
+});
+
 test("status strip: Restart anyway is carried as the core wrote it, never the strip's primary button", () => {
   const s = new Store();
   const actions = [

@@ -2403,6 +2403,11 @@ PENDING_PER_CALLER :: 3 // confirmations one caller (not the user) may have wait
 files_session_close_if_empty :: proc(id: u64, caller: Caller) -> bool {
 	s := find_session(id)
 	if s == nil || s.agent != .Files || len(s.tabs) > 0 do return false
+	if files_open_pending(id) { 	// an open on its way: its tab comes; no pane meanwhile (whole without one)
+		session_panes_free(s)
+		s.active_tab = 0
+		return false
+	}
 	close_session(id, caller)
 	return true
 }
@@ -2436,7 +2441,7 @@ close_session :: proc(id: u64, caller: Caller) {
 	if state.shown_before == id do state.shown_before = 0
 	if state.current_session == id {
 		state.current_session = 0
-		#reverse for o in state.open_sessions do if !o.home {
+		#reverse for o in state.open_sessions do if !o.home && !(o.agent == .Files && len(o.tabs) == 0) { // never an empty Files session (its open on the way)
 			focus_session(o.id, caller) // an agent's close never starts the next one's Claude tabs
 			break
 		}

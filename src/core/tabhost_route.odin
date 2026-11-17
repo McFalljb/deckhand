@@ -666,6 +666,7 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 			if c.line > 0 do routed(Goto_Line{tab_id = id, line = c.line, col = c.col}, caller, request_id)
 			return {ok = true, created_id = id}, true
 		}
+		files_open_begin(s) // a Files session's open in flight: neither closed nor swept meanwhile
 		return routed(Open_File{path = p, line = c.line, col = c.col, session = s.id, preview = c.preview}, caller, request_id, new_id())
 	case Markdown_Open:
 		s, p, files, err := file_open_target(caller, c.session, c.path)
@@ -682,6 +683,7 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 			if c.anchor != "" do routed(Markdown_Scroll{tab_id = id, anchor = c.anchor}, caller, request_id)
 			return {ok = true, created_id = id}, true
 		}
+		files_open_begin(s)
 		return routed(Markdown_Open{path = p, session = s.id, anchor = c.anchor}, caller, request_id, new_id())
 	case Diff_File:
 		s, _, et := editor_tab_of(c.tab_id)
@@ -738,6 +740,7 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 // (machine_page.odin keeps its forward with it, even when the window answers pending).
 browser_open_tab :: proc(s: ^Open_Session, url: string, caller: Caller, request_id: u64) -> (r: Result, changed: bool, tab_id: u64) {
 	if s.home do return fail("Home has only its pi tab"), false, 0
+	if why := files_only_refusal(s, "a browser tab"); why != "" do return fail(why), false, 0
 	nurl, uerr := browser_url_normalize(url)
 	if uerr != "" do return fail(uerr), false, 0
 	if ferr := browser_file_check(caller, nurl); ferr != "" do return fail(ferr), false, 0
@@ -818,7 +821,8 @@ tab_host_after :: proc(cmd: Command, caller: Caller, tab_id: u64, r: ^Result, wi
 		r.created_id = tab_id
 		return true
 	case Open_File:
-		if !r.ok do return files_session_close_if_empty(c.session, caller) // a Files session made for it goes
+		last := files_open_end(c.session)
+		if !r.ok do return last && files_session_close_if_empty(c.session, caller) // a Files session made for it goes (no other open on its way)
 		s := find_session(c.session)
 		if s == nil do return false
 		tab := Tab{id = tab_id, kind = Editor_Tab{path = strings.clone(c.path), preview = c.preview}, title = title_for(c.path, .File), status = .Running}
@@ -851,7 +855,8 @@ tab_host_after :: proc(cmd: Command, caller: Caller, tab_id: u64, r: ^Result, wi
 		r.created_id = tab_id
 		return true
 	case Markdown_Open:
-		if !r.ok do return files_session_close_if_empty(c.session, caller)
+		last := files_open_end(c.session)
+		if !r.ok do return last && files_session_close_if_empty(c.session, caller)
 		s := find_session(c.session)
 		if s == nil do return false
 		pane_add_tab(s, Tab{id = tab_id, kind = Markdown_Tab{path = strings.clone(c.path)}, title = strings.clone(filepath.base(c.path)), status = .Running})
@@ -1181,6 +1186,7 @@ file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Ope
 	s = session != 0 ? find_session(session) : caller_session(caller)
 	if s != nil && s.home && session == 0 do s = cur()
 	create := files_session_may_create(caller) && (s == nil || s.agent == .Files || session == 0)
+	if create && s != nil && s.home do s = nil // Home holds only its pi tab: the file's project decides
 	if s == nil && !create {
 		if caller.kind == .UI do return nil, "", nil, no_session_for_file(path) // the user's, over a hub link
 		return nil, "", nil, "no open session to open the file in"
@@ -1205,7 +1211,9 @@ file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Ope
 	if create {
 		fp := file_project(p)
 		if fp == nil && s == nil do return nil, "", nil, no_session_for_file(p)
-		if fp != nil && (s == nil || s.project_id != fp.id) do return nil, p, fp, ""
+		// a file the session's folder, project or tree holds (a nested project, a worktree inside
+		// it) stays in it; only one outside goes to its project's Files session
+		if fp != nil && (s == nil || !session_holds_file(s, p)) do return nil, p, fp, ""
 	}
 	return s, p, nil, ""
 }

@@ -119,7 +119,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	if files {
 		fp := file_project(p)
 		if fp == nil && s == nil do return fail(no_session_for_file(p)), false
-		if fp != nil && (s == nil || s.project_id != fp.id) do s = files_session_ensure(fp)
+		if fp != nil && (s == nil || !session_holds_file(s, p)) do s = files_session_ensure(fp) // one the session holds stays in it
 	}
 	kind := md ? "markdown" : "editor"
 	data :: proc(kind, path: string, session: u64, again: bool) -> string {

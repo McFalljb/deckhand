@@ -18,3 +18,9 @@ files_open :: proc(path: string, preview := false) {
 files_reveals :: proc(file, root: string) -> bool {
 	return root != "" && strings.has_prefix(file, strings.concatenate({root, "/"}, context.temp_allocator))
 }
+
+// The Files tree shows s's own folder (not a project selected since), and s can hold a terminal
+// (not a Files session): "Open terminal here" is offered only then.
+files_tree_is_session :: proc(s: ^core.Open_Session) -> bool {
+	return s != nil && !s.home && s.agent != .Files && s.cwd != "" && core.files_base() == core.fs_real(s.cwd)
+}

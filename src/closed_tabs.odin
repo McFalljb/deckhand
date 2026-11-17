@@ -70,7 +70,7 @@ closed_tab_free :: proc(x: Closed_Tab) {
 // The user closes tab_id by hand (its ×, ⌘W, its menu's Close tab).
 closed_tab_record :: proc(tab_id: u64) {
 	s, tab, i := find_tab(tab_id)
-	if s == nil || tab == nil || i == 0 || s.home || s.machine != 0 || tab.machine != 0 do return
+	if s == nil || tab == nil || (i == 0 && core.session_main_tab(s) != 0) || s.home || s.machine != 0 || tab.machine != 0 do return // a Files session's first tab is any file
 	x := Closed_Tab{tab_id = tab_id, session = s.id}
 	#partial switch k in tab.kind {
 	case core.Shell_Tab:    x.kind, x.what = .Shell, tab.cwd != "" ? tab.cwd : s.cwd
@@ -163,6 +163,12 @@ closed_tab_reopen :: proc() {
 		defer closed_tab_free(x)
 		if _, still, _ := find_tab(x.tab_id); still != nil do continue // its close was cancelled
 		s := core.find_session(x.session)
+		if s == nil && (x.kind == .Editor || x.kind == .Markdown) {
+			// its session went with it (a Files session's last tab): the file opens by its project
+			// again, in that project's Files session (core/files_session.odin)
+			ui_do(x.kind == .Editor ? core.Command(core.Open_File{path = x.what}) : core.Command(core.Markdown_Open{path = x.what}))
+			return
+		}
 		if s == nil || s.home || s.missing do continue
 		open: core.Command
 		switch x.kind {

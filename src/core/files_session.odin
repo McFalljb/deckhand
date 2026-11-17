@@ -30,6 +30,13 @@ files_follow: struct {
 	by_project: bool,
 }
 
+// The user clicked the selected project's row again (ui_sidebar.odin): the tree shows it, while
+// a session of another project stays on screen. This window's alone, as files_follow.
+files_tree_pick_project :: proc() {
+	if cs := cur(); cs != nil do files_tree_follows_session(cs) // seen first, so this is the latest
+	files_follow.by_project = true
+}
+
 // True: the Files tree shows cs's folder (cs on screen); false: the selected project's.
 files_tree_follows_session :: proc(cs: ^Open_Session) -> bool {
 	f := &files_follow
@@ -51,6 +58,22 @@ files_tree_name :: proc() -> string {
 	if base == "" do return ""
 	if p := file_project(strings.concatenate({base, "/x"}, context.temp_allocator)); p != nil do return project_display(p^)
 	return filepath.base(base)
+}
+
+// At most this many Files sessions, and file tabs in each, come back from the saved workspace.
+FILES_SESSIONS_MAX :: 64
+FILES_TABS_MAX :: 64
+
+// s holds file p: inside its folder, its project's, or the folder its project's Files tree shows
+// (a checkout). A file a nested project or a worktree inside it also holds stays in s.
+session_holds_file :: proc(s: ^Open_Session, p: string) -> bool {
+	rp := fs_real(p)
+	if within(rp, fs_real(s.cwd)) do return true
+	if proj := find_project(s.project_id); proj != nil && proj.machine == 0 {
+		root := fs_real(proj.cwd)
+		if within(rp, root) || within(rp, files_root_for(root)) do return true
+	}
+	return false
 }
 
 // The user's open may make a project's Files session.
@@ -84,16 +107,42 @@ files_session_of :: proc(project_id: u64) -> ^Open_Session {
 // The project's Files session, made (empty, not current) when there is none.
 files_session_ensure :: proc(p: ^Project) -> ^Open_Session {
 	if s := files_session_of(p.id); s != nil do return s
+	// no pane until its first tab (pane_add_tab makes it): a session without panes is whole
 	s := Open_Session{id = new_id(), agent = .Files, project_id = p.id, cwd = strings.clone(p.cwd)}
-	session_panes_init(&s) // one empty pane: the file's tab goes in it
 	append(&state.open_sessions, s)
 	files_made[s.id] = time.tick_now()
 	return &state.open_sessions[len(state.open_sessions) - 1]
 }
 
-// When each Files session was made, until its first tab came (files_sessions_sweep).
+// When each Files session was made or last given an open, until it has a tab (files_sessions_sweep),
+// and the opens of each on their way to the window (an answer still to come).
 @(private = "file")
 files_made: map[u64]time.Tick
+@(private = "file")
+files_pending: map[u64]int
+
+// An open of a file into s is on its way to the window (s a Files session): s is not closed or
+// swept for being empty before its answer (files_open_end).
+files_open_begin :: proc(s: ^Open_Session) {
+	if s == nil || s.agent != .Files do return
+	files_pending[s.id] += 1
+	files_made[s.id] = time.tick_now()
+}
+
+// An open of a file into Files session id is on its way.
+files_open_pending :: proc(id: u64) -> bool {return files_pending[id] > 0}
+
+// Its answer came: true when no other open of that session is on its way.
+files_open_end :: proc(id: u64) -> bool {
+	n, ok := files_pending[id]
+	if !ok do return true
+	if n <= 1 {
+		delete_key(&files_pending, id)
+		return true
+	}
+	files_pending[id] = n - 1
+	return false
+}
 
 FILES_SWEEP_AFTER :: 30 * time.Second
 
@@ -103,16 +152,19 @@ FILES_SWEEP_AFTER :: 30 * time.Second
 files_sessions_sweep :: proc(after := FILES_SWEEP_AFTER) {
 	if len(files_made) == 0 do return
 	gone := make([dynamic]u64, context.temp_allocator)
+	empty := make([dynamic]u64, context.temp_allocator)
 	for id, at in files_made {
 		s := find_session(id)
-		if s == nil || len(s.tabs) > 0 do append(&gone, id) // closed, or its file came: nothing to sweep
-		else if time.tick_since(at) >= after {
-			append(&gone, id)
-			files_session_close_if_empty(id, {kind = .Internal})
-			window_state_changed()
+		stale := time.tick_since(at) >= after
+		if s == nil || stale do delete_key(&files_pending, id) // gone, or answers that never came (the window went): forgotten
+		switch {
+		case s == nil:          append(&gone, id)
+		case len(s.tabs) > 0:   if !files_open_pending(id) do append(&gone, id) // its file came: nothing to sweep
+		case stale:             append(&gone, id); append(&empty, id)
 		}
 	}
 	for id in gone do delete_key(&files_made, id)
+	for id in empty do if files_session_close_if_empty(id, {kind = .Internal}) do window_state_changed()
 }
 
 // Why s cannot hold what (a terminal, a browser tab, …): "" = it can (not a Files session).

@@ -1276,7 +1276,7 @@ write_files_sessions :: proc(w: ^W) {
 read_files_sessions :: proc(root: json.Object, has_current: bool) {
 	list, _ := root["files_sessions"].(json.Array)
 	for v, i in list {
-		if i >= 256 do break
+		if i >= FILES_SESSIONS_MAX do break
 		o, ok := v.(json.Object)
 		if !ok do continue
 		pcwd, _ := o["project"].(json.String)
@@ -1287,7 +1287,7 @@ read_files_sessions :: proc(root: json.Object, has_current: bool) {
 		saved, _ := o["tabs"].(json.Array)
 		tabs := make([dynamic]Restore_Tab, context.temp_allocator)
 		for tv, j in saved {
-			if j >= 256 do break
+			if j >= FILES_TABS_MAX do break
 			to, tok := tv.(json.Object)
 			if !tok do continue
 			kind, _ := to["kind"].(json.String)

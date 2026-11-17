@@ -368,3 +368,192 @@ files_session_empty_is_swept :: proc(t: ^testing.T) {
 	core.files_sessions_sweep(0)
 	testing.expect(t, core.files_session_of(state.projects[0].id) != nil)
 }
+
+@(private = "file")
+fo_agent :: proc(project: u64, cwd: string) -> u64 {
+	a := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%d", core.new_id()), project_id = project, cwd = strings.clone(cwd)}
+	append(&a.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running})
+	a.active_tab = a.tabs[0].id
+	core.session_panes_init(&a)
+	append(&state.open_sessions, a)
+	return a.id
+}
+
+// Review P1: nested projects and a worktree inside the repository: a file the session on screen
+// holds (its folder, its project's, its tree's) opens in it, never in a nested project's new
+// Files session; only a file outside it goes to its project's Files session.
+@(test)
+files_open_nested_projects_stay_in_the_session :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir, other := fo_setup()
+	defer fo_done(dir)
+	ui := core.Caller{kind = .UI}
+	// proj/web is a project too (an agent ran there once), and proj/.worktrees/wt one more
+	for sub in ([]string{"web/src", ".worktrees/wt"}) do os.make_directory_all(fmt.tprintf("%s/%s", dir, sub))
+	_ = os.write_entire_file(fmt.tprintf("%s/web/src/x.ts", dir), transmute([]u8)string("x\n"))
+	_ = os.write_entire_file(fmt.tprintf("%s/.worktrees/wt/y.txt", dir), transmute([]u8)string("y\n"))
+	append(&state.projects, core.Project{id = core.new_id(), cwd = fmt.aprintf("%s/web", dir), label = strings.clone("web")})
+	append(&state.projects, core.Project{id = core.new_id(), cwd = fmt.aprintf("%s/.worktrees/wt", dir), label = strings.clone("wt")})
+	web_id := state.projects[2].id
+	aid := fo_agent(state.projects[0].id, dir)
+	testing.expect(t, core.run_command(core.Focus_Session{session = aid}, ui).ok)
+	files_open(fmt.tprintf("%s/web/src/x.ts", dir))
+	testing.expect_value(t, toast.text, "")
+	testing.expect_value(t, state.current_session, aid)
+	testing.expect_value(t, len(core.find_session(aid).tabs), 2)
+	testing.expect_value(t, fo_files(), 0)
+	files_open(fmt.tprintf("%s/.worktrees/wt/y.txt", dir))
+	testing.expect_value(t, len(core.find_session(aid).tabs), 3)
+	r := core.run_command(core.Show_File{path = fmt.tprintf("%s/web/src/x.ts", dir)}, {kind = .UI, web = true}) // a paired browser's tree
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, fo_files(), 0)
+	// a session running in a checkout outside the project holds its checkout's files
+	wt := fmt.tprintf("%s/wt-out", strings.trim_suffix(dir, "/proj"))
+	os.make_directory_all(wt)
+	_ = os.write_entire_file(fmt.tprintf("%s/z.txt", wt), transmute([]u8)string("z\n"))
+	bid := fo_agent(state.projects[0].id, wt)
+	testing.expect(t, core.run_command(core.Focus_Session{session = bid}, ui).ok)
+	files_open(fmt.tprintf("%s/z.txt", wt))
+	testing.expect_value(t, len(core.find_session(bid).tabs), 2)
+	// outside the session: the file's project's Files session (the nested one's, the deepest)
+	files_open(fmt.tprintf("%s/o.txt", other))
+	testing.expect(t, core.files_session_of(state.projects[1].id) != nil)
+	state.current_session = 0
+	files_open(fmt.tprintf("%s/web/src/x.ts", dir))
+	testing.expect(t, core.files_session_of(web_id) != nil)
+	// proj's Files session on screen holds web's file too
+	state.current_session = 0
+	files_open(fmt.tprintf("%s/a.txt", dir))
+	pf := core.files_session_of(state.projects[0].id)
+	testing.expect(t, pf != nil && state.current_session == pf.id)
+	files_open(fmt.tprintf("%s/web/src/x.ts", dir))
+	testing.expect_value(t, len(core.files_session_of(state.projects[0].id).tabs), 2)
+}
+
+// Review P2: a Files session is never a host for a machine's tab (Log in…, a machine's web page),
+// and no path puts a browser tab into one; "Open terminal here" only into the session whose
+// folder the tree shows.
+@(test)
+files_session_hosts_no_machine_tab :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir, other := fo_setup()
+	defer fo_done(dir)
+	ui := core.Caller{kind = .UI}
+	files_open(fmt.tprintf("%s/a.txt", dir))
+	f := core.cur()
+	testing.expect(t, f != nil && f.agent == .Files)
+	testing.expect(t, core.machine_local_session() == nil)
+	r, _, _ := core.browser_open_tab(f, "https://example.com", ui, 0)
+	testing.expect_value(t, r.error, "Start a session in proj for a browser tab")
+	testing.expect_value(t, len(f.tabs), 1)
+	aid := fo_agent(state.projects[1].id, other)
+	testing.expect_value(t, core.machine_local_session().id, aid) // the agent session, not the Files one on screen
+	// the tree's menu: Open names no session; Open terminal here only for A's own tree
+	has_terminal :: proc(path: string) -> bool {
+		items := make([dynamic]core.Menu_Item, context.temp_allocator)
+		files_menu_items(path, &items)
+		for it in items do if it.label == "Open terminal here" do return true
+		return false
+	}
+	testing.expect(t, !has_terminal(fmt.tprintf("%s/a.txt", dir)), "a Files session on screen: no terminal")
+	testing.expect(t, core.run_command(core.Focus_Session{session = aid}, ui).ok)
+	testing.expect(t, has_terminal(fmt.tprintf("%s/o.txt", other)))
+	// proj is still the selected project (A was focused without selecting its own): a click on
+	// its row shows it again
+	testing.expect_value(t, state.selected_project, state.projects[0].id)
+	testing.expect_value(t, core.files_root(), other)
+	project_row_click(state.projects[0].id)
+	testing.expect_value(t, core.files_root(), dir)
+	testing.expect(t, !has_terminal(fmt.tprintf("%s/a.txt", dir)), "the tree shows another project: no terminal in A")
+}
+
+// Review P3: opens on their way keep their Files session (a second open is never lost); closing a
+// session never lands on an empty Files session; Home on screen still opens by the project.
+@(test)
+files_session_pending_opens_and_landing :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir, other := fo_setup()
+	defer fo_done(dir)
+	ui := core.Caller{kind = .UI}
+	s := core.files_session_ensure(&state.projects[0])
+	sid := s.id
+	core.files_open_begin(s)
+	core.files_open_begin(s)
+	testing.expect(t, !core.files_open_end(sid)) // one more on its way
+	testing.expect(t, !core.files_session_close_if_empty(sid, ui), "an open on its way: kept")
+	core.files_sessions_sweep() // not stale yet
+	testing.expect(t, core.find_session(sid) != nil)
+	testing.expect(t, core.files_open_end(sid))
+	testing.expect(t, core.files_session_close_if_empty(sid, ui))
+	// stale opens (the window went) are forgotten by the sweep, which then closes it
+	s = core.files_session_ensure(&state.projects[0])
+	sid = s.id
+	core.files_open_begin(s)
+	core.files_sessions_sweep(0)
+	testing.expect(t, core.find_session(sid) == nil)
+
+	// closing the session on screen: the next is never an empty Files session
+	b := fo_agent(state.projects[1].id, other)
+	e := core.files_session_ensure(&state.projects[0]).id
+	a := fo_agent(state.projects[1].id, other)
+	core.find_session(a).tabs[0].status = .Exited // nothing running: closes without asking
+	testing.expect(t, core.run_command(core.Focus_Session{session = a}, ui).ok)
+	testing.expect(t, core.run_command(core.Close_Session{session = a}, ui).ok)
+	testing.expect_value(t, state.current_session, b)
+	testing.expect(t, core.find_session(e) != nil)
+	core.files_sessions_sweep(0)
+	testing.expect(t, core.find_session(e) == nil)
+
+	// Home on screen: a tree click opens by the file's project
+	h := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("home-1"), home = true, cwd = strings.clone(dir)}
+	append(&h.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = strings.clone("Home"), status = .Running})
+	h.active_tab = h.tabs[0].id
+	core.session_panes_init(&h)
+	append(&state.open_sessions, h)
+	state.home = h.id
+	state.current_session = h.id
+	files_open(fmt.tprintf("%s/a.txt", dir))
+	testing.expect_value(t, toast.text, "")
+	testing.expect(t, core.files_session_of(state.projects[0].id) != nil)
+}
+
+// Review P3 (iv): ⇧⌘T after closing a Files session's last tab opens the file again, in its
+// project's Files session (made again).
+@(test)
+files_session_reopen_last_closed :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir, _ := fo_setup()
+	defer fo_done(dir)
+	files_open(fmt.tprintf("%s/a.txt", dir))
+	f := core.cur()
+	testing.expect(t, f != nil && f.agent == .Files)
+	close_tab_click(f.tabs[0].id)
+	core.inbox_drain()
+	testing.expect_value(t, fo_files(), 0)
+	closed_tab_reopen()
+	core.inbox_drain()
+	g := core.files_session_of(state.projects[0].id)
+	testing.expect(t, g != nil)
+	if g != nil do testing.expect_value(t, fo_titles(g), "a.txt")
+}
+
+// Review P3 (vi): at most FILES_TABS_MAX file tabs come back per Files session.
+@(test)
+files_session_restore_is_capped :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir, _ := fo_setup()
+	defer fo_done(dir)
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"v":1,"projects":[{{"cwd":"%s"}}],"open_sessions":[],"files_sessions":[{{"project":"%s","tabs":[`, dir, dir)
+	for i in 0 ..< 70 {
+		name := fmt.tprintf("%s/f%d.txt", dir, i)
+		_ = os.write_entire_file(name, transmute([]u8)string("f\n"))
+		if i > 0 do strings.write_byte(&b, ',')
+		fmt.sbprintf(&b, `{{"kind":"editor","path":"%s"}}`, name)
+	}
+	strings.write_string(&b, `],"active_tab":0}]}`)
+	testing.expect_value(t, core.workspace_restore(strings.to_string(b)), "")
+	f := core.files_session_of(state.projects[0].id)
+	testing.expect(t, f != nil)
+	if f != nil do testing.expect_value(t, len(f.tabs), core.FILES_TABS_MAX)
+}

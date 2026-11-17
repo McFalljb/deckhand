@@ -598,6 +598,7 @@ tree_sync :: proc() {
 project_row_click :: proc(id: u64) {
 	tree_sync()
 	if id == state.selected_project {
+		core.files_tree_pick_project() // the Files tab shows it again (another project's session on screen)
 		tree.folded = !tree.folded
 		app.redraw = true
 		return

@@ -1248,7 +1248,7 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 	append(items, core.Menu_Item{label = "Reveal in Finder", cmd = core.Reveal_In_Finder{path = path}})
 	append(items, core.Menu_Item{label = "Copy path", files = .Copy_Path})
 	append(items, core.Menu_Item{label = "Copy relative path", files = .Copy_Relative})
-	if s := files_session(); s != 0 {
+	if s := files_session(); s != 0 && files_tree_is_session(core.cur()) { // only into the session whose folder the tree shows
 		dir := is_dir ? path : filepath.dir(path)
 		append(items, core.Menu_Item{label = "Open terminal here", cmd = core.New_Shell_Tab{session = s, cwd = dir}})
 	}
@@ -1385,7 +1385,7 @@ files_commit_edit :: proc(blur := false) {
 	case .New_File:
 		path = strings.concatenate({fu.target, "/", name}, context.temp_allocator)
 		r = ui_run(core.Create_File{path = path})
-		if r.ok do ui_do(core.Open_File{path = path, session = files_session()})
+		if r.ok do ui_do(core.Open_File{path = path}) // by the file's project (files_open)
 	case .New_Folder:
 		path = strings.concatenate({fu.target, "/", name}, context.temp_allocator)
 		r = ui_run(core.Create_Dir{path = path})
@@ -1484,7 +1484,7 @@ files_filter_key :: proc(key: sapp.Keycode) -> bool {
 			core.files_select_in(core.tree_view(), rows[0].path)
 			files_scroll_to(0, len(rows))
 			// Enter while filtering opens the best match
-			if key != .DOWN && rows[0].kind == .File && state.files.filter != "" do ui_do(core.Open_File{path = rows[0].path, session = files_session()})
+			if key != .DOWN && rows[0].kind == .File && state.files.filter != "" do ui_do(core.Open_File{path = rows[0].path})
 		}
 		ui_do(core.Set_Focus{"files"})
 		return true

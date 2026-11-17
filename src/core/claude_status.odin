@@ -140,7 +140,7 @@ claude_status_tick :: proc(now := time.Tick{}) {
 			if v := tab_status_view(tab); v.source == .Osc7501 && v.state != .Blocked do up = true
 			if up do r.up = now
 		}
-		if ct.codex && tab.machine == 0 { // another machine's: its OSC 7501 says nothing of this Mac's sign-in
+		if ct.harness == .Codex && tab.machine == 0 { // another machine's: its OSC 7501 says nothing of this Mac's sign-in
 			if v := tab_status_view(tab); v.source == .Osc7501 {
 				if !r.osc {
 					r.osc = true
@@ -172,8 +172,8 @@ claude_status_tick :: proc(now := time.Tick{}) {
 claude_hooks_silent :: proc(tab: ^Tab, now := time.Tick{}) -> bool {
 	if replica_process do return tab.live.claude_quiet // the core's (Tab_Live)
 	ct, is := &tab.kind.(Claude_Tab)
-	if is && ct.codex && codex_plain_version(tab.id) != "" do return false // started without hooks (codex.odin): its bar says so
-	if is && ct.codex && tab.status == .Running {
+	if is && ct.harness == .Codex && codex_plain_version(tab.id) != "" do return false // started without hooks (codex.odin): its bar says so
+	if is && ct.harness == .Codex && tab.status == .Running {
 		// Codex: no hook in this run, CLAUDE_HOOKS_GRACE after its first turn began (OSC 7501)
 		r, has := status_rt[tab.id]
 		if !has || r.start != claude_wait_run(tab.id) || r.heard || r.worked == {} do return false
@@ -242,7 +242,7 @@ claude_update_command_now :: proc() -> string {
 codex_signed_out_due :: proc(tab: ^Tab) -> bool {
 	ct, is := tab.kind.(Claude_Tab)
 	// another machine's tab: this Mac's sign-in says nothing of it (its own screen is in its terminal)
-	if !is || !ct.codex || tab.machine != 0 || tab.status != .Running || codex_login_state(ct.account) != .Signed_Out do return false
+	if !is || ct.harness != .Codex || tab.machine != 0 || tab.status != .Running || codex_login_state(ct.account) != .Signed_Out do return false
 	r, has := status_rt[tab.id]
 	return !(has && r.start == claude_wait_run(tab.id) && r.osc)
 }
@@ -250,7 +250,7 @@ codex_signed_out_due :: proc(tab: ^Tab) -> bool {
 // The version a tab's Claude Code started with, when it is old ("" = new enough or unknown).
 @(private = "file")
 old_version :: proc(tab: ^Tab) -> string {
-	if ct, is := tab.kind.(Claude_Tab); is && ct.codex do return "" // Codex's rule is codex_start's
+	if ct, is := tab.kind.(Claude_Tab); is && ct.harness == .Codex do return "" // Codex's rule is codex_start's
 	v := tab.reload.version
 	if !claude_version_below(v, CLAUDE_MIN_VERSION) do return ""
 	return v
@@ -262,7 +262,7 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if tab == nil do return ""
 	if _, is := tab.kind.(Claude_Tab); !is || tab.status != .Running do return ""
 	if replica_process do return tab.live.claude_status // the core's (Tab_Live): its dismissals, its harness
-	if ct := tab.kind.(Claude_Tab); ct.codex {
+	if ct := tab.kind.(Claude_Tab); ct.harness == .Codex {
 		if rt_of(tab.id).dismissed do return ""
 		if codex_signed_out_due(tab) do return CODEX_SIGNED_OUT
 		if v := codex_plain_version(tab.id); v != "" do return codex_plain_text(v, codex_update_hint(harness_path(.Codex))) // started without its hooks (codex.odin)
@@ -293,7 +293,7 @@ claude_status_dismiss :: proc(tab: ^Tab, now := time.Tick{}) {
 		if claude_status_dismiss_send != nil do claude_status_dismiss_send(tab.id)
 		return
 	}
-	if ct, is := tab.kind.(Claude_Tab); is && ct.codex {
+	if ct, is := tab.kind.(Claude_Tab); is && ct.harness == .Codex {
 		rt_of(tab.id).dismissed = true // its bars, for this run
 		return
 	}

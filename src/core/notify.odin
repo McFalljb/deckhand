@@ -390,7 +390,7 @@ notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind, tab_shown
 		title         = notice_text(open_session_title(s)),
 		place         = notice_text(place),
 		claude        = claude,
-		codex         = claude && claude_tab_is_codex(tab^),
+		codex         = claude && tab_harness(tab^) == .Codex,
 	}
 	return notice_post(n)
 }

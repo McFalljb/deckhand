@@ -185,7 +185,7 @@ claude_credential :: proc(p: string) -> bool {
 // Temp-allocated.
 claude_config_dirs :: proc() -> []string {
 	// and every account's folder, found or added, also removed ones (claude_accounts.odin)
-	return claude_account_dirs()
+	return claude_account_dirs(.Claude)
 }
 
 // Whether p (under the config folder c) is the user's config: a CONFIG_FILES file at its top,
@@ -247,7 +247,7 @@ claude_file_class :: proc(path: string) -> Claude_File_Class {
 	case "CLAUDE.md", "CLAUDE.local.md", ".mcp.json": return .Restart
 	}
 	rel := ""
-	for cfg in claude_account_dirs() do if under(p, cfg) {
+	for cfg in claude_account_dirs(.Claude) do if under(p, cfg) {
 		rel = p[len(cfg) + 1:]
 		break
 	}
@@ -338,7 +338,7 @@ claude_version_label :: proc(v: string) -> string {
 // Whether a Claude tab started with another claude than the one on disk.
 claude_reload_outdated :: proc(t: ^Tab) -> bool {
 	v := state.reload.claude.ident
-	if claude_tab_is_codex(t^) do return false // claude's version is not Codex's (codex.odin)
+	if tab_harness(t^) == .Codex do return false // claude's version is not Codex's (codex.odin)
 	return v != "" && t.reload.version != "" && t.reload.version != v
 }
 
@@ -402,7 +402,7 @@ accounts_now :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
 	for x in running_claude() {
 		ct := x.t.kind.(Claude_Tab)
-		d := claude_account_dir(ct.account)
+		d := claude_account_dir(ct.account, .Claude)
 		if d != "" && !slice.contains(out[:], d) do append(&out, d)
 	}
 	slice.sort(out[:])
@@ -415,7 +415,7 @@ accounts_now :: proc() -> []string {
 in_scope_tab :: proc(t: ^Tab, cwd, scope: string) -> bool {
 	if strings.has_prefix(scope, ACCOUNT_SCOPE) {
 		ct, _ := t.kind.(Claude_Tab)
-		return claude_account_dir(ct.account) == scope[len(ACCOUNT_SCOPE):]
+		return claude_account_dir(ct.account, .Claude) == scope[len(ACCOUNT_SCOPE):]
 	}
 	return in_scope(cwd, scope)
 }
@@ -457,7 +457,7 @@ running_claude :: proc() -> []Claude_Running {
 		if s.home do continue
 		for &t in s.tabs {
 			// not Codex tabs (codex.odin): Claude Code's files and version are not theirs
-			if ct, is := t.kind.(Claude_Tab); is && !ct.codex && t.status == .Running do append(&out, Claude_Running{&s, &t})
+			if ct, is := t.kind.(Claude_Tab); is && ct.harness != .Codex && t.status == .Running do append(&out, Claude_Running{&s, &t})
 		}
 	}
 	return out[:]
@@ -619,7 +619,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		return {ok = true}, true
 	case Claude_Restart_Anyway:
 		_, t, ct := claude_tab_of(c.tab_id)
-		if ct == nil || ct.codex do return fail("no such Claude tab"), false
+		if ct == nil || ct.harness == .Codex do return fail("no such Claude tab"), false
 		if t.status != .Running do return fail("Claude is not running in this tab"), false
 		if t.reload.queued != .Restart do return fail("no restart waits in this tab"), false
 		class := claude_restart_class(t)
@@ -814,7 +814,7 @@ claude_reload_note_save :: proc(path: string) {
 	scope := ""
 	plugin := claude_plugin_dir()
 	in_config := false
-	for cfg in claude_account_dirs() do if under(p, cfg) {
+	for cfg in claude_account_dirs(.Claude) do if under(p, cfg) {
 		// only a running account's tabs read it (none running: the default's, for new tabs)
 		running := accounts_now()
 		if len(running) > 0 ? !slice.contains(running, cfg) : cfg != claude_config_dir() do return

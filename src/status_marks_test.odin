@@ -173,7 +173,7 @@ status_mirror_cleaned_and_skew_safe :: proc(t: ^testing.T) {
 	r: core.State
 	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/me/garden"), label = strings.clone("garden")})
 	os := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me/garden"), title = strings.clone("Plant the beans")}
-	tab := core.Tab{id = 10, kind = core.Claude_Tab{}, title = strings.clone("claude"), status = .Running, status_since = time.time_add(now, 10 * time.Minute)}
+	tab := core.Tab{id = 10, kind = core.Claude_Tab{harness = .Claude}, title = strings.clone("claude"), status = .Running, status_since = time.time_add(now, 10 * time.Minute)}
 	tab.prog = {state = .Blocked, kind = .Permission, progress = -1, app = strings.clone("claude-code"), msg = strings.clone("Apply\u202e these\nedits?"), at = now}
 	append(&os.tabs, tab)
 	os.active_tab = 10
@@ -337,7 +337,7 @@ status_marks_claude_tab_row_steady :: proc(t: ^testing.T) {
 	}
 	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 300, .Sessions
 	s := core.find_session(sid)
-	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{session_id = "cl-1"}, title = "claude", status = .Running})
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{session_id = "cl-1", harness = .Claude}, title = "claude", status = .Running})
 	ctab := s.tabs[len(s.tabs) - 1].id
 	append(&state.sessions, core.Session{id = "cl-1", claude = true, path = "/tmp/sm-proj/cl-1.jsonl", title = "A Claude session with a title long enough to be cut"})
 	row_line :: proc() -> string {

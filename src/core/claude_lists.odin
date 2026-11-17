@@ -156,7 +156,7 @@ claude_lists_reset :: proc() {
 @(private = "file")
 claude_lists_dirs :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
-	for a in claude_accounts() do if os.is_dir(a.dir) do append(&out, a.dir)
+	for a in claude_accounts(.Claude) do if os.is_dir(a.dir) do append(&out, a.dir)
 	return out[:]
 }
 

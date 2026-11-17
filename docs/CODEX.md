@@ -8,7 +8,7 @@ in #112): what works, what does not yet, how it was tested, and the rules that k
 `tools/deckhand-cli/hooks.odin`.
 
 **One record, two harnesses.** A Codex tab is a Claude tab record (`Claude_Tab`, `Claude_Record`)
-with `codex` set. Everything that is not about Claude Code itself is shared as it is: the tab's
+with `harness = .Codex` (on the state stream and in the history: the `codex` bool, as before). Everything that is not about Claude Code itself is shared as it is: the tab's
 token and its process check, OSC 7501 status (marks, the bell, the fleet pill, ⌥⌘A, the Attention
 and Deck views), the hooks' `claude.session` and `claude.turn` reports, held prompts, the dead-tab
 bar and Restart, history rows and Resume, the session's place in the left column. A Codex-only
@@ -364,14 +364,14 @@ named `.codex/auth.json`, and everything in a Codex home but its config (`config
 `AGENTS.md`, `AGENTS.override.md`, `prompts/`, `skills/`, `rules/`) is refused wherever Deckhand
 refuses Claude's credentials (`settings_credential`: open, show, upload, list, watch, hard links by
 inode): `sessions/` transcripts, `history.jsonl`, logs and databases included. The Codex homes
-(`claude_account_dirs(codex = true)`): `~/.codex`, the default (`CODEX_HOME`), every account's
+(`claude_account_dirs(.Codex)`): `~/.codex`, the default (`CODEX_HOME`), every account's
 home, and a removed account's while it still holds `auth.json` or `sessions/` (one that never
 held Codex's files is given back); never HOME or a folder above it.
 
 ## 6a. Accounts
 
 An account is a **Codex home**: the folder `CODEX_HOME` names (its sign-in, config, sessions).
-Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/CLAUDE.md §1b):
+Claude's accounts code with harness `.Codex` (`src/core/claude_accounts.odin`; docs/CLAUDE.md §1b):
 
 - **Which**: the default, `CODEX_HOME` as tabs get it when absolute (never HOME or above it), else
   `~/.codex` (`codex_home`); `~/.codex` too while `CODEX_HOME` names another; then the folders the

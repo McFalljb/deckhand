@@ -216,8 +216,8 @@ sp_edit_commit :: proc() {
 		if h, ok := flags_edit_harness(spage.edit.target); ok do r = ui_run(core.Set_Harness_Flags{harness = h, flags = name})
 	case .Rename_Account:
 		if name == "" do break
-		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, codex = true})
-		else do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name})
+		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, harness = .Codex})
+		else do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name, harness = .Claude})
 	case .New_File, .New_Folder, .Rename_File:
 		if err := files_name_error(name); err != "" {
 			r = {error = err}

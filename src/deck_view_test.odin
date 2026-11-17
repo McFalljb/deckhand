@@ -783,11 +783,11 @@ deck_card_harness_peek_and_ring :: proc(t: ^testing.T) {
 	pi := dk_session(100, "Pi one", dk_tab(101, "working", time.Minute))
 	_ = pi
 	cl := dk_tab(201, "working", time.Minute)
-	cl.kind = core.Claude_Tab{}
+	cl.kind = core.Claude_Tab{harness = .Claude}
 	c := dk_session(200, "Claude one", cl)
 	c.agent = .Claude
 	cx := dk_tab(301, "waiting", time.Minute, "Run the migration?")
-	cx.kind = core.Claude_Tab{codex = true}
+	cx.kind = core.Claude_Tab{harness = .Codex}
 	cx.has_term = true
 	x := dk_session(300, "Codex one", cx)
 	x.agent = .Claude

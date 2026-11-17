@@ -221,10 +221,24 @@ One data table, `HARNESS_MANIFEST` in
 covers the checklist only: a new harness adds its rows and its `Harness` value here, and code of
 its own elsewhere (its tab and how it starts, its integration, its flag rule, its sessions found
 on disk). Some of those places are an exhaustive `switch` on `Harness`, so the compiler names
-them (`harness_version_of`, `harness_args_check`, `disk_files`, `disk_first_line`); others are
-not (Claude Code and Codex share the Claude tab kind, `Claude_Tab.codex`; pi has `Pi_Tab`). The
+them (`harness_version_of`, `harness_args_check`, `disk_files`, `disk_first_line`). The
 setup sheet's first step and Settings → Coding agents draw it (`src/ui_harness.odin`). Setup reads the user's harness config and never
 writes it.
+
+**A harness on the Claude tab kind.** Claude Code and Codex share the Claude tab kind: a
+Claude tab, its history record and the commands that start or configure one carry `harness:
+Harness` (`Claude_Tab.harness`, `Claude_Record.harness`, `New_Claude_Tab`, `New_Claude_Session`,
+the account commands, `Set_Claude_Default_Flags`), `.Claude` or `.Codex`; pi has `Pi_Tab`.
+`.Pi` is `Harness`'s zero value and never a Claude tab's: every literal sets the harness, and
+`claude_harness_check` fails a test (or a scene) that starts, records or restores one with
+`.Pi`. Another harness on this kind is a `Harness` value plus the arms the compiler then asks
+for: the exhaustive `switch`es where the harnesses differ (`claude_start`'s dispatch,
+`claude_harness_missing`, the accounts' settings and folders, `marked`, `claude_account_env`),
+plus the one-off `== .Codex` comparisons for wording and rules, which it does not list (search
+for `.Codex`). The wires keep their names: a command's `"harness":"codex"`, workspace.json's tab
+kind `"codex"`, the history's `"codex": true`, and on the state stream the `"codex"` bool
+(`STATE_WIRE_CODEX_BOOLS`, `src/core/state_wire.odin`), so a new harness on this kind needs a
+wire form of its own there too.
 
 **A row** (`Harness_Row`): `harness`; `id` (stable: the state snapshot, Settings rows, the
 runner); `name`; `kind` (`Harness`, `Built_In`: Deckhand's own, ships in the app, never installed,

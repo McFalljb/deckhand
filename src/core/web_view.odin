@@ -354,22 +354,22 @@ web_view_new_choices :: proc(b: ^strings.Builder) {
 	}
 	// New Claude tab / New Codex tab there: once per account while there are several (this
 	// machine's; claude_account_items), [] while that harness is not there
-	tabs :: proc(b: ^strings.Builder, no: u64, codex: bool) {
+	tabs :: proc(b: ^strings.Builder, no: u64, harness: Harness) {
 		strings.write_byte(b, '[')
 		on: bool
-		if no == 0 do on = codex ? codex_installed() : claude_installed()
+		if no == 0 do on = harness == .Codex ? codex_installed() : claude_installed()
 		else {
 			_, claude, cx := machine_harnesses(no)
-			on = codex ? cx : claude
+			on = harness == .Codex ? cx : claude
 		}
 		if on {
 			items := make([dynamic]Menu_Item, context.temp_allocator)
-			if no == 0 do claude_account_items(&items, "", New_Claude_Tab{codex = codex})
-			else do append(&items, Menu_Item{cmd = New_Claude_Tab{codex = codex}})
+			if no == 0 do claude_account_items(&items, "", New_Claude_Tab{harness = harness})
+			else do append(&items, Menu_Item{cmd = New_Claude_Tab{harness = harness}})
 			for it, i in items {
 				c, _ := it.cmd.(New_Claude_Tab)
 				name := ""
-				if c.account != "" do for a in claude_accounts(codex) do if a.dir == c.account do name = a.label
+				if c.account != "" do for a in claude_accounts(harness) do if a.dir == c.account do name = a.label
 				if i > 0 do strings.write_byte(b, ',')
 				strings.write_string(b, `{"account":`)
 				json_quote(b, c.account)
@@ -389,9 +389,9 @@ web_view_new_choices :: proc(b: ^strings.Builder) {
 		strings.write_string(b, `,"chats":`)
 		list(b, no, .Chats)
 		strings.write_string(b, `,"claude_tab":`)
-		tabs(b, no, false)
+		tabs(b, no, .Claude)
 		strings.write_string(b, `,"codex_tab":`)
-		tabs(b, no, true)
+		tabs(b, no, .Codex)
 		strings.write_string(b, `,"note":`)
 		json_quote(b, no == 0 ? NO_HARNESS : machine_no_harness_note(no))
 		if no == 0 do web_view_new_project_rows(b, rows)
@@ -404,7 +404,7 @@ web_view_new_choices :: proc(b: ^strings.Builder) {
 // accounts, its last used account first: claude_account_pick): ,"project_rows":[{project, rows}].
 @(private = "file")
 web_view_new_project_rows :: proc(b: ^strings.Builder, rows: proc(b: ^strings.Builder, p: ^Project)) {
-	if len(claude_accounts(false)) < 2 && len(claude_accounts(true)) < 2 do return
+	if len(claude_accounts(.Claude)) < 2 && len(claude_accounts(.Codex)) < 2 do return
 	strings.write_string(b, `,"project_rows":[`)
 	kinds: [Sidebar_Group]string
 	for g in Sidebar_Group do if g == .Projects || g == .Chats {
@@ -435,9 +435,9 @@ web_view_new_key :: proc() -> u64 {
 	if pi_installed() do k |= 1 << 8
 	if claude_installed() do k |= 1 << 9
 	if codex_installed() do k |= 1 << 10
-	for codex in ([2]bool{false, true}) do if len(claude_accounts(codex)) >= 2 {
+	for h in ([2]Harness{.Claude, .Codex}) do if len(claude_accounts(h)) >= 2 {
 		for &p in state.projects do if p.machine == 0 {
-			k = hash.fnv64a(transmute([]u8)claude_account_pick(&p, codex), k)
+			k = hash.fnv64a(transmute([]u8)claude_account_pick(&p, h), k)
 		}
 	}
 	return k

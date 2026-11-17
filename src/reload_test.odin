@@ -740,7 +740,7 @@ claude_reload_sources :: proc(t: ^testing.T) {
 	core.claude_reload_build({})
 	sess := cr_session(proj)
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 	testing.expect(t, id != 0)
 	core.claude_reload_tick()
 	core.claude_reload_poll_now()
@@ -772,7 +772,7 @@ claude_reload_enabled_plugins :: proc(t: ^testing.T) {
 	cr_w(local, `{}`)
 	sess := cr_session(proj)
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 	testing.expect(t, id != 0)
 	core.claude_reload_tick()
 	core.claude_reload_poll_now()
@@ -830,9 +830,9 @@ claude_reload_restart_flow :: proc(t: ^testing.T) {
 	args := fmt.tprintf("%s/args", base)
 	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	sess := cr_session(proj)
-	idle := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
-	busy := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
-	none := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	idle := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}, harness = .Claude}, R_UI).created_id
+	busy := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
+	none := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556661", source = "startup"}, CR_SCRIPT)
 	core.run_command(core.Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556662", source = "startup"}, CR_SCRIPT)
 	core.run_command(core.Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
@@ -960,7 +960,7 @@ claude_version_drift :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.claude_binary_path(), link)
 	// a running tab records the version on disk
 	sess := cr_session(proj)
-	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556663", source = "startup"}, CR_SCRIPT)
 	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "idle"}, CR_SCRIPT)
 	core.claude_reload_tick()
@@ -1029,9 +1029,9 @@ claude_reload_agent_confirm :: proc(t: ^testing.T) {
 	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	mine_s := cr_session(proj)
 	agent := core.Caller{kind = .Control, tab_id = core.find_session(mine_s).tabs[0].id}
-	mine := core.run_command(core.New_Claude_Tab{session = mine_s}, R_UI).created_id
+	mine := core.run_command(core.New_Claude_Tab{session = mine_s, harness = .Claude}, R_UI).created_id
 	other_s := cr_session(proj)
-	other := core.run_command(core.New_Claude_Tab{session = other_s, args = {"--model", "opus"}}, R_UI).created_id
+	other := core.run_command(core.New_Claude_Tab{session = other_s, args = {"--model", "opus"}, harness = .Claude}, R_UI).created_id
 	for x in ([][2]u64{{mine, 1}, {other, 2}}) {
 		core.run_command(core.Claude_Session_Report{tab_id = x[0], session_id = fmt.tprintf("0c1a0de0-aaaa-4222-8333-44445555668%d", x[1]), source = "startup"}, CR_SCRIPT)
 		core.run_command(core.Claude_Turn_Report{tab_id = x[0], state = "idle"}, CR_SCRIPT)
@@ -1078,7 +1078,7 @@ claude_reload_scope_nested :: proc(t: ^testing.T) {
 	_, _, proj := cr_env("nested")
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	sess := cr_session(proj)
-	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 	core.claude_reload_tick()
 	os.make_directory_all(fmt.tprintf("%s/.claude/rules/sub", proj))
 	p := fmt.tprintf("%s/.claude/rules/sub/x.md", proj)
@@ -1101,9 +1101,9 @@ claude_restart_all :: proc(t: ^testing.T) {
 	args := fmt.tprintf("%s/args", base)
 	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	sess := cr_session(proj)
-	idle := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
-	busy := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
-	none := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	idle := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}, harness = .Claude}, R_UI).created_id
+	busy := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
+	none := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556691", source = "startup"}, CR_SCRIPT)
 	core.run_command(core.Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556692", source = "startup"}, CR_SCRIPT)
 	core.run_command(core.Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
@@ -1170,8 +1170,8 @@ claude_restart_anyway_silent_subagent :: proc(t: ^testing.T) {
 	args := fmt.tprintf("%s/args", base)
 	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	sess := cr_session(proj)
-	held := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
-	other := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	held := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
+	other := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = held, session_id = "0c1a0de0-aaaa-4222-8333-444455556671", source = "startup"}, CR_SCRIPT)
 	core.run_command(core.Claude_Session_Report{tab_id = other, session_id = "0c1a0de0-aaaa-4222-8333-444455556672", source = "startup"}, CR_SCRIPT)
 	core.run_command(core.Claude_Turn_Report{tab_id = held, state = "idle"}, CR_SCRIPT)

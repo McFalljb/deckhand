@@ -231,7 +231,7 @@ harness_flags_no_secret_in_errors :: proc(t: ^testing.T) {
 		r := run_command(cmd, {kind = .UI})
 		testing.expectf(t, !r.ok && !strings.contains(r.error, SECRET), "%v: %q", cmd, r.error)
 	}
-	for cmd in ([]Command{Set_Harness_Flags{harness = .Pi, flags = "--model " + SECRET}, New_Chat{project_id = 1, args = {"--model", SECRET}}, New_Claude_Tab{session = 1, args = {"--x", SECRET}}, New_Claude_Session{project_id = 1, codex = true, args = {"-c", "k=" + SECRET}}}) {
+	for cmd in ([]Command{Set_Harness_Flags{harness = .Pi, flags = "--model " + SECRET}, New_Chat{project_id = 1, args = {"--model", SECRET}}, New_Claude_Tab{session = 1, args = {"--x", SECRET}, harness = .Claude}, New_Claude_Session{project_id = 1, harness = .Codex, args = {"-c", "k=" + SECRET}}}) {
 		ev := event_json(Command_Event{command = cmd, result = {error = "refused"}})
 		testing.expectf(t, !strings.contains(ev, SECRET), "%s", ev)
 		testing.expectf(t, !strings.contains(command_json(cmd, redact = true), SECRET), "the log: %v", cmd)
@@ -279,9 +279,9 @@ harness_flags_history_load :: proc(t: ^testing.T) {
 	hf_reset()
 	defer hf_reset()
 	recs := []Claude_Record {
-		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad501", project = "/w/p", cwd = "/w/p", codex = true, args = {"-p", "work"}},
-		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad502", project = "/w/p", cwd = "/w/p", codex = true, args = {"-c", "model=o3"}},
-		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad503", project = "/w/p", cwd = "/w/p", args = {"--model", "opus"}},
+		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad501", project = "/w/p", cwd = "/w/p", harness = .Codex, args = {"-p", "work"}},
+		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad502", project = "/w/p", cwd = "/w/p", harness = .Codex, args = {"-c", "model=o3"}},
+		{id = "01a1d0d6-5353-7ff3-9308-ff91070ad503", project = "/w/p", cwd = "/w/p", harness = .Claude, args = {"--model", "opus"}},
 	}
 	run_command(Claude_Restore_History{records = recs}, {kind = .Internal})
 	testing.expect_value(t, len(state.claude_history), 3)

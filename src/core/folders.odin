@@ -351,7 +351,7 @@ setup_claude_line :: proc() -> string {
 	if claude {
 		// one account (a config folder there): which; several: the step before listed them
 		which := "Claude Code is installed"
-		if accts := claude_accounts(); len(accts) == 1 && path_kind(accts[0].dir) == .Dir do which = fmt.tprintf("Claude Code is installed (its account: %s)", path_tilde(accts[0].dir))
+		if accts := claude_accounts(.Claude); len(accts) == 1 && path_kind(accts[0].dir) == .Dir do which = fmt.tprintf("Claude Code is installed (its account: %s)", path_tilde(accts[0].dir))
 		if !pi && !codex do return fmt.tprintf("%s: New session starts it.%s", which, NO_PI)
 		if !pi do return fmt.tprintf("%s, and Codex: New session asks which one to start.%s", which, NO_PI)
 		return fmt.tprintf("%s, and %s: New session asks which one to start.%s", which, codex ? "pi and Codex" : "pi", pi_setup_note())

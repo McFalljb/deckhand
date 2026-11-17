@@ -82,14 +82,14 @@ web_bars_json :: proc() -> string {
 			if t.machine != 0 do continue
 			#partial switch &k in t.kind {
 			case Claude_Tab:
-				h := k.codex ? "codex" : "claude"
+				h := k.harness == .Codex ? "codex" : "claude"
 				if msg := claude_status_message(&t); msg != "" {
 					hooks := claude_hooks_silent(&t)
 					bar(&b, &n, t.id, h, "status", hooks ? "error" : "waiting", msg)
 					// the native bar's action: Show settings (hooks), Copy update command (an old
 					// Claude Code); a Codex tab's bars say what to do in Codex itself
-					if !k.codex && hooks do act(&b, true, "Show settings", "settings", `"agents"`)
-					else if !k.codex do if cmd := claude_update_command_now(); cmd != "" do act(&b, true, "Copy update command", "copy", quoted(cmd))
+					if k.harness != .Codex && hooks do act(&b, true, "Show settings", "settings", `"agents"`)
+					else if k.harness != .Codex do if cmd := claude_update_command_now(); cmd != "" do act(&b, true, "Copy update command", "copy", quoted(cmd))
 					strings.write_string(&b, "]}")
 				}
 				if len(k.held) > 0 {

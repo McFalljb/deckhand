@@ -1169,7 +1169,7 @@ confirm_pending :: proc(token: string) {
 		case core.Job_Delete:  cmd = core.Job_Delete{job = c.job, confirm = token}
 		case core.Changes_Discard: cmd = core.Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}
 		case core.Markdown_Follow: cmd = core.Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
-		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, codex = c.codex, confirm = token}
+		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, harness = c.harness, confirm = token}
 		case core.Machine_Remove: cmd = core.Machine_Remove{no = c.no, confirm = token}
 		case core.Set_Machines_Reachable: cmd = core.Set_Machines_Reachable{on = c.on, confirm = token}
 		case core.Set_Web_Access: cmd = core.Set_Web_Access{on = c.on, confirm = token}
@@ -1536,11 +1536,11 @@ launch_project :: proc(r: core.Result) -> u64 {
 // toast says how to install it).
 launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 	if pid == 0 || core.find_project(pid) == nil do return nil // never the project that happened to be selected
-	if claude do return core.New_Claude_Session{project_id = pid}
+	if claude do return core.New_Claude_Session{project_id = pid, harness = .Claude}
 	if !launch_settled(claude) do return nil // not yet: the frame asks again (launch_settled)
 	if !core.pi_installed() {
-		if core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code without pi (harness.odin)
-		if core.codex_installed() do return core.New_Claude_Session{project_id = pid, codex = true} // Codex alone
+		if core.claude_installed() do return core.New_Claude_Session{project_id = pid, harness = .Claude} // Claude Code without pi (harness.odin)
+		if core.codex_installed() do return core.New_Claude_Session{project_id = pid, harness = .Codex} // Codex alone
 	}
 	return core.New_Chat{project_id = pid}
 }

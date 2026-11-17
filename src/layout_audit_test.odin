@@ -593,7 +593,7 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 						state.focus_widget = "setup"
 						// the accounts step: found ones, one typed in without Claude Code's files, a long label, a warning
 						for d, k in ([]string{"/Users/someone/.claude", "/Users/someone/.claude-work", "/Volumes/External/a-very-long-folder-name-for-claude/config-of-the-team"}) {
-							append(&setup_ui.accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(k == 2 ? "A rather long account name for here" : core.claude_account_label_of(d)), orig_label = strings.clone(""), keep = k != 1, fixed = k == 0, hand = k == 2, marked = k != 2})
+							append(&setup_ui.accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(k == 2 ? "A rather long account name for here" : core.claude_account_label_of(d, .Claude)), orig_label = strings.clone(""), keep = k != 1, fixed = k == 0, hand = k == 2, marked = k != 2})
 						}
 						setup_ui.acct_show = true
 						setup_ui.acct_default = 2

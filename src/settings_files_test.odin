@@ -697,7 +697,7 @@ settings_files_claude_default_flags :: proc(t: ^testing.T) {
 	if len(state.pending_confirmations) == 1 {
 		p := state.pending_confirmations[0]
 		testing.expect_value(t, p.summary, core.CLAUDE_SKIP_CONFIRM)
-		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, confirm = p.token}, ui).ok)
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, confirm = p.token, harness = .Claude}, ui).ok)
 	}
 	testing.expect(t, state.settings.claude_skip_permissions)
 	got = rows()

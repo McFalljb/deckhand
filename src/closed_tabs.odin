@@ -172,7 +172,7 @@ closed_tab_reopen :: proc() {
 		case .Claude:
 			args: []string
 			if rec, _ := core.claude_record(x.what); rec != nil do args = rec.args // the user's own resume: its flags
-			open = core.New_Claude_Tab{session = s.id, cwd = x.cwd, resume = x.what, args = args}
+			open = core.New_Claude_Tab{session = s.id, cwd = x.cwd, resume = x.what, args = args, harness = .Claude}
 		}
 		// as a click: the session to the front (the opens show the tab in the session on screen)
 		if state.current_session != s.id do ui_do(core.Focus_Session{session = s.id})

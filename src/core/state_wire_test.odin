@@ -212,7 +212,7 @@ sample_state :: proc() -> State {
 	argv := make([]string, 2)
 	argv[0], argv[1] = "/usr/bin/engine", "--tab"
 	app := Tab{id = 15, kind = App_Tab{argv = argv, cwd = "/Users/x/proj", app_status = .Stalled, exit_code = -1}, title = "engine", pane = 20}
-	cl := Claude_Tab{session_id = "cl-1", readonly = true, turn = .Waiting, model = "opus", ended = .Question, account = "/a"}
+	cl := Claude_Tab{session_id = "cl-1", readonly = true, turn = .Waiting, model = "opus", ended = .Question, account = "/a", harness = .Claude}
 	append(&cl.held, Claude_Held{id = 3, text = "later", who = "Atlas"})
 	claude := Tab{id = 16, kind = cl, title = "Claude", pane = 20}
 	append(&os.tabs, pi, sh, ed, br, app, claude)
@@ -254,7 +254,7 @@ sample_state :: proc() -> State {
 	append(&s.notices.os_recent, Os_Recent{session = 10})
 	s.reload.gen = 3
 	append(&s.reload.changed, "~/.pi/agent/settings.json")
-	append(&s.claude_history, Claude_Record{id = "cl-1", cwd = "/Users/x/proj", title = "hello", used = 12})
+	append(&s.claude_history, Claude_Record{id = "cl-1", cwd = "/Users/x/proj", title = "hello", used = 12, harness = .Claude})
 	s.home_model = "provider/model"
 	return s
 }

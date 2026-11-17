@@ -139,7 +139,7 @@ web_view_new_choices_section :: proc(t: ^testing.T) {
 	harness_installed_probe[.Pi] = proc() -> bool {return false}
 	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,codex=Codex | claude=Claude Code,codex=Codex | tabs 1/1\n"), new_of())
 	// a browser's new session goes first next time (as the native picker's); an agent's does not
-	web_note_harness(New_Claude_Session{project_id = 1, codex = true}, {kind = .UI, web = true})
+	web_note_harness(New_Claude_Session{project_id = 1, harness = .Codex}, {kind = .UI, web = true})
 	testing.expect_value(t, state.settings.last_harness, Harness.Codex)
 	testing.expect(t, strings.has_prefix(new_of(), "0: codex=Codex,claude=Claude Code | codex=Codex,claude=Claude Code |"), new_of())
 	web_note_harness(New_Chat{project_id = 1}, {kind = .Control, web = false})
@@ -162,7 +162,7 @@ web_view_bars_section :: proc(t: ^testing.T) {
 	p := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-bars"}
 	append(&state.projects, p)
 	s := Open_Session{id = new_id(), project_id = p.id, pi_session_id = "pi-bars", cwd = p.cwd}
-	ct := Claude_Tab{}
+	ct := Claude_Tab{harness = .Claude}
 	append(&ct.held, Claude_Held{id = 1, text = "deploy\tit\nnow ‮" + "please", who = "Atlas"})
 	claude := Tab{id = new_id(), kind = ct, title = "Claude", status = .Running}
 	pi := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running}

@@ -56,7 +56,7 @@ w_claude :: proc(t: ^testing.T, tag: string) -> (sess, id: u64) {
 	r := core.run_command(core.New_Chat{project_id = pid}, W_UI)
 	testing.expect(t, r.ok, r.error)
 	sess = r.created_id
-	r = core.run_command(core.New_Claude_Tab{session = sess}, W_UI)
+	r = core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, W_UI)
 	testing.expect(t, r.ok, r.error)
 	return sess, r.created_id
 }

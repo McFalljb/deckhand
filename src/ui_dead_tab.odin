@@ -57,7 +57,7 @@ dead_tab_bar_layout :: proc(p: ^core.Pane) {
 			}) {
 				dot(th.text_muted)
 				_, is_claude := tab.kind.(core.Claude_Tab)
-				who := core.claude_tab_is_codex(tab^) ? "Codex" : "Claude"
+				who := core.tab_harness(tab^) == .Codex ? "Codex" : "Claude"
 				clay.TextDynamic(clip(is_claude ? fmt.tprintf("Restarting: waiting for the old %s to exit…", who) : "Restarting: waiting for the old pi to exit…", max(pane_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
 			}
 			return
@@ -116,7 +116,7 @@ dead_tab_hit :: proc() -> Hit {
 
 dead_tab_tip_for :: proc(h: Hit_Dead_Tab) -> (label, keys: string) {
 	if tab := dead_shown(hit_pane()); tab != nil {
-		if core.claude_tab_is_codex(tab^) do return "Start Codex again in this tab, resuming its conversation (codex resume)", ""
+		if core.tab_harness(tab^) == .Codex do return "Start Codex again in this tab, resuming its conversation (codex resume)", ""
 		if _, is := tab.kind.(core.Claude_Tab); is {
 			if h.part == .Restart_Model do return "Start Claude Code again, resuming its conversation, then pick another model (/model)", ""
 			return "Start Claude Code again in this tab, resuming its conversation", ""

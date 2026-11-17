@@ -352,7 +352,7 @@ Menu_New_Session :: struct {
 harness_of :: proc(cmd: Command) -> (h: Harness, ok: bool) {
 	#partial switch c in cmd {
 	case New_Chat, Worktree_Session: return .Pi, true
-	case New_Claude_Session:         return c.codex ? .Codex : .Claude, true
+	case New_Claude_Session:         return c.harness, true
 	}
 	return {}, false
 }
@@ -377,9 +377,9 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 		pi, claude, codex := machine_harnesses(no)
 		for h in order {
 			if h == .Pi && pi do append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = New_Chat{project_id = p.id}})
-			if h == .Claude && claude && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = New_Claude_Session{project_id = p.id}})
+			if h == .Claude && claude && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = New_Claude_Session{project_id = p.id, harness = .Claude}})
 			// Codex: only where its core says it starts one (machine_codex; an older core would start Claude Code)
-			if h == .Codex && codex && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, codex = true}})
+			if h == .Codex && codex && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, harness = .Codex}})
 		}
 		for &it, i in out do it.keys = fmt.tprint(i + 1)
 		return out[:]
@@ -392,8 +392,7 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 			if cwd != "" do cmd = Worktree_Session{project_id = p.id, path = cwd}
 			append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = cmd})
 		case .Claude, .Codex:
-			codex := h == .Codex
-			if codex {
+			if h == .Codex {
 				// a project or a checkout of it, or Chats
 				if !codex_installed() do continue
 				if p.group == .Chats {
@@ -403,13 +402,13 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 				// in a project or Chats (claude.odin: New_Claude_Session); a checkout: a project's only
 				if !claude_installed() || (p.group != .Projects && !(p.group == .Chats && cwd == "")) do continue
 			}
-			base := New_Claude_Session{project_id = p.id, cwd = cwd, codex = codex}
-			accts := claude_accounts(codex)
+			base := New_Claude_Session{project_id = p.id, cwd = cwd, harness = h}
+			accts := claude_accounts(h)
 			if len(accts) < 2 {
 				append(&out, Menu_Item{label = HARNESSES[h].name, icon = harness_icon(h), cmd = base})
 				continue
 			}
-			pick := claude_account_pick(p, codex)
+			pick := claude_account_pick(p, h)
 			for pass in 0 ..< 2 { 	// the pick first, then the others in their order
 				for a in accts {
 					if (a.dir == pick) != (pass == 0) do continue

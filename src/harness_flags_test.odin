@@ -106,12 +106,12 @@ harness_flags_claude_start :: proc(t: ^testing.T) {
 		caller: core.Caller,
 	}
 	run :: proc(p: rawptr) -> core.Result {s := (^Start)(p); return core.run_command(s.cmd, s.caller)}
-	st := Start{core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, HF_UI}
+	st := Start{core.New_Claude_Tab{session = sess, args = {"--model", "opus"}, harness = .Claude}, HF_UI}
 	r, argv := hf_argv(argf, "claude", run, &st)
 	testing.expect(t, r.ok, r.error)
 	testing.expectf(t, strings.contains(argv, "--add-dir /tmp/a b --model opus") && !strings.contains(argv, "sonnet"), "defaults first, the tab's after: %q", argv)
 	testing.expect_value(t, hf_args_of(r.created_id), "--model opus") // only the tab's own are saved
-	st = Start{core.New_Claude_Tab{session = sess}, core.Caller{kind = .Control}}
+	st = Start{core.New_Claude_Tab{session = sess, harness = .Claude}, core.Caller{kind = .Control}}
 	r, argv = hf_argv(argf, "claude", run, &st)
 	testing.expect(t, r.ok, r.error)
 	testing.expectf(t, argv != "" && !strings.contains(argv, "--add-dir"), "an agent's start: no defaults: %q", argv)
@@ -246,7 +246,7 @@ harness_flags_hooks_off_bar :: proc(t: ^testing.T) {
 	defer hf_done()
 	pid := core.run_command(core.Add_Project{cwd = hf_dir("hooksoff")}, HF_UI).created_id
 	sess := core.run_command(core.New_Chat{project_id = pid}, HF_UI).created_id
-	r := core.run_command(core.New_Claude_Tab{session = sess, args = {"--settings", `{"disableAllHooks":true}`}}, HF_UI)
+	r := core.run_command(core.New_Claude_Tab{session = sess, args = {"--settings", `{"disableAllHooks":true}`}, harness = .Claude}, HF_UI)
 	testing.expect(t, r.ok, r.error)
 	_, tab, _ := core.find_tab(r.created_id)
 	if tab == nil do return

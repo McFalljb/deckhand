@@ -220,10 +220,10 @@ Set_Chats_Readonly :: struct {
 	on: bool,
 }
 // The default Claude Code flags for the tabs the user starts (user-only; claude_with_defaults), or
-// with codex (harness "codex") Codex's (codex_with_defaults).
+// with harness .Codex (wire: harness "codex") Codex's (codex_with_defaults).
 Set_Claude_Default_Flags :: struct {
 	skip_permissions: bool, // --dangerously-skip-permissions; Codex: --dangerously-bypass-approvals-and-sandbox
-	codex:            bool,
+	harness:          Harness, // .Claude or .Codex (wire: harness "codex")
 	confirm:          string, // turning it on: the user's confirmation (confirm_gate)
 }
 Set_Agent_Name :: struct {
@@ -461,7 +461,7 @@ Restore_Tab :: struct {
 	claude_id: string, // Claude tabs: the Claude session to resume ("" = a new one)
 	args:  []string, // Claude tabs: the user's extra flags
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
-	codex: bool, // Claude tabs: a Codex tab (codex.odin; saved as kind "codex")
+	harness: Harness, // Claude tabs: .Claude, or .Codex: a Codex tab (codex.odin; saved as kind "codex")
 	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
 	pane_active: bool, // with a layout: the tab its pane showed
 	held:  u32, // its process runs in the session holder's terminal `held` (adopted at launch)
@@ -1607,11 +1607,12 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Set_Chats_Readonly:
 		return fail(CHATS_READONLY_REMOVED), false
 	case Set_Claude_Default_Flags:
-		on := c.codex ? &state.settings.codex_full_access : &state.settings.claude_skip_permissions
+		claude_harness_check(c.harness)
+		on := c.harness == .Codex ? &state.settings.codex_full_access : &state.settings.claude_skip_permissions
 		if on^ == c.skip_permissions do return {ok = true}, false
 		// on: the user confirms first, with the warning (a saved setting coming back does not ask)
 		if c.skip_permissions && caller.kind != .Internal {
-			gr, go_on, ch := confirm_gate(cmd, .Settings_Write, caller, c.confirm, c.codex ? CODEX_FULL_ACCESS_CONFIRM : CLAUDE_SKIP_CONFIRM, force_ask = true)
+			gr, go_on, ch := confirm_gate(cmd, .Settings_Write, caller, c.confirm, c.harness == .Codex ? CODEX_FULL_ACCESS_CONFIRM : CLAUDE_SKIP_CONFIRM, force_ask = true)
 			if !go_on do return gr, ch
 		}
 		on^ = c.skip_permissions
@@ -1814,7 +1815,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		claude_tab_gone(tab) // a Claude tab: what it held goes
 		// claude (or codex) not found (the tab's command exits 127): look for it again before the next start
 		if ct, is_cl := tab.kind.(Claude_Tab); is_cl && c.exit.known && c.exit.code == 127 {
-			if ct.codex do codex_recheck()
+			if ct.harness == .Codex do codex_recheck()
 			else do claude_recheck()
 		}
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi && c.exit.known && c.exit.code == 127 do pi_recheck()
@@ -2001,7 +2002,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			claude_disk_rescan()
 			// an added account's projects (scan_projects: on the Rescan worker)
 			// (one running: once more after it, so every account added at once is scanned)
-			if a, is := cmd.(Add_Claude_Account); is && !a.codex && caller.kind == .UI { // a Codex home holds no projects
+			if a, is := cmd.(Add_Claude_Account); is && a.harness != .Codex && caller.kind == .UI { // a Codex home holds no projects
 				if scan_thread == nil do run_command(Rescan{}, {kind = .Internal})
 				else do claude_rescan_again = true
 			}
@@ -2127,13 +2128,14 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 		return pane_add_tab(s, Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(url)}, title = strings.clone(rt.title != "" ? rt.title : "Browser"), status = .Not_Started}).id
 	}
 	if rt.kind == .Claude {
-		if rt.claude_id != "" && !(rt.codex ? codex_id_ok(rt.claude_id) : claude_id_ok(rt.claude_id)) do return 0
-		if (rt.codex ? codex_args_check(rt.args) : claude_args_check(rt.args)) != "" do return 0
+		claude_harness_check(rt.harness)
+		if rt.claude_id != "" && !(rt.harness == .Codex ? codex_id_ok(rt.claude_id) : claude_id_ok(rt.claude_id)) do return 0
+		if (rt.harness == .Codex ? codex_args_check(rt.args) : claude_args_check(rt.args)) != "" do return 0
 		args := make([]string, len(rt.args))
 		for a, i in rt.args do args[i] = strings.clone(a)
 		// its account: an absolute folder; checked again at its start (claude_start: configured only)
 		acct := filepath.is_abs(rt.account) ? rt.account : ""
-		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, account = strings.clone(acct), codex = rt.codex}, title = strings.clone(rt.codex ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
+		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, account = strings.clone(acct), harness = rt.harness}, title = strings.clone(rt.harness == .Codex ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 	}
 	if rt.kind != .Shell do return 0
 	title := rt.title != "" ? strings.clone(rt.title) : fmt.aprintf("shell %d", len(s.tabs))
@@ -2325,7 +2327,7 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok
 	case Set_Claude_Default_Flags:
 		y, ok := b.(Set_Claude_Default_Flags)
-		return ok && x.skip_permissions == y.skip_permissions && x.codex == y.codex
+		return ok && x.skip_permissions == y.skip_permissions && x.harness == y.harness
 	case Update_Install:
 		_, ok := b.(Update_Install)
 		return ok
@@ -2566,7 +2568,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 			if !claude_tab_installed_now(&tab) { // installed since it was restored: looked up again (its harness's: codex.odin)
 				// not installed (any more): nothing starts, the tab says why and shows as exited; no
 				// bell entry, no retry (Restart, once it is installed)
-				term_note(t, tab.kind.(Claude_Tab).codex ? CODEX_MISSING : CLAUDE_MISSING)
+				term_note(t, tab.kind.(Claude_Tab).harness == .Codex ? CODEX_MISSING : CLAUDE_MISSING)
 				tab.status, tab.exit = .Exited, {known = true, code = 127}
 				continue
 			}

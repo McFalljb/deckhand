@@ -1159,15 +1159,15 @@ tab_label :: proc(cs: ^core.Open_Session, tab: core.Tab) -> (ic: core.Icon, labe
 	ct, is_claude := tab.kind.(core.Claude_Tab)
 	tag := ""
 	if is_claude {
-		ic = core.harness_icon(ct.codex ? .Codex : .Claude)
+		ic = core.harness_icon(ct.harness)
 		// several accounts: which one (claude_accounts.odin)
-		tag = core.claude_account_tag(ct.account, ct.codex)
+		tag = core.claude_account_tag(ct.account, ct.harness)
 		if tag != "" do label = fmt.tprintf("%s · %s", tab.title, tag)
 	}
 	// a Claude-only session's main tab: Claude and where it runs
 	if cs != nil && cs.agent == .Claude && len(cs.tabs) > 0 && cs.tabs[0].id == tab.id {
 		_, place := core.session_place(cs)
-		who := is_claude && ct.codex ? "Codex" : "Claude"
+		who := is_claude && ct.harness == .Codex ? "Codex" : "Claude"
 		label = tag != "" ? fmt.tprintf("%s · %s · %s", who, tag, place) : fmt.tprintf("%s · %s", who, place)
 	}
 	if tab.status == .Exited do extra = "exited"

@@ -212,7 +212,7 @@ SITES := [?]Site {
 		core.home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
 		_ = os.write_entire_file(fmt.tprintf("%s/%s", core.update_data_dir(), core.CLAUDE_HINTS_FILE), transmute([]u8)s)
 		core.claude_status_reset()
-		tab := core.Tab{id = 1 << 40, kind = core.Claude_Tab{}}
+		tab := core.Tab{id = 1 << 40, kind = core.Claude_Tab{harness = .Claude}}
 		tab.reload.version = "2.1.250" // older than CLAUDE_MIN_VERSION: the hint reads the file
 		return core.claude_status_message(&tab) != ""
 	}},

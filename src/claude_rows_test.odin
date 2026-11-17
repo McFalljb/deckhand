@@ -89,7 +89,7 @@ r_config :: proc(tag, sid: string) -> (cfg, transcript: string) {
 
 @(private = "file")
 r_claude_session :: proc(t: ^testing.T, pid: u64) -> (sess, tab: u64) {
-	r := core.run_command(core.New_Claude_Session{project_id = pid}, R_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R_UI)
 	testing.expect(t, r.ok, r.error)
 	sess = r.created_id
 	if s := core.find_session(sess); s != nil && len(s.tabs) > 0 do tab = s.tabs[0].id
@@ -369,7 +369,7 @@ claude_rows_exit_bell :: proc(t: ^testing.T) {
 	sess := core.run_command(core.New_Chat{project_id = pid}, R_UI).created_id
 	for code in ([]int{0, 127, 3}) {
 		os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exit %d", code))
-		id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+		id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 		state.current_session = 0 // not on screen
 		before := len(state.notices.items)
 		testing.expect(t, r_wait_exit(id), "exited")
@@ -617,11 +617,11 @@ launch_start_codex_alone :: proc(t: ^testing.T) {
 	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	core.harness_installed_probe[.Codex] = proc() -> bool {return true}
 	c, is := launch_start(false, pid).(core.New_Claude_Session)
-	testing.expect(t, is && c.codex && c.project_id == pid, "a Codex session in DIR's project")
+	testing.expect(t, is && c.harness == .Codex && c.project_id == pid, "a Codex session in DIR's project")
 	// Claude Code and Codex: Claude Code, as before
 	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	c, is = launch_start(false, pid).(core.New_Claude_Session)
-	testing.expect(t, is && !c.codex, "a Claude session")
+	testing.expect(t, is && c.harness != .Codex, "a Claude session")
 	// pi there: a pi chat
 	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
 	_, is_chat := launch_start(false, pid).(core.New_Chat)

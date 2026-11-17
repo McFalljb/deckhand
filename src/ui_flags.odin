@@ -30,10 +30,10 @@ flags_harness :: proc(cmd: core.Command) -> (h: core.Harness, ok: bool) {
 		return .Pi, true
 	case core.New_Claude_Session:
 		if core.id_machine(c.project_id) != 0 do return
-		return c.codex ? .Codex : .Claude, true
+		return c.harness, true
 	case core.New_Claude_Tab:
 		if core.id_machine(c.session) != 0 || core.id_machine(c.project_id) != 0 do return
-		return c.codex ? .Codex : .Claude, true
+		return c.harness, true
 	}
 	return
 }

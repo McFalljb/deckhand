@@ -462,7 +462,7 @@ claude_restart_with_model :: proc(t: ^testing.T) {
 	state.current_session = s.id
 	sess := s.id
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, D_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, D_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556670", source = "startup"}, D_SCRIPT)
 	exited := false
 	for _ in 0 ..< 500 {
@@ -544,7 +544,7 @@ claude_restart_pick_model_user :: proc(t: ^testing.T) {
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
-	id := core.run_command(core.New_Claude_Tab{session = s.id}, D_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = s.id, harness = .Claude}, D_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556690", source = "startup"}, D_SCRIPT)
 	exited := false
 	for _ in 0 ..< 500 {

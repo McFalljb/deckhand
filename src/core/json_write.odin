@@ -440,7 +440,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Set_Claude_Default_Flags:
 		kv_bool(&w, "skip_permissions", c.skip_permissions)
-		if c.codex do kv_str(&w, "harness", "codex")
+		if c.harness == .Codex do kv_str(&w, "harness", "codex")
 		token(&w, c.confirm, redact)
 	case Set_Pinned:
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
@@ -1196,7 +1196,7 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		if c.resume != "" do kv_str(&w, "resume", c.resume)
 		if len(c.args) > 0 do strs(&w, "args", c.args)
 		if c.account != "" do kv_str(&w, "account", c.account)
-		if c.codex do kv_str(&w, "harness", "codex")
+		if c.harness == .Codex do kv_str(&w, "harness", "codex")
 		obj_end(&w)
 		return
 	case New_Claude_Session:
@@ -1206,7 +1206,7 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
 		if len(c.args) > 0 do strs(&w, "args", c.args)
 		if c.account != "" do kv_str(&w, "account", c.account)
-		if c.codex do kv_str(&w, "harness", "codex")
+		if c.harness == .Codex do kv_str(&w, "harness", "codex")
 		obj_end(&w)
 		return
 	case Claude_Rename:

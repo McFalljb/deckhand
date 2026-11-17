@@ -287,7 +287,14 @@ CODEX_FLAGS_OK := [?]Codex_Flag {
 	{"--no-alt-screen", 0, false},
 	{"--strict-config", 0, false},
 	{"--approve-for-me", 0, false},
+	{"--profile", 'p', true}, // a plain name (codex_profile_ok): $CODEX_HOME/<name>.config.toml over the base config, under every -c (Deckhand's too)
 	{"--dangerously-bypass-approvals-and-sandbox", 0, false},
+}
+
+// A Codex flag's long name ("-m" → "--model"); one it does not know, as it is (harness_flags.odin).
+codex_flag_long :: proc(name: string) -> string {
+	if len(name) == 2 && name[0] == '-' do for f in CODEX_FLAGS_OK do if f.short == name[1] do return f.long
+	return name
 }
 
 // Codex flags refused by name, and why (the others not in CODEX_FLAGS_OK: "not one Deckhand passes").
@@ -309,13 +316,23 @@ CODEX_FLAGS_REFUSED := [?]struct {
 	{"--image", 'i', "a Codex tab starts without a prompt"},
 	{"--enable", 0, CODEX_FEATURES_WHY},
 	{"--disable", 0, CODEX_FEATURES_WHY},
-	{"--profile", 'p', CODEX_PROFILES_WHY},
 	{"--help", 'h', "it prints and exits"},
 	{"--version", 'V', "it prints and exits"},
 }
 
+CODEX_NOT_A_FLAG :: "an argument that is not a flag: Codex would take it for a command or a prompt"
 CODEX_FEATURES_WHY :: "Codex features are set in your ~/.codex/config.toml, not per tab"
-CODEX_PROFILES_WHY :: "profiles are not supported per tab yet"
+CODEX_PROFILES_WHY :: "choose a profile with -p NAME (Codex no longer reads -c profile)"
+CODEX_PROFILE_NAME_WHY :: "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"
+
+// A profile name Codex reads as $CODEX_HOME/<name>.config.toml and nothing else: letters, digits,
+// _, - and ., not starting with - or . (no path: Codex refuses -p ../x itself; an unknown name is
+// silently ignored).
+codex_profile_ok :: proc(name: string) -> bool {
+	if name == "" || len(name) > 128 || name[0] == '-' || name[0] == '.' do return false
+	for ch in transmute([]u8)name do if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-' || ch == '.') do return false
+	return true
+}
 
 // Why a -c key=value cannot go ("" = it can): nothing under `hooks` (Deckhand's hooks and their
 // trust), `mcp_servers.deckhand` or the whole `mcp_servers` table (Deckhand's tools), `features`
@@ -347,7 +364,7 @@ codex_args_check :: proc(args: []string) -> string {
 	for a in args do if a == "" || len(a) > 1024 || strings.contains_any(a, "\x00\r\n") do return "an extra flag is empty, too long or has a line break"
 	for i := 0; i < len(args); i += 1 {
 		a := args[i]
-		if len(a) < 2 || a[0] != '-' || a == "--" do return fmt.tprintf("%q is not a flag: Codex would take it for a command or a prompt", a)
+		if len(a) < 2 || a[0] != '-' || a == "--" do return CODEX_NOT_A_FLAG
 		name, val: string
 		has_val := false
 		if a[1] == '-' {
@@ -361,8 +378,8 @@ codex_args_check :: proc(args: []string) -> string {
 		for f in CODEX_FLAGS_OK do if name == f.long || (f.short != 0 && len(name) == 2 && name[1] == f.short) do flag = f
 		f, ok := flag.?
 		if !ok {
-			for r in CODEX_FLAGS_REFUSED do if name == r.long || (r.short != 0 && len(name) == 2 && name[1] == r.short) do return fmt.tprintf("%s is refused: %s", name, r.why)
-			return fmt.tprintf("%s is not a Codex flag Deckhand passes on", name)
+			for r in CODEX_FLAGS_REFUSED do if name == r.long || (r.short != 0 && len(name) == 2 && name[1] == r.short) do return fmt.tprintf("%s is refused: %s", flag_shown(name), r.why)
+			return fmt.tprintf("%s is not a Codex flag Deckhand passes on", flag_shown(name))
 		}
 		if !f.value {
 			if has_val do return fmt.tprintf("%s takes no value", f.long)
@@ -374,6 +391,7 @@ codex_args_check :: proc(args: []string) -> string {
 			val = args[i]
 		}
 		if f.long == "--config" do if e := codex_config_refused(val); e != "" do return e
+		if f.long == "--profile" && !codex_profile_ok(val) do return CODEX_PROFILE_NAME_WHY
 	}
 	return ""
 }
@@ -411,12 +429,13 @@ codex_args_choose_access :: proc(args: []string) -> bool {
 // What turning full access on asks the user (Set_Claude_Default_Flags with harness codex).
 CODEX_FULL_ACCESS_CONFIRM :: "Start the Codex tabs you start with --dangerously-bypass-approvals-and-sandbox? Codex will edit files and run commands without asking you first, outside its sandbox. Agents' tabs never get it."
 
-// args with the user's default Codex flags as the setting is NOW, after them (codex_start, for a
-// start the user makes; never saved into a tab's or a record's flags): full access
-// (--dangerously-bypass-approvals-and-sandbox), left out when the tab's flags already choose how
-// Codex asks or sandboxes (codex_args_choose_access; Codex refuses it beside -a or
-// --approve-for-me), or past CLAUDE_ARGS_MAX. Temp.
-codex_with_defaults :: proc(args: []string) -> []string {
+// args with the user's default Codex flags as the setting is NOW (codex_start, for a start the
+// user makes; never saved into a tab's or a record's flags): the Default flags line before them
+// (harness_with_defaults), then full access (--dangerously-bypass-approvals-and-sandbox), left
+// out when the flags already choose how Codex asks or sandboxes (codex_args_choose_access; Codex
+// refuses it beside -a or --approve-for-me), or past CLAUDE_ARGS_MAX. Temp.
+codex_with_defaults :: proc(args_in: []string) -> []string {
+	args := harness_with_defaults(.Codex, args_in)
 	if !state.settings.codex_full_access || len(args) + 1 > CLAUDE_ARGS_MAX || codex_args_choose_access(args) do return args
 	list := make([dynamic]string, 0, len(args) + 1, context.temp_allocator)
 	append(&list, ..args)

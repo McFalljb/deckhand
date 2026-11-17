@@ -48,9 +48,6 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 
 ## What does not yet
 
-- No profiles per tab (`-p`, `-c profile…` are refused): where a profile layers against Deckhand's
-  trailing `-c` overrides is unchecked, and a profile may carry `features.hooks`, `hooks.*` or
-  `mcp_servers.deckhand`. Revisit after a real-run check.
 - **Rename** changes Deckhand's title only, not Codex's own.
 - Conversation ids are one space across harnesses: when a Codex record and Claude Code's own
   transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
@@ -117,7 +114,7 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   (a saved tab whose flags fail does not start; the tab says why).
 - **An allowlist** (Codex 0.167.2's `--help`): `-m`/`--model`, `-s`/`--sandbox`,
   `-a`/`--ask-for-approval`, `-c`/`--config`, `--add-dir`, `--local-provider`, `--oss`, `--search`, `--no-alt-screen`, `--strict-config`,
-  `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`; a value as `-m o3`, `-mo3` or
+  `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`, `-p`/`--profile` (below); a value as `-m o3`, `-mo3` or
   `--model=o3` (a separate value never starts with `-`: it would take Deckhand's next flag). Refused,
   each with its reason: anything else, so a newer Codex's new flag waits until it is looked at; a
   word that is no flag's value (`codex exec`, `login` … would run a subcommand, else it is a
@@ -126,9 +123,30 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   `--dangerously-bypass-hook-trust`, `--last`, `--all`, `--include-non-interactive`, `-i`/`--image`,
   `-h`, `-V`; `--enable`, `--disable` and a `-c` under `features` (Codex features are set in the
   user's `config.toml`, not per tab: some turn hooks off, `codex_hooks` is an alias of `hooks`, and
-  others bear on the daemon and MCP); `-p`/`--profile` and a `-c` of `profile` or `profiles` (not
-  per tab yet); a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
+  others bear on the daemon and MCP); a `-c` of `profile` or `profiles` (Codex itself rejects the
+  legacy `-c profile=…`; choose one with `-p`); a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
   `hooks`, is `mcp_servers` or under `mcp_servers.deckhand`.
+- **Profiles** (checked against real Codex 0.167.2): `-p NAME`, `-pNAME`, `--profile NAME` or
+  `--profile=NAME`, NAME a plain name (letters, digits, `_`, `-`, `.`; no `/`; not starting with `-`
+  or `.`: `codex_profile_ok`), placed with the user's other flags before Deckhand's own. Codex layers
+  `$CODEX_HOME/NAME.config.toml` over the base config, and every `-c` over both (base < profile <
+  `-c`), so Deckhand's trailing `-c hooks…` and `-c mcp_servers.deckhand…` still win: its hooks and
+  MCP server ran under `-p`. Codex itself refuses `-p ../x` and the legacy `-c profile=…`, and
+  ignores an unknown name silently. A profile is the user's own config, like `config.toml`: it can
+  turn hooks off (`features.hooks`, which Deckhand's "hooks silent" bar then reports) or bring hooks
+  of its own, which Codex asks the user to review as it does for `config.toml`'s.
+- **Typing them** (the window, `ui_flags.odin`): **New Codex tab with flags…** (the tab strip's **+**,
+  the palette) and **New session with flags…** → **Codex with flags…** open the palette as a one-line field (the flags last used
+  from that window), split as a shell splits words (quotes honoured, nothing expanded:
+  `core.flags_split`), and send them as `args`; the row shows `codex_args_check`'s reason before
+  anything starts. A start on another machine takes no flags from here.
+- **Default Codex flags** (`set_harness_flags` with `"harness": "codex"`, Settings › Coding agents ›
+  Codex › **Default flags…**, the palette's **Default Codex flags…**; `User_Here`; blank in a hub's
+  or a browser's state stream): one line, checked by `codex_args_check` when set
+  and again when used, put before the tab's own flags at each start the user makes (the same starts
+  as full access below); a default flag the tab's flags name too (`-m` and `--model` are one, a `-c`
+  by its key) is left out; never saved into a tab or its history entry
+  (`harness_with_defaults`, `core/harness_flags.odin`).
 - **Full access in new Codex tabs** (`set_claude_default_flags` with `"harness": "codex"`, off by
   default; Settings › Coding agents › Codex and the palette): `User_Here`, so only the user at this
   Mac changes it (never an agent, a script or a machine allowed to connect). Turning it on is
@@ -400,13 +418,18 @@ Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/C
 ## 7. Deckhand's tools: a per-run MCP server
 
 Codex's sandbox cannot reach Deckhand's socket, so a Codex tab gets the `deckhand` command's tools
-as MCP tools instead. Deckhand passes one more `-c` for the run, one inline table (it replaces a
-server of the user's own named `deckhand` for that run, never merges with it):
+as MCP tools instead. Deckhand passes one more `-c` for the run, one inline table:
 
 ```
 -c 'mcp_servers.deckhand={command="<deckhand-cli>",args=["mcp"],env_vars=["DECKHAND_SOCKET","DECKHAND_CLAUDE_TOKEN","DECKHAND_SHOTS_DIR"],tool_timeout_sec=620}'
 ```
 
+- **It merges with the user's own `[mcp_servers.deckhand]`.** Codex deep-merges the inline table
+  into a table of that name in the user's config (or a profile's): Deckhand's keys (`command`,
+  `args`, `env_vars`, `tool_timeout_sec`) win, and the user's other keys stay, so the user's
+  `enabled = false` turns Deckhand's tools off for their tabs, and their `env` or other timeouts
+  apply. That is the user's own config deciding for their own tabs, not an escalation: it gives
+  the server nothing beyond the tab's token, which `env_vars` passes as before.
 - Codex starts `deckhand-cli mcp` (`tools/deckhand-cli/mcp.odin`) **outside its sandbox**, as its
   own child: the hello's process check (§3) sees a descendant of the tab's process and passes. An
   MCP server does not get the tab's environment: `env_vars` names the variables Codex copies to it,

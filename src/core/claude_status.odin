@@ -272,7 +272,7 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	old := old_version(tab)
 	if claude_hooks_silent(tab, now) {
 		if rt_of(tab.id).dismissed do return ""
-		why := "`disableAllHooks` in your Claude settings, or your organisation's managed `allowManagedHooksOnly`"
+		why := "`disableAllHooks` in your Claude settings or this tab's `--settings` flag, or your organisation's managed `allowManagedHooksOnly`"
 		if old != "" do why = fmt.tprintf("Claude Code %s (older than %s), %s", old, CLAUDE_MIN_VERSION, why)
 		return fmt.tprintf("Deckhand's Claude Code hooks aren't running here (likely %s; or a startup dialog is still open: answer it first): a new session is not saved and can't resume; comments, held messages and panels don't work", why)
 	}

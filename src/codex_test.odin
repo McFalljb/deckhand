@@ -200,10 +200,12 @@ codex_user_flags :: proc(t: ^testing.T) {
 	ok := [][]string{
 		{"-m", "o3"}, {"-mo3"}, {"--model=o3"}, {"-s", "danger-full-access", "-a", "never"}, {"--dangerously-bypass-approvals-and-sandbox"},
 		{"-c", `model="o3"`}, {"--config=mcp_servers.mine.command=\"x\""}, {"--search", "--oss"},
+		// a profile by its plain name: $CODEX_HOME/<name>.config.toml over the base, under Deckhand's -c
+		{"-p", "work"}, {"-pwork"}, {"--profile", "fast_o3.v2"}, {"--profile=Team-1"},
 	}
 	for a in ok do testing.expectf(t, core.codex_args_check(a) == "", "%v: %s", a, core.codex_args_check(a))
 	refused := [][2]string{
-		{"exec", `"exec" is not a flag: Codex would take it for a command or a prompt`},
+		{"exec", core.CODEX_NOT_A_FLAG},
 		{"--no-daemon", "--no-daemon is refused: Deckhand sets it (its hooks must run under the tab's own Codex)"},
 		{"-C", "-C is refused: Deckhand sets the tab's folder"},
 		{"--cd=/tmp", "--cd is refused: Deckhand sets the tab's folder"},
@@ -218,18 +220,26 @@ codex_user_flags :: proc(t: ^testing.T) {
 		{"-c features.daemon_auto_start=true", "-c features… is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
 		{"--disable=codex_hooks", "--disable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
 		{"--enable", "--enable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
-		{"-p", "-p is refused: profiles are not supported per tab yet"},
-		{"--profile=work", "--profile is refused: profiles are not supported per tab yet"},
-		{"-cprofile=\"work\"", "-c profile… is refused: profiles are not supported per tab yet"},
-		{"-c profiles.work.model=\"o3\"", "-c profile… is refused: profiles are not supported per tab yet"},
+		{"-p", "--profile needs a value"},
+		{"--profile=../x", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"-p/etc/x", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"--profile=.hidden", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"--profile=", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"-cprofile=\"work\"", "-c profile… is refused: " + core.CODEX_PROFILES_WHY},
+		{"-c profiles.work.model=\"o3\"", "-c profile… is refused: " + core.CODEX_PROFILES_WHY},
 		{"--frobnicate", "--frobnicate is not a Codex flag Deckhand passes on"},
 		{"-m", "--model needs a value"},
 		{"--search=yes", "--search takes no value"},
 	}
 	for r in refused do testing.expect_value(t, core.codex_args_check({r[0]}), r[1])
 	testing.expect_value(t, core.codex_args_check({"-m", "--no-daemon"}), "--model needs a value") // never eats Deckhand's next flag
+	testing.expect_value(t, core.codex_args_check({"-p", "--no-daemon"}), "--profile needs a value")
+	testing.expect_value(t, core.codex_args_check({"--profile", "a/b"}), "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)")
+	// a profile goes before Deckhand's own flags, as the user's other flags
+	pargs, pwhy := core.codex_args(CX_CLI, "/w/p", "", {"-p", "work"})
+	testing.expectf(t, pwhy == "" && len(pargs) > 4 && pargs[0] == "-p" && pargs[1] == "work" && pargs[2] == "--no-daemon", "%v %s", pargs, pwhy)
 	testing.expect_value(t, core.codex_args_check({"-c", "mcp_servers={}"}), "-c mcp_servers.deckhand is Deckhand's own MCP server")
-	testing.expect_value(t, core.codex_args_check({"-m", "o3", "login"}), `"login" is not a flag: Codex would take it for a command or a prompt`)
+	testing.expect_value(t, core.codex_args_check({"-m", "o3", "login"}), core.CODEX_NOT_A_FLAG)
 	// Deckhand's own arguments come after the user's: --no-daemon, -C and every -c of Deckhand's last
 	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad530"
 	args, why := core.codex_args(CX_CLI, "/w/p", sid, {"-m", "o3", "-c", `model_reasoning_effort="high"`})
@@ -637,7 +647,7 @@ codex_resume_from_row :: proc(t: ^testing.T) {
 	s, _, _ := core.find_tab(r.created_id)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, resume = sid}, CX_UI).error, "that id is another harness's conversation")
 	// accounts: refused for Codex; flags: Codex's own rule (codex_user_flags)
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"exec"}}, CX_UI).error, `"exec" is not a flag: Codex would take it for a command or a prompt`)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"exec"}}, CX_UI).error, core.CODEX_NOT_A_FLAG)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"-m", "o3"}}, CX_CONTROL).error, "only the user sets Codex's flags")
 	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = s.id, codex = true, account = "/x"}, CX_UI).ok)
 	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, resume = "--last"}, CX_UI).error, "resume must be a Codex session id")
@@ -1034,12 +1044,28 @@ codex_wire_and_persist :: proc(t: ^testing.T) {
 	// a saved Codex tab with flags or a non-UUID id is not restored
 	r := core.run_command(core.Restore_Session{project_id = pid, pi_session_id = "abc-1", agent = .Claude, tabs = {{kind = .Claude, claude_id = "abc-1", codex = true}}}, core.Caller{kind = .Internal})
 	testing.expect(t, !r.ok, "not a Codex session id")
-	// a saved Codex main tab with flags (a Codex tab has none) is skipped cleanly:
-	// refused before anything is restored, never a session without its main tab
+	// a saved Codex main tab with the user's flags comes back with them (Codex's own rule)
 	n := len(state.open_sessions)
+	fid := "01a1d0d6-5353-7ff3-9308-ff91070ad5fe"
+	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = fid, agent = .Claude, tabs = {{kind = .Claude, claude_id = fid, codex = true, args = {"-m", "o3"}}, {kind = .Claude, codex = true, args = {"--search"}}}}, core.Caller{kind = .Internal})
+	testing.expect(t, r.ok, r.error)
+	if s := core.find_session(r.created_id); s != nil && len(s.tabs) == 2 {
+		testing.expect_value(t, strings.join(s.tabs[0].kind.(core.Claude_Tab).args, " ", context.temp_allocator), "-m o3")
+		testing.expect_value(t, strings.join(s.tabs[1].kind.(core.Claude_Tab).args, " ", context.temp_allocator), "--search")
+	} else do testing.fail_now(t, "restored with both tabs")
+	testing.expect_value(t, len(state.open_sessions), n + 1)
+	// a Codex record with its flags: kept; one with a flag Codex's rule refuses: not
+	core.run_command(core.Claude_Restore_History{records = {{id = "01a1d0d6-5353-7ff3-9308-ff91070ad5fd", project = "/w/p", cwd = "/w/p", codex = true, args = {"-m", "o3"}}, {id = "01a1d0d6-5353-7ff3-9308-ff91070ad5fc", project = "/w/p", cwd = "/w/p", codex = true, args = {"--no-daemon"}}}}, core.Caller{kind = .Internal})
+	rec, _ := core.claude_record("01a1d0d6-5353-7ff3-9308-ff91070ad5fd")
+	testing.expect(t, rec != nil && len(rec.args) == 2, "a Codex record keeps its flags")
+	bad, _ := core.claude_record("01a1d0d6-5353-7ff3-9308-ff91070ad5fc")
+	testing.expect(t, bad == nil, "a refused flag: not restored")
+	// a saved Codex main tab with a flag Codex refuses is skipped cleanly: refused before anything
+	// is restored, never a session without its main tab
+	n = len(state.open_sessions)
 	bid := "01a1d0d6-5353-7ff3-9308-ff91070ad5ff"
-	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, args = {"-m", "o3"}}, {kind = .Shell}}}, core.Caller{kind = .Internal})
-	testing.expect(t, !r.ok, "flags")
+	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, args = {"--no-daemon"}}, {kind = .Shell}}}, core.Caller{kind = .Internal})
+	testing.expect(t, !r.ok, "a refused flag")
 	testing.expect_value(t, len(state.open_sessions), n)
 }
 

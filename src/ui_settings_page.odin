@@ -80,6 +80,7 @@ Sp_Edit_Kind :: enum u8 {
 	Rename_Machine,
 	Rename_Account,
 	Web_Listen, // web access's listen address
+	Harness_Flags, // a harness's Default flags (target: its HARNESS_KEYS; ui_flags.odin)
 	// a file row's menu (right click; settings_page_context): as the old Settings tab's name field
 	New_File, // target: the folder
 	New_Folder,
@@ -211,6 +212,8 @@ sp_edit_commit :: proc() {
 		if no, ok := core.machine_row_no(spage.edit.target); ok do r = ui_run(core.Machine_Rename{no = no, name = name})
 	case .Web_Listen: // "" = the default
 		r = ui_run(core.Set_Web_Listen{address = name})
+	case .Harness_Flags: // "" = none; the core says why it refuses
+		if h, ok := flags_edit_harness(spage.edit.target); ok do r = ui_run(core.Set_Harness_Flags{harness = h, flags = name})
 	case .Rename_Account:
 		if name == "" do break
 		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, codex = true})
@@ -916,6 +919,9 @@ sp_button_text :: proc(s: ^core.Setting) -> (button, hint: string) {
 	case "atlas_model":        return "Change…", action_detail("agent_model")
 	case "machine_add":        return "Add…", s.hint
 	case "web_listen":         return "Change…", fmt.tprintf("%s · %s", core.web_listen_address(), s.hint)
+	case "claude_default_flags": return "Change…", flags_default_hint(.Claude)
+	case "codex_default_flags":  return "Change…", flags_default_hint(.Codex)
+	case "pi_default_flags":     return "Change…", flags_default_hint(.Pi)
 	case "web_pair":           return "Pair…", web_pair_hint(s.hint)
 	case "setup":              return "Set up…", s.hint
 	case "shortcuts":          return "Show ⌘/", s.hint
@@ -996,13 +1002,14 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 		}
 		btn, hint := sp_button_text(s)
 		k := s.id == "machine_add" || strings.has_prefix(s.id, "web_") ? sp_item({do_ = .Row, path = s.row}) : sp_item({do_ = .Action, action = s.action})
-		if sp_row(label, hint, strings.has_prefix(s.id, "web_") ? nil : sp_badges(s), mono_hint = s.id == "chats_dir") { // web access's rows: its switch carries the badge
+		if sp_row(label, hint, strings.has_prefix(s.id, "web_") || strings.has_suffix(s.id, "_default_flags") ? nil : sp_badges(s), mono_hint = s.id == "chats_dir") { // web access's rows and Default flags: the card's switch carries the badge (no room beside Change…)
 			sp_button(k, btn)
 			if s.id == "chats_dir" && action_ok("chats_dir_default") do sp_button(sp_item({do_ = .Action, action = "chats_dir_default"}), "Default")
 			if s.id == "update_checks" do sp_button(sp_item({do_ = .Action, action = "check_updates"}), "Check now")
 		}
 		if s.id == "machine_add" && spage.edit.kind == .Add_Machine do sp_edit_row("Add a machine", "user@host or an ~/.ssh/config name")
 		if s.id == "web_listen" && spage.edit.kind == .Web_Listen do sp_edit_row("Listen address", core.WEB_LISTEN_DEFAULT)
+		if strings.has_suffix(s.id, "_default_flags") && spage.edit.kind == .Harness_Flags && strings.has_prefix(s.id, strings.concatenate({spage.edit.target, "_"}, context.temp_allocator)) do sp_edit_row("Default flags", "--model opus")
 		if s.id == "web_pair" && web_pair_open() do if sp_row(fmt.tprintf("Code: %s", web_pair.code), fmt.tprintf("Open http://%s/ in the browser and type it. It works once, for 2 minutes.", web_pair_address())) {}
 	case .Status:
 		has := false

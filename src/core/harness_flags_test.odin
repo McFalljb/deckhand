@@ -248,16 +248,18 @@ harness_flags_not_streamed_elsewhere :: proc(t: ^testing.T) {
 		for x in state_sections(&state) do if x[0] == "settings" do return x[1]
 		return "<none>"
 	}
-	old := window_link_swap_for_test(nil)
-	defer window_link_swap_for_test(old)
-	testing.expect(t, strings.contains(settings_of(), SECRET), "this Mac's window")
-	hub := Window_Link{hub = true}
-	window_link_swap_for_test(&hub)
-	testing.expect(t, !strings.contains(settings_of(), SECRET), "a hub's stream")
-	web := Window_Link{web = true}
-	window_link_swap_for_test(&web)
-	testing.expect(t, !strings.contains(settings_of(), SECRET), "a browser's stream")
-	window_link_swap_for_test(nil)
+	when TEST_HOOKS { // the stream kinds stand in through a test hook (a release-hooks build has none)
+		old := window_link_swap_for_test(nil)
+		defer window_link_swap_for_test(old)
+		testing.expect(t, strings.contains(settings_of(), SECRET), "this Mac's window")
+		hub := Window_Link{hub = true}
+		window_link_swap_for_test(&hub)
+		testing.expect(t, !strings.contains(settings_of(), SECRET), "a hub's stream")
+		web := Window_Link{web = true}
+		window_link_swap_for_test(&web)
+		testing.expect(t, !strings.contains(settings_of(), SECRET), "a browser's stream")
+		window_link_swap_for_test(nil)
+	}
 	testing.expect_value(t, state.settings.harness_flags[.Codex], "-c k=" + SECRET) // left as it was
 	testing.expect(t, !strings.contains(state_json(), SECRET), "agents' snapshot")
 }

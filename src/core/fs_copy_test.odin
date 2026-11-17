@@ -761,3 +761,62 @@ find_files_filters_like_the_tree :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, "")
 	if c, ok := cmd.(Find_Files); ok do testing.expect(t, c.query == "a b" && c.limit == FIND_FILES_MAX, "read back, limit capped")
 }
+
+// A control caller whose fs_write copies need no confirmation (auto) copies at once; trusted, it
+// confirms its own token.
+@(test)
+fs_copy_control_auto_and_trusted :: proc(t: ^testing.T) {
+	when TEST_HOOKS {
+		context.allocator = runtime.heap_allocator()
+		inbox_drain()
+		proj, _ := csetup("auto")
+		defer {os.remove_all(tdir(proj)); state = State{}}
+		wait :: proc() {
+			for i := 0; i < 500 && fs_copy_running() > 0; i += 1 {
+				inbox_drain()
+				time.sleep(5 * time.Millisecond)
+			}
+			inbox_drain()
+		}
+		cwrite(fmt.tprintf("%s/c/a.txt", proj), "a")
+		from := fmt.tprintf("%s/c", proj)
+		state.settings.confirm[.Control][.Fs_Write] = .Auto
+		r := run_command(Fs_Copy{from = from, to = fmt.tprintf("%s/auto", proj)}, Caller{kind = .Control})
+		testing.expect(t, r.ok && r.pending, r.error)
+		wait()
+		testing.expect_value(t, cread(fmt.tprintf("%s/auto/a.txt", proj)), "a")
+		state.settings.confirm[.Control][.Fs_Write] = .Trusted
+		r = run_command(Fs_Copy{from = from, to = fmt.tprintf("%s/trusted", proj)}, Caller{kind = .Control})
+		testing.expect_value(t, r.error, "needs_confirmation")
+		testing.expect(t, r.confirm_token != "", "its own token")
+		r = run_command(Fs_Copy{from = from, to = fmt.tprintf("%s/trusted", proj), confirm = strings.clone(r.confirm_token, context.temp_allocator)}, Caller{kind = .Control})
+		testing.expect(t, r.ok && r.pending, r.error)
+		wait()
+		testing.expect_value(t, cread(fmt.tprintf("%s/trusted/a.txt", proj)), "a")
+		testing.expect_value(t, len(state.pending_confirmations), 0)
+	}
+}
+
+// A trashed folder that Finder opened (it writes .DS_Store: the folder's time changes) still
+// comes back; a file whose size or time changed does not.
+@(test)
+restore_path_folder_opened_in_the_trash :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	proj, outside := csetup("dsstore")
+	defer {os.remove_all(tdir(proj)); state = State{}}
+	saved := fs_trash_fn
+	defer fs_trash_fn = saved
+	fake_trash_dir = outside
+	fs_trash_fn = fake_trash
+	d := fmt.tprintf("%s/d", proj)
+	cwrite(fmt.tprintf("%s/x.txt", d), "x")
+	id := delete_ids(t, d)[d]
+	for e in fs_trashed do if e.id == id {
+		time.sleep(10 * time.Millisecond)
+		cwrite(fmt.tprintf("%s/.DS_Store", e.trashed), "finder")
+	}
+	r := run_command(Restore_Path{id = id}, UI_HERE)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, cread(fmt.tprintf("%s/x.txt", d)), "x")
+}

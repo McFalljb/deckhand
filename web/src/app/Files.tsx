@@ -66,6 +66,7 @@ let drag: { sources: string[]; from: string; nonce: string; root: string } | nul
 // long press is the menu.
 let lastPointer = "mouse";
 let dropAt = "";
+let dropFx = "none"; // what the last dragover showed (copy with Option/Alt): the drop does that
 let hover = { path: "", timer: 0 }; // a closed folder hovered: opened after HOVER_OPEN_MS
 let edge = { dir: 0, timer: 0 }; // scrolling while the pointer is near the top or bottom edge
 const HOVER_OPEN_MS = 600;
@@ -336,6 +337,7 @@ function hoverOver(app: App, path: string) {
 function endDrag() {
   drag = null;
   dropAt = "";
+  dropFx = "none";
   clearHover();
   stopEdge();
   bump();
@@ -666,7 +668,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     const dir = dropFolder(e);
     const copy = e.altKey; // Option/Alt held: a copy (into the items' own folder too: duplicates)
     const at = dir && !(copy ? planCopy(root, drag!.sources, dir) : planMove(root, drag!.sources, dir, listed.get(dir))).why ? dir : "";
-    dt.dropEffect = at ? (copy ? "copy" : "move") : "none";
+    dt.dropEffect = dropFx = at ? (copy ? "copy" : "move") : "none";
     if (at !== dropAt) {
       dropAt = at;
       bump();
@@ -687,8 +689,9 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     if (!d || !ours(e) || e.dataTransfer?.getData(DRAG_TYPE) !== d.nonce || d.root !== root) return void (d && endDrag());
     const dir = dropFolder(e);
     const onRow = (e.target as HTMLElement).closest?.<HTMLElement>(".file-row")?.dataset.path;
+    const fx = dropFx;
     endDrag();
-    if (e.altKey) return void (dir && onRow !== d.from && copyInto(treeOf(app, root), d.sources, dir));
+    if (fx === "copy") return void (dir && onRow !== d.from && copyInto(treeOf(app, root), d.sources, dir)); // as the cursor showed
     if (!dir || onRow === d.from || planMove(root, d.sources, dir, listed.get(dir)).noop) return;
     moveTo(app, root, d.sources, dir);
   };

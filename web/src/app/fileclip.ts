@@ -105,7 +105,8 @@ export async function runCopies(run: (c: object) => Promise<{ ok: boolean; error
       break;
     }
     out.done.push({ from: c.from, path: copiedPath(c.to, String(d.path ?? "")) });
-    for (const s of d.skipped ?? []) if (typeof s?.path === "string") out.skipped.push(s.path);
+    // a credential left out is named as one, never by its path (as the window says it)
+    for (const s of d.skipped ?? []) if (typeof s?.path === "string") out.skipped.push(String(s.why ?? "").startsWith("a credential") ? "a credential" : s.path);
   }
   return out;
 }

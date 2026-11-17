@@ -84,6 +84,15 @@ export class UndoStack {
   askedUndo(token: string, rec: UndoRec): void {
     this.asked.set(token, { kind: "undo", rec });
   }
+  // The token an undo waits on in the confirmation bar ("" none).
+  waitingFor(rec: UndoRec): string {
+    for (const [tok, a] of this.asked) if (a.kind === "undo" && a.rec === rec) return tok;
+    return "";
+  }
+  // A token the bar no longer holds (cancelled there): forgotten.
+  forget(token: string): void {
+    this.asked.delete(token);
+  }
   // The bar's confirmed command answered (this page sent it): null when it was none of this tree's.
   confirmed(token: string, r: Result): Confirmed | null {
     const a = this.asked.get(token);

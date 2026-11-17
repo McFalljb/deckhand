@@ -60,10 +60,14 @@ export function cancelCut(t: Tree): boolean {
 export function take(t: Tree, mode: Clip["mode"], paths: string[]): void {
   clip = clipOf(mode, t.root, paths);
   if (!clip) return;
-  if (mode === "copy" && navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(dragText(clip.paths)).catch(() => {});
-  if (!t.app.phone) t.app.toast(clipLabel(clip) + ` · paste with ${IS_MAC ? "⌘V" : "Ctrl+V"}`); // a phone: its bar says it
+  if (mode === "copy" && systemClip()) navigator.clipboard.writeText(dragText(clip.paths)).catch(() => {});
+  // the tree's own paste (a phone: its bar says it); never a word about the system clipboard
+  if (!t.app.phone) t.app.toast(clipLabel(clip) + ` · paste in the tree with ${IS_MAC ? "⌘V" : "Ctrl+V"}`);
   t.bump();
 }
+
+// The system clipboard can be written (a secure page): else ⌘C is left to the browser too.
+const systemClip = (): boolean => !!navigator.clipboard && window.isSecureContext;
 
 // Paste into dir: a copy copies (a clash named "name copy" by the core); a cut moves (a name
 // already there refuses it, never renamed) and is done once anything moved.
@@ -158,6 +162,10 @@ export async function undo(t: Tree, rec?: UndoRec): Promise<void> {
   if (!r) return void app.toast("Nothing to undo");
   if (!undos.has(r) || r.root !== t.root) return void app.toast("That can no longer be undone", true);
   if (undoing) return;
+  // its Trash already waits in the confirmation bar: never a second one (cancelled there: asked again)
+  const tok = undos.waitingFor(r);
+  if (tok && app.store.confirmations.some((c: { token?: string }) => c.token === tok)) return void app.toast("Waiting for you to confirm it in the bar");
+  if (tok) undos.forget(tok);
   undoing = true;
   try {
     const run = (cmd: object) => app.link.run(cmd);
@@ -189,7 +197,7 @@ export function treeTakes(e: KeyboardEvent): boolean {
 // pastes into target, D duplicates, Z undoes. true: taken (the browser's own then prevented).
 export function treeKey(t: Tree, key: string, paths: string[], target: string): boolean {
   switch (key) {
-    case "c": take(t, "copy", paths); return true;
+    case "c": take(t, "copy", paths); return systemClip(); // not secure: the browser's own copy is not stopped
     case "x": take(t, "cut", paths); return true;
     case "v": void paste(t, target); return true;
     case "d": void duplicate(t, paths); return true;

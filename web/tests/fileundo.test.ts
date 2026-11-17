@@ -154,3 +154,16 @@ test("the bar's answer: an undo waiting there leaves the stack when it ran", () 
   assert.equal(s.confirmed("U1", { ok: true, data: { trashed: 1 } })!.kind, "undone");
   assert.equal(s.size, 0);
 });
+
+test("an undo waiting in the confirmation bar: its token, until the bar answers", () => {
+  const s = new UndoStack();
+  const rec = s.push(R, { kind: "create", path: R + "/a", dir: true });
+  assert.equal(s.waitingFor(rec), "");
+  s.askedUndo("U1", rec);
+  assert.equal(s.waitingFor(rec), "U1");
+  s.confirmed("U1", { ok: false, error: "refused" });
+  assert.equal(s.waitingFor(rec), "");
+  s.askedUndo("U2", rec);
+  s.forget("U2");
+  assert.equal(s.waitingFor(rec), "");
+});

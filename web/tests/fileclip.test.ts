@@ -92,9 +92,16 @@ test("run a paste: fs_copy per item in order with unique; stops at a refusal; th
   const out = await runCopies(run, [{ from: R + "/a.txt", to: R + "/a.txt" }, { from: R + "/cfg", to: R + "/s/cfg" }, { from: R + "/bad", to: R + "/s/bad" }, { from: R + "/z", to: R + "/s/z" }]);
   assert.deepEqual(sent.map((c) => [c.type, c.from, c.to, c.unique]), [["fs_copy", R + "/a.txt", R + "/a.txt", true], ["fs_copy", R + "/cfg", R + "/s/cfg", true], ["fs_copy", R + "/bad", R + "/s/bad", true]]);
   assert.deepEqual(out.done, [{ from: R + "/a.txt", path: R + "/a copy.txt" }, { from: R + "/cfg", path: R + "/s/cfg copy" }]);
-  assert.deepEqual(out.skipped, ["cfg/.env"]);
+  assert.deepEqual(out.skipped, ["a credential"]);
   assert.deepEqual(out.failed, { from: R + "/bad", error: "copied 1 of 2, then x: no space" });
   // a copy left midway is in the folder: it shows (and can be trashed by hand), never undone
   const w = await runCopies(async () => ({ ok: false, error: "needs_confirmation", needs_confirmation: { summary: "", by: "caller", token: "t" } }), [{ from: R + "/a", to: R + "/s/a" }]);
   assert.equal(w.waiting, true);
+});
+
+test("a credential left out is named as one, never by its path", async () => {
+  const { runCopies } = await import("../src/app/fileclip.ts");
+  const run = async () => ({ ok: true, data: { path: R + "/s/cfg", copied: 3, skipped: [{ path: "cfg/.codex/auth.json", why: "a credential: not copied" }, { path: "cfg/.git", why: ".git is not copied" }] } });
+  const out = await runCopies(run, [{ from: R + "/cfg", to: R + "/s/cfg" }]);
+  assert.deepEqual(out.skipped, ["a credential", "cfg/.git"]);
 });

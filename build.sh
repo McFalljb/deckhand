@@ -113,6 +113,13 @@ if [ ! -f build/dh_platform.a ] || [ src/native/platform_macos.m -nt build/dh_pl
   ar rcs build/dh_platform.a build/dh_platform.o build/dh_menubar.o
 fi
 
+# a Files drag out of the window: AppKit's drag session (macOS; src/files_drag_out_darwin.odin)
+if [ ! -f build/dh_dragout.a ] || [ src/native/dragout_macos.m -nt build/dh_dragout.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/dragout_macos.m -o build/dh_dragout.o
+  rm -f build/dh_dragout.a
+  ar rcs build/dh_dragout.a build/dh_dragout.o
+fi
+
 # editor and file-system model: FSEvents watcher, Trash, Finder (macOS)
 if [ ! -f build/dh_editor.a ] || [ src/native/editor_macos.m -nt build/dh_editor.a ]; then
   clang -c -O2 -Wall -fobjc-arc src/native/editor_macos.m -o build/dh_editor.o

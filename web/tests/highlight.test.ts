@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HL_MAX_LINE, langForFence, langForPath, lexLine, Lines, type Tok } from "../src/app/highlight.ts";
+import { HL_MAX_LINE, langForFence, langForPath, lexLine, Lines, makeTarget, paintable, tomlKey, yamlKey, yamlScalar, type Tok } from "../src/app/highlight.ts";
 
 // The tokens of a text as "tok:text" pairs, lines lexed in order (states carried).
 function toks(lang: string, text: string): string[] {
@@ -113,5 +113,41 @@ test("highlight: never loops on odd input", () => {
     let st = "";
     for (const s of odd) st = lexLine(lang, s, st).state;
     for (const s of odd) lexLine(lang, s, "");
+  }
+});
+
+test("highlight: names that are Object's own never pick a language nor throw", () => {
+  for (const n of ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"]) {
+    assert.equal(langForFence(n), "", n);
+    assert.equal(langForPath("/a/" + n), "", n);
+    assert.equal(langForPath("/a/x." + n), "", n);
+    assert.deepEqual(lexLine(n, "int x = 1;", ""), { spans: [], state: "" });
+    assert.doesNotThrow(() => new Lines(n).get(["a", "b"], 1));
+  }
+});
+
+test("highlight: text whose line breaks a textarea reads differently is not painted", () => {
+  assert.equal(paintable("a\nb\r\nc"), true);
+  for (const t of ["a\rb", "a\r", "a b", "a b", "a\vb", "a\fb"]) assert.equal(paintable(t), false, JSON.stringify(t));
+});
+
+// The regexes these lexers used (lazy, then \s*): quadratic on long lines. The rewrites must read
+// every line as they did.
+test("highlight: keys, targets and plain scalars read as the old regexes did", () => {
+  const sp = " ".repeat(2900);
+  const oldTarget = (s: string) => /^([^\s:=#][^:=#]*?)\s*::?(?!=)/.exec(s)?.[1] ?? null;
+  const oldYamlKey = (s: string, i: number) => { const r = /("[^"]*"|'[^']*'|[^\s#:"'][^#:]*?)\s*:(?=\s|$)/y; r.lastIndex = i; return r.exec(s)?.[0] ?? ""; };
+  const oldScalar = (s: string, i: number) => { const r = /[^\s,\]}#][^,\]}#]*?(?=\s*(,|\]|\}|\s#|$))/y; r.lastIndex = i; return r.exec(s)?.[0] ?? ""; };
+  const oldToml = (s: string) => { const m = /^\s*([^=#;\s"'][^=#;]*?|"[^"]*"|'[^']*')\s*(=|:)/.exec(s); return m ? [m[0], m[1]] : null; };
+  const lines = ["all: x", "a b  :: c", "CC := gcc", "x ::= y", " t: u", "a#b: c", "name:", "na me  :  v", "a:b: c", '"k y" : v', "'k':v", "k: v # c",
+    "v, w", "v ]", "a #c", "a#b", "x  }", "x:y", "key = 1", "k=1", "[t]", "a.b . c = 2", '"q" = 1', "k ; c", "k # c = 1", "k: 1", "", "   ",
+    "a" + sp + "b", "a" + sp, sp + "a", "a" + sp + ":", "a" + sp + "=", "a" + sp + "#", "a" + sp + ",", "k" + sp + ": v"];
+  for (const s of lines) {
+    assert.deepEqual(makeTarget(s), oldTarget(s), "target " + JSON.stringify(s.slice(0, 20)));
+    assert.deepEqual(tomlKey(s), oldToml(s), "toml " + JSON.stringify(s.slice(0, 20)));
+    for (let i = 0; i < Math.min(s.length, 12); i++) {
+      assert.equal(yamlKey(s, i), oldYamlKey(s, i), `yaml key ${JSON.stringify(s.slice(0, 20))} @${i}`);
+      assert.equal(yamlScalar(s, i), oldScalar(s, i), `scalar ${JSON.stringify(s.slice(0, 20))} @${i}`);
+    }
   }
 });

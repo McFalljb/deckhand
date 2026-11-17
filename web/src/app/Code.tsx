@@ -5,11 +5,22 @@
 // keyboards) over a layer that paints the same text in colour: the textarea's text is transparent,
 // its caret and selection show, and the layer follows its scrolling. The layer holds only the lines
 // in view and some either side (OVERSCAN), so a long file costs what a screenful does; a file over
-// the limits (HL_MAX_BYTES, HL_MAX_LINES) or of no known language is the plain textarea as before.
+// the limits (HL_MAX_BYTES, HL_MAX_LINES), of no known language, with line breaks other than \n and
+// \r\n (paintable), or that the lexer fails on is the plain textarea as before.
 
 import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
-import { highlightable, langForFence, langForPath, Lines, type Span } from "./highlight.ts";
+import { highlightable, langForFence, langForPath, Lines, paintable, type Span } from "./highlight.ts";
+
+// The lexer's spans, or null (plain text) should it ever throw: a lexer bug never blanks the page.
+function lexed(lexer: Lines, lines: string[], upTo: number): Span[][] | null {
+  try {
+    return lexer.get(lines, upTo);
+  } catch (e) {
+    console.error("highlight:", e);
+    return null;
+  }
+}
 
 const LINE_H = 18; // .code-edit's line-height
 const PAD_T = 8; // .code-text's top padding
@@ -39,14 +50,14 @@ export function CodeEdit({ text, path, onEdit }: { text: string; path: string; o
   const nums = useRef("");
   if (nums.current.split("\n").length !== lines.length) nums.current = Array.from({ length: lines.length }, (_, i) => i + 1).join("\n");
   const lang = langForPath(path);
-  const on = lang !== "" && highlightable(text, lines.length);
+  const on = lang !== "" && highlightable(text, lines.length) && paintable(text);
   const lexer = useRef<Lines | null>(null);
   if (on && lexer.current?.lang !== lang) lexer.current = new Lines(lang);
   // the lines painted: those in view (scroll top and height, from the textarea) and OVERSCAN either side
   const [view, setView] = useState({ top: 0, h: 1000 });
   const first = Math.max(0, Math.floor((view.top - PAD_T) / LINE_H) - OVERSCAN);
   const last = Math.min(lines.length - 1, Math.ceil((view.top + view.h) / LINE_H) + OVERSCAN);
-  const spans = on ? lexer.current!.get(lines, last) : null;
+  const spans = on ? lexed(lexer.current!, lines, last) : null;
   const follow = () => {
     const t = area.current;
     if (!t) return;
@@ -108,8 +119,9 @@ export function CodeBlock({ text, lang }: { text: string; lang: string }) {
   const body = useMemo(() => {
     const l = langForFence(lang);
     const lines = text.split("\n");
-    if (!l || lines.length > BLOCK_MAX_LINES || !highlightable(text, lines.length)) return text;
-    const spans = new Lines(l).get(lines, lines.length - 1);
+    if (!l || lines.length > BLOCK_MAX_LINES || !highlightable(text, lines.length) || !paintable(text)) return text;
+    const spans = lexed(new Lines(l), lines, lines.length - 1);
+    if (!spans) return text;
     return lines.map((ln, k) => [paint(ln, spans[k]), k < lines.length - 1 ? "\n" : ""]);
   }, [text, lang]);
   return <pre class="md-code"><code>{body}</code></pre>;

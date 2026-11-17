@@ -68,7 +68,10 @@ const cpp: Code = { ...c, kw: words(C_KW + CPP_KW + OBJC_KW), types: words(C_TYP
 const js: Code = { ...C_LIKE, quotes: `"'`, multi: [["`", "`", true]], kw: words(JS_KW), consts: words(JS_CONSTS), caps: true, ident: /[\p{L}_$][\p{L}\p{N}_$]*/uy, regex: true, at: "attribute" };
 const ts: Code = { ...js, kw: words(JS_KW + TS_KW), types: words(TS_TYPES) };
 
-const LANGS: Record<string, Kind> = {
+// No prototype: a name like "constructor" or "__proto__" finds nothing.
+const table = <T>(o: Record<string, T>): Record<string, T> => Object.assign(Object.create(null), o);
+
+const LANGS: Record<string, Kind> = table<Kind>({
   c,
   cpp,
   javascript: js,
@@ -132,11 +135,11 @@ const LANGS: Record<string, Kind> = {
   markdown: "markdown",
   yaml: "yaml",
   toml: "toml",
-};
+});
 LANGS.objc = LANGS.cpp;
 
 // Extensions (lower case, with the dot) and whole file names onto languages.
-const BY_EXT: Record<string, string> = {};
+const BY_EXT: Record<string, string> = table<string>({});
 const add = (lang: string, names: string) => names.split(" ").forEach((n) => (BY_EXT[n] = lang));
 add("c", ".c");
 add("cpp", ".cc .cpp .cxx .c++ .hh .hpp .hxx .h++ .ipp .inl .h .m .mm");
@@ -160,7 +163,7 @@ add("yaml", ".yml .yaml");
 add("toml", ".toml .ini .cfg .conf .editorconfig .gitconfig");
 
 // Code-fence names that are not an extension.
-const ALIAS: Record<string, string> = {
+const ALIAS: Record<string, string> = table<string>({
   js: "javascript", jsx: "javascript", node: "javascript", ts: "typescript", tsx: "typescript",
   py: "python", python3: "python", golang: "go", rs: "rust", sh: "shell", bash: "shell", zsh: "shell",
   console: "shell", "shell-session": "shell", shellscript: "shell", fish: "shell",
@@ -168,7 +171,7 @@ const ALIAS: Record<string, string> = {
   html: "markup", xml: "markup", svg: "markup", vue: "markup", md: "markdown", yml: "yaml", ini: "toml",
   makefile: "make", mk: "make", docker: "dockerfile", postgres: "sql", postgresql: "sql", sqlite: "sql",
   scss: "css", less: "css", jsonc: "json", json5: "json", h: "cpp",
-};
+});
 
 // The language for a file's path (by extension or name), or "" = plain text.
 export function langForPath(path: string): string {
@@ -269,10 +272,10 @@ function lexCode(L: Code, s: string, st: string, o: Out): string {
     }
   }
   if (L.target && i === 0 && s[0] !== "\t") {
-    const m = /^([^\s:=#][^:=#]*?)\s*::?(?!=)/.exec(s);
-    if (m && !L.kw.has(m[1].split(/\s/)[0])) {
-      o.put(0, m[1].length, "function");
-      i = m[1].length;
+    const m = makeTarget(s);
+    if (m !== null && !L.kw.has(m.split(/\s/)[0])) {
+      o.put(0, m.length, "function");
+      i = m.length;
     }
   }
   while (i < n) {
@@ -695,6 +698,65 @@ function lexMarkdown(s: string, st: string, o: Out): string {
   return "";
 }
 
+// Scans that read as a lazy match followed by \s* would, without its quadratic time on a long
+// line (each is tested against that regex: tests/highlight.test.ts).
+const WS = /\s/;
+const isWs = (c: string | undefined) => c !== undefined && WS.test(c);
+const firstOf = (s: string, from: number, chars: string) => {
+  let e = from;
+  while (e < s.length && !chars.includes(s[e])) e++;
+  return e;
+};
+const skipWs = (s: string, j: number) => {
+  while (isWs(s[j])) j++;
+  return j;
+};
+// make's "target:" (not "x := y"): the target, or null. /^([^\s:=#][^:=#]*?)\s*::?(?!=)/
+export function makeTarget(s: string): string | null {
+  if (!s || /[\s:=#]/.test(s[0])) return null;
+  const e = firstOf(s, 1, ":=#");
+  if (s[e] !== ":" || s[e + 1] === "=") return null;
+  return s.slice(0, e).trimEnd();
+}
+// A YAML key at i, through its colon, or "". /("[^"]*"|'[^']*'|[^\s#:"'][^#:]*?)\s*:(?=\s|$)/y
+export function yamlKey(s: string, i: number): string {
+  const c = s[i];
+  if (c === undefined) return "";
+  let j: number;
+  if (c === '"' || c === "'") {
+    const q = s.indexOf(c, i + 1);
+    if (q < 0) return "";
+    j = skipWs(s, q + 1);
+  } else {
+    if (/[\s#:"']/.test(c)) return "";
+    j = firstOf(s, i + 1, "#:");
+  }
+  return s[j] === ":" && (j + 1 >= s.length || isWs(s[j + 1])) ? s.slice(i, j + 1) : "";
+}
+// A YAML plain scalar at i, or "". /[^\s,\]}#][^,\]}#]*?(?=\s*(,|\]|\}|\s#|$))/y
+export function yamlScalar(s: string, i: number): string {
+  const c = s[i];
+  if (c === undefined || /[\s,\]}#]/.test(c)) return "";
+  const e = firstOf(s, i + 1, ",]}#");
+  const p = i + s.slice(i, e).trimEnd().length;
+  return s[e] === "#" && p === e ? "" : s.slice(i, p);
+}
+// A TOML or INI key: [through its = or :, the key], or null. /^\s*([^=#;\s"'][^=#;]*?|"[^"]*"|'[^']*')\s*(=|:)/
+export function tomlKey(s: string): [string, string] | null {
+  const a = skipWs(s, 0);
+  const c = s[a];
+  if (c === undefined) return null;
+  if (c === '"' || c === "'") {
+    const q = s.indexOf(c, a + 1);
+    if (q < 0) return null;
+    const j = skipWs(s, q + 1);
+    return s[j] === "=" || s[j] === ":" ? [s.slice(0, j + 1), s.slice(a, q + 1)] : null;
+  }
+  if (/[=#;\s"']/.test(c)) return null;
+  const e = firstOf(s, a + 1, "=:#;");
+  return s[e] === "=" || s[e] === ":" ? [s.slice(0, e + 1), s.slice(a, e).trimEnd()] : null;
+}
+
 // YAML: keys, values, comments, anchors. Block scalars' text stays plain.
 const YAML_CONSTS = words("true false null yes no on off True False Null TRUE FALSE NULL ~");
 function lexYaml(s: string, o: Out): string {
@@ -704,7 +766,7 @@ function lexYaml(s: string, o: Out): string {
   const lead = at(/\s*(-\s+)*/y, s, 0);
   if (lead.includes("-")) o.put(lead.indexOf("-"), lead.length, "punctuation");
   i = lead.length;
-  const k = at(/("[^"]*"|'[^']*'|[^\s#:"'][^#:]*?)\s*:(?=\s|$)/y, s, i);
+  const k = yamlKey(s, i);
   if (k) {
     const colon = i + k.lastIndexOf(":");
     o.put(i, i + k.slice(0, k.lastIndexOf(":")).trimEnd().length, "property");
@@ -734,7 +796,7 @@ function lexYaml(s: string, o: Out): string {
     if ("[]{},".includes(ch)) { o.put(i, i + 1, "punctuation"); i++; continue; }
     if ((ch === "|" || ch === ">") && /^[|>][-+\d]*\s*(#.*)?$/.test(s.slice(i))) { o.put(i, i + 1, "operator"); i++; continue; }
     // a plain scalar up to a comment or a flow punctuation
-    const w = at(/[^\s,\]}#][^,\]}#]*?(?=\s*(,|\]|\}|\s#|$))/y, s, i);
+    const w = yamlScalar(s, i);
     if (!w) { i++; continue; }
     if (YAML_CONSTS.has(w)) o.put(i, i + w.length, "constant");
     else if (/^[-+]?(\d[\d_]*(\.\d*)?([eE][-+]?\d+)?|0x[\da-fA-F]+|\.inf|\.nan)$/.test(w)) o.put(i, i + w.length, "number");
@@ -752,7 +814,7 @@ function lexToml(s: string, st: string, o: Out): string {
     o.put(0, t[0].length, "type");
     return lexCode(TOML, s.slice(t[0].length), "", shifted(o, t[0].length));
   }
-  const k = /^\s*([^=#;\s"'][^=#;]*?|"[^"]*"|'[^']*')\s*(=|:)/.exec(s);
+  const k = tomlKey(s);
   if (!k) return lexCode(TOML, s, "", o);
   const ks = k[0].length - k[0].trimStart().length;
   o.put(ks, ks + k[1].length, "property");
@@ -804,6 +866,12 @@ export class Lines {
     }
     return res;
   }
+}
+
+// Whether a textarea reads the text's lines as the painted layer does (split on \n): not with a lone
+// CR (a textarea makes it LF), U+2028, U+2029, VT or FF. Such a text is shown plain.
+export function paintable(text: string): boolean {
+  return !/\r(?!\n)|[\u2028\u2029\v\f]/.test(text);
 }
 
 // Whether a text is small enough to highlight.

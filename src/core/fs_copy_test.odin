@@ -351,8 +351,9 @@ fs_copy_modes_and_midway :: proc(t: ^testing.T) {
 	defer arena_done(arena)
 	plan, perr := fs_copy_plan(fmt.tprintf("%s/s", proj), fmt.tprintf("%s/s2", proj), false, UI_HERE, virtual.arena_allocator(arena))
 	testing.expect_value(t, perr, "")
-	os.remove(fmt.tprintf("%s/s/b.txt", proj))
-	cwrite(fmt.tprintf("%s/s/b.txt", proj), "swapped") // another file at that name
+	// another file at that name (the old one kept elsewhere: a freed inode may be reused at once)
+	os.rename(fmt.tprintf("%s/s/b.txt", proj), fmt.tprintf("%s/b.old", proj))
+	cwrite(fmt.tprintf("%s/s/b.txt", proj), "swapped")
 	n, failed, rerr := fs_copy_run(plan)
 	testing.expect_value(t, n, 2) // the folder and a.txt
 	testing.expect_value(t, failed, "b.txt")

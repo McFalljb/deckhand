@@ -317,8 +317,9 @@ fs_copy_apply :: proc(c: Fs_Copy, caller: Caller, request_id: u64) -> (r: Result
 		if caller.kind == .Control && (fs_outside_own(plan.from, caller) || fs_outside_own(plan.to, caller)) {
 			// parked with the paths as checked (the target as asked: a unique name is picked when it runs)
 			a, b, _ := fs_copy_paths(c.from, c.to, caller)
-			gr, _, gch := confirm_gate(Fs_Copy{from = a, to = b, unique = c.unique}, .Fs_Write, caller, "", fmt.tprintf("copy %s to %s?", a, b))
-			return gr, gch
+			gr, go_on, gch := confirm_gate(Fs_Copy{from = a, to = b, unique = c.unique}, .Fs_Write, caller, "", fmt.tprintf("copy %s to %s?", a, b))
+			if !go_on do return gr, gch // parked (else its policy is auto: on)
+			ch = gch
 		}
 	}
 	keep = true

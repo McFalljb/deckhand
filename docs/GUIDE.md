@@ -1375,6 +1375,10 @@ as it does anywhere else.
 
 Deckhand has a small code editor with syntax highlighting.
 
+- **Highlighted languages**: C, C++, Objective-C, Odin, Go, Rust, Zig, Python, JavaScript,
+  TypeScript (and JSX/TSX), Lua, shell, Makefiles, Dockerfiles, HTML, CSS, JSON, YAML, TOML, INI
+  and Markdown, in editor tabs and in Markdown code blocks. Other files show as plain text.
+
 - **To open a file**, click it in the Files tab (a single click opens a *preview* tab that the
   next click replaces; double-click, Enter or editing keeps it), or press ⌘P and type part of its
   name. A double-click on a preview tab keeps it too.
@@ -2317,7 +2321,7 @@ when you have not edited it, and asks when you have. In the Files tab the arrows
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
 Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
-shown; git letters and colours are the window's. The Settings page shows every setting; the
+shown; git letters and colours are the window's. ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
 installed, once per account with the project's own first, the last used agent first; one starts

@@ -70,6 +70,40 @@ syntax_spans :: proc(t: ^testing.T) {
 	check_lang(t, "yaml", "key: value # c\nn: 3\n", {{"key", 0, .Property}, {"# c", 0, .Comment}, {"3", 0, .Number}})
 	check_lang(t, "toml", "[table]\nkey = \"v\" # c\n", {{"key", 0, .Property}, {"\"v\"", 0, .String}, {"# c", 0, .Comment}})
 	check_lang(t, "markdown", "# Title\n\ntext\n", {{"Title", 0, .Heading}})
+	check_lang(t, "cpp", "#include <vector>\n// c\nnamespace a { class B { public: int f() { return 1; } }; }\nauto s = \"x\";\n", {{"#include", 0, .Keyword}, {"// c", 0, .Comment}, {"namespace", 0, .Keyword}, {"class", 0, .Keyword}, {"\"x\"", 0, .String}, {"1;", 0, .Number}})
+	check_lang(t, "objc", "#import <Foundation/Foundation.h>\n// c\n@interface A : NSObject\n@end\nNSString *s = @\"x\";\n", {{"#import", 0, .Keyword}, {"// c", 0, .Comment}, {"@interface", 0, .Keyword}, {"\"x\"", 0, .String}})
+	check_lang(t, "html", "<!-- c -->\n<a href=\"x\">hi</a>\n", {{"<!-- c", 0, .Comment}, {"a href", 0, .Tag}, {"href", 0, .Attribute}, {"x\"", 0, .String}})
+	check_lang(t, "css", "/* c */\n@media screen { a { color: red; width: 2px; } }\n", {{"/* c", 0, .Comment}, {"@media", 0, .Keyword}, {"color", 0, .Property}, {"2px", 0, .Number}})
+	check_lang(t, "lua", "-- c\nlocal function f() return \"x\" end\n", {{"-- c", 0, .Comment}, {"local", 0, .Keyword}, {"function", 0, .Keyword}, {"\"x\"", 0, .String}})
+	check_lang(t, "zig", "// c\nconst std = @import(\"std\");\npub fn main() void {}\n", {{"// c", 0, .Comment}, {"const", 0, .Keyword}, {"\"std\"", 0, .String}, {"fn", 0, .Keyword}, {"main", 0, .Function}})
+	check_lang(t, "make", "# c\nifeq ($(A),1)\nall: b\n\techo \"x\"\nendif\n", {{"# c", 0, .Comment}, {"ifeq", 0, .Keyword}})
+	check_lang(t, "dockerfile", "# c\nFROM alpine:3\nRUN echo \"x\"\n", {{"# c", 0, .Comment}, {"FROM", 0, .Keyword}, {"RUN", 0, .Keyword}})
+	check_lang(t, "ini", "; c\n[sec]\nkey = v\n", {{"; c", 0, .Comment}, {"sec", 0, .Type}, {"key", 0, .Property}})
+}
+
+// File names and Markdown fence names reach the new languages.
+@(test)
+syntax_language_names :: proc(t: ^testing.T) {
+	Want :: struct {
+		path, lang: string,
+	}
+	for w in ([]Want{
+		{"a/x.cpp", "cpp"}, {"x.cc", "cpp"}, {"x.hpp", "cpp"}, {"x.h", "c"}, {"x.m", "objc"}, {"x.mm", "objc"},
+		{"x.html", "html"}, {"x.htm", "html"}, {"x.css", "css"}, {"x.lua", "lua"}, {"x.zig", "zig"},
+		{"Makefile", "make"}, {"GNUmakefile", "make"}, {"makefile", "make"}, {"x.mk", "make"}, {"Makefile.local", "make"},
+		{"Dockerfile", "dockerfile"}, {"x.dockerfile", "dockerfile"}, {"Containerfile", "dockerfile"}, {"Dockerfile.dev", "dockerfile"},
+		{"x.ini", "ini"}, {"Dockerfile.md", "markdown"},
+	}) {
+		l := language_for_path(w.path)
+		testing.expectf(t, l != nil && l.name == w.lang, "%s -> %v, want %s", w.path, l.name if l != nil else "nil", w.lang)
+	}
+	for w in ([]Want{
+		{"cpp", "cpp"}, {"c++", "cpp"}, {"objc", "objc"}, {"objective-c", "objc"}, {"html", "html"}, {"css", "css"},
+		{"lua", "lua"}, {"zig", "zig"}, {"make", "make"}, {"makefile", "make"}, {"dockerfile", "dockerfile"}, {"ini", "ini"},
+	}) {
+		l := md_code_language(w.path)
+		testing.expectf(t, l != nil && l.name == w.lang, "fence %s -> %v, want %s", w.path, l.name if l != nil else "nil", w.lang)
+	}
 }
 
 // Edits go into the tree incrementally; a new token after an edit is seen.

@@ -202,7 +202,12 @@ export function ConfirmBar() {
             app.toast("This needs a newer page to confirm: cancel it, or confirm it at the Mac", true);
             return;
           }
-          app.run({ ...c.command, confirm: token });
+          const cmd = c.command as { type?: string };
+          // its answer (errors as the core words them: app.run's toast); a file command done: the
+          // Files tree looks again
+          app.run({ ...c.command, confirm: token }).then(() => {
+            if (cmd.type === "delete_path" || cmd.type === "rename_path") window.dispatchEvent(new Event("deckhand:fs-changed"));
+          });
         }}
       >
         Confirm

@@ -2,10 +2,13 @@
 // The tree is the session's folder (else the selected project's), listed with list_dir (inside a
 // project, git status codes, .git and ignored left out; asked again every few seconds with the
 // listing's hash, so an unchanged folder sends nothing; not while the page is hidden), folders
-// opened in the page itself. One row is selected; the keys move it (arrows, Home, End), Enter opens
-// a file (show_file: a Markdown tab for .md, an editor tab otherwise; credentials and binaries
+// opened in the page itself. One row has focus (sel); the keys move it (arrows, Home, End), Enter
+// opens a file (show_file: a Markdown tab for .md, an editor tab otherwise; credentials and binaries
 // refused) or opens and closes a folder, F2 renames, Delete or ⌘⌫ moves to the Trash (delete_path:
-// the confirmation bar asks), Esc clears it. Right-click, the row's "…" or a long press (a phone:
+// the confirmation bar asks), Esc clears it. Several rows can be picked (pick): ⌘/Ctrl-click,
+// shift-click, shift-arrows, ⌘/Ctrl-A in the tree; on a phone, Select in a row's sheet (taps then
+// pick, a bar acts on them). Delete then trashes them all with one confirmation (delete_path paths);
+// typing a name's first letters goes to it. Right-click, the row's "…" or a long press (a phone:
 // a sheet) shows its menu. New file, New folder and Rename are typed in the tree, where the name
 // goes (filetree.ts); the core refuses what it refuses, shown under the field. The active file tab
 // is shown (its folders opened). The tabs read and save the file with file_read / file_save
@@ -23,7 +26,7 @@ import { FileReads, knowFile, knownFile } from "./filecache.ts";
 import { CodeBlock, CodeEdit } from "./Code.tsx";
 import { longPressProps } from "./Peek.tsx";
 import { fileTabPath } from "./Panes.tsx";
-import { gitLetter, gitTone, isEditRow, moveSel, newTarget, parentOf, parentsOf, relPath, rowKey, stemEnd, treeRows, type Edit, type Listing, type Row } from "./filetree.ts";
+import { clickPick, entryPaths, extendPick, gitLetter, gitTone, isEditRow, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -35,7 +38,11 @@ const listed = new Map<string, Listing>();
 const asking = new Set<string>(); // folders being listed now
 const again = new Set<string>(); // ... and to list once more when that answer comes
 let bump = () => {};
-let sel = ""; // the selected row's path
+let sel = ""; // the focused row's path (the keys act on it, or on the picked rows holding it)
+let pick: Pick = pickOne(""); // the rows picked (shown selected); none: sel alone shows selected
+let order: string[] = []; // the entry rows' paths as drawn
+let picking = false; // a phone's selection mode: taps pick rows, a bar acts on them
+let typeBuf = { text: "", at: 0 }; // type-to-select's letters
 let edit: Edit | null = null; // the name field (new file or folder, rename)
 let focusWanted = ""; // a row to focus once it is drawn
 let scrollWanted: { key: string; center: boolean } | null = null; // a row to bring into view once listed
@@ -99,6 +106,39 @@ function trash(app: App, path: string) {
   app.run({ type: "delete_path", path });
 }
 
+// Several rows: one delete_path with paths, one confirmation (the core checks every path first and
+// refuses the lot naming the first it refuses; at most 500: its words, shown as they come). One
+// row: path, as an older core knows it. An older core reads only path (empty here) and says so:
+// never deleted one by one.
+async function trashMany(app: App, paths: string[]) {
+  if (paths.length === 1) return trash(app, paths[0]);
+  if (!paths.length) return;
+  const r = await app.link.run({ type: "delete_path", path: "", paths });
+  if (r.ok || r.error === "needs_confirmation" || r.error === "not connected") return;
+  if ((r.error ?? "").startsWith("path is empty")) app.toast("Deckhand on that machine is too old to move several items to the Trash at once. Update it, or move them one at a time.", true);
+  else app.toast(r.error || "Could not move them to the Trash", true);
+}
+
+// The rows a command acts on: the picked rows when they hold the focused one, else that row.
+function chosen(): string[] {
+  return pick.paths.size > 1 && pick.paths.has(sel) ? order.filter((p) => pick.paths.has(p)) : sel ? [sel] : [];
+}
+
+function focusOne(path: string) {
+  sel = path;
+  pick = pickOne(path);
+}
+
+function startPicking(path: string) {
+  picking = true;
+  focusOne(path);
+  bump();
+}
+
+function copyPaths(app: App, root: string, paths: string[], rel: boolean) {
+  copyText(app, paths.map((p) => (rel ? relPath(root, p) : p)).join("\n"));
+}
+
 function startNew(app: App, root: string, dir: string, kind: "file" | "dir") {
   if (dir !== root && !open.has(dir)) {
     open.add(dir);
@@ -111,7 +151,7 @@ function startNew(app: App, root: string, dir: string, kind: "file" | "dir") {
 
 function startRename(path: string) {
   edit = { kind: "rename", path, err: "" };
-  sel = path;
+  focusOne(path);
   scrollWanted = { key: path, center: false };
   bump();
 }
@@ -145,7 +185,7 @@ async function commitEdit(app: App, root: string, text: string) {
     }
     for (const k of [...listed.keys()]) if (k === from || k.startsWith(from + "/")) listed.delete(k);
     const now = r.ok ? to : from;
-    sel = now;
+    focusOne(now);
     scrollWanted = { key: now, center: false };
     endEdit(now);
     refresh(app, root);
@@ -160,7 +200,7 @@ async function commitEdit(app: App, root: string, text: string) {
   }
   const made = e.dir + "/" + name; // as the tree names it (the core's answer is resolved: a symlinked root differs)
   for (const d of parentsOf(root, made)) open.add(d); // a/b/c.txt: its folders open
-  sel = made;
+  focusOne(made);
   scrollWanted = { key: made, center: false };
   endEdit(made);
   refresh(app, root);
@@ -170,6 +210,17 @@ async function commitEdit(app: App, root: string, text: string) {
 function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[] {
   const keys = (k: string) => (app.phone ? undefined : k);
   const items: MenuItem[] = [];
+  const many = chosen();
+  if (many.length > 1) {
+    // several rows: what acts on them all (no open, rename or new here)
+    const out = outermost(order, new Set(many));
+    items.push({ label: out.length > 1 ? `Move ${out.length} items to Trash` : "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trashMany(app, out) });
+    items.push({ sep: true });
+    items.push({ label: "Copy paths", run: () => copyPaths(app, root, many, false) });
+    items.push({ label: "Copy relative paths", run: () => copyPaths(app, root, many, true) });
+    return items;
+  }
+  if (app.phone) items.push({ label: "Select", run: () => startPicking(path) });
   if (dir) items.push({ label: open.has(path) ? "Collapse" : "Expand", keys: keys("↩"), run: () => toggle(app, path) });
   else {
     items.push({ label: "Open", keys: keys("↩"), run: () => openFile(app, path) });
@@ -228,6 +279,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     const under = (x: string) => x === root || x.startsWith(root + "/");
     if (edit && !under(edit.kind === "rename" ? edit.path : edit.dir)) edit = null;
     refresh(app, root);
+    picking = false;
     const t = window.setInterval(() => !document.hidden && refresh(app, root), 5000);
     const seen = () => !document.hidden && refresh(app, root);
     document.addEventListener("visibilitychange", seen);
@@ -237,6 +289,13 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     };
   }, [root]);
   // a confirmation answered (a delete): look again, now and once it has run
+  // a confirmed delete or rename has finished (ConfirmBar): look again (a batch that failed midway
+  // moved some)
+  useEffect(() => {
+    const again = () => refresh(app, root);
+    window.addEventListener("deckhand:fs-changed", again);
+    return () => window.removeEventListener("deckhand:fs-changed", again);
+  }, [root]);
   const asks = store.confirmations.length;
   const hadAsks = useRef(asks);
   useEffect(() => {
@@ -258,8 +317,8 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
       list(app, d);
     }
     // the keys act on the focused row: while focus is in the tree the selection stays where it is
-    if (!nav.current?.contains(document.activeElement)) {
-      sel = active;
+    if (!nav.current?.contains(document.activeElement) && !picking) {
+      focusOne(active);
       scrollWanted = { key: active, center: true };
     }
     bump();
@@ -267,6 +326,9 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
 
   const rowH = app.phone ? 44 : 26;
   const rows = root ? treeRows(root, listed, open, edit) : [];
+  // the picked rows still drawn (listed again: what went drops out; a closed folder's rows too)
+  order = entryPaths(rows);
+  pick = prunePick(order, pick);
   // a row wanted in view: scrolled to once it is listed (the windowed list then draws it)
   useLayoutEffect(() => {
     const el = nav.current;
@@ -281,10 +343,16 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   if (!root) return <div class="files"><div class="empty-state"><div>No folder</div><div class="muted small">Open a session of this machine</div></div></div>;
 
   const selRow = rows.find((r) => r.t === "entry" && r.path === sel);
-  const go = (path: string) => {
+  // the focus to path: it alone picked, or (keep) the picking already done
+  const go = (path: string, keep = false) => {
     if (!path) return;
-    sel = path;
-    focusWanted = path;
+    if (keep) sel = path;
+    else focusOne(path);
+    // drawn: focused now, so a key pressed before the next render acts here (keys come faster
+    // than renders: a held arrow, type-to-select's letters); else once it is drawn
+    const el = nav.current?.querySelector<HTMLElement>(`.file-row[data-path="${CSS.escape(path)}"]`);
+    if (el) el.focus({ preventScroll: true });
+    else focusWanted = path;
     scrollWanted = { key: path, center: false };
     bump();
   };
@@ -297,11 +365,28 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     const cur = target?.t === "entry" ? target : undefined;
     const dir = cur?.e.kind === "dir";
     const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+    // ⌘/Ctrl-A: every row drawn (only here: the tree has focus, not a field)
+    if (mod && !e.shiftKey && e.key.toLowerCase() === "a") {
+      if (!order.length) return;
+      if (!sel || !order.includes(sel)) go(order[0]);
+      pick = { paths: new Set(order), anchor: pick.anchor && order.includes(pick.anchor) ? pick.anchor : sel };
+      bump();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (mod && e.key !== "Backspace") return;
+    // the focus outside what is picked (⌘-clicked off): the keys never act on rows it is not on
+    const loose = pick.paths.size > 0 && !!sel && !pick.paths.has(sel);
     switch (e.key) {
-      case "ArrowDown": case "ArrowUp": case "Home": case "End":
-        go(moveSel(rows, sel, e.key, open));
+      case "ArrowDown": case "ArrowUp": case "Home": case "End": {
+        const to = moveSel(rows, sel, e.key, open);
+        if (e.shiftKey && to) {
+          pick = extendPick(order, loose ? pickOne(sel) : pick, sel, to);
+          go(to, true);
+        } else go(to);
         break;
+      }
       case "ArrowRight":
         if (cur && dir && !open.has(cur.path)) toggle(app, cur.path);
         else go(moveSel(rows, sel, e.key, open));
@@ -317,29 +402,33 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         break;
       case "F2":
         if (!cur) return;
-        startRename(cur.path);
+        startRename(cur.path); // several picked: the focused row alone
         break;
-      case "Delete":
-        if (!cur || e.repeat) return;
-        trash(app, cur.path);
-        break;
-      case "Backspace":
-        if (!cur || !mod || e.repeat) return;
-        trash(app, cur.path);
+      case "Delete": case "Backspace":
+        if (!cur || e.repeat || (e.key === "Backspace" && !mod)) return;
+        trashMany(app, trashTargets(order, pick, sel));
         break;
       case "ContextMenu": {
         if (!cur) return;
+        if (loose) focusOne(cur.path);
         const r = (e.target as HTMLElement).getBoundingClientRect();
         showMenu(app, cur.e.name, rowItems(app, root, cur.path, dir), { clientX: r.left + 24, clientY: r.bottom });
         break;
       }
       case "Escape":
-        if (!sel) return;
-        sel = "";
+        if (pick.paths.size > 1 || loose) focusOne(sel); // several: back to the focused row
+        else if (sel) focusOne("");
+        else return;
         bump();
         break;
-      default:
-        return;
+      default: {
+        // type-to-select: letters go to the next row whose name starts with them
+        if (e.key.length !== 1 || e.ctrlKey || e.metaKey || (e.key === " " && !typeBuf.text)) return;
+        typeBuf = typed(typeBuf, e.key, performance.now());
+        const to = typeMatch(rows, sel, typeBuf.text);
+        if (to) go(to);
+        break;
+      }
     }
     e.preventDefault();
     e.stopPropagation();
@@ -375,6 +464,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         class="nav files-tree"
         ref={nav}
         role="tree"
+        aria-multiselectable="true"
         aria-label={"Files in " + name}
         onKeyDown={onKey}
         onContextMenu={(e) => {
@@ -385,6 +475,32 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
       >
         <Windowed items={items} />
       </div>
+      {picking ? <PickBar app={app} root={root} /> : null}
+    </div>
+  );
+}
+
+// A phone's selection mode: how many are picked and what to do with them, at the thumb.
+function PickBar({ app, root }: { app: App; root: string }) {
+  const many = order.filter((p) => pick.paths.has(p));
+  const out = outermost(order, pick.paths);
+  return (
+    <div class="files-pick" role="toolbar" aria-label="Selected files">
+      <span class="files-pick-n">{many.length} selected</span>
+      <span class="spacer" />
+      <button type="button" class="btn small danger" disabled={!out.length} onClick={() => trashMany(app, out)}>Move to Trash</button>
+      <button type="button" class="btn small" disabled={!many.length} onClick={() => copyPaths(app, root, many, false)}>Copy paths</button>
+      <button
+        type="button"
+        class="btn small primary"
+        onClick={() => {
+          picking = false;
+          pick = pickOne(sel);
+          bump();
+        }}
+      >
+        Done
+      </button>
     </div>
   );
 }
@@ -481,9 +597,11 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
     }
   });
   const renaming = edit?.kind === "rename" && edit.path === path;
-  const selected = sel === path;
+  const selected = picking || pick.paths.size ? pick.paths.has(path) : sel === path;
   const menu = (at: { clientX: number; clientY: number }) => {
-    sel = path;
+    // on a picked row the picking stays (the menu acts on them all); elsewhere the row alone
+    if (pick.paths.has(path)) sel = path;
+    else focusOne(path);
     bump();
     showMenu(app, e.name, rowItems(app, root, path, isDir), at);
   };
@@ -505,9 +623,22 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
           bump();
         }
       }}
-      onClick={() => {
+      onClick={(ev) => {
         if (renaming) return;
-        sel = path;
+        const mod = IS_MAC ? ev.metaKey : ev.ctrlKey;
+        if (picking) {
+          // a phone picking: a tap picks or unpicks; the folder's arrow still opens it
+          if (isDir && (ev.target as HTMLElement).closest(".chev")) return toggle(app, path);
+          pick = clickPick(order, pick, path, { toggle: true, range: false });
+          sel = path;
+          return bump();
+        }
+        if (mod || ev.shiftKey) {
+          pick = clickPick(order, pick, path, { toggle: mod, range: ev.shiftKey });
+          sel = path;
+          return bump();
+        }
+        focusOne(path);
         if (isDir) toggle(app, path);
         else {
           bump();
@@ -518,7 +649,7 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
         ev.preventDefault();
         if (!renaming) menu(ev);
       }}
-      {...longPressProps(() => !renaming, (at) => menu({ clientX: at.x, clientY: at.y }))}
+      {...longPressProps(() => !renaming && !picking, (at) => menu({ clientX: at.x, clientY: at.y }))}
     >
       {isDir ? <Icon name={on ? "chevron-down" : "chevron-right"} size={12} class="chev" /> : <span class="chev-gap" />}
       <Icon name={isDir ? "folder" : "file"} size={14} class="muted" />
@@ -529,7 +660,8 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
       )}
       <span class="spacer" />
       {letter && !renaming ? <span class={"ch-letter " + tone}>{letter}</span> : null}
-      {!renaming ? (
+      {picking ? (selected ? <Icon name="check" size={16} class="accent" /> : <span class="pick-gap" />) : null}
+      {!renaming && !picking ? (
         <button
           type="button"
           class="icon-btn small file-more"

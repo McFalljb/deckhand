@@ -144,3 +144,100 @@ export function gitTone(letter: string): string {
   }
   return "";
 }
+
+// ---- the selection (several rows) ----
+// The rows picked (paths), and the anchor a shift-range runs from. The focused row (Files.tsx sel)
+// is where the keys act; it is in the picked rows unless nothing is picked. order: the entry rows'
+// paths as drawn, top to bottom.
+export interface Pick {
+  paths: Set<string>;
+  anchor: string;
+}
+
+export const entryPaths = (rows: Row[]): string[] => rows.flatMap((r) => (r.t === "entry" ? [r.path] : []));
+
+export const pickOne = (path: string): Pick => ({ paths: new Set(path ? [path] : []), anchor: path });
+
+// The rows from a to b, inclusive, in either direction; a not drawn: b alone.
+export function rangeOf(order: string[], a: string, b: string): string[] {
+  const j = order.indexOf(b);
+  if (j < 0) return [];
+  const i = order.indexOf(a);
+  if (i < 0) return [b];
+  return order.slice(Math.min(i, j), Math.max(i, j) + 1);
+}
+
+// A click: plain picks the row alone; toggle (⌘/Ctrl) adds or removes it, and it becomes the
+// anchor; range (shift) picks anchor..row (with toggle too: added to what is picked); the anchor
+// stays.
+export function clickPick(order: string[], p: Pick, path: string, mods: { toggle: boolean; range: boolean }): Pick {
+  if (mods.range && p.anchor && order.includes(p.anchor)) {
+    const span = rangeOf(order, p.anchor, path);
+    return { paths: new Set(mods.toggle ? [...p.paths, ...span] : span), anchor: p.anchor };
+  }
+  if (mods.toggle) {
+    const paths = new Set(p.paths);
+    if (paths.has(path)) paths.delete(path);
+    else paths.add(path);
+    return { paths, anchor: path };
+  }
+  return pickOne(path);
+}
+
+// Shift and an arrow (or Home, End): the focus moved to `to`, the picked rows anchor..to.
+export function extendPick(order: string[], p: Pick, from: string, to: string): Pick {
+  const anchor = p.anchor && order.includes(p.anchor) ? p.anchor : from || to;
+  return { paths: new Set(rangeOf(order, anchor, to)), anchor };
+}
+
+// What is still drawn (the tree listed again; a folder closed): rows that went drop out.
+export function prunePick(order: string[], p: Pick): Pick {
+  const drawn = new Set(order);
+  if ([...p.paths].every((x) => drawn.has(x))) return p;
+  return { paths: new Set([...p.paths].filter((x) => drawn.has(x))), anchor: drawn.has(p.anchor) ? p.anchor : "" };
+}
+
+// The picked rows in drawn order, a row inside another picked folder left out (trashing the folder
+// trashes it).
+export function outermost(order: string[], paths: Set<string>): string[] {
+  const out: string[] = [];
+  for (const x of order) {
+    if (!paths.has(x)) continue;
+    if (out.some((o) => x.startsWith(o + "/"))) continue;
+    out.push(x);
+  }
+  return out;
+}
+
+// Type-to-select: the next row whose name starts with the typed prefix (any case), from the
+// focused row (one letter: from the row after it, so typing it again cycles), wrapping; "" none.
+export function typeMatch(rows: Row[], from: string, prefix: string): string {
+  const entries = rows.flatMap((r) => (r.t === "entry" ? [r] : []));
+  if (!entries.length || !prefix) return "";
+  const want = prefix.toLowerCase();
+  // the same letter typed again ("ss"): cycle through the rows starting with it
+  const cycle = [...want].every((c) => c === want[0]);
+  const key = cycle ? want[0] : want;
+  const at = entries.findIndex((r) => r.path === from);
+  const start = at < 0 ? 0 : cycle ? at + 1 : at;
+  for (let k = 0; k < entries.length; k++) {
+    const r = entries[(start + k) % entries.length];
+    if (r.e.name.toLowerCase().startsWith(key)) return r.path;
+  }
+  return "";
+}
+
+// The letters typed for type-to-select: a pause (ms) starts a new prefix.
+export const TYPE_PAUSE = 1000;
+export function typed(buf: { text: string; at: number }, ch: string, now: number): { text: string; at: number } {
+  return { text: (now - buf.at > TYPE_PAUSE ? "" : buf.text) + ch, at: now };
+}
+
+// What Delete trashes (as the window's tree, src/ui_files.odin files_key): the picked rows when
+// several are picked, or when the focus is off them (⌘-clicked out: what shows selected goes, and
+// the confirmation names it); else the focused row. Outermost only.
+export function trashTargets(order: string[], p: Pick, focus: string): string[] {
+  const loose = p.paths.size > 0 && !!focus && !p.paths.has(focus);
+  if (p.paths.size > 1 || loose) return outermost(order, p.paths);
+  return focus ? [focus] : [];
+}

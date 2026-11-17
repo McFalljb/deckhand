@@ -828,6 +828,11 @@ a { color: inherit; }
 .phone-files .file-more, .phone-files .files-head .icon-btn.small { width: 36px; height: 36px; }
 .phone-files .files-head { height: 44px; }
 .chev-gap { flex: 0 0 12px; }
+/* a phone's selection mode (Files.tsx PickBar): the count and its actions under the tree */
+.pick-gap { flex: 0 0 16px; }
+.files-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 52px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg-elevated); }
+.files-pick-n { font-weight: 600; color: var(--text); white-space: nowrap; }
+.files-pick .btn.small { min-height: 36px; padding: 0 10px; font-size: 13px; }
 .file-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-app); }
 .code-edit { flex: 1; min-height: 0; display: flex; font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; }
 .code-gutter { flex: none; overflow: hidden; padding: 8px 10px 8px 12px; color: var(--line-number); text-align: right; white-space: pre; user-select: none; border-right: 1px solid var(--border); }

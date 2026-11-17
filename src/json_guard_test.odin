@@ -613,7 +613,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse", "", ""},
 		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse_string", "", ""}, // a page's binding payload
 		{"src/core/claude_disk.odin", "found_read", "jg.parse", "", ""}, // Claude transcripts (seen 16 deep)
-		{"src/core/claude_disk.odin", "found_cwd", "jg.parse", "", ""},
+		{"src/core/claude_disk.odin", "transcript_cwd", "jg.parse", "", ""},
 		{"src/core/codex_disk.odin", "codex_first_line", "jg.parse", "", ""}, // a Codex rollout's first line (64 KB cap, json_depth_ok first)
 		{"src/core/codex_disk.odin", "codex_index_refresh", "jg.parse", "", ""}, // a Codex home's session_index.jsonl (16 KB a line, json_depth_ok first)
 		{"src/core/claude_status.odin", "hints_load", "jg.parse", "", ""},

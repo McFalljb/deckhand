@@ -290,3 +290,104 @@ files_finder_drop_copies_into_the_tree :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.projects), projects + 1)
 	testing.expect(t, !os.exists(strings.concatenate({dir, "/src/notes copy"}, context.temp_allocator)), "nothing copied")
 }
+
+// Review of #180: Open here keeps to the target pane. Pane A shows an editor; pane B's only tab is
+// a.ts. Dropping a.ts and b.ts on A: a.ts stays in B (said), b.ts opens in A, and the keyboard
+// ends in A (opening a.ts brings B forward on the way). At most FILES_OPEN_MAX open per drop.
+@(test)
+files_drop_open_here_keeps_the_target_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	when !core.TEST_HOOKS do return
+	defer pk_reset()
+	defer core.after_command_check = nil
+	dir := fx_setup("openhere")
+	defer os.remove_all(dir)
+	xp := fx_write(dir, "x.txt")
+	ap := fx_write(dir, "a.ts")
+	bp := fx_write(dir, "b.ts")
+	a, _, a_id, b_id := fx_split()
+	s := core.cur()
+	for &tab in s.tabs {
+		if tab.id == 101 do tab.kind, tab.has_term = core.Editor_Tab{path = strings.clone(xp)}, false
+		if tab.id == 102 do tab.kind, tab.has_term = core.Editor_Tab{path = strings.clone(ap)}, false
+	}
+	v := core.tree_view()
+	core.files_select_in(v, ap)
+	core.files_sel_set(v, {ap, bp})
+	x, y, ok := fx_row("/a.ts")
+	if !testing.expect(t, ok, "row drawn") do return
+	fx_drag(x, y, a.x, a.y)
+	s = core.cur()
+	in_pane :: proc(s: ^core.Open_Session, path: string) -> u64 {
+		for tab in s.tabs do if et, is := tab.kind.(core.Editor_Tab); is && et.path == path do return core.pane_of_tab(s, tab.id).id
+		return 0
+	}
+	testing.expect_value(t, in_pane(s, bp), a_id)
+	testing.expect_value(t, in_pane(s, ap), b_id)
+	testing.expect_value(t, core.session_focused_pane(s).id, a_id)
+	testing.expect(t, strings.contains(toast.text, "a.ts: open in another pane"), toast.text)
+
+	// more than FILES_OPEN_MAX: the first ones open, the toast says how many
+	paths := make([dynamic]string, context.temp_allocator)
+	for i in 0 ..< int(FILES_OPEN_MAX + 5) do append(&paths, fx_write(dir, fmt.tprintf("m%02d.txt", i)))
+	core.files_select_in(v, paths[0])
+	core.files_sel_set(v, paths[:])
+	x, y, _ = fx_row("/m00.txt")
+	fx_drag(x, y, a.x, a.y)
+	s = core.cur()
+	n := 0
+	for p in paths do if in_pane(s, p) == a_id do n += 1
+	testing.expect_value(t, n, FILES_OPEN_MAX)
+	testing.expect(t, strings.contains(toast.text, fmt.tprintf("Opened %d of %d", FILES_OPEN_MAX, FILES_OPEN_MAX + 5)), toast.text)
+}
+
+// Review of #180: no pane is a target under an overlay (the palette, a menu, settings, the
+// shortcuts, setup, a peek, the notifications).
+@(test)
+files_drop_no_pane_under_an_overlay :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	when !core.TEST_HOOKS do return
+	defer pk_reset()
+	defer core.after_command_check = nil
+	dir := fx_setup("overlay")
+	defer os.remove_all(dir)
+	_, b, _, b_id := fx_split()
+	testing.expect_value(t, files_pane_target(b.x, b.y).pane, b_id)
+	for w in ([]string{"palette", "settings", "shortcuts", "notifications"}) {
+		ui_do(core.Set_Focus{w})
+		core.inbox_drain()
+		testing.expectf(t, files_pane_target(b.x, b.y).pane == 0, "%s open: no target", w)
+		ui_do(core.Set_Focus{""})
+		core.inbox_drain()
+	}
+	testing.expect_value(t, files_pane_target(b.x, b.y).pane, b_id)
+}
+
+// Review of #180: the Finder copy queue never sticks. A copy whose finished never comes (the
+// core went, or restarted: another link) ends the queue with a toast; so does one past
+// DROPS_FOLLOW_MAX. A finished event that comes while no copy is being started is not kept.
+@(test)
+files_drops_queue_never_sticks :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	when !core.TEST_HOOKS do return
+	defer files_drops_test_reset()
+	// another link than the copy's (the core restarted)
+	files_drops_test_waiting(77, time.tick_now(), rawptr(uintptr(0x10)))
+	testing.expect(t, files_drops_busy(), "waiting")
+	files_drops_tick()
+	testing.expect(t, !files_drops_busy(), "the queue ended")
+	testing.expect(t, strings.contains(toast.text, "stopped following"), toast.text)
+	// past the deadline
+	files_drops_test_waiting(78, time.tick_add(time.tick_now(), -(time.Duration(DROPS_FOLLOW_MAX) + time.Second)), nil)
+	files_drops_tick()
+	testing.expect(t, !files_drops_busy(), "the queue ended at the deadline")
+	// an unrelated finished while a copy runs (not being started): not kept
+	files_drops_test_waiting(79, time.tick_now(), nil)
+	files_drops_on_event(core.Finished_Event{request_id = 5, result = {ok = true}})
+	testing.expect_value(t, files_drops_test_kept(), 0)
+	files_drops_on_event(core.Finished_Event{request_id = 79, result = {ok = true, data = `{"path":"/x/a.txt","copied":1}`}})
+	testing.expect(t, !files_drops_busy(), "its own finished ends it")
+	testing.expect(t, strings.contains(toast.text, "a.txt"), toast.text)
+}

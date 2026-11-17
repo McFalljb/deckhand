@@ -51,9 +51,10 @@ pane_drop_texts :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, "")
 	testing.expect_value(t, s, `'/p/a.txt' '/p/it'\''s dir' `)
 	// an agent's prompt: the plain path, quoted only when it has to be; spaces between, one after
-	s, err = pane_drop_text(.Insert_Prompt, .Agent, {"/p/a.txt", "/p/b c.md", "/p/@x"})
+	s, err = pane_drop_text(.Insert_Prompt, .Agent, {"/p/a.txt", "/p/b c.md", "rel/x", "!x"})
 	testing.expect_value(t, err, "")
-	testing.expect_value(t, s, `/p/a.txt '/p/b c.md' /p/@x `)
+	// a word starting / ! $ or @ (every dragged path starts /) could read as a command in an empty prompt: quoted
+	testing.expect_value(t, s, `'/p/a.txt' '/p/b c.md' rel/x '!x' `)
 	// Codex: a word starting / ! $ or @ would be a command or open a picker: quoted
 	s, err = pane_drop_text(.Insert_Prompt, .Codex, {"/p/a.txt", "rel/x", "@types/y"})
 	testing.expect_value(t, err, "")

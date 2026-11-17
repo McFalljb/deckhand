@@ -63,8 +63,8 @@ pane_drop_action :: proc(t: Pane_Drop_Tab) -> Pane_Drop {
 
 // The text a Paste_Path or Insert_Prompt sends (temp): every path, a space after each. A
 // terminal's are shell-quoted; a prompt's are plain, quoted only when they must be (a space or a
-// quote in it; for Codex also a word starting / ! $ or @, which it would read as a command or a
-// picker). err: why nothing goes (a control character in a name: a newline would press Enter).
+// quote in it, or a word starting / ! $ or @, which an agent's empty prompt may read as a command
+// or a picker: every dragged path starts /). err: why nothing goes (a control character in a name: a newline would press Enter).
 pane_drop_text :: proc(action: Pane_Drop, tab: Pane_Drop_Tab, paths: []string) -> (text, err: string) {
 	if action != .Paste_Path && action != .Insert_Prompt do return "", "nothing to type"
 	if len(paths) == 0 do return "", "nothing to drop"
@@ -72,7 +72,7 @@ pane_drop_text :: proc(action: Pane_Drop, tab: Pane_Drop_Tab, paths: []string) -
 	for p in paths {
 		for i in 0 ..< len(p) do if p[i] < 0x20 || p[i] == 0x7f do return "", "a name has a control character"
 		quote := action == .Paste_Path || strings.index_any(p, " \t'\"\\`$") >= 0
-		if tab == .Codex && len(p) > 0 && strings.index_byte("/!$@", p[0]) >= 0 do quote = true
+		if action == .Insert_Prompt && len(p) > 0 && strings.index_byte("/!$@", p[0]) >= 0 do quote = true
 		strings.write_string(&b, quote ? drop_shell_quote(p) : p)
 		strings.write_byte(&b, ' ')
 	}

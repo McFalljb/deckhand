@@ -426,8 +426,8 @@ settings_files_claude_lists :: proc(t: ^testing.T) {
 	defer os.unset_env("CLAUDE_CONFIG_DIR")
 	core.claude_lists_reset()
 	defer core.claude_lists_reset()
-	write_mode(fmt.tprintf("%s/settings.json", cfg), fmt.tprintf(`{{"env": {{"API_KEY": "%s"}}, "enabledPlugins": {{"zed@mk": true, "able@mk": false, "odd@mk": "x"}}, "extraKnownMarketplaces": {{"mk": {{"source": {{"source": "github", "repo": "o/mk"}}}}}}}}`, SECRET), 0o644)
-	account := fmt.tprintf(`{{"oauthAccount": {{"emailAddress": "who@example.com"}}, "mcpServers": {{"github": {{"type": "http", "url": "https://mcp.example.com/?token=%s", "headers": {{"Authorization": "Bearer %s"}}}}, "local": {{"command": "npx", "args": ["srv"], "env": {{"KEY": "%s"}}}}, "odd": {{"type": "stdio; rm -rf"}}, "notone": 3}}, "projects": {{"/p": {{"mcpServers": {{"projsrv": {{"command": "x"}}}}}}}}}}`, SECRET, SECRET, SECRET)
+	write_mode(fmt.tprintf("%s/settings.json", cfg), fmt.tprintf(`{{"env": {{"API_KEY": "%s"}}, "enabledPlugins": {{"zed@mk": true, "able@mk": false, "odd@mk": "x", "li\u2028ne@mk": true}}, "extraKnownMarketplaces": {{"mk": {{"source": {{"source": "github", "repo": "o/mk"}}}}}}}}`, SECRET), 0o644)
+	account := fmt.tprintf(`{{"oauthAccount": {{"emailAddress": "who@example.com"}}, "mcpServers": {{"github": {{"type": "http", "url": "https://mcp.example.com/?token=%s", "headers": {{"Authorization": "Bearer %s"}}}}, "local": {{"command": "npx", "args": ["srv"], "env": {{"KEY": "%s"}}}}, "odd": {{"type": "stdio; rm -rf"}}, "bi\u202edi\u2066": {{"command": "x"}}, "notone": 3}}, "projects": {{"/p": {{"mcpServers": {{"projsrv": {{"command": "x"}}}}}}}}}}`, SECRET, SECRET, SECRET)
 	write_mode(fmt.tprintf("%s/.claude.json", cfg), account, 0o600)
 	testing.expect_value(t, core.claude_account_file(cfg), fmt.tprintf("%s/.claude.json", cfg))
 	testing.expect_value(t, core.claude_account_file(fmt.tprintf("%s/.claude", home)), fmt.tprintf("%s/.claude.json", home))
@@ -436,10 +436,11 @@ settings_files_claude_lists :: proc(t: ^testing.T) {
 	b := strings.builder_make(context.temp_allocator)
 	for r in core.settings_file_rows() do fmt.sbprintf(&b, "%s|%s|%s|%v\n", r.group, r.label, r.detail, r.button)
 	got := strings.to_string(b)
-	for w in ([]string{"claude-plugin|able@mk|disabled|", "claude-plugin|zed@mk|enabled|", "claude-mcp|github|http|", "claude-mcp|local|stdio|", "claude-mcp|odd|server|"}) {
+	for w in ([]string{"claude-plugin|able@mk|disabled|", "claude-plugin|zed@mk|enabled|", "claude-mcp|github|http|", "claude-mcp|local|stdio|", "claude-mcp|odd|server|", "claude-plugin|line@mk|enabled|", "claude-mcp|bidi|stdio|"}) {
 		testing.expectf(t, strings.contains(got, w), "missing %q in\n%s", w, got)
 	}
 	testing.expectf(t, strings.index(got, "able@mk") < strings.index(got, "zed@mk"), "sorted:\n%s", got)
+	for r in got do testing.expectf(t, r == '\n' || core.text_rune_ok(r), "a name keeps %U:\n%s", r, got) // bidi controls, line separators
 	for never in ([]string{SECRET, "odd@mk", "projsrv", "notone", "who@example", "token", "Bearer", "npx", "mcp.example", "rm -rf", ".claude.json", "API_KEY"}) {
 		testing.expectf(t, !strings.contains(got, never), "%s shown:\n%s", never, got)
 	}
@@ -478,7 +479,7 @@ settings_files_claude_lists :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	testing.expect_value(t, len(plugins), 1)
 	if len(plugins) == 1 do testing.expect(t, plugins[0].id == "zed@mk" && !plugins[0].enabled, "zed@mk off")
-	testing.expect_value(t, len(mcp), 3) // the account file was not read again: the same three
+	testing.expect_value(t, len(mcp), 4) // the account file was not read again: the same four
 	// a broken account file lists nothing (and never crashes: json_guard_test's hostile inputs)
 	write_mode(fmt.tprintf("%s/.claude.json", cfg), strings.repeat("[", 100_000, context.temp_allocator), 0o600)
 	core.claude_lists_refresh_now()

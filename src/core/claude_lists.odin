@@ -247,13 +247,14 @@ lists_refresh :: proc(jobs: []Lists_Job) {
 	}
 }
 
-// A plugin id or server name as shown: control characters dropped, at most NAME_MAX bytes (on a
-// character boundary). Temp.
+// A plugin id or server name as shown: what text_rune_ok refuses (control characters, bidi
+// controls, line separators, invalid UTF-8) dropped, at most NAME_MAX bytes (on a character
+// boundary). Temp.
 @(private = "file")
 shown_name :: proc(s: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	for r in s {
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r < 0xa0) || r == 0xfffd do continue
+		if !text_rune_ok(r) || r == 0xfffd do continue
 		if strings.builder_len(b) + utf8.rune_size(r) > NAME_MAX do break
 		strings.write_rune(&b, r)
 	}

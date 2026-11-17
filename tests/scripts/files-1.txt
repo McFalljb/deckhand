@@ -105,6 +105,10 @@ assert_toast put back
 key backspace cmd
 eventually
 assert_not_files todo.md
+# the tree keeps the keyboard (no confirmation bar took it): Esc gives it back
+key escape
+wait 200
+assert_state focus.id <missing>
 # ---- the row menu ("…" on hover, right click): open a terminal in src
 hover frow 3
 wait 300

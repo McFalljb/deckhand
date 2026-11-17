@@ -99,12 +99,12 @@ reload_message :: proc(restart: bool) -> (msg: string, can: bool) {
 // The running Claude tabs a bar is about (update: the update bar; harness .Codex: the Codex bar,
 // which has no update bar).
 claude_reload_counts :: proc(update: bool, harness := Harness.Claude) -> (n: Reload_Counts) {
-	codex := harness == .Codex
+	codex := harness_is_codex(harness)
 	if codex && update do return
 	for &s in state.open_sessions {
 		if s.home || s.machine != 0 do continue // another machine's tabs are its core's
 		for &t in s.tabs {
-			if ct, is := t.kind.(Claude_Tab); !is || t.machine != 0 || (ct.harness == .Codex) != codex do continue
+			if ct, is := t.kind.(Claude_Tab); !is || t.machine != 0 || harness_is_codex(ct.harness) != codex do continue
 			if t.status == .Exited && restart_waiting(t.id) && strings.has_prefix(t.reload.note, "restarting") {
 				n.reloading += 1
 				continue
@@ -126,7 +126,7 @@ claude_reload_counts :: proc(update: bool, harness := Harness.Claude) -> (n: Rel
 }
 
 claude_bar_shows :: proc(update: bool, harness := Harness.Claude) -> bool {
-	if harness == .Codex {
+	if harness_is_codex(harness) {
 		info := state.reload.codex
 		if update || info.dismissed do return false
 		n := claude_reload_counts(false, .Codex)
@@ -147,7 +147,7 @@ claude_reload_silent_tab :: proc(update: bool) -> (tab: ^Tab, why: string) {
 	for &s in state.open_sessions {
 		if s.home do continue
 		for &t in s.tabs {
-			if ct, is := t.kind.(Claude_Tab); !is || ct.harness == .Codex || t.status != .Running || t.reload.queued != .Restart do continue
+			if ct, is := t.kind.(Claude_Tab); !is || harness_is_codex(ct.harness) || t.status != .Running || t.reload.queued != .Restart do continue
 			if update ? !claude_reload_outdated(&t) : !t.reload.stale do continue
 			i := strings.index(t.reload.note, CLAUDE_SILENT_NOTE)
 			if i < 0 do continue
@@ -159,7 +159,7 @@ claude_reload_silent_tab :: proc(update: bool) -> (tab: ^Tab, why: string) {
 
 // The bar's text, and whether its Restart button shows.
 claude_reload_message :: proc(update: bool, harness := Harness.Claude) -> (msg: string, can: bool) {
-	if harness == .Codex do return codex_reload_message()
+	if harness_is_codex(harness) do return codex_reload_message()
 	n := claude_reload_counts(update)
 	head := "Claude Code settings changed"
 	if update do head = fmt.tprintf("Claude Code updated to %s", claude_version_label(state.reload.claude.version))

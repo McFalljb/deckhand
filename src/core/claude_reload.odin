@@ -438,7 +438,7 @@ accounts_now :: proc(h: Harness) -> []string {
 	out := make([dynamic]string, context.temp_allocator)
 	for x in running_harness(h) {
 		ct := x.t.kind.(Claude_Tab)
-		d := claude_account_dir(ct.account, which(h))
+		d := claude_account_dir(ct.account, claude_kind_harness(h))
 		if d != "" && !slice.contains(out[:], d) do append(&out, d)
 	}
 	slice.sort(out[:])
@@ -451,7 +451,7 @@ accounts_now :: proc(h: Harness) -> []string {
 in_scope_tab :: proc(t: ^Tab, cwd, scope: string) -> bool {
 	if strings.has_prefix(scope, ACCOUNT_SCOPE) {
 		ct, _ := t.kind.(Claude_Tab)
-		return claude_account_dir(ct.account, which(ct.harness)) == scope[len(ACCOUNT_SCOPE):]
+		return claude_account_dir(ct.account, claude_kind_harness(ct.harness)) == scope[len(ACCOUNT_SCOPE):]
 	}
 	return in_scope(cwd, scope)
 }
@@ -492,12 +492,12 @@ running_claude :: proc() -> []Claude_Running {return running_harness(.Claude)}
 
 // The running Claude tabs of a harness: Claude Code's (.Claude, or the zero .Pi) or Codex's.
 running_harness :: proc(harness: Harness) -> []Claude_Running {
-	h := which(harness)
+	h := claude_kind_harness(harness)
 	out := make([dynamic]Claude_Running, context.temp_allocator)
 	for &s in state.open_sessions {
 		if s.home || s.machine != 0 do continue // another machine's tabs are its core's (machine_mirror.odin)
 		for &t in s.tabs {
-			if ct, is := t.kind.(Claude_Tab); is && t.machine == 0 && which(ct.harness) == h && t.status == .Running do append(&out, Claude_Running{&s, &t})
+			if ct, is := t.kind.(Claude_Tab); is && t.machine == 0 && claude_kind_harness(ct.harness) == h && t.status == .Running do append(&out, Claude_Running{&s, &t})
 		}
 	}
 	return out[:]
@@ -540,7 +540,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 	info := &state.reload.claude
 	#partial switch c in cmd {
 	case Claude_Restart_Changed:
-		codex := which(c.harness) == .Codex
+		codex := harness_is_codex(c.harness)
 		if codex {
 			info = &state.reload.codex
 			if c.update do return fail("Codex tabs have no update bar"), false
@@ -600,7 +600,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		return {ok = true, data = strings.to_string(b)}, true
 	case Claude_Reload_Later:
 		info = claude_reload_info(c.harness)
-		if c.update && which(c.harness) == .Claude do info.update_dismissed = true
+		if c.update && !harness_is_codex(c.harness) do info.update_dismissed = true
 		else {
 			info.dismissed = true
 			info.from_save = false
@@ -639,7 +639,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 			info.dismissed = false
 			if c.from_save do info.from_save = true
 		}
-		if which(c.harness) == .Claude && c.ident != "" && c.ident != info.ident {
+		if !harness_is_codex(c.harness) && c.ident != "" && c.ident != info.ident {
 			first := info.ident == ""
 			delete(info.ident)
 			delete(info.version)
@@ -668,7 +668,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		return {ok = true}, true
 	case Claude_Restart_Anyway:
 		_, t, ct := claude_tab_of(c.tab_id)
-		if ct == nil || ct.harness == .Codex do return fail("no such Claude tab"), false
+		if ct == nil || harness_is_codex(ct.harness) do return fail("no such Claude tab"), false
 		if t.status != .Running do return fail("Claude is not running in this tab"), false
 		if t.reload.queued != .Restart do return fail("no restart waits in this tab"), false
 		class := claude_restart_class(t)
@@ -701,14 +701,14 @@ claude_reload_write :: proc(b: ^strings.Builder, cmd: Command) {
 	case Claude_Restart_Changed:
 		if c.update do strings.write_string(b, `,"update":true`)
 		if c.all do strings.write_string(b, `,"all":true`)
-		if which(c.harness) == .Codex do strings.write_string(b, `,"harness":"codex"`)
+		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
 		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
 	case Claude_Reload_Later:
 		if c.update do strings.write_string(b, `,"update":true`)
-		if which(c.harness) == .Codex do strings.write_string(b, `,"harness":"codex"`)
+		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
 	case Claude_Reload_Watch:
 		fmt.sbprintf(b, `,"files":%d`, len(c.paths) + c.more)
-		if which(c.harness) == .Codex do strings.write_string(b, `,"harness":"codex"`)
+		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
 		if c.version != "" {
 			strings.write_string(b, `,"version":`)
 			json_quote(b, c.version)
@@ -802,13 +802,8 @@ Watcher :: struct {
 @(private = "file")
 cws: [Harness]Watcher
 
-// The harness a watcher or command is about: .Codex, else Claude (a zero value, .Pi, is Claude's:
-// the commands' harness field came later).
-@(private = "file")
-which :: proc(h: Harness) -> Harness {return h == .Codex ? .Codex : .Claude}
-
 // The bars' model of a harness (State.reload.claude, State.reload.codex).
-claude_reload_info :: proc(h: Harness) -> ^Claude_Reload_Info {return which(h) == .Codex ? &state.reload.codex : &state.reload.claude}
+claude_reload_info :: proc(h: Harness) -> ^Claude_Reload_Info {return harness_is_codex(h) ? &state.reload.codex : &state.reload.claude}
 
 // Forgets the watchers' state (tests).
 claude_reload_watch_reset :: proc() {
@@ -843,7 +838,7 @@ pending_add :: proc(w: ^Watcher, path, scope: string, at := time.Tick{}) {
 
 // Reports what changed if the debounce passed (true when it did).
 claude_reload_flush :: proc(at := time.Tick{}, harness := Harness.Claude) -> bool {
-	h := which(harness)
+	h := claude_kind_harness(harness)
 	w := &cws[h]
 	now := at == {} ? time.tick_now() : at
 	if !w.has_due || time.tick_diff(w.due, now) < 0 do return false
@@ -862,7 +857,7 @@ claude_reload_flush :: proc(at := time.Tick{}, harness := Harness.Claude) -> boo
 }
 
 // Paths waiting for the debounce (tests).
-claude_reload_pending_count :: proc(harness := Harness.Claude) -> int {return len(cws[which(harness)].pending)}
+claude_reload_pending_count :: proc(harness := Harness.Claude) -> int {return len(cws[claude_kind_harness(harness)].pending)}
 
 // The editor saved a file (settings_after_save): one a running Claude session reads only at
 // start shows the bar at once; one it applies live, nothing. Codex's: codex_reload_note_save.
@@ -953,7 +948,7 @@ reload_tick_of :: proc(h: Harness) {
 	tabs := running_harness(h)
 	kicks := make([dynamic]u64, context.temp_allocator)
 	for &s in state.open_sessions do for &t in s.tabs {
-		if ct, is := t.kind.(Claude_Tab); is && which(ct.harness) == h && t.status != .Running && t.reload.started {
+		if ct, is := t.kind.(Claude_Tab); is && claude_kind_harness(ct.harness) == h && t.status != .Running && t.reload.started {
 			t.reload.started = false
 			window_state_changed() // a tick, not a command: the window's replica follows
 		}
@@ -995,7 +990,7 @@ reload_tick_of :: proc(h: Harness) {
 
 // Tests: a poll now, and its report as if the debounce passed.
 claude_reload_poll_now :: proc(harness := Harness.Claude) {
-	claude_reload_poll(which(harness))
+	claude_reload_poll(claude_kind_harness(harness))
 	claude_reload_flush(time.tick_add(time.tick_now(), 2 * RELOAD_DEBOUNCE), harness)
 }
 
@@ -1157,7 +1152,7 @@ NEW_FOLDERS :: [?]string{"agents", "skills"} // watched only for appearing (Clau
 // The sources for these folders (cwds_now; none = stop). What was known of sources still
 // watched is kept, so a change between polls still shows.
 claude_reload_build :: proc(cwds: []string, harness := Harness.Claude) {
-	h := which(harness)
+	h := claude_kind_harness(harness)
 	w := &cws[h]
 	old := w.srcs
 	w.srcs = {}
@@ -1391,7 +1386,7 @@ add :: proc(w: ^Watcher, path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 // For tests: the sources now (path → scope; folders end in "/").
 claude_reload_sources_for_test :: proc(harness := Harness.Claude) -> map[string]string {
 	m := make(map[string]string, context.temp_allocator)
-	for s in cws[which(harness)].srcs {
+	for s in cws[claude_kind_harness(harness)].srcs {
 		k := s.kind == .File || s.kind == .Toml ? s.path : s.kind == .Keys ? strings.concatenate({s.path, "#keys"}, context.temp_allocator) : strings.concatenate({s.path, "/"}, context.temp_allocator)
 		m[k] = s.scope
 	}

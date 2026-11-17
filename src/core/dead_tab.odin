@@ -45,7 +45,7 @@ exit_not_found :: proc(e: Exit_Info) -> bool {
 
 // "pi exited (code 1)": the bar's text and the tab's and row's tooltip.
 dead_tab_tip :: proc(tab: ^Tab) -> string {
-	if ct, is_claude := tab.kind.(Claude_Tab); is_claude && ct.harness == .Codex {
+	if ct, is_claude := tab.kind.(Claude_Tab); is_claude && harness_is_codex(ct.harness) {
 		if exit_not_found(tab.exit) do return "Codex isn't installed (or not on your login PATH)"
 		if how := exit_text(tab.exit); how != "" do return fmt.tprintf("Codex exited (%s)", how)
 		return "Codex exited"
@@ -65,7 +65,7 @@ dead_tab_tip :: proc(tab: ^Tab) -> string {
 dead_tab_offers_model :: proc(tab: ^Tab) -> bool {
 	#partial switch k in tab.kind {
 	case Pi_Tab:
-	case Claude_Tab: if k.harness == .Codex do return false // Codex has no model step yet (codex.odin)
+	case Claude_Tab: if harness_is_codex(k.harness) do return false // Codex has no model step yet (codex.odin)
 	case: return false
 	}
 	return exit_failed(tab.exit) && !exit_not_found(tab.exit)
@@ -274,7 +274,7 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		return {ok = true, created_id = tab.id}
 	}
 	if exit_not_found(tab.exit) && !claude_tab_installed_now(tab) {
-		hint := ct.harness == .Codex ? CODEX_MISSING_HINT : CLAUDE_MISSING_HINT
+		hint := harness_is_codex(ct.harness) ? CODEX_MISSING_HINT : CLAUDE_MISSING_HINT
 		window_toast(hint, err = true)
 		return fail(hint)
 	}
@@ -283,7 +283,7 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		window_toast(fmt.tprintf("Restart %s: %s", session_where(s), CODEX_CHAT_GONE), err = true)
 		return fail(CODEX_CHAT_GONE)
 	}
-	pick_model := pick_model && ct.harness != .Codex // Claude's /model only
+	pick_model := pick_model && !harness_is_codex(ct.harness) // Claude's /model only
 	forget_confirmations_for(tab.id)
 	socket_forget_tab(tab.id)
 	tab_clear_panels(tab)
@@ -298,7 +298,7 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		drop_term(tab.id)
 		if old != nil do terms[tab.id] = old
 		tab.status, tab.exit = .Exited, exit
-		what := ct.harness == .Codex ? "Codex" : "Claude Code"
+		what := harness_is_codex(ct.harness) ? "Codex" : "Claude Code"
 		why := swhy != "" ? swhy : fmt.tprintf("could not start %s", what) // the new terminal that said why is dropped
 		window_toast(fmt.tprintf("Restart %s: %s", session_where(s), why), err = true)
 		return fail(why)

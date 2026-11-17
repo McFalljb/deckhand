@@ -365,7 +365,7 @@ holder_adopt_all :: proc(released: map[u32]bool = nil) {
 		switch _ in tab.kind {
 		case Shell_Tab:  kind = .Shell
 		case Pi_Tab:     kind = .Pi
-		case Claude_Tab: kind = tab.kind.(Claude_Tab).harness == .Codex ? .Codex : .Claude // a Codex tab's codex is its own kind
+		case Claude_Tab: kind = harness_is_codex(tab.kind.(Claude_Tab).harness) ? .Codex : .Claude // a Codex tab's codex is its own kind
 		case Editor_Tab, Changes_Tab, Markdown_Tab, Browser_Tab, App_Tab:
 			continue
 		}

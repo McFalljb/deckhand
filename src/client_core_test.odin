@@ -62,3 +62,35 @@ client_path_changed_redraws :: proc(t: ^testing.T) {
 	testing.expect(t, app.redraw, "an idle window was not asked to draw the Files tree again")
 	client.sock = nil
 }
+
+// A separate core's Changes action ended (path_changed, count 1: the checkout's root): this
+// window's own list of that checkout is read again at once (now), as in process, not after its
+// watcher's event and the debounce; another checkout's is left alone (#160).
+@(test)
+client_changes_action_reads_list_now :: proc(t: ^testing.T) {
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer posix.close(fds[1])
+	saved, saved_redraw, saved_repos := client, app.redraw, core.changes_repos
+	defer {
+		client = saved
+		app.redraw = saved_redraw
+		core.changes_repos = saved_repos
+	}
+	client = {}
+	sock: cw.Sock_Transport
+	cw.sock_open(&sock, fds[0])
+	defer cw.sock_destroy(&sock)
+	client.sock = &sock // a separate core's window
+	a := core.Changes_Repo{root = "/tmp/dh-changes-a", loaded = true}
+	b := core.Changes_Repo{root = "/tmp/dh-changes-b", loaded = true}
+	core.changes_repos = make([dynamic]^core.Changes_Repo, context.temp_allocator)
+	append(&core.changes_repos, &a, &b)
+	window_request_run({op = .Path_Changed, path = "/tmp/dh-changes-a", count = 1})
+	testing.expect(t, a.stale && a.now, "the action's checkout is not read again at once")
+	testing.expect(t, !b.now, "another checkout is read at once too")
+	b.stale = false
+	window_request_run({op = .Path_Changed, path = "/tmp/dh-changes-b"}) // a file command's path: the debounce as before
+	testing.expect(t, !b.now, "a plain path_changed reads the list at once")
+	client.sock = nil
+}

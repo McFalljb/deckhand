@@ -1335,6 +1335,7 @@ changes_op_done :: proc(c: Changes_Op_Done) -> (r: Result, changed: bool) {
 	}
 	fs_model_changed(c.root) // the Files tab's git status too
 	changes_refresh(changes_repo(c.root))
+	window_changes_refresh(c.root) // a separate core's window reads its own list again too (#160)
 	if v := changes_view(c.tab_id); v != nil {
 		v.busy = ""
 		delete(v.notice)

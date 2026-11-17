@@ -70,3 +70,9 @@ export function foundNote(f: Found): string {
   if (f.more) return `${f.paths.length} shown, more match: type more to narrow`;
   return "";
 }
+
+// Whether Enter opens a result now: the answer is to what is typed (not an older query while a
+// newer one is on its way) and there is one.
+export function enterOpens(f: Found | null, text: string, busy: boolean): boolean {
+  return !busy && !!f && f.query === text.trim() && f.paths.length > 0;
+}

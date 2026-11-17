@@ -8,7 +8,7 @@ import { type App, type MenuItem } from "./ctx.ts";
 import { Icon } from "./icons.tsx";
 import { storageGet, storageSet } from "../ui/dom.ts";
 import { fileIcon } from "./filetree.ts";
-import { FIND_DEBOUNCE_MS, FIND_LIMIT, Latest, foundNote, foundRows, parseFound, stepFound, type Found } from "./filefilter.ts";
+import { FIND_DEBOUNCE_MS, FIND_LIMIT, Latest, enterOpens, foundNote, foundRows, parseFound, stepFound, type Found } from "./filefilter.ts";
 import { CHECKOUT_KEY, checkoutLabel, checkoutName, parseCheckouts, viewRoot, type Checkout, type Checkouts } from "./checkouts.ts";
 
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -155,7 +155,11 @@ export function useFind(app: App, root: string, open: (path: string) => void, do
   };
   useEffect(() => {
     st.root = root;
+    st.found = null; // another root: the old answer is not this tree's
+    st.at = -1;
+    st.last = "";
     if (st.text) ask(st.text);
+    else redraw();
   }, [root]);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   const set = (text: string) => {
@@ -225,15 +229,18 @@ export function FilterBox({ find, phone, listId }: { find: FindState; phone: boo
         aria-activedescendant={active}
         onInput={(e) => find.set((e.target as HTMLInputElement).value)}
         onKeyDown={(e) => {
-          e.stopPropagation(); // never the tree's keys (type-to-select, Delete)
           if (e.key === "ArrowDown" || e.key === "ArrowUp") {
             e.preventDefault();
+            e.stopPropagation();
             find.move(e.key);
           } else if (e.key === "Enter") {
             e.preventDefault();
-            if (find.found?.paths.length) find.pick(Math.max(find.at, 0));
+            e.stopPropagation();
+            // only the answer to what is typed now (not the last query's while a newer one is on its way)
+            if (enterOpens(find.found, find.text, find.busy)) find.pick(Math.max(find.at, 0));
           } else if (e.key === "Escape") {
             e.preventDefault();
+            e.stopPropagation();
             if (find.text || find.shown) find.clear();
             else (e.target as HTMLInputElement).blur();
           }

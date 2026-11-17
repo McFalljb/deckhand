@@ -27,7 +27,11 @@ export function parseCheckouts(d: any): Checkouts {
     if (typeof w?.path !== "string" || !w.path.startsWith("/") || w.missing || w.prunable || w.bare) continue;
     list.push({ path: w.path, branch: typeof w.branch === "string" ? w.branch : "", head: typeof w.head === "string" ? w.head : "", main: !!w.main });
   }
-  return { base: typeof d?.base === "string" ? d.base : "", list, loading: !!d?.loading, err: typeof d?.error === "string" ? d.error : "" };
+  const base = typeof d?.base === "string" ? d.base : "";
+  // a project in a subfolder of its repository (a monorepo's package): the core reads no other
+  // checkout for it, so none is offered
+  const top = list.some((x) => x.path === base);
+  return { base, list: top ? list : [], loading: !!d?.loading, err: typeof d?.error === "string" ? d.error : "" };
 }
 
 // What a checkout has on: its branch, else "detached <short id>".

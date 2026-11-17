@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Latest, foundRows, foundNote, stepFound, parseFound, type Found } from "../src/app/filefilter.ts";
+import { Latest, enterOpens, foundRows, foundNote, stepFound, parseFound, type Found } from "../src/app/filefilter.ts";
 import { CHECKOUT_KEY, checkoutLabel, checkoutName, parseCheckouts, viewRoot, type Checkouts } from "../src/app/checkouts.ts";
 
 test("filter: find_files' answer under the tree's own root (relative paths, more, a refusal)", () => {
@@ -76,4 +76,22 @@ test("checkouts: the page's root: the remembered one while it is listed, else th
   // a symlinked project folder: the core's base is the real path, the tree keeps its own
   assert.equal(viewRoot("/tmp/proj", "/r/proj", parseCheckouts(wt({}))), "/tmp/proj");
   assert.ok(CHECKOUT_KEY("/r/proj").startsWith("deckhand.files.checkout:"));
+});
+
+test("filter: Enter opens only the answer to what is typed now", () => {
+  const f: Found = { query: "main", paths: ["/p/main.ts"], more: false, err: "" };
+  assert.equal(enterOpens(f, "main", false), true);
+  assert.equal(enterOpens(f, " main ", false), true);
+  assert.equal(enterOpens(f, "mainx", false), false); // a newer query on its way
+  assert.equal(enterOpens(f, "main", true), false); // asking again
+  assert.equal(enterOpens(null, "main", false), false);
+  assert.equal(enterOpens({ ...f, paths: [] }, "main", false), false);
+});
+
+test("checkouts: a project in a subfolder of its repository is offered none", () => {
+  // list_worktrees from /r/mono/pkg: base is the package folder, not a checkout's top
+  const c = parseCheckouts({ base: "/r/mono/pkg", loading: false, worktrees: [{ path: "/r/mono", branch: "main", main: true }, { path: "/r/mono-wt", branch: "x" }] });
+  assert.deepEqual(c.list, []);
+  assert.equal(viewRoot("/r/mono/pkg", "/r/mono-wt", c), "/r/mono/pkg");
+  assert.equal(viewRoot("/r/mono/pkg", "/r/mono", c), "/r/mono/pkg");
 });

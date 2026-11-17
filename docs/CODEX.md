@@ -251,7 +251,9 @@ the selected project and Chats. **Codex's files are read only, never written.**
   (`HOME`'s spelling, its real path or the folder resolved; `codex_chat_roots`; Chat mode makes
   `<date>/<slug>` there) is a row in Chats, never a found project, unless that folder is a listed
   project (one you added stays yours); its click and a resume from the history run `codex resume`
-  in that folder (`Claude_Disk.cwd`, `claude_resume_cwd`), not in the chats folder.
+  in that folder (`Claude_Disk.cwd`, `claude_resume_cwd`), not in the chats folder. A history
+  entry 0.7.0 filed under such a folder's project is re-filed to Chats (saved) once that folder is
+  no listed project (`codex_chats_refile`).
 - **Projects where only Codex ran** (`claude_scan_projects`, Claude's own path, on the Rescan
   worker): the `cwd` of each listed rollout (source `"cli"` or `"vscode"`), from the found rows'
   saved cache after a pass on the Rescan worker (`codex_disk_pass_now`, `codex_disk_folders`: a

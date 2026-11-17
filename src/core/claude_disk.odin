@@ -543,6 +543,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	// Claude's transcript has is Claude's (one id, one harness: codex.odin)
 	// (codex_disk.odin: its cache, filled on its worker; nothing read here)
 	codex_disk_refresh()
+	if chats do codex_chats_refile(p)
 	m := 0
 	// the cwd as Codex wrote it, byte for byte: the project's path or its real path (never a
 	// path from the file resolved: a planted one would cost a walk per file per rescan). Chats also
@@ -584,6 +585,21 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 			}
 		}
 		if gone do append(out, Claude_Disk{id = strings.clone(r.id), account = strings.clone(r.account), gone = true, harness = .Claude})
+	}
+}
+
+// A Codex history entry filed under a Codex Desktop chat's folder (0.7.0 made that folder a project
+// and resumed it there) whose folder is no listed project (any more) is Chats' from now on (saved),
+// so it never drops out of the sidebar; its cwd stays, where it resumes (claude_resume_cwd).
+@(private = "file")
+codex_chats_refile :: proc(chats: ^Project) {
+	roots := codex_chat_roots_here()
+	for &r in state.claude_history {
+		if r.harness != .Codex || r.project == chats.cwd || !codex_chat_folder(r.project, roots) do continue
+		if project_by_cwd(r.project) != nil || project_by_cwd(fs_real(r.project)) != nil do continue
+		delete(r.project, runtime.heap_allocator())
+		r.project = strings.clone(chats.cwd, runtime.heap_allocator())
+		persist.gen += 1
 	}
 }
 

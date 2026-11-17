@@ -157,7 +157,7 @@ claude_tab_tip :: proc(tab: Tab) -> string {
 	}
 	ct, is := tab.kind.(Claude_Tab)
 	if !is || ct.model == "" do return ""
-	return fmt.tprintf("%s · model %s", ct.harness == .Codex ? "Codex" : "Claude Code", ct.model)
+	return fmt.tprintf("%s · model %s", harness_is_codex(ct.harness) ? "Codex" : "Claude Code", ct.model)
 }
 
 // A pi tab's model from its bridge's pi.status: "provider/id" and the thinking level, each a short

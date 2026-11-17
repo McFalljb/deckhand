@@ -91,6 +91,19 @@ claude_harness_check :: proc(h: Harness, loc := #caller_location) {
 	when TEST_HOOKS do assert(h != .Pi, "a Claude tab's harness is .Claude or .Codex, never .Pi", loc)
 }
 
+// The harness a Claude tab's, record's or command's harness field runs: Codex, else Claude Code
+// (.Pi too, as above). The one place that decides it, over every Harness value: a new value must be
+// placed here before it builds, never fall silently into the Claude Code or Codex branch of an
+// equality somewhere (#160). Every such field is read through these two.
+claude_kind_harness :: proc(h: Harness) -> Harness {
+	switch h {
+	case .Codex:       return .Codex
+	case .Claude, .Pi: return .Claude
+	}
+	return .Claude
+}
+harness_is_codex :: proc(h: Harness) -> bool {return claude_kind_harness(h) == .Codex}
+
 CLAUDE_HISTORY_MAX :: 100
 CLAUDE_HELD_MAX :: 8
 CLAUDE_PROMPT_MAX :: 64 * 1024
@@ -225,7 +238,7 @@ claude_typed :: proc(tab_id: u64) -> bool {
 claude_ready :: proc(tab: ^Tab, ct: ^Claude_Tab) -> (ok: bool, why: string) {
 	w := replica_process ? tab.live.claude_wait : claude_wait_of(tab, ct) // a window's replica: the core's (Tab_Live)
 	if tab.status != .Running do w = .Not_Running
-	return w == .None, ct.harness == .Codex ? CODEX_WAIT_WHY[w] : CLAUDE_WAIT_WHY[w]
+	return w == .None, harness_is_codex(ct.harness) ? CODEX_WAIT_WHY[w] : CLAUDE_WAIT_WHY[w]
 }
 
 // Why nothing can go into a Claude tab's prompt now (claude_ready).
@@ -267,7 +280,7 @@ claude_wait_of :: proc(tab: ^Tab, ct: ^Claude_Tab) -> Claude_Wait {
 	if tab.status != .Running do return .Not_Running
 	rt := claude_rt[tab.id]
 	if rt.enter_due != {} do return .Sending
-	if ct.harness == .Codex {
+	if harness_is_codex(ct.harness) {
 		// Codex (codex.odin) starts its session, and so its hooks, at the first prompt: before that
 		// its own OSC 7501 alone says it is idle. It must always say so (it reports nothing while a
 		// login or trust dialog is up), and the hooks, once they report, must agree: Enter during a
@@ -345,7 +358,7 @@ claude_command_text :: proc(text: string) -> string {
 claude_paste_message :: proc(tab: ^Tab, text: string, slash := false) -> string {
 	ct, is := &tab.kind.(Claude_Tab)
 	if !is do return "not a Claude tab"
-	if slash && ct.harness == .Codex do return "not Deckhand's own command"
+	if slash && harness_is_codex(ct.harness) do return "not Deckhand's own command"
 	if ok, why := claude_ready(tab, ct); !ok do return why
 	if slash {
 		if text != CLAUDE_MODEL_COMMAND do return "not Deckhand's own command"
@@ -376,7 +389,7 @@ claude_tick :: proc() {
 				// Codex working or blocked since the paste (its OSC 7501, or its hooks' permission): an
 				// Enter now would steer the turn or answer a dialog; dropped (the text stays typed)
 				enter := true
-				if ct.harness == .Codex {
+				if harness_is_codex(ct.harness) {
 					v := tab_status_view(tab)
 					if (v.source == .Osc7501 && (v.state == .Working || v.state == .Blocked)) || ct.turn == .Waiting do enter = false
 				}
@@ -544,7 +557,7 @@ claude_recheck :: proc() {harness_recheck(.Claude)}
 
 // The installed check for the harness of a tab's (claude_missing or codex_missing).
 claude_tab_missing :: proc(tab: ^Tab, caller: Caller) -> (r: Result, missing: bool) {
-	if ct, is := tab.kind.(Claude_Tab); is && ct.harness == .Codex do return codex_missing(caller)
+	if ct, is := tab.kind.(Claude_Tab); is && harness_is_codex(ct.harness) do return codex_missing(caller)
 	return claude_missing(caller)
 }
 
@@ -643,13 +656,13 @@ claude_record :: proc(id: string) -> (^Claude_Record, int) {
 // first legitimately seen): its record and the Codex tabs' hold on it go.
 codex_claim_drop :: proc(p: ^Project, id: string) {
 	rec, i := claude_record(id)
-	if rec == nil || rec.harness != .Codex do return
+	if rec == nil || !harness_is_codex(rec.harness) do return
 	if _, ok := claude_disk_find(p, id); !ok do return
 	record_free(rec^)
 	ordered_remove(&state.claude_history, i)
 	for &s in state.open_sessions do for &tab in s.tabs {
 		ct, is := &tab.kind.(Claude_Tab)
-		if !is || ct.harness != .Codex || ct.session_id != id do continue
+		if !is || !harness_is_codex(ct.harness) || ct.session_id != id do continue
 		if s.agent == .Claude && s.tabs[0].id == tab.id && s.pi_session_id == id {
 			delete(s.pi_session_id)
 			s.pi_session_id = ""
@@ -780,7 +793,7 @@ claude_host :: proc(p: ^Project) -> ^Open_Session {
 @(private = "file")
 claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "", harness: Harness) -> (Result, bool) {
 	focus := caller.kind == .UI || caller.kind == .Script
-	tab := Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(resume), args = clone_strings(args), account = strings.clone(account), resume_path = strings.clone(resume_path), harness = harness}, title = strings.clone(harness == .Codex ? "Codex" : "Claude"), status = .Running}
+	tab := Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(resume), args = clone_strings(args), account = strings.clone(account), resume_path = strings.clone(resume_path), harness = harness}, title = strings.clone(harness_is_codex(harness) ? "Codex" : "Claude"), status = .Running}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	ct := &tab.kind.(Claude_Tab)
 	t := new_term(tab.id)
@@ -791,7 +804,7 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 		delete(tab.cwd)
 		// the reason, not only that it failed: the tab that said it is dropped here (#135)
 		if why != "" do return fail(why), false
-		return fail(harness == .Codex ? "could not start Codex" : "could not start Claude Code"), false
+		return fail(harness_is_codex(harness) ? "could not start Codex" : "could not start Claude Code"), false
 	}
 	pane_add_tab(s, tab, pane = open_pane(s, caller))
 	if focus {
@@ -803,7 +816,7 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 		history_touch(resume, cwd, p != nil ? p.cwd : s.cwd, args, account, harness)
 	}
 	// the next new session's default (claude_account_pick); the user's own choice
-	last := harness == .Codex ? &state.settings.codex_account_last : &state.settings.claude_account_last
+	last := harness_is_codex(harness) ? &state.settings.codex_account_last : &state.settings.claude_account_last
 	if caller.kind == .UI && account != "" && account != last^ {
 		delete(last^)
 		last^ = strings.clone(account)
@@ -877,8 +890,8 @@ claude_resume_cwd :: proc(rec: ^Claude_Record, p: ^Project, s: ^Open_Session = n
 // folder: "gone", never started.
 claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool) {
 	// its flags by its harness's rule (restore_tab would drop it: never a session without its main tab)
-	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || (c.tabs[0].harness == .Codex ? codex_args_check(c.tabs[0].args) : claude_args_check(c.tabs[0].args)) != "" do return fail("a Claude session's first tab is its Claude tab"), false
-	if !(c.tabs[0].harness == .Codex ? codex_id_ok(c.pi_session_id) : claude_id_ok(c.pi_session_id)) do return fail("not a Claude session id"), false
+	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || (harness_is_codex(c.tabs[0].harness) ? codex_args_check(c.tabs[0].args) : claude_args_check(c.tabs[0].args)) != "" do return fail("a Claude session's first tab is its Claude tab"), false
+	if !(harness_is_codex(c.tabs[0].harness) ? codex_id_ok(c.pi_session_id) : claude_id_ok(c.pi_session_id)) do return fail("not a Claude session id"), false
 	if claude_open_tab(c.pi_session_id) != 0 do return fail("this session is already open"), false
 	s := Open_Session{agent = .Claude, pi_session_id = strings.clone(c.pi_session_id), project_id = p.id, cwd = strings.clone(p.cwd), restored = true, missing = !os.is_dir(p.cwd)}
 	restore_tabs(&s, c.tabs, c.layout) // its main tab is c.tabs[0], with its own saved pane
@@ -972,14 +985,14 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		} else do return fail("session or project_id is needed"), false
 		if s.home do return fail("Home has only its pi tab"), false
 		if s.missing do return fail("this session is gone"), false
-		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.harness == .Codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
-		if e := c.harness == .Codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
+		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(harness_is_codex(c.harness) ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
+		if e := harness_is_codex(c.harness) ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
 		if c.resume != "" {
-			if c.harness == .Codex && !codex_id_ok(c.resume) do return fail("resume must be a Codex session id"), false
-			if c.harness != .Codex && !claude_id_ok(c.resume) do return fail("resume must be a Claude session id"), false
+			if harness_is_codex(c.harness) && !codex_id_ok(c.resume) do return fail("resume must be a Codex session id"), false
+			if !harness_is_codex(c.harness) && !claude_id_ok(c.resume) do return fail("resume must be a Claude session id"), false
 			// a conversation resumes in its own harness only (codex.odin: one id, one harness)
-			if c.harness == .Codex && claude_conversation_seen(find_project(s.project_id), c.resume) do return fail("that id is another harness's conversation"), false
-			if c.harness != .Codex do codex_claim_drop(find_project(s.project_id), c.resume)
+			if harness_is_codex(c.harness) && claude_conversation_seen(find_project(s.project_id), c.resume) do return fail("that id is another harness's conversation"), false
+			if !harness_is_codex(c.harness) do codex_claim_drop(find_project(s.project_id), c.resume)
 			if rec, _ := claude_record(c.resume); rec != nil && rec.harness != c.harness do return fail("that id is another harness's conversation"), false
 			if tid := claude_tab_of_session(c.resume); tid != 0 {
 				if _, ot, oct := claude_tab_of(tid); ot != nil && oct.harness != c.harness do return fail("that id is another harness's conversation"), false
@@ -1000,7 +1013,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		}
 		// its account: the one named (configured only), else the resumed entry's, else the default
 		// pick (a Codex tab: a Codex account, the same way)
-		which := c.harness == .Codex ? "Codex" : "Claude"
+		which := harness_is_codex(c.harness) ? "Codex" : "Claude"
 		account, aerr := claude_account_resolve(c.account, c.harness)
 		if aerr != "" do return fail(aerr), false
 		// a recorded session stays in its account: its transcript is there
@@ -1023,8 +1036,8 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			chats_instructions_ensure(date_stamp())
 		}
 		if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
-		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(c.harness == .Codex ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
-		if e := c.harness == .Codex ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
+		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail(harness_is_codex(c.harness) ? "only the user sets Codex's flags" : "only the user sets Claude Code's flags"), false
+		if e := harness_is_codex(c.harness) ? codex_args_check(c.args) : claude_args_check(c.args); e != "" do return fail(e), false
 
 		cwd := p.cwd
 		if c.cwd != "" {
@@ -1059,7 +1072,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		p := project_by_cwd(rec.project)
 		if ch := chats_project(); p == nil && ch != nil && ch.cwd == rec.project do p = ch // a Claude chat
 		if p == nil do return fail("its project is not listed"), false
-		if rec.harness == .Codex && claude_conversation_seen(p, rec.id) {
+		if harness_is_codex(rec.harness) && claude_conversation_seen(p, rec.id) {
 			// Claude Code's own transcript has this id: the Codex claim goes and the row opens as
 			// the Claude conversation it is (codex.odin: ids are one space, Claude's transcript wins)
 			id := strings.clone(rec.id, context.temp_allocator)
@@ -1070,7 +1083,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			if !r.ok do return r, ch
 			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
 		}
-		if rec.harness == .Codex {
+		if harness_is_codex(rec.harness) {
 			// a Codex conversation (codex.odin): `codex resume <id>`, the user's saved flags on the
 			// user's own resume only (as Claude's below), under the account it ran in while that
 			// is configured
@@ -1107,17 +1120,17 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 	case Claude_Session_Report:
 		s, tab, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
-		if !claude_tab_id_ok(ct, c.session_id) do return fail(ct.harness == .Codex ? "session_id must be a Codex session id" : "session_id must be a Claude session id"), false
+		if !claude_tab_id_ok(ct, c.session_id) do return fail(harness_is_codex(ct.harness) ? "session_id must be a Codex session id" : "session_id must be a Claude session id"), false
 		p := find_project(s.project_id)
 		project := p != nil ? p.cwd : s.cwd
 		// one id, one harness (codex.odin): Codex never takes Claude Code's; Claude Code's own
 		// transcript beats a Codex claim on its id
-		if ct.harness == .Codex && claude_conversation_seen(p, c.session_id) do return fail("that id is another harness's conversation"), false
-		if ct.harness != .Codex do codex_claim_drop(p, c.session_id)
+		if harness_is_codex(ct.harness) && claude_conversation_seen(p, c.session_id) do return fail("that id is another harness's conversation"), false
+		if !harness_is_codex(ct.harness) do codex_claim_drop(p, c.session_id)
 		if rec, _ := claude_record(c.session_id); rec != nil && rec.project != project do return fail("that Claude session belongs to another project"), false
 		if rec, _ := claude_record(c.session_id); rec != nil && rec.harness != ct.harness do return fail("that id is another harness's conversation"), false
 		if claude_id_taken(s, tab, p, c.session_id) do return fail("that id is another session's"), false
-		if ct.harness == .Codex do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
+		if harness_is_codex(ct.harness) do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
 		if ct.session_id != c.session_id {
 			delete(ct.session_id)
 			ct.session_id = strings.clone(c.session_id)
@@ -1135,7 +1148,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		ts, tab, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
 		was := ct.turn
-		if ct.harness == .Codex do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
+		if harness_is_codex(ct.harness) do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
 		defer if claude_status_turn(ts, tab, was, c.state, c.idle_prompt) do window_state_changed() // dots without OSC 7501 (claude_status.odin)
 		ended := claude_rows_turn(ct, c.state, c.question, c.idle_prompt) // the question and error dots (claude_rows.odin)
 		switch c.state {
@@ -1193,7 +1206,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		case "send":
 			if len(ct.held) == 0 do return fail("nothing waits"), false
 			if tab.status != .Running do return fail("Claude is not running in this tab"), false
-			if ct.harness == .Codex {
+			if harness_is_codex(ct.harness) {
 				// Codex: only at an idle composer per OSC 7501 and the hooks (never into a running
 				// turn: Enter would steer it); Send now skips just the wait for what the user typed
 				if w := claude_wait_of(tab, ct); w != .None && w != .Typing do return fail(CODEX_WAIT_WHY[w]), false
@@ -1254,8 +1267,8 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		for r in c.records {
 			// as a report would be: an id that can go into argv, no flags Deckhand sets, an absolute
 			// project, a one-line title of at most CLAUDE_TITLE_MAX
-			if !(r.harness == .Codex ? codex_id_ok(r.id) : claude_id_ok(r.id)) || len(state.claude_history) >= CLAUDE_HISTORY_MAX do continue
-			if (r.harness == .Codex ? codex_args_check(r.args) : claude_args_check(r.args)) != "" || !strings.has_prefix(r.project, "/") do continue
+			if !(harness_is_codex(r.harness) ? codex_id_ok(r.id) : claude_id_ok(r.id)) || len(state.claude_history) >= CLAUDE_HISTORY_MAX do continue
+			if (harness_is_codex(r.harness) ? codex_args_check(r.args) : claude_args_check(r.args)) != "" || !strings.has_prefix(r.project, "/") do continue
 			if old, _ := claude_record(r.id); old != nil do continue
 			title := cut_utf8(strings.trim_space(one_line(r.title, context.temp_allocator)), CLAUDE_TITLE_MAX)
 			// the transcript path and model as a report's would be (claude_rows.odin)
@@ -1327,10 +1340,10 @@ claude_command_write :: proc(b: ^strings.Builder, cmd: Command, redact: bool) {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, c.account)
 		}
-		if c.harness == .Codex do strings.write_string(b, `,"harness":"codex"`)
+		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
 	case New_Claude_Session:
 		fmt.sbprintf(b, `,"project_id":%d`, c.project_id)
-		if c.harness == .Codex do strings.write_string(b, `,"harness":"codex"`)
+		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
 		if c.account != "" {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, c.account)
@@ -1466,7 +1479,7 @@ claude_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 	strings.write_string(b, `,"claude_session_id":`)
 	json_quote(b, ct.session_id)
 	fmt.sbprintf(b, `,"turn":"%s","held":%d,"typed":%v,"argc":%d`, CLAUDE_TURN_NAMES[ct.turn], len(ct.held), claude_typed(tab.id), len(ct.args))
-	if ct.harness == .Codex do strings.write_string(b, `,"harness":"codex"`)
+	if harness_is_codex(ct.harness) do strings.write_string(b, `,"harness":"codex"`)
 	if tag := claude_account_tag(ct.account, ct.harness); tag != "" {
 		strings.write_string(b, `,"account":`)
 		json_quote(b, tag)
@@ -1499,7 +1512,7 @@ claude_history_json :: proc(b: ^strings.Builder, list: []Claude_Record, found, f
 			json_quote(b, r.model)
 		}
 		fmt.sbprintf(b, `,"used":%d,"open":%v`, r.used, claude_open_tab(r.id) != 0)
-		if r.harness == .Codex do strings.write_string(b, `,"harness":"codex"`)
+		if harness_is_codex(r.harness) do strings.write_string(b, `,"harness":"codex"`)
 		if tag := claude_account_tag(r.account, r.harness); tag != "" {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, tag)

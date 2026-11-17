@@ -239,7 +239,7 @@ claude_accounts_refresh :: proc() {
 // A label from a folder's name: ".claude-work" -> "Work", "claude_personal" -> "Personal",
 // "acme-claude" -> "Acme-claude", ".claude" -> "Claude" (.Codex: ".codex-work" -> "Work"). Temp.
 claude_account_label_of :: proc(dir: string, harness: Harness) -> string {
-	word := harness == .Codex ? "codex" : "claude"
+	word := harness_is_codex(harness) ? "codex" : "claude"
 	name := filepath.base(dir)
 	name = strings.trim_left(name, ".")
 	low := strings.to_lower(name, context.temp_allocator)
@@ -286,7 +286,7 @@ claude_accounts :: proc(harness: Harness) -> []Claude_Account {
 	// frame: a frame or a core tick, so also while the window is hidden, and in a separate core
 	list := settings_of(harness)
 	key := Accounts_Key{frame = app_frames_called + core_loop.ticks, gen = claude_accounts_gen, settings = raw_data(list^), n = len(list^), home = home_dir_now(), def = env_default(harness), chosen = chosen_of(harness)^}
-	c := &accounts_cache[harness == .Codex ? 1 : 0]
+	c := &accounts_cache[harness_is_codex(harness) ? 1 : 0]
 	same := c.ok && c.key.frame == key.frame && c.key.gen == key.gen && c.key.settings == key.settings && c.key.n == key.n && c.key.home == key.home && c.key.def == key.def && c.key.chosen == key.chosen
 	if !same {
 		for a in c.list {
@@ -321,7 +321,7 @@ accounts_make :: proc(harness: Harness) -> []Claude_Account {
 		if slice.contains(seen[:], real) || slice.contains(seen[:], d) do return
 		st := setting_of(d, harness)
 		if src != .Default && st != nil && st.removed do return
-		label := src == .Default ? (harness == .Codex ? "Codex" : "Claude") : claude_account_label_of(d, harness)
+		label := src == .Default ? (harness_is_codex(harness) ? "Codex" : "Claude") : claude_account_label_of(d, harness)
 		if st != nil && st.label != "" do label = st.label
 		// two of one name: the later one by its folder
 		for a in out do if strings.equal_fold(a.label, label) do label = path_tilde(d)
@@ -331,8 +331,8 @@ accounts_make :: proc(harness: Harness) -> []Claude_Account {
 	def := env_default(harness)
 	add(&out, &seen, def, .Default, harness)
 	if home := home_config(harness); home != "" && home != def && path_kind(home) == .Dir do add(&out, &seen, home, .Home, harness)
-	if harness != .Codex do for d in found_dirs do add(&out, &seen, d, .Found, harness) // Codex homes are only added by hand
-	for s in settings_of(harness)^ do if s.added && path_kind(s.dir) == .Dir && !(harness == .Codex && codex_home_too_high(s.dir)) do add(&out, &seen, s.dir, .Added, harness)
+	if !harness_is_codex(harness) do for d in found_dirs do add(&out, &seen, d, .Found, harness) // Codex homes are only added by hand
+	for s in settings_of(harness)^ do if s.added && path_kind(s.dir) == .Dir && !(harness_is_codex(harness) && codex_home_too_high(s.dir)) do add(&out, &seen, s.dir, .Added, harness)
 	chosen := 0
 	for a, i in out do if i > 0 && a.dir == chosen_of(harness)^ do chosen = i
 	if len(out) > 0 do out[chosen].chosen = true
@@ -365,12 +365,12 @@ claude_account_dirs :: proc(harness: Harness) -> []string {
 	add :: proc(out: ^[dynamic]string, d: string, harness: Harness) {
 		c := clean_dir(d)
 		if c == "" || slice.contains(out[:], c) do return
-		if harness == .Codex && codex_home_too_high(c) do return // only its auth.json (codex_credential)
+		if harness_is_codex(harness) && codex_home_too_high(c) do return // only its auth.json (codex_credential)
 		append(out, c)
 	}
 	add(&out, home_config(harness), harness)
 	add(&out, env_default(harness), harness)
-	if harness != .Codex do for d in found_dirs do add(&out, d, harness)
+	if !harness_is_codex(harness) do for d in found_dirs do add(&out, d, harness)
 	// a removed folder stays guarded while it holds Claude Code's (Codex's) files (a hand-added
 	// one without them was never Claude's: removing it gives it back)
 	for s in settings_of(harness)^ do if !s.removed || marked(s.dir, harness) do add(&out, s.dir, harness)
@@ -391,7 +391,7 @@ claude_account_resolve :: proc(name: string, harness: Harness) -> (dir: string, 
 		if i > 0 do strings.write_string(&b, ", ")
 		strings.write_string(&b, a.label)
 	}
-	return "", fmt.tprintf("no such %s account (Settings → %s accounts: %s)", harness == .Codex ? "Codex" : "Claude", harness == .Codex ? "Codex" : "Claude", strings.to_string(b))
+	return "", fmt.tprintf("no such %s account (Settings → %s accounts: %s)", harness_is_codex(harness) ? "Codex" : "Claude", harness_is_codex(harness) ? "Codex" : "Claude", strings.to_string(b))
 }
 
 // The folder a tab or record's account is ("" = the default: legacy entries). Temp.
@@ -453,7 +453,7 @@ claude_accounts_restore :: proc(st: json.Object) {
 	heap := runtime.heap_allocator()
 	claude_accounts_gen += 1
 	for harness in ([2]Harness{.Claude, .Codex}) {
-		key := harness == .Codex ? "codex_" : "claude_"
+		key := harness_is_codex(harness) ? "codex_" : "claude_"
 		list_now := settings_of(harness)
 		if list, ok := st[strings.concatenate({key, "accounts"}, context.temp_allocator)].(json.Array); ok {
 			for x in list_now^ {
@@ -466,7 +466,7 @@ claude_accounts_restore :: proc(st: json.Object) {
 				if !oo do continue
 				dir, _ := o["dir"].(json.String)
 				d := clean_dir(string(dir))
-				if d == "" || setting_of(d, harness) != nil || (harness == .Codex && codex_home_too_high(d)) do continue
+				if d == "" || setting_of(d, harness) != nil || (harness_is_codex(harness) && codex_home_too_high(d)) do continue
 				label, _ := o["label"].(json.String)
 				added, _ := o["added"].(json.Boolean)
 				removed, _ := o["removed"].(json.Boolean)
@@ -517,8 +517,8 @@ claude_account_items :: proc(items: ^[dynamic]Menu_Item, label: string, cmd: Com
 		return
 	}
 	accts := claude_accounts(harness)
-	if len(accts) < 2 || !(harness == .Codex ? codex_installed() : claude_installed()) {
-		append(items, Menu_Item{label = harness == .Codex ? codex_label(label) : claude_label(label), cmd = cmd})
+	if len(accts) < 2 || !(harness_is_codex(harness) ? codex_installed() : claude_installed()) {
+		append(items, Menu_Item{label = harness_is_codex(harness) ? codex_label(label) : claude_label(label), cmd = cmd})
 		return
 	}
 	pick := claude_account_pick(find_project(pid), harness)
@@ -545,9 +545,9 @@ claude_account_dir_refused :: proc(d: string, harness: Harness) -> string {
 		rx := fs_real(x)
 		return x == d || rx == rd || within(x, d) || within(rx, rd)
 	}
-	what := harness == .Codex ? "a Codex home" : "a Claude Code config folder"
-	pick := harness == .Codex ? "pick the Codex home itself" : "pick the Claude Code config folder itself"
-	if d == "/" || holds(d, rd, h) || (harness == .Codex && codex_home_too_high(d)) do return fmt.tprintf("%s is not your home folder or above it", what)
+	what := harness_is_codex(harness) ? "a Codex home" : "a Claude Code config folder"
+	pick := harness_is_codex(harness) ? "pick the Codex home itself" : "pick the Claude Code config folder itself"
+	if d == "/" || holds(d, rd, h) || (harness_is_codex(harness) && codex_home_too_high(d)) do return fmt.tprintf("%s is not your home folder or above it", what)
 	for p in state.projects do if p.machine == 0 && holds(d, rd, p.cwd) do return fmt.tprintf("it holds the project %s: %s", p.label != "" ? p.label : p.cwd, pick)
 	if holds(d, rd, state.settings.home_dir) do return fmt.tprintf("it holds Deckhand's main folder: %s", pick)
 	if holds(d, rd, chats_cwd()) do return fmt.tprintf("it holds the chats folder: %s", pick)
@@ -555,11 +555,11 @@ claude_account_dir_refused :: proc(d: string, harness: Harness) -> string {
 	// would cover the other's files. The same harness's own folder: itself (a removed one added
 	// again; a listed one: "already an account")
 	for same in ([2]bool{true, false}) {
-		if harness != .Codex && same do continue // Claude's own folders nest as before
-		other := same ? harness : harness == .Codex ? Harness.Claude : Harness.Codex
+		if !harness_is_codex(harness) && same do continue // Claude's own folders nest as before
+		other := same ? harness : harness_is_codex(harness) ? Harness.Claude : Harness.Codex
 		for o in claude_account_dirs(other) {
 			if same && (o == d || fs_real(o) == rd) do continue
-			if holds(d, rd, o) || holds(o, fs_real(o), d) do return fmt.tprintf("it is, is inside, or holds %s (%s)", other == .Codex ? "a Codex home" : "a Claude Code config folder", path_tilde(o))
+			if holds(d, rd, o) || holds(o, fs_real(o), d) do return fmt.tprintf("it is, is inside, or holds %s (%s)", harness_is_codex(other) ? "a Codex home" : "a Claude Code config folder", path_tilde(o))
 		}
 	}
 	return ""
@@ -632,7 +632,7 @@ claude_account_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		claude_harness_check(c.harness)
 		d, err := claude_account_resolve(c.account, c.harness)
 		if err != "" || d == "" do return fail(err != "" ? err : "account is needed"), false
-		if d == env_default(c.harness) do return fail(c.harness == .Codex ? "the default account stays (it is what `codex` uses in your shell)" : "the default account stays (it is what `claude` uses in your shell)"), false
+		if d == env_default(c.harness) do return fail(harness_is_codex(c.harness) ? "the default account stays (it is what `codex` uses in your shell)" : "the default account stays (it is what `claude` uses in your shell)"), false
 		st := setting_of(d, c.harness)
 		if st == nil {
 			list := settings_of(c.harness)
@@ -698,7 +698,7 @@ claude_account_write :: proc(b: ^strings.Builder, cmd: Command) {
 		json_quote(b, c.account)
 		harness = c.harness
 	}
-	if harness == .Codex do strings.write_string(b, `,"harness":"codex"`) // Claude's wire is unchanged
+	if harness_is_codex(harness) do strings.write_string(b, `,"harness":"codex"`) // Claude's wire is unchanged
 }
 
 claude_account_clone :: proc(cmd: Command, allocator := context.allocator) -> Command {
@@ -727,7 +727,7 @@ claude_account_free :: proc(cmd: Command, allocator := context.allocator) {
 // The snapshot's accounts (no secrets: labels and folders): Claude's, then Codex's.
 claude_accounts_json :: proc(b: ^strings.Builder) {
 	for harness in ([2]Harness{.Claude, .Codex}) {
-		strings.write_string(b, harness == .Codex ? `,"codex_accounts":[` : `,"claude_accounts":[`)
+		strings.write_string(b, harness_is_codex(harness) ? `,"codex_accounts":[` : `,"claude_accounts":[`)
 		for a, i in claude_accounts(harness) {
 			if i > 0 do strings.write_byte(b, ',')
 			strings.write_string(b, `{"label":`)

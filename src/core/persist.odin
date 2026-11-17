@@ -381,7 +381,7 @@ workspace_json :: proc() -> string {
 			if tab.id == s.active_tab do active = j
 			open_obj(&w)
 			// a Codex tab (codex.odin) is "codex": an older Deckhand drops it rather than start claude on its id
-			if ct, is_cl := tab.kind.(Claude_Tab); is_cl && ct.harness == .Codex do ks(&w, "kind", "codex")
+			if ct, is_cl := tab.kind.(Claude_Tab); is_cl && harness_is_codex(ct.harness) do ks(&w, "kind", "codex")
 			else do ks(&w, "kind", TAB_KIND_NAMES[tab_kind_id(tab.kind)])
 			if held := tab_held(tab.id); held != 0 {
 				ki(&w, "held", int(held)) // its process runs on in the session holder
@@ -513,7 +513,7 @@ workspace_json :: proc() -> string {
 			if r.transcript != "" do ks(&w, "transcript", r.transcript)
 			if r.model != "" do ks(&w, "model", r.model)
 			if r.account != "" do ks(&w, "account", r.account)
-			if r.harness == .Codex do kb(&w, "codex", true) // a Codex conversation (codex.odin)
+			if harness_is_codex(r.harness) do kb(&w, "codex", true) // a Codex conversation (codex.odin)
 			if len(r.args) > 0 {
 				k(&w, "args")
 				write_strings(&w.b, r.args)

@@ -239,9 +239,9 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	// a Codex tab there: only to a core whose hello says it starts one (an older core would start
 	// Claude Code for it, or refuse it); refused here, before anything is sent
 	case New_Claude_Session:
-		if c.harness == .Codex && !machine_codex(no) do return codex_remote_old(no), true
+		if harness_is_codex(c.harness) && !machine_codex(no) do return codex_remote_old(no), true
 	case New_Claude_Tab:
-		if c.harness == .Codex && !machine_codex(no) do return codex_remote_old(no), true
+		if harness_is_codex(c.harness) && !machine_codex(no) do return codex_remote_old(no), true
 	case Pi_Handoff_Part:
 		// only pi_handoff's own sending (machine_handoff_send) puts one on a link, never a caller's
 		return fail("pi_handoff_part is sent only by pi_handoff"), true

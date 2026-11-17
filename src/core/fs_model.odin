@@ -1279,12 +1279,22 @@ fs_find_files :: proc(root, query: string, limit: int, caller: Caller) -> (data:
 		ids := credential_ids() // once for every result
 		none: [1]Cred_Id
 		if len(ids) == 0 do ids = none[:0]
+		// fs_credential_place by folder, once each (the results are files: a place is a folder)
+		places := make(map[string]bool, context.temp_allocator)
 		for i in files_filter_match(files, query) {
 			rel := files[i]
 			if fs_in_git(rel) do continue
 			full := strings.concatenate({p, "/", rel}, context.temp_allocator)
+			if !user {
+				dir := tdir(full)
+				in_place, seen := places[dir]
+				if !seen {
+					in_place = fs_credential_place(dir)
+					places[dir] = in_place
+				}
+				if in_place do continue
+			}
 			if settings_credential(full, ids) do continue
-			if !user && fs_credential_place(full) do continue
 			if shown == n {
 				more = true
 				break

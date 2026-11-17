@@ -796,8 +796,8 @@ codex_home :: proc() -> string {
 // The files in Codex's folder a user edits: everything else there is Codex's state (its sign-in
 // auth.json, sessions/ transcripts, history, logs, databases), refused wherever Claude's
 // credentials are (settings_credential: open, show, upload, list, watch) and never written. One
-// exception, read only: the found-row scan lists sessions/ and reads the newest rollouts' first
-// line (codex_disk.odin, docs/CODEX.md §2b).
+// exception, read only: the found-row scan lists sessions/, reads each rollout's first line and
+// session_index.jsonl's titles (codex_disk.odin, docs/CODEX.md §2b).
 CODEX_CONFIG_FILES := [?]string{"config.toml", "AGENTS.md", "AGENTS.override.md"}
 CODEX_CONFIG_FOLDERS := [?]string{"prompts", "skills", "rules"}
 

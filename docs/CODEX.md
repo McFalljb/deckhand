@@ -181,22 +181,38 @@ at each file rather than "the Read tool". Nothing pending: nothing printed. If t
 
 ## 2b. Sessions found on disk
 
-`claude_disk_scan` (`src/core/claude_disk.odin`; Codex's lister and first-line reader in `src/core/codex_disk.odin`) lists Codex conversations beside Claude Code's for
-the selected project and Chats. **Read only, never written.**
+`claude_disk_scan` (`src/core/claude_disk.odin`; Codex's lister, first-line reader and saved cache in `src/core/codex_disk.odin`) lists Codex conversations beside Claude Code's for
+the selected project and Chats. **Codex's files are read only, never written.**
 
 - **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), and each Codex
-  account's `<home>/sessions` (§6a), `YYYY/MM/DD/` folders
-  newest first: at most 60 day folders and 400 files a home (`CODEX_DISK_DAYS_MAX`, `CODEX_DISK_FILES_MAX`),
+  account's `<home>/sessions` (§6a), every `YYYY/MM/DD/` folder, newest first (no age or count
+  limit; hard ceilings against a broken folder: 20,000 folders walked and 50,000 files a home,
+  `CODEX_DISK_DIRS_MAX`, `CODEX_DISK_FILES_MAX`),
   regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
   (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set or a home they added,
   never the real home's `~/.codex`.
 - **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
-  through the Claude scan's cache, budget and worker (`found_info`). The payload's `id` must be
+  once per file ever, never on the main thread (`codex_pass`, `codex_disk.odin`). The scan asks
+  for a pass (`codex_disk_refresh`: one at a time, at most one per 10 s) and shows the cache
+  (`codex_disk_found`); the pass lists every home, drops the entries of files gone, reads the
+  first line of each new or changed rollout (size or mtime), and has the rows made again every 64
+  files. The payload's `id` must be
   the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source`
-  `"cli"` or `"vscode"` (an interactive thread: `codex exec`'s and a subagent's, an object, are
-  skipped). The cwd is only compared; no title is read (rows read
-  "Untitled Codex session" with the file's date); nothing from the file reaches a shell, the
-  terminal or the snapshot but the id (a UUID). The file's path is not kept.
+  `"cli"` (the CLI) or `"vscode"` (Codex Desktop) to be a row (`codex_source_listed`:
+  `codex exec`'s, a subagent's, an object, and any source Deckhand does not know are not). The
+  cwd is only compared; nothing from the file reaches a shell, the terminal or the snapshot but
+  the id (a UUID). The file's path is not kept in a row.
+- **The saved cache**: `codex-sessions.tsv` in the data dir, beside the session-title cache
+  (`titles_load`): a version line (`deckhand codex sessions 1`), then per rollout its size, mtime,
+  created time, source, id, account (home), cwd and path, tab-separated; written atomically, 0600,
+  at the end of a pass that changed anything; at most 100,000 entries (`CODEX_CACHE_MAX`). A file
+  over 64 MB, of another version, or a line that does not parse is not used (those rollouts are
+  read again). A launch reads only new or changed rollouts.
+- **Titles**: each home's `session_index.jsonl` (one object a line: `id`, `thread_name`,
+  `updated_at`; the last line for an id wins), joined to the listed rows only (a row it does not
+  name stays "Untitled Codex session" with the file's date). Read on the pass's worker, again only
+  when its size or mtime changes; its last 16 MB at most, lines over 16 KB skipped; the name made
+  one line as other titles are (`clean_title`, `one_line`, at most 80 bytes). Never written.
 - **Which**: not one Deckhand's history has (its row is the history's), a pi session's id, or an
   id Claude Code's transcript has (one id, one harness: Claude's wins, in the scan and again at
   resume, `claude_conversation_seen`); at most `MAX_SESSIONS`.

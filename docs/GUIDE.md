@@ -1190,10 +1190,12 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   message) appears then. **Resume** from the row continues it (`codex resume`); a session that was
   open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
   title only; Codex keeps its own. Codex conversations you ran outside Deckhand in the project's
-  folder are listed too (from `~/.codex/sessions/`, the last 60 days or so; read, never changed),
-  as "Untitled Codex session" with their date: a click resumes one. Only conversations you had
-  with Codex (in a terminal or your editor) count, never `codex exec` runs or Codex's own
-  subagents. Folders where only Codex ran show up as projects, as Claude Code's do; **Rescan
+  folder are listed too (from `~/.codex/sessions/`, however old; read, never changed), titled
+  with the name Codex gave the thread (its `session_index.jsonl`), else "Untitled Codex session"
+  with their date: a click resumes one. The first look reads each conversation's first line once,
+  in the background; Deckhand remembers what it read, so later launches read only new ones. Only
+  conversations you had with Codex (in a terminal or Codex Desktop) count, never `codex exec`
+  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude Code's do; **Rescan
   sessions** looks again and drops one no conversation records any more (unless you added or
   named it).
 - **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when

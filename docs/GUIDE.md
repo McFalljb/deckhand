@@ -1564,8 +1564,8 @@ own files.
 new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tabs](#codex-tabs)).
 Once Codex is installed and has its folder (`~/.codex` or your `CODEX_HOME`): `config.toml`,
 `AGENTS.md`, `AGENTS.override.md`, and the folders `prompts`, `skills`, `rules`, each account's
-own. They open **read-only**: Deckhand never writes in Codex's folder, so edit them in your own
-editor (or with Codex). Its sign-in (`auth.json`) and its sessions and history are never listed.
+own, open and save like Claude Code's; `hooks.json` and `hooks/` show **read-only**. Its sign-in
+(`auth.json`), its sessions, history and `plugins/` are never listed, opened or saved over.
 
 ### Machines
 

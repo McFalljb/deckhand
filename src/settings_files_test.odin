@@ -710,21 +710,25 @@ settings_files_claude_every_config_folder :: proc(t: ^testing.T) {
 	testing.expect(t, core.settings_credential(fmt.tprintf("%s/projects/-p/s.jsonl", dflt)), "~/.claude still")
 }
 
-// Codex's config files (codex.odin's allowlist) are listed once Codex is installed, never its sign-in
-// or state, never offered for Create; they open read-only (Deckhand never writes in a Codex home)
-// and the tree offers no New, Rename or Delete there. Under a temp HOME: never the real ~/.codex.
+// Codex's config files (codex.odin's allowlist) are listed once Codex is installed and edited like
+// Claude's; its hooks show read-only; its sign-in, state and plugins/ are never listed, opened or
+// saved over (by any name), and nothing is offered for Create or New there. Under a temp HOME:
+// never the real ~/.codex.
 @(test)
 settings_files_codex_rows :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	home, _ := setup()
+	home, proj := setup()
 	os.unset_env("CODEX_HOME")
 	cx := fmt.tprintf("%s/.codex", home)
 	os.make_directory_all(fmt.tprintf("%s/sessions/2026/11/16", cx))
 	os.make_directory_all(fmt.tprintf("%s/prompts", cx))
 	os.make_directory_all(fmt.tprintf("%s/skills/s1", cx))
+	os.make_directory_all(fmt.tprintf("%s/plugins/p", cx))
 	write_mode(fmt.tprintf("%s/config.toml", cx), "model = \"x\"\n", 0o644)
 	write_mode(fmt.tprintf("%s/AGENTS.md", cx), "# mine\n", 0o644)
+	write_mode(fmt.tprintf("%s/hooks.json", cx), "{}\n", 0o644)
 	write_mode(fmt.tprintf("%s/skills/s1/SKILL.md", cx), "# s1\n", 0o644)
+	write_mode(fmt.tprintf("%s/plugins/p/x.json", cx), "{}\n", 0o644)
 	write_mode(fmt.tprintf("%s/auth.json", cx), fmt.tprintf(`{{"key":"%s"}}`, SECRET), 0o600)
 	write_mode(fmt.tprintf("%s/history.jsonl", cx), "{}\n", 0o600)
 	write_mode(fmt.tprintf("%s/sessions/2026/11/16/rollout-x.jsonl", cx), "{}\n", 0o600)
@@ -738,9 +742,9 @@ settings_files_codex_rows :: proc(t: ^testing.T) {
 	defer core.codex_installed_probe = nil
 	testing.expect_value(t, text(), "")
 	core.codex_installed_probe = proc() -> bool {return true}
-	testing.expect_value(t, text(), "codex|config.toml|~/.codex/config.toml|true|false\ncodex|AGENTS.md|~/.codex/AGENTS.md|true|false\ncodex|prompts|~/.codex/prompts|true|false\ncodex|skills|~/.codex/skills|true|false\n")
+	testing.expect_value(t, text(), "codex|config.toml|~/.codex/config.toml|true|false\ncodex|AGENTS.md|~/.codex/AGENTS.md|true|false\ncodex|prompts|~/.codex/prompts|true|false\ncodex|skills|~/.codex/skills|true|false\ncodex|hooks.json|~/.codex/hooks.json|true|false\n")
 	got := text()
-	for never in ([]string{"auth.json", "history", "sessions", "AGENTS.override.md", "rules"}) do testing.expectf(t, !strings.contains(got, never), "%s listed:\n%s", never, got)
+	for never in ([]string{"auth.json", "history", "sessions", "plugins", "AGENTS.override.md", "rules"}) do testing.expectf(t, !strings.contains(got, never), "%s listed:\n%s", never, got)
 	testing.expect_value(t, core.settings_group_label("codex", ""), "Codex (global)")
 	testing.expect_value(t, core.settings_group_label("codex:work", ""), "Codex · work (global)")
 	for g in ([]string{"codex", "codex:work"}) {
@@ -749,35 +753,64 @@ settings_files_codex_rows :: proc(t: ^testing.T) {
 	}
 	// the folders open in the tree; nothing may be made, renamed or deleted there
 	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/skills/s1", cx)), cx)
+	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/hooks", cx)), cx)
 	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/sessions", cx)), "")
 	testing.expect(t, !core.settings_new_ok(fmt.tprintf("%s/prompts", cx)), "no New in Codex's prompts/")
 	testing.expect(t, !core.settings_row_editable(fmt.tprintf("%s/skills/s1/SKILL.md", cx)), "no Rename or Delete in Codex's skills/")
 	core.settings_create(fmt.tprintf("%s/AGENTS.override.md", cx))
 	testing.expect(t, !os.exists(fmt.tprintf("%s/AGENTS.override.md", cx)), "never a Create in a Codex home")
-	// the sign-in stays refused, by anyone
-	for c in ([]core.Caller{ui, {kind = .Control}}) {
-		r := core.run_command(core.Open_File{path = fmt.tprintf("%s/auth.json", cx)}, c)
-		testing.expectf(t, !r.ok && r.error == core.CREDENTIAL_REFUSED, "auth.json opened: %v", r)
+	// the sign-in, the state and plugins/ stay refused, by anyone
+	for p in ([]string{"auth.json", "history.jsonl", "sessions/2026/11/16/rollout-x.jsonl", "plugins/p/x.json"}) {
+		for c in ([]core.Caller{ui, {kind = .Control}}) {
+			r := core.run_command(core.Open_File{path = fmt.tprintf("%s/%s", cx, p)}, c)
+			testing.expectf(t, !r.ok && r.error == core.CREDENTIAL_REFUSED, "%s opened: %v", p, r)
+		}
 	}
-	// a config file opens read-only: no edit, no save, the file as it was
+	// the user's config: edited and saved, as Claude's
 	for p in ([]string{fmt.tprintf("%s/config.toml", cx), fmt.tprintf("%s/skills/s1/SKILL.md", cx)}) {
-		before := read(p)
 		r := core.run_command(core.Open_File{path = p}, ui)
 		testing.expect(t, r.ok, r.error)
 		e := editor_of(r.created_id)
 		if e == nil do continue
-		testing.expect(t, e.readonly && e.codex_home, p)
-		ed_insert(e, "x = 1\n")
+		testing.expect(t, !e.readonly && !e.codex_view_only, p)
+		ed_goto(e, 1, 1)
+		ed_insert(e, "# edited\n")
 		r = core.run_command(core.Save_File{e.tab_id}, ui)
-		testing.expect(t, !r.ok, p)
-		testing.expect_value(t, read(p), before)
+		testing.expect(t, r.ok, r.error)
+		testing.expectf(t, strings.has_prefix(read(p), "# edited\n"), "%s: %q", p, read(p))
 	}
-	// another name for a file there (a symlink into Codex's home) is read-only too; a file elsewhere is not
-	ln := fmt.tprintf("%s/proj/codex-config.toml", home)
-	os.symlink(fmt.tprintf("%s/config.toml", cx), ln)
-	testing.expect(t, core.codex_home_file(ln), "a symlink into ~/.codex")
-	testing.expect(t, !core.codex_home_file(fmt.tprintf("%s/proj/notes.md", home)))
-	testing.expect(t, !core.codex_home_file(fmt.tprintf("%s/proj/.codex/config.toml", home)), "a project's own .codex is the project's")
+	// its hooks: shown read-only, never saved
+	{
+		p := fmt.tprintf("%s/hooks.json", cx)
+		r := core.run_command(core.Open_File{path = p}, ui)
+		testing.expect(t, r.ok, r.error)
+		if e := editor_of(r.created_id); e != nil {
+			testing.expect(t, e.readonly && e.codex_view_only, "hooks.json read-only")
+			ed_insert(e, "x")
+			testing.expect(t, !core.run_command(core.Save_File{e.tab_id}, ui).ok)
+		}
+		testing.expect_value(t, read(p), "{}\n")
+	}
+	// a project file swapped for a link to Codex's state (or its hooks) after it was opened: never
+	// saved over
+	for target in ([]string{"history.jsonl", "hooks.json"}) {
+		f := fmt.tprintf("%s/notes-%s.txt", proj, target)
+		write_mode(f, "mine\n", 0o644)
+		r := core.run_command(core.Open_File{path = f}, ui)
+		testing.expect(t, r.ok, r.error)
+		e := editor_of(r.created_id)
+		if e == nil do continue
+		ed_insert(e, "x")
+		real := fmt.tprintf("%s/%s", cx, target)
+		before := read(real)
+		os.remove(f)
+		os.symlink(real, f)
+		testing.expectf(t, editor_save(e) != "", "%s: saved over", target)
+		testing.expect_value(t, read(real), before)
+	}
+	testing.expect(t, core.codex_view_only(fmt.tprintf("%s/hooks/pre.sh", cx)))
+	testing.expect(t, !core.codex_view_only(fmt.tprintf("%s/config.toml", cx)))
+	testing.expect(t, !core.codex_view_only(fmt.tprintf("%s/hooks.json", proj)), "a project's own hooks.json is the project's")
 }
 
 // The settings registry (core/settings_registry.odin) and the window's actions agree: every action

@@ -392,7 +392,7 @@ draw_status_line :: proc(e: ^Editor, x, y, w, h: f32) {
 		case e.view == .Diff_Head: left = "Diff with HEAD (read-only)"
 		case e.view == .Diff_Disk: left = "Diff with the file on disk (read-only)"
 		case e.view == .Changes:   left = changes_status_text(e.tab_id)
-		case e.view == .File && e.readonly && e.refused == "": left = e.codex_home ? "Read-only: Codex's folder (Deckhand never writes there)" : "Read-only copy"
+		case e.view == .File && e.readonly && e.refused == "": left = e.codex_view_only ? "Read-only: Codex's hooks (edit them in Codex or your own editor)" : "Read-only copy"
 		case e.missing:            left = "Deleted on disk: ⌘S saves it again"
 		case editor_dirty(e):      left = "Unsaved changes"
 		}

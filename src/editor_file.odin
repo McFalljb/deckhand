@@ -169,11 +169,15 @@ editor_load :: proc(e: ^Editor, path: string) -> bool {
 	detect_format(e)
 	// Atlas's copy of the user guide (agent.odin) is rewritten at startup: never edited
 	if editor_guide_copy(path) do e.readonly = true
-	// a Codex home (~/.codex, CODEX_HOME, an account's): Codex's, never written by Deckhand
-	e.codex_home = core.codex_home_file(path)
-	if e.codex_home do e.readonly = true
+	// Codex's hooks (hooks.json, hooks/): shown, never written (its config files are the user's to edit)
+	e.codex_view_only = core.codex_view_only(path)
+	if e.codex_view_only do e.readonly = true
 	return true
 }
+
+// editor_save's refusals by what the file is
+SAVE_REFUSED_CREDENTIAL :: "not saved: a sign-in or state file (Deckhand never writes those)"
+SAVE_REFUSED_CODEX :: "not saved: Codex's hooks are read-only here"
 
 editor_guide_copy :: proc(path: string) -> bool {
 	g := core.agent_guide_path()
@@ -198,6 +202,10 @@ editor_save :: proc(e: ^Editor) -> string {
 		// the rename below would replace it anyway: say so instead
 		if posix.access(strings.clone_to_cstring(target, context.temp_allocator), {.W_OK}) != .OK do return fmt.tprintf("%s is read-only (no write permission): not saved", filepath.base(target))
 	}
+	// never over a credentials or state file (Codex's sign-in, sessions, history; pi's, Claude's), nor
+	// Codex's hooks, by any name: what the path leads to now, not only what it was when opened
+	if core.settings_credential(e.path) || core.settings_credential(target) do return SAVE_REFUSED_CREDENTIAL
+	if core.codex_view_only(e.path) || core.codex_view_only(target) do return SAVE_REFUSED_CODEX
 	dir, base := filepath.split(target)
 	tmp := fmt.tprintf("%s/.%s.deckhand-%d.tmp", dir, base, time.now()._nsec)
 	f, err := os.open(tmp, {.Write, .Create, .Excl}, mode)

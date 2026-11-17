@@ -20,6 +20,7 @@ import { Icon } from "./icons.tsx";
 import { parseMarkdown, safeHref, type Block, type Inline } from "./markdown.ts";
 import { Windowed, type WItem } from "./Windowed.tsx";
 import { FileReads, knowFile, knownFile } from "./filecache.ts";
+import { CodeBlock, CodeEdit } from "./Code.tsx";
 import { longPressProps } from "./Peek.tsx";
 import { fileTabPath } from "./Panes.tsx";
 import { gitLetter, gitTone, isEditRow, moveSel, newTarget, parentOf, parentsOf, relPath, rowKey, stemEnd, treeRows, type Edit, type Listing, type Row } from "./filetree.ts";
@@ -670,41 +671,8 @@ export function FileTab({ tab, path, markdown }: { s: OpenSession; tab: Tab; pat
       ) : markdown && !source ? (
         <MarkdownView app={app} text={text} path={path} />
       ) : (
-        <CodeEdit key={tab.id + ":" + path} text={text} onEdit={(t) => f.setDraft(t)} />
+        <CodeEdit key={tab.id + ":" + path} text={text} path={path} onEdit={(t) => f.setDraft(t)} />
       )}
-    </div>
-  );
-}
-
-// Text with line numbers: a gutter beside a textarea, scrolled together.
-function CodeEdit({ text, onEdit }: { text: string; onEdit: (t: string) => void }) {
-  const gutter = useRef<HTMLDivElement>(null);
-  const lines = text.split("\n").length;
-  const nums = useRef("");
-  if (nums.current.split("\n").length !== lines) nums.current = Array.from({ length: lines }, (_, i) => i + 1).join("\n");
-  return (
-    <div class="code-edit">
-      <div class="code-gutter" ref={gutter} aria-hidden="true">{nums.current}</div>
-      <textarea
-        class="code-text"
-        value={text}
-        spellcheck={false}
-        autocomplete="off"
-        autocapitalize="off"
-        wrap="off"
-        onInput={(e) => onEdit((e.target as HTMLTextAreaElement).value)}
-        onScroll={(e) => {
-          if (gutter.current) gutter.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop;
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Tab" && !e.metaKey && !e.ctrlKey) {
-            e.preventDefault();
-            const t = e.target as HTMLTextAreaElement;
-            t.setRangeText("\t", t.selectionStart, t.selectionEnd, "end");
-            onEdit(t.value);
-          }
-        }}
-      />
     </div>
   );
 }
@@ -747,7 +715,7 @@ function block(b: Block, follow: (h: string) => void): ComponentChildren {
     case "p":
       return <p>{il(b.c)}</p>;
     case "code":
-      return <pre class="md-code"><code>{b.s}</code></pre>;
+      return <CodeBlock text={b.s} lang={b.lang} />;
     case "html":
       return <pre class="md-code md-html">{b.s}</pre>;
     case "quote":

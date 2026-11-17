@@ -2294,7 +2294,7 @@ views this one.
 The browser has the window's layout: the left column (Sessions, Files, Jobs), the session's tabs
 and terminals, split panes, the Deck, the palette, the bell, the right column's panels, Atlas's
 drawer, Jobs and the job sheet, the Changes tab, the Files tab, and file tabs (Markdown rendered,
-editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
+editor tabs with line numbers, syntax colours and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
 when you have not edited it, and asks when you have. In the Files tab the arrows, Home and End move
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to

@@ -16,6 +16,9 @@ package core
 //                 with a Create button (made only on that click, never over
 //                 a file: O_EXCL)
 //   Extensions    each extension's config file(s) and its folder
+//   Codex         its home's config by codex.odin's allowlist (CODEX_CONFIG_FILES,
+//                 CODEX_CONFIG_FOLDERS), once Codex is installed; read-only in the
+//                 editor (codex_home_file): Deckhand never writes in a Codex home
 //
 // A click opens a file in an editor tab of the session on screen (a preview,
 // as in the Files tab). Nothing here edits settings: the editor does, with
@@ -262,6 +265,33 @@ CLAUDE_SETTINGS_FOLDERS :: [?]struct {
 	name, detail: string,
 }{{"agents", "subagents"}, {"skills", "skills"}, {"commands", "slash commands"}, {"output-styles", "output styles"}, {"rules", "rules"}}
 
+// What each of Codex's config files and folders is (its Settings row; the list itself is
+// codex.odin's allowlist).
+codex_config_detail :: proc(name: string) -> string {
+	switch name {
+	case "config.toml":        return "model, approvals, sandbox, MCP servers… (read-only here)"
+	case "AGENTS.md":          return "instructions for every project (read-only here)"
+	case "AGENTS.override.md": return "replaces AGENTS.md (read-only here)"
+	case "prompts":            return "custom prompts"
+	case "skills":             return "skills"
+	case "rules":              return "rules"
+	}
+	return ""
+}
+
+// Whether path is in a Codex home (claude_account_dirs with codex: ~/.codex, CODEX_HOME's, every
+// account's), by name or where it leads: Deckhand never writes there, so the editor opens such a
+// file read-only (editor_file.odin) and the tree offers no New, Rename or Delete there.
+codex_home_file :: proc(path: string) -> bool {
+	if path == "" || !filepath.is_abs(path) do return false
+	p, _ := filepath.clean(path, context.temp_allocator)
+	rp := fs_real(p)
+	for home in claude_account_dirs(codex = true) do for c in ([2]string{home, fs_real(home)}) {
+		if c != "" && (under(p, c) || (rp != "" && under(rp, c))) do return true
+	}
+	return false
+}
+
 // pi's agent folder as written, cleaned (the tree's paths start here).
 settings_agent_dir :: proc() -> string {
 	d, _ := filepath.clean(pi_agent_dir(), context.temp_allocator)
@@ -349,6 +379,21 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		add(&out, {group = "claude-project", label = "CLAUDE.md", detail = "this project's instructions for Claude", path = j(cwd, "CLAUDE.md"), create = true, seed = ""})
 		add(&out, {group = "claude-project", label = "CLAUDE.local.md", detail = "your instructions here (not committed)", path = j(cwd, "CLAUDE.local.md")})
 		add(&out, {group = "claude-project", label = ".mcp.json", detail = "the project's MCP servers (may hold tokens)", path = j(cwd, ".mcp.json")})
+	}
+	// Codex (codex.odin), once installed and its home is there: its config by codex.odin's allowlist
+	// (CODEX_CONFIG_FILES, CODEX_CONFIG_FOLDERS), never its sign-in or state (auth.json, sessions/,
+	// history…: codex_credential refuses them). Never a Create: Deckhand writes nothing in a Codex
+	// home, and the editor opens these read-only (codex_home_file). One group per account once
+	// there are several.
+	if codex_installed() {
+		caccts := claude_accounts(codex = true)
+		for a in caccts {
+			cd := a.dir
+			if !os.is_dir(cd) do continue
+			g := len(caccts) > 1 ? strings.concatenate({"codex:", a.label}, context.temp_allocator) : "codex"
+			for f in CODEX_CONFIG_FILES do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f)})
+			for f in CODEX_CONFIG_FOLDERS do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f), kind = .Folder})
+		}
 	}
 	// Atlas (agent.odin): its prompt file (made on its first start; Create
 	// writes the starter), its model
@@ -850,6 +895,10 @@ settings_tree_root :: proc(path: string) -> string {
 		d := strings.concatenate({cd, "/", f.name}, context.temp_allocator)
 		if p == d || under(p, d) do return cd
 	}
+	for cd in claude_account_dirs(codex = true) do for f in CODEX_CONFIG_FOLDERS {
+		d := strings.concatenate({cd, "/", f}, context.temp_allocator)
+		if p == d || under(p, d) do return cd
+	}
 	return ""
 }
 
@@ -945,6 +994,8 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))
 	}
 	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])
+	if group == "codex" do return "Codex (global)"
+	if strings.has_prefix(group, "codex:") do return fmt.tprintf("Codex · %s (global)", group[len("codex:"):])
 	return group
 }
 

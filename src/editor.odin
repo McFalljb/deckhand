@@ -67,6 +67,7 @@ Editor :: struct {
 	indent_w:    int, // spaces per indent level (tab files: EDITOR_TAB_WIDTH)
 	readonly:    bool,
 	always_readonly: bool, // never editable (a Markdown tab's source): editor_reopen keeps readonly
+	codex_home:  bool, // a file in a Codex home (core.codex_home_file): read-only, Deckhand never writes there
 	refused:     string, // not shown: why (binary, too large, unreadable)
 	// the file on disk (editor_file.odin)
 	disk:        core.Disk_Stamp,

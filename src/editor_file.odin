@@ -169,6 +169,9 @@ editor_load :: proc(e: ^Editor, path: string) -> bool {
 	detect_format(e)
 	// Atlas's copy of the user guide (agent.odin) is rewritten at startup: never edited
 	if editor_guide_copy(path) do e.readonly = true
+	// a Codex home (~/.codex, CODEX_HOME, an account's): Codex's, never written by Deckhand
+	e.codex_home = core.codex_home_file(path)
+	if e.codex_home do e.readonly = true
 	return true
 }
 

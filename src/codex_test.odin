@@ -892,10 +892,10 @@ codex_credential_guard :: proc(t: ^testing.T) {
 	defer os.set_env("HOME", old)
 	os.make_directory_all(fmt.tprintf("%s/.codex/sessions/2026/11/12", home))
 	_ = os.write_entire_file(fmt.tprintf("%s/.codex/auth.json", home), transmute([]u8)string("{}"))
-	for p in ([]string{"/.codex/auth.json", "/.codex/sessions/2026/11/12/rollout-x.jsonl", "/.codex/history.jsonl", "/.codex/state_5.sqlite", "/.codex/log/codex-tui.log"}) {
+	for p in ([]string{"/.codex/auth.json", "/.codex/sessions/2026/11/12/rollout-x.jsonl", "/.codex/history.jsonl", "/.codex/state_5.sqlite", "/.codex/log/codex-tui.log", "/.codex/plugins/cache/x.json", "/.codex/hooks.json/x"}) {
 		testing.expectf(t, core.settings_credential(strings.concatenate({home, p}, context.temp_allocator)), "%s refused", p)
 	}
-	for p in ([]string{"/.codex/config.toml", "/.codex/AGENTS.md", "/.codex/prompts/x.md", "/proj/.codex/config.toml", "/proj/notes.md"}) {
+	for p in ([]string{"/.codex/config.toml", "/.codex/AGENTS.md", "/.codex/prompts/x.md", "/.codex/hooks.json", "/.codex/hooks/pre.sh", "/proj/.codex/config.toml", "/proj/notes.md"}) {
 		testing.expectf(t, !core.settings_credential(strings.concatenate({home, p}, context.temp_allocator)), "%s allowed", p)
 	}
 	// a repo's own .codex/auth.json, and a hard link to the sign-in elsewhere
@@ -1602,4 +1602,22 @@ codex_accounts_found_session :: proc(t: ^testing.T) {
 @(private = "file")
 cx_cache_clear :: proc() {
 	when core.TEST_HOOKS do core.codex_disk_cache_clear()
+}
+
+// Audit: codex not found (a Codex tab's command exits 127) and Refresh shell environment drop
+// Codex's cached answer, not Claude Code's.
+@(test)
+codex_recheck_on_127_and_refresh :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	_, _, tab := cx_codex_session(t, "recheck")
+	testing.expect(t, tab != 0)
+	core.claude_found = .Yes
+	core.codex_found = .Yes
+	core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 127}}, {kind = .Internal})
+	testing.expect_value(t, core.codex_found, core.Claude_Found.Unknown)
+	testing.expect_value(t, core.claude_found, core.Claude_Found.Yes) // a Codex tab says nothing about claude
+	core.codex_found = .No
+	core.run_command(core.Refresh_Shell_Env_Done{ok = false}, {kind = .Internal})
+	testing.expect_value(t, core.codex_found, core.Claude_Found.Unknown)
 }

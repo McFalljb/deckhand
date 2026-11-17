@@ -387,6 +387,7 @@ window_door_tick :: proc() {
 		attached := live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device)
 		if a.web do web_device_release()
 		if attached {
+			if a.web do rescan_when_active() // a browser shows sessions started outside Deckhand too (commands.odin)
 			if !a.hub && !a.web { // a window's version raises the floor; a hub's is a core's, a browser has none
 				sync.lock(&door.mu)
 				was := door.floor

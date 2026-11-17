@@ -8,6 +8,7 @@ import type { OpenSession, Store, WebProjectRow, WebSessionRow } from "../state.
 import { sessionView, tabView, type Dot } from "../status.ts";
 import { ago, keysLabel, menuAt, useApp, type App, type MenuItem, shownSession, wished } from "./ctx.ts";
 import { narrowTree } from "./treefilter.ts";
+import { newSessionChoices, newSessionPlan, newTabChoices } from "./harness.ts";
 import { HarnessIcon, Icon, StatusMark, dotMark } from "./icons.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { fold } from "./fold.ts";
@@ -82,11 +83,10 @@ export function IconButton(props: { icon: Parameters<typeof Icon>[0]["name"]; la
   );
 }
 
-export async function newChat(app: App) {
+// New chat: New session in Chats, as the native ⌘N there (the harnesses installed for chats)
+export function newChat(app: App) {
   const c = app.store.chatsEntry;
-  if (!c) return;
-  const r = await app.run({ type: "new_chat", project_id: c.id });
-  if (r.ok && r.created_id) app.go({ screen: "session", session: r.created_id });
+  if (c) newSession(app, c.id, undefined, "New chat");
 }
 
 // ---- the Sessions tab ----
@@ -304,7 +304,7 @@ function projectSessionItems(app: App, pid: number, key: string, depth: number, 
     out.push({ key: `s:${key}:${r.id}`, h: rowH, draw: () => <SessionRow r={r} projectId={pid} depth={depth} /> });
   });
   if (rows.length > shown.length) out.push({ key: "more:" + key, h: rowH, draw: () => <ActionRow icon="more" label={`Show ${rows.length - shown.length} more`} depth={depth} run={() => fold.showAll(key)} /> });
-  out.push({ key: "new:" + key, h: rowH, draw: () => <ActionRow icon="plus" label="New session" depth={depth} run={(e) => menuAt(app, e, newSessionItems(app, pid))} /> });
+  out.push({ key: "new:" + key, h: rowH, draw: () => <ActionRow icon="plus" label="New session" depth={depth} run={(e) => newSession(app, pid, e)} /> });
 }
 
 function chatItems(app: App, chatsId: number, rowH: number): WItem[] {
@@ -413,7 +413,7 @@ export function sessionItems(app: App, s: OpenSession): MenuItem[] {
   if (!s.machine) {
     items.push({ label: pin >= 0 ? "Unpin" : "Pin", run: () => app.run({ type: "set_pinned", pi_session_id: s.pi_session_id, pinned: pin < 0 }) });
     items.push({ label: "New shell tab here", run: () => app.run({ type: "new_shell_tab", session: s.id }) });
-    items.push({ label: "New Claude tab here", run: () => app.run({ type: "new_claude_tab", session: s.id }) });
+    items.push(...tabItems(app, s.machine, { session: s.id }, "New Claude tab here", "New Codex tab here"));
     items.push({ sep: true });
     if (s.agent === "claude") items.push(renameItem(app, s.pi_session_id, store.webTitle(s.id)?.title ?? s.title));
     items.push(...infoItems(app, s.project_id, s.pi_session_id));
@@ -471,7 +471,7 @@ function ProjectRow({ r, expanded, kidsOpen, mark, onToggle, remote }: { r: WebP
           <button type="button" class="icon-btn small star" title={r.pin >= 0 ? "Unpin" : "Pin"} onClick={(e) => { e.stopPropagation(); app.run({ type: "set_pinned", project_id: p.id, pinned: r.pin < 0 }); }}>
             {r.pin >= 0 ? "★" : "☆"}
           </button>
-          <IconButton small icon="plus" label="New session" run={(e) => menuAt(app, e, newSessionItems(app, p.id))} />
+          <IconButton small icon="plus" label="New session" run={(e) => newSession(app, p.id, e)} />
           <IconButton small icon="more" label="More" run={(e) => menuAt(app, e, projectItems(app, p.id))} />
         </span>
       ) : null}
@@ -493,28 +493,37 @@ function GroupRow({ r, open }: { r: WebProjectRow; open: boolean }) {
   );
 }
 
-export function newSessionItems(app: App, projectId: number): MenuItem[] {
-  const p = app.store.project(projectId);
-  const chats = p?.group === "chats";
-  const go = async (cmd: object) => {
-    const r = await app.run(cmd);
-    if (r.ok && r.created_id) app.go({ screen: "session", session: r.created_id });
-  };
-  const items: MenuItem[] = [{ label: "pi", run: () => go({ type: "new_chat", project_id: projectId }) }];
-  if (!chats) {
-    items.push({ label: "Claude Code", run: () => go({ type: "new_claude_session", project_id: projectId }) });
-    if (codexAvailable(app.store, p?.machine ?? 0)) items.push({ label: "Codex", run: () => go({ type: "new_claude_session", project_id: projectId, harness: "codex" }) });
-  }
-  return items;
+async function goNew(app: App, cmd: object) {
+  const r = await app.run(cmd);
+  if (r.ok && r.created_id) app.go({ screen: "session", session: r.created_id });
 }
 
-const FOUND = new Set(["ok", "too_old", "unchecked"]);
-export function codexAvailable(store: Store, machine: number): boolean {
-  const has = (list: any[] | undefined) => (list ?? []).some((c) => c.id === "codex" && FOUND.has(c.state));
-  if (!machine) return has(store.live.checklist);
-  const m: any = store.machines.find((x) => x.no === machine);
-  return !!m?.codex && has(m.checklist);
+export function newSessionItems(app: App, projectId: number): MenuItem[] {
+  // what the native picker offers there (harness.ts), the last used first
+  return newSessionChoices(app.store, projectId).map((c) => (c.note ? { label: c.label, note: true } : { label: c.label, run: () => goNew(app, c.cmd!) }));
 }
+
+// New session in a project, as the native window's: one choice starts at once, none says why
+// (another machine's opens a session anyway), several ask (a menu at e, else a sheet titled title).
+export function newSession(app: App, projectId: number, e?: { clientX: number; clientY: number }, title = "New session"): void {
+  const plan = newSessionPlan(app.store, projectId);
+  if ("pick" in plan) {
+    const items = newSessionItems(app, projectId);
+    if (e) menuAt(app, e, items);
+    else app.setOverlay({ menu: null, sheet: { title, items } });
+    return;
+  }
+  app.setOverlay({ menu: null });
+  if (plan.toast) app.toast(plan.toast, plan.err);
+  if ("run" in plan) void goNew(app, plan.run);
+}
+
+// New Claude tab / New Codex tab rows for a session or project on machine: once per account while
+// there are several, none while that harness is not there (harness.ts).
+export function tabItems(app: App, machine: number, target: { session: number } | { project_id: number }, claudeLabel: string, codexLabel: string): MenuItem[] {
+  return [...newTabChoices(app.store, machine, target, false, claudeLabel), ...newTabChoices(app.store, machine, target, true, codexLabel)].map((c) => ({ label: c.label, run: () => app.run(c.cmd) }));
+}
+
 
 function projectItems(app: App, id: number): MenuItem[] {
   const { store } = app;
@@ -524,8 +533,9 @@ function projectItems(app: App, id: number): MenuItem[] {
   const now = store.sidebar.sort?.sessions;
   return [
     { label: pin >= 0 ? "Unpin" : "Pin", run: () => app.run({ type: "set_pinned", project_id: id, pinned: pin < 0 }) },
-    { label: "New session", run: () => app.setOverlay({ menu: null, sheet: { title: "New session in " + (p.name || p.label), items: newSessionItems(app, id) } }) },
-    { label: "New Claude tab", run: () => app.run({ type: "new_claude_tab", project_id: id }) },
+    { label: "New session", run: () => newSession(app, id, undefined, "New session in " + (p.name || p.label)) },
+    // as the native menu: a project's (not Chats'), only while that harness is there
+    ...(p.group === "projects" ? tabItems(app, p.machine ?? 0, { project_id: id }, "New Claude tab", "New Codex tab") : []),
     { label: "Rename…", run: () => app.setOverlay({ sheet: { title: "Rename project", body: p.name || "", items: [{ label: "prompt:rename_project:" + id }] } }) },
     { sep: true },
     ...SORTS.map(([by, , label]) => ({ label, check: now === by, run: () => app.run({ type: "set_sort", section: "sessions", by }) })),
@@ -594,7 +604,7 @@ function sessionRowItems(app: App, r: WebSessionRow, projectId: number, open?: O
   const items: MenuItem[] = [
     { label: r.pin >= 0 ? "Unpin" : "Pin", run: () => app.run({ type: "set_pinned", pi_session_id: r.id, pinned: r.pin < 0 }) },
   ];
-  if (open) items.push({ label: "New Claude tab here", run: () => app.run({ type: "new_claude_tab", session: open.id }) });
+  if (open) items.push(...tabItems(app, open.machine, { session: open.id }, "New Claude tab here", "New Codex tab here"));
   items.push({ sep: true });
   if (r.claude) items.push(renameItem(app, r.id, r.label));
   items.push(...infoItems(app, projectId, r.id));

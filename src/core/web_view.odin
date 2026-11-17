@@ -13,7 +13,8 @@ package core
 //
 //   web           {fleet {waiting, errors, unseen, working}, next (open session id, 0), open [ids],
 //                 attention [{session, group, tab}], deck [same], filtered (waiting rows the
-//                 filter hides), here {name, label}, watch [project ids]}
+//                 filter hides), here {name, label}, watch [project ids], new [{machine,
+//                 projects, chats, claude_tab, codex_tab, note}]: the New session picker's harnesses (web_view_new_choices)}
 //   webo:<id>     an open session's row: {title, place, chat, at (Unix ns, 0 = new)}
 //   webm          [{no, open [ids], projects [{id, depth, name}]}]: each other machine
 //   webtree       the Projects tree in order: [[key, depth, kids, forced] or key (0, 0, 0)]; key = a project's
@@ -25,6 +26,8 @@ package core
 //   webs:<p>:<id> a session row: {label, open (open session id, 0), pin, hidden, dot, claude,
 //                 codex, modified (ns)}
 //   webcl, webc:<id>  the Chats, the same way
+//   webbars       the tabs' bars as text, with the actions a browser may take (tab_bars.odin:
+//                 web_bars_json)
 //
 // Computed only when something it reads changed (web_view_cached: a hash of the other sections,
 // the open sessions' file stamps and the watched lists), and never reading a disk on a flush:
@@ -51,6 +54,10 @@ ATTENTION_GROUP_NAMES := [Attention_Group]string {
 	.Working   = "working",
 	.Idle      = "idle",
 }
+
+// web_view_tick's last look at the bars (web_bars_json's hash)
+@(private = "file")
+web_bars_seen: u64
 
 // The page's open projects (web_watch): their sessions listed here (the selected project's are
 // state.sessions already).
@@ -146,6 +153,10 @@ web_view_cached :: proc(sections: [][2]string) -> [][2]string {
 	}
 	gen := web_watch_gen
 	h = hash.fnv64a(mem.ptr_to_bytes(&gen), h)
+	nk := web_view_new_key()
+	h = hash.fnv64a(mem.ptr_to_bytes(&nk), h)
+	// the tabs' bars: some change with time alone (a Claude tab's hooks silent past their grace)
+	h = hash.fnv64a(transmute([]u8)web_bars_json(), h)
 	if web_view_last.builds > 0 && h == web_view_last.key do return web_view_last.sections[:]
 	heap := runtime.heap_allocator()
 	for x in web_view_last.sections {
@@ -175,6 +186,11 @@ web_view_tick :: proc() {
 	for &w in web_watch do if time.tick_since(w.at) >= WEB_WATCH_RESCAN do web_watch_list(&w)
 	changes_web_tick()
 	web_settings_tick()
+	// a bar that came or went with time alone (no command, no section change): a flush
+	if bh := hash.fnv64a(transmute([]u8)web_bars_json()); bh != web_bars_seen {
+		web_bars_seen = bh
+		window_state_changed()
+	}
 }
 
 @(private = "file")
@@ -209,7 +225,9 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 		if i > 0 do strings.write_byte(&b, ',')
 		fmt.sbprintf(&b, "%d", w.pid)
 	}
-	strings.write_string(&b, "]}")
+	strings.write_string(&b, `],"new":`)
+	web_view_new_choices(&b)
+	strings.write_string(&b, "}")
 	put(out, WEB_VIEW_SECTION, &b)
 
 	// ---- webo:<id>: an open session's title row ----
@@ -292,6 +310,98 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 		web_view_session_rows(out, .Sessions, list, w.pid, fmt.tprintf("websl:%d", w.pid), fmt.tprintf("webs:%d:", w.pid))
 	}
 	web_view_session_rows(out, .Chats, state.chats[:], 0, "webcl", "webc:")
+
+	// ---- webbars: the tabs' bars as text (tab_bars.odin), the browser's status strip ----
+	b = strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, web_bars_json())
+	put(out, "webbars", &b)
+}
+
+// The New session picker's harnesses per machine (0 = this one) and kind of project, as the native
+// picker offers them (new_session_choices: installed here, or on that machine by its checklist;
+// Claude Code and Codex in Chats here, never another machine's): [{machine, projects [{harness,
+// label, account}], chats [same], claude_tab [{account, name}], codex_tab [same], note}] in the
+// picker's order (the last used first), one row per account while there are several; the tab
+// lists are New Claude tab and New Codex tab there ([] = not installed). note: why a list is empty.
+@(private = "file")
+web_view_new_choices :: proc(b: ^strings.Builder) {
+	// the picker's rows: Claude Code and Codex once per account while there are several (the
+	// default's first is the core's pick), each with its account ("" = the core's pick)
+	list :: proc(b: ^strings.Builder, no: u64, group: Sidebar_Group) {
+		p := Project{id = no << MACHINE_ID_SHIFT, machine = no, group = group}
+		strings.write_byte(b, '[')
+		n := 0
+		for it in new_session_choices(&p, "") {
+			h, ok := harness_of(it.cmd)
+			if !ok do continue
+			if n > 0 do strings.write_byte(b, ',')
+			n += 1
+			account := ""
+			if c, is := it.cmd.(New_Claude_Session); is do account = c.account
+			fmt.sbprintf(b, `{{"harness":"%s","label":`, HARNESS_KEYS[h])
+			json_quote(b, it.label)
+			strings.write_string(b, `,"account":`)
+			json_quote(b, account)
+			strings.write_byte(b, '}')
+		}
+		strings.write_byte(b, ']')
+	}
+	// New Claude tab / New Codex tab there: once per account while there are several (this
+	// machine's; claude_account_items), [] while that harness is not there
+	tabs :: proc(b: ^strings.Builder, no: u64, codex: bool) {
+		strings.write_byte(b, '[')
+		on: bool
+		if no == 0 do on = codex ? codex_installed() : claude_installed()
+		else {
+			_, claude, cx := machine_harnesses(no)
+			on = codex ? cx : claude
+		}
+		if on {
+			items := make([dynamic]Menu_Item, context.temp_allocator)
+			if no == 0 do claude_account_items(&items, "", New_Claude_Tab{codex = codex})
+			else do append(&items, Menu_Item{cmd = New_Claude_Tab{codex = codex}})
+			for it, i in items {
+				c, _ := it.cmd.(New_Claude_Tab)
+				name := ""
+				if c.account != "" do for a in claude_accounts(codex) do if a.dir == c.account do name = a.label
+				if i > 0 do strings.write_byte(b, ',')
+				strings.write_string(b, `{"account":`)
+				json_quote(b, c.account)
+				strings.write_string(b, `,"name":`)
+				json_quote(b, name)
+				strings.write_byte(b, '}')
+			}
+		}
+		strings.write_byte(b, ']')
+	}
+	strings.write_byte(b, '[')
+	for i in 0 ..= len(state.machines) {
+		no := i == 0 ? 0 : state.machines[i - 1].no
+		if i > 0 do strings.write_byte(b, ',')
+		fmt.sbprintf(b, `{{"machine":%d,"projects":`, no)
+		list(b, no, .Projects)
+		strings.write_string(b, `,"chats":`)
+		list(b, no, .Chats)
+		strings.write_string(b, `,"claude_tab":`)
+		tabs(b, no, false)
+		strings.write_string(b, `,"codex_tab":`)
+		tabs(b, no, true)
+		strings.write_string(b, `,"note":`)
+		json_quote(b, no == 0 ? NO_HARNESS : machine_no_harness_note(no))
+		strings.write_byte(b, '}')
+	}
+	strings.write_byte(b, ']')
+}
+
+// What the New session picker reads besides the other sections (web_view_cached's key): which
+// harnesses this machine has and the last used one.
+@(private = "file")
+web_view_new_key :: proc() -> u64 {
+	k := u64(state.settings.last_harness)
+	if pi_installed() do k |= 1 << 8
+	if claude_installed() do k |= 1 << 9
+	if codex_installed() do k |= 1 << 10
+	return k
 }
 
 // A tree row's key: its project's id, or g and a hash of a group row's folder.
@@ -391,4 +501,12 @@ web_projects_json :: proc() -> string {
 	}
 	fmt.sbprintf(&b, `],"selected_project":%d}}`, state.selected_project)
 	return strings.to_string(b)
+}
+
+// A browser's new session (its picker, web/src/app/harness.ts): that harness goes first in the
+// picker next time, as the native picker's harness_used does (a browser sends no window.command).
+// Only a browser's own (the user's): never an agent's or a hub's.
+web_note_harness :: proc(cmd: Command, caller: Caller) {
+	if !caller.web || caller.kind != .UI do return
+	if h, ok := harness_of(cmd); ok do run_command(Set_Last_Harness{harness = h}, {kind = .Internal})
 }

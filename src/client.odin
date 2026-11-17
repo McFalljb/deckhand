@@ -79,6 +79,7 @@ Client :: struct {
 	viewed_from: string, // another machine's Deckhand took the core (window.request viewed_from; heap): no reconnect until Take back
 	viewed_browser: bool, // ...a paired browser did (web access): viewed_from is its name
 	asking:         bool, // the Take Back question is up (client_core_tick): its modal loop's timer turns do nothing
+	state_gen:      u64, // state messages applied (the Settings page's rows: sp_rows_now)
 }
 
 client: Client
@@ -507,6 +508,7 @@ client_on_frames :: proc() {
 				else do core.window_link_resync()
 			} else {
 				client_got_state()
+				client.state_gen += 1
 				// a separate core: the Files and Settings trees' open folders and filter came in
 				// State, not through this process's commands (files.odin's cache key)
 				if client.sock != nil do core.files_state_gen += 1

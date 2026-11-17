@@ -8,7 +8,8 @@ import { sessionView } from "../status.ts";
 import { keysLabel, keysMatch, useApp, type App, type Keys } from "./ctx.ts";
 import { score } from "./match.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
-import { codexAvailable, focusSession, newChat, newSessionItems, openHarness } from "./Sidebar.tsx";
+import { focusSession, newChat, newSession, openHarness } from "./Sidebar.tsx";
+import { newTabChoices } from "./harness.ts";
 import { newTabItems } from "./Panes.tsx";
 import { setTermFont, termFontSize } from "./Term.tsx";
 import { openJobSheet } from "./JobSheet.tsx";
@@ -64,11 +65,12 @@ export const ACTIONS: Action[] = [
     id: "new_session",
     label: "New session",
     when: (app) => !!app.store.selectedProject,
-    run: (app) => app.setOverlay({ sheet: { title: "New session", items: newSessionItems(app, app.store.selectedProject) } }),
+    run: (app) => newSession(app, app.store.selectedProject),
   },
   { id: "new_shell_tab", label: "New shell tab", keys: { k: "t", alt: true }, when: (app) => !!cur(app), run: (app) => app.run({ type: "new_shell_tab", session: cur(app)!.id, pane: panes(app)?.focused_pane || undefined }) },
-  { id: "new_claude_tab", label: "New Claude tab", when: (app) => !!cur(app), run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id }) },
-  { id: "new_codex_tab", label: "New Codex tab", when: (app) => !!cur(app) && codexAvailable(app.store, cur(app)!.machine), run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id, harness: "codex" }) },
+  // while that harness is there (harness.ts); the account is the core's pick, as the native palette's
+  { id: "new_claude_tab", label: "New Claude tab", when: (app) => !!cur(app) && newTabChoices(app.store, cur(app)!.machine, { session: cur(app)!.id }, false, "").length > 0, run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id }) },
+  { id: "new_codex_tab", label: "New Codex tab", when: (app) => !!cur(app) && newTabChoices(app.store, cur(app)!.machine, { session: cur(app)!.id }, true, "").length > 0, run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id, harness: "codex" }) },
   { id: "show_changes", label: "Show changes", when: (app) => !!cur(app) && !cur(app)!.machine && !cur(app)!.home, run: (app) => app.run({ type: "changes_open", session: cur(app)!.id }) },
   { id: "close_tab", label: "Close tab", when: (app) => !!curTab(app), run: (app) => app.run({ type: "close_tab", tab_id: curTab(app)!.id }) },
   { id: "close_session", label: "Close session", when: (app) => !!cur(app), run: (app) => app.run({ type: "close_session", session: cur(app)!.id }) },

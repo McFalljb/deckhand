@@ -4,6 +4,7 @@ package core
 // The first line is a header with the real cwd (the dir name is lossy:
 // dashes in paths are ambiguous). Titles: titles.odin (pi's rule, cached).
 
+import "base:runtime"
 import "core:encoding/json"
 import jg "../jsonguard"
 import "core:mem/virtual"
@@ -69,6 +70,7 @@ sessions_arena: virtual.Arena
 chats_arena: virtual.Arena
 
 SCAN_CHUNK :: 64 * 1024
+HEADER_CHUNK :: 4 * 1024 // header_cwd's first read
 MAX_SESSIONS :: 300
 
 // pi's session store: <agent dir>/sessions (pi_agent_dir: PI_CODING_AGENT_DIR, else ~/.pi/agent).
@@ -94,11 +96,13 @@ scan_projects :: proc(scan: ^Scan_Result) {
 	context.allocator = virtual.arena_allocator(&scan.arena)
 	scan.projects = make([dynamic]Project)
 
-	root := sessions_root()
-	dirs, _ := os.read_all_directory_by_path(root, context.allocator) // none: no pi sessions (Claude's may still be there)
+	// the listings are temp (the arena keeps only the projects), each project's freed after it
+	root := sessions_root(context.temp_allocator)
+	dirs, _ := os.read_all_directory_by_path(root, context.temp_allocator) // none: no pi sessions (Claude's may still be there)
 	for d in dirs {
 		if d.type != .Directory do continue
-		files, ferr := os.read_all_directory_by_path(d.fullpath, context.allocator)
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+		files, ferr := os.read_all_directory_by_path(d.fullpath, context.temp_allocator)
 		if ferr != nil do continue
 		newest, oldest: ^os.File_Info
 		for &f in files {
@@ -109,7 +113,7 @@ scan_projects :: proc(scan: ^Scan_Result) {
 		if newest == nil do continue
 		cwd := header_cwd(newest.fullpath)
 		if cwd == "" do cwd = decode_dir_name(d.name)
-		append(&scan.projects, Project{dir = d.fullpath, cwd = cwd, label = short_label(cwd), newest = newest.modification_time, created = oldest.modification_time, missing = !os.exists(cwd), repo = is_repo_root(cwd)})
+		append(&scan.projects, Project{dir = strings.clone(d.fullpath), cwd = cwd, label = short_label(cwd), newest = newest.modification_time, created = oldest.modification_time, missing = !os.exists(cwd), repo = is_repo_root(cwd)})
 	}
 	claude_scan_projects(&scan.projects) // folders where only Claude Code or Codex ran (claude_disk.odin)
 	slice.sort_by(scan.projects[:], proc(a, b: Project) -> bool {return time.diff(b.newest, a.newest) < 0})
@@ -357,9 +361,20 @@ read_chunk :: proc(path: string, size: i64) -> []u8 {
 	return buf[:got]
 }
 
+when TEST_HOOKS {
+	header_read_bytes: i64 // what header_cwd read (tests: scan_test.odin)
+}
+
 header_cwd :: proc(path: string) -> string {
-	buf := read_chunk(path, SCAN_CHUNK)
+	// the first line is short (pi's session header): 4 KB, more only when it goes on past them
+	buf := read_chunk(path, HEADER_CHUNK)
 	nl := strings.index_byte(string(buf), '\n')
+	if nl < 0 && len(buf) == HEADER_CHUNK {
+		when TEST_HOOKS do header_read_bytes += i64(len(buf))
+		buf = read_chunk(path, SCAN_CHUNK)
+		nl = strings.index_byte(string(buf), '\n')
+	}
+	when TEST_HOOKS do header_read_bytes += i64(len(buf))
 	if nl < 0 do return ""
 	v, err := jg.parse(buf[:nl], .JSON, allocator = context.temp_allocator) // pi writes it (JSON.stringify)
 	if err != nil do return ""

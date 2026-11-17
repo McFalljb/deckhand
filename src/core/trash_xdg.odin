@@ -33,7 +33,8 @@ trash_xdg_dir :: proc() -> string {
 	return strings.concatenate({strings.trim_right(d, "/"), "/Trash"}, context.temp_allocator)
 }
 
-// Moves path (absolute) into the home trash. "" = moved; else why not (a temp string).
+// Moves path (absolute) into the home trash. "" = moved (fs_trash_where: its files/<name>);
+// else why not (a temp string).
 trash_xdg :: proc(path: string) -> string {
 	trash := trash_xdg_dir()
 	if trash == "" do return "no home folder for the Trash"
@@ -73,7 +74,9 @@ trash_xdg :: proc(path: string) -> string {
 		}
 		// never over a file put at that name meanwhile (trash_rename_*.odin: no-replace)
 		switch trash_rename(strings.clone_to_cstring(path, context.temp_allocator), fpath) {
-		case .Ok:         return ""
+		case .Ok:
+			fs_trash_where = strings.clone(string(fpath), context.temp_allocator) // restore_path (fs_restore.odin)
+			return ""
 		case .Exists:     posix.unlink(ipath); continue
 		case .Other_Disk: posix.unlink(ipath); return TRASH_OTHER_DISK
 		case .Failed:     posix.unlink(ipath); return "cannot move it to the Trash"

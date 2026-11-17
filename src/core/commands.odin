@@ -651,6 +651,10 @@ Command :: union {
 	Delete_Path,
 	Reveal_In_Finder,
 	Keep_Tab,
+	Fs_Copy,
+	Fs_Copy_Done,
+	Restore_Path,
+	Find_Files,
 	// the Files tab (files.odin)
 	Set_Left_Tab,
 	Files_Expand,
@@ -942,7 +946,8 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	}
 	_, q4 := cmd.(Editor_State)
 	_, q5 := cmd.(List_Dir)
-	if !q1 && !q2 && !q3 && !q4 && !q5 do emit_event(Command_Event{request_id = request_id, caller = caller, version = state.version, changed = changed, command = cmd, result = r})
+	_, q6 := cmd.(Find_Files) // a project's paths: its caller's only, as list_dir
+	if !q1 && !q2 && !q3 && !q4 && !q5 && !q6 do emit_event(Command_Event{request_id = request_id, caller = caller, version = state.version, changed = changed, command = cmd, result = r})
 	return r
 }
 
@@ -1977,7 +1982,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		sent := comments_bridge_done(c.request_id, c.ok) // Send now's pi.prompt (comments.odin)
 		emit_event(Finished_Event{request_id = c.request_id, result = {ok = c.ok, error = c.error}})
 		return {ok = true}, sent
-	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done:
+	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done, Fs_Copy, Fs_Copy_Done, Restore_Path, Find_Files:
 		return tab_host_apply(cmd, caller, request_id) // editor: the window hosts it (tabhost_route.odin)
 	case Set_Left_Tab, Files_Expand, Files_Collapse_All, Files_Reveal, Set_Files_Filter, Set_Files_Hide_Ignored:
 		return files_apply(cmd, caller)
@@ -2372,6 +2377,9 @@ same_target :: proc(a, b: Command) -> bool {
 	case Rename_Path:
 		y, ok := b.(Rename_Path)
 		return ok && x.from == y.from && x.to == y.to
+	case Fs_Copy:
+		y, ok := b.(Fs_Copy)
+		return ok && x.from == y.from && x.to == y.to && x.unique == y.unique
 	case Worktree_Cleanup:
 		y, ok := b.(Worktree_Cleanup)
 		return ok && x.path == y.path

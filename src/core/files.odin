@@ -737,7 +737,22 @@ files_cached_dirs :: proc(dir: string) -> []string {
 @(private = "file")
 files_filter_rows :: proc(root: string, a: runtime.Allocator) {
 	files := fs_project_files(root)
-	words := strings.fields(state.files.filter, context.temp_allocator)
+	hits := files_filter_match(files, state.files.filter)
+	for i, n in hits {
+		if n >= FILES_FILTER_MAX {
+			append(&files_ui.rows, Files_Row{path = strings.clone(root, a), more = len(hits) - n})
+			break
+		}
+		rel := files[i]
+		full := strings.concatenate({root, "/", rel}, a)
+		append(&files_ui.rows, Files_Row{path = full, name = full[len(full) - len(filepath.base(rel)):], rel = full[len(root) + 1:], kind = .File})
+	}
+}
+
+// The indexes of the files (relative paths) that match every word of query, best first (a word
+// in the name counts double; ties in list order). The Files tree's filter and find_files. Temp.
+files_filter_match :: proc(files: []string, query: string) -> []int {
+	words := strings.fields(query, context.temp_allocator)
 	Hit :: struct {
 		i, score: int,
 	}
@@ -764,15 +779,9 @@ files_filter_rows :: proc(root: string, a: runtime.Allocator) {
 		if x.score != y.score do return x.score > y.score
 		return x.i < y.i
 	})
-	for h, n in hits {
-		if n >= FILES_FILTER_MAX {
-			append(&files_ui.rows, Files_Row{path = strings.clone(root, a), more = len(hits) - n})
-			break
-		}
-		rel := files[h.i]
-		full := strings.concatenate({root, "/", rel}, a)
-		append(&files_ui.rows, Files_Row{path = full, name = full[len(full) - len(filepath.base(rel)):], rel = full[len(root) + 1:], kind = .File})
-	}
+	out := make([]int, len(hits), context.temp_allocator)
+	for h, n in hits do out[n] = h.i
+	return out
 }
 
 // The row index of path (-1 = not shown).

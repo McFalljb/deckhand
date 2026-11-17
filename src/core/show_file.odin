@@ -211,7 +211,8 @@ show_slow_path :: proc(p: string) -> bool {
 // What an agent never shows (users opening files themselves are unaffected): keys, tokens and
 // sign-ins by name (as worktree_cleanup's wt_secret_name, without its "secret"/"credential"
 // substrings, which docs share) and the folders that hold them in the home folder.
-show_secret :: proc(p: string) -> bool {
+// real_home: the home folder's real path, when the caller has it already (fs_copy: once per tree).
+show_secret :: proc(p: string, real_home := "") -> bool {
 	base := strings.to_lower(filepath.base(p), context.temp_allocator)
 	switch base {
 	case ".envrc", ".netrc", ".npmrc", ".pypirc", ".htpasswd", ".git-credentials", ".pgpass":
@@ -220,7 +221,7 @@ show_secret :: proc(p: string) -> bool {
 	for pre in ([]string{"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}) do if strings.has_prefix(base, pre) do return true
 	for ext in ([]string{".pem", ".key", ".p12", ".pfx", ".keystore", ".jks", ".keychain", ".keychain-db"}) do if strings.has_suffix(base, ext) do return true
 	if strings.contains(p, "/Library/Keychains/") do return true
-	for home in ([]string{os.get_env("HOME", context.temp_allocator), fs_real(os.get_env("HOME", context.temp_allocator))}) {
+	for home in ([]string{os.get_env("HOME", context.temp_allocator), real_home != "" ? real_home : fs_real(os.get_env("HOME", context.temp_allocator))}) {
 		h := strings.trim_right(home, "/")
 		if h == "" do continue
 		for d in ([]string{".ssh", ".aws", ".gnupg", ".kube", ".docker/config.json", ".config/gh/hosts.yml"}) {

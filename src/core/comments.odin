@@ -540,6 +540,7 @@ comments_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Res
 		}
 		if tab == nil do return refuse(crop, "no such tab")
 		if s.home do return refuse(crop, "Home has only its pi tab")
+		if why := files_only_refusal(s, "comments to an agent"); why != "" do return refuse(crop, why) // no agent to take them
 		switch c.source {
 		case .Browser: if _, is := tab.kind.(Browser_Tab); !is do return refuse(crop, "not a browser tab")
 		case .App:     if _, is := tab.kind.(App_Tab); !is do return refuse(crop, "not an app tab")

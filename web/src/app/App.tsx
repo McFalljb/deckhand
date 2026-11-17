@@ -6,7 +6,7 @@ import { render } from "preact";
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks";
 import { pairKey, unpair, whoami } from "../api.ts";
 import { Link, type LinkStatus, type Result, type WindowRequest } from "../link.ts";
-import { AppCtx, useApp, wishes, type App, type Overlay, shownSession } from "./ctx.ts";
+import { AppCtx, useApp, wishes, type App, type Overlay, type ToastAction, shownSession } from "./ctx.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { SessionPanes } from "./Panes.tsx";
 import { Deck } from "./Deck.tsx";
@@ -40,10 +40,13 @@ function Root() {
   const [route, setRoute] = useState<App["route"]>(() => parseHash());
   const toastId = useRef(0);
 
-  const toast = (text: string, err = false) => {
+  const toast = (text: string, err = false, action?: ToastAction) => {
     const id = ++toastId.current;
-    setToasts((t) => [...t.slice(-2), { id, text, err }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), err ? 6000 : 3000);
+    const drop = () => setToasts((t) => t.filter((x) => x.id !== id));
+    // an action (Undo) runs once and takes its toast away; it stays a while longer
+    const act = action && { label: action.label, run: () => (drop(), action.run()) };
+    setToasts((t) => [...t.slice(-2), { id, text, err, action: act }]);
+    window.setTimeout(drop, act ? 8000 : err ? 6000 : 3000);
   };
 
   const link = useMemo(

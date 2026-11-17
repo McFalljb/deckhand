@@ -383,7 +383,7 @@ export function OpenRow({ s, from, mach, peek }: { s: OpenSession; from?: number
     >
       <Icon name={w?.chat ? "chat" : "folder"} size={14} class={elsewhere ? "accent" : "muted"} />
       {!w?.chat ? <span class={"place" + (elsewhere ? " accent" : "")}>{(w?.place ?? "") + " ·"}</span> : null}
-      <HarnessIcon harness={openHarness(store, s)} />
+      {s.agent === "files" ? null : <HarnessIcon harness={openHarness(store, s)} />}
       <span class="title">{w?.title ?? s.title}</span>
       <span class="spacer" />
       {mach ? <span class="mach">{mach}</span> : null}

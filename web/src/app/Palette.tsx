@@ -8,6 +8,7 @@ import { sessionView } from "../status.ts";
 import { keysLabel, keysMatch, useApp, type App, type Keys } from "./ctx.ts";
 import { score } from "./match.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
+import { treeTakes } from "./fileops.ts";
 import { focusSession, newChat, newSession, openHarness } from "./Sidebar.tsx";
 import { newTabChoices } from "./harness.ts";
 import { newTabItems } from "./Panes.tsx";
@@ -188,6 +189,7 @@ export function useShortcuts(app: App) {
         return;
       }
       if (a.overlay.palette || a.overlay.sheet) return;
+      if (treeTakes(e)) return; // ⌘D on a Files row duplicates it (fileops.ts), not Split pane right
       for (const x of ACTIONS) {
         if (x.keys && keysMatch(x.keys, e) && (!x.when || x.when(a))) {
           e.preventDefault();

@@ -244,7 +244,7 @@ tab_menu_items :: proc(tab_id: u64, items: ^[dynamic]core.Menu_Item) {
 	if s == nil do return
 	action_items(items, {"split_right", "split_down", "move_tab_left", "move_tab_right", "move_tab_up", "move_tab_down"})
 	if len(items) > 0 do append(items, core.Menu_Item{sep = true})
-	if i == 0 do append(items, core.Menu_Item{label = "Close session", cmd = core.Close_Session{session = s.id, ask = true}})
+	if i == 0 && core.session_main_tab(s) != 0 do append(items, core.Menu_Item{label = "Close session", cmd = core.Close_Session{session = s.id, ask = true}})
 	else do append(items, core.Menu_Item{label = "Close tab", keys = "⌘W", cmd = core.Close_Tab{tab_id = tab_id}})
 }
 

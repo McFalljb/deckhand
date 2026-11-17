@@ -1279,10 +1279,11 @@ older one from 0.157.0 runs as a plain terminal tab (below).
 - **"Update available"**: at start, Codex shows its own update prompt in the tab until you update it
   or skip that version; answer it there.
 - **Settings changed**: edit a file a running Codex reads only when it starts (your Codex home's
-  `config.toml`, `AGENTS.md`, `hooks.json`, `prompts/` or `rules/`, or the project's `AGENTS.md`)
-  and a bar says *Codex settings changed — Restart N idle Codex tabs*: **Restart** resumes each
-  conversation in its tab (busy ones once idle), after you confirm. Skills need no restart: Codex
-  picks them up itself.
+  `config.toml`, `AGENTS.md`, `hooks.json`, `prompts/`, `rules/` when saved in Deckhand, or the
+  project's `AGENTS.md`) and a bar says *Codex settings changed — Restart N idle Codex tabs*:
+  **Restart** resumes each conversation in its tab (busy ones once idle), after you confirm. What
+  Codex writes there itself (trusting a folder, `/model`, "always allow") does not count; skills
+  need no restart: Codex picks them up itself.
 - **On another machine**: **+ New session** under one of its projects (or **New Codex tab** in its
   menu) starts Codex there, with that machine's own Codex, settings and sign-in (its own **Full
   access in new Codex tabs**, never this Mac's); its Codex rows open there too. It needs Deckhand

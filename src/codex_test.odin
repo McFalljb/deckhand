@@ -2000,10 +2000,10 @@ codex_reload_bar_and_restart :: proc(t: ^testing.T) {
 	// AGENTS.md; never Codex's sign-in, state or skills
 	src := core.claude_reload_sources_for_test(.Codex)
 	for f in ([]string{"config.toml", "AGENTS.md", "AGENTS.override.md", "hooks.json"}) do testing.expectf(t, fmt.tprintf("%s/%s", home, f) in src, "watched: %s", f)
-	for f in ([]string{"prompts/", "rules/"}) do testing.expectf(t, fmt.tprintf("%s/%s", home, f) in src, "watched: %s", f)
+	testing.expect(t, fmt.tprintf("%s/prompts/", home) in src, "watched: prompts/")
 	testing.expectf(t, src[fmt.tprintf("%s/AGENTS.md", dir)] == dir, "the project's AGENTS.md, for its tabs")
 	for k, _ in src {
-		for never in ([]string{"auth.json", "sessions", "session_index", "history", "skills", "/hooks/"}) do testing.expectf(t, !strings.contains(k, never), "never watched: %s", k)
+		for never in ([]string{"auth.json", "sessions", "session_index", "history", "skills", "/hooks/", "/rules"}) do testing.expectf(t, !strings.contains(k, never), "never watched: %s", k)
 	}
 	testing.expect_value(t, len(core.claude_reload_sources_for_test()), 0) // Claude's watcher: no Claude tab
 	// a skill (Codex watches those itself): no bar; config.toml: the bar
@@ -2068,4 +2068,157 @@ codex_reload_bar_and_restart :: proc(t: ^testing.T) {
 	core.claude_reload_flush(harness = .Codex)
 	testing.expect(t, tb.reload.stale, "the save's change")
 	testing.expect(t, core.claude_bar_shows(false, .Codex))
+}
+
+// Codex writes its own config.toml in normal use (a project's trust, /model, notices, hook review
+// state, the TUI's one-time checks) and appends to rules/ on "always allow": none of that raises
+// the bar; the user's own keys do, and what the filter cannot read (an inline table, a dotted key)
+// counts as a change.
+@(test)
+codex_reload_self_writes_quiet :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rself")
+	defer cx_reload_done()
+	cfg := fmt.tprintf("%s/config.toml", home)
+	w :: proc(p, text: string) {_ = os.write_entire_file(p, transmute([]u8)text)}
+	base := "approval_policy = \"on-request\"\n\n[mcp_servers.x]\ncommand = \"x\"\nargs = [\n  \"[projects]\",\n  \"b\",\n]\n"
+	w(cfg, base)
+	d0, ok := core.codex_config_digest(cfg)
+	testing.expect(t, ok)
+	same := []string {
+		strings.concatenate({"model = \"o4\"\nmodel_reasoning_effort = \"high\"\n", base}),
+		strings.concatenate({base, "\n[projects.\"/w/app\"]\ntrust_level = \"trusted\"\n"}),
+		strings.concatenate({base, "\n[notice]\nhide_full_access_warning = true\n[notice.model_migrations]\na = \"b\"\n"}),
+		strings.concatenate({base, "\n[hooks.state.\"/h/config.toml:stop:0:0\"]\ntrusted_hash = \"sha256:x\"\n"}),
+		strings.concatenate({base, "\n[tui]\nscreen_reader_detection_done = true\n[tui.model_availability_nux]\n\"m\" = 1\n"}),
+		strings.concatenate({"# a comment\n", base, "\n"}),
+	}
+	for s, i in same {
+		w(cfg, s)
+		d, k := core.codex_config_digest(cfg)
+		testing.expectf(t, k && d == d0, "self-written %d counted as a change", i)
+	}
+	other := []string {
+		strings.concatenate({"approval_policy = \"never\"\n", base[len("approval_policy = \"on-request\"\n"):]}),
+		strings.concatenate({base, "\n[profiles.p]\nsandbox_mode = \"read-only\"\n"}),
+		strings.concatenate({base, "\n[tui]\nnotifications = true\n"}),
+		strings.concatenate({base, "projects = { \"/w\" = { trust_level = \"trusted\" } }\n"}), // inline: unread, a change
+		strings.concatenate({"notice.hide_full_access_warning = true\n", base}), // dotted: a change
+		strings.concatenate({base[:len(base) - 2], "  \"c\",\n]\n"}),
+	}
+	for s, i in other {
+		w(cfg, s)
+		d, k := core.codex_config_digest(cfg)
+		testing.expectf(t, k && d != d0, "the user's change %d not seen", i)
+	}
+	// too large to look into: any change is one
+	big := strings.concatenate({base, "# ", strings.repeat("x", core.CODEX_CONFIG_READ_MAX), "\n"})
+	w(cfg, big)
+	db, kb := core.codex_config_digest(cfg)
+	w(cfg, strings.concatenate({big, "\n"}))
+	db2, kb2 := core.codex_config_digest(cfg)
+	testing.expect(t, kb && kb2 && db != db2, "over the cap: changed")
+	// the running tab: Codex's own writes and a rules/ append raise no bar
+	w(cfg, base)
+	_, _, tab := cx_codex_session(t, "rself")
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "01a1d0d6-5353-7ff3-9308-ff91070ad532", source = "startup"}, CX_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now(.Codex)
+	testing.expect(t, !(fmt.tprintf("%s/rules/", home) in core.claude_reload_sources_for_test(.Codex)), "rules/ is Codex's to append to: not polled")
+	time.sleep(20 * time.Millisecond)
+	w(cfg, same[1])
+	w(fmt.tprintf("%s/rules/default.rules", home), "prefix_rule(pattern=[\"ls\"], decision=\"allow\")\n")
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 0)
+	w(cfg, other[0])
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 1)
+}
+
+// Another machine's mirrored tabs (machine_mirror.odin) are its core's: this Mac's watchers and
+// bars never take them, Claude's or Codex's.
+@(test)
+claude_reload_skips_other_machines :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	for h in ([2]core.Harness{.Claude, .Codex}) {
+		state.open_sessions = {}
+		remote := core.Open_Session{id = core.new_id(), machine = 3, cwd = strings.clone("/remote/p")}
+		append(&remote.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{harness = h}, status = .Running, title = "r"})
+		remote.tabs[0].reload.stale = true
+		append(&state.open_sessions, remote)
+		local := core.Open_Session{id = core.new_id(), cwd = strings.clone("/local/p")}
+		append(&local.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{harness = h}, status = .Running, title = "m", machine = 4})
+		local.tabs[0].reload.stale = true
+		append(&state.open_sessions, local)
+		testing.expectf(t, len(core.running_harness(h)) == 0, "%v: another machine's tabs are not this Mac's", h)
+		n := core.claude_reload_counts(false, h)
+		testing.expectf(t, n.idle + n.busy + n.no_bridge + n.queued + n.reloading == 0, "%v: no bar for them", h)
+	}
+	state.open_sessions = {}
+}
+
+// Project instructions: only a running tab's own (its folder up to its repository's root, a file
+// there not made yet too); a save elsewhere is no Codex change.
+@(test)
+codex_reload_project_agents_scope :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rscope")
+	defer cx_reload_done()
+	_ = home
+	repo := cx_dir("rscope-repo")
+	os.make_directory_all(fmt.tprintf("%s/.git", repo))
+	sub := fmt.tprintf("%s/pkg/app", repo)
+	os.make_directory_all(sub)
+	pid := core.run_command(core.Add_Project{cwd = sub}, CX_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := core.find_session(r.created_id).tabs[0].id
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "01a1d0d6-5353-7ff3-9308-ff91070ad533", source = "startup"}, CX_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now(.Codex)
+	src := core.claude_reload_sources_for_test(.Codex)
+	for d in ([]string{sub, fmt.tprintf("%s/pkg", repo), repo}) do testing.expectf(t, fmt.tprintf("%s/AGENTS.md", d) in src, "watched though not there yet: %s", d)
+	testing.expect(t, !(fmt.tprintf("%s/AGENTS.md", filepath_dir(repo)) in src), "never above the repository")
+	// a parent's AGENTS.md made now: the bar
+	_ = os.write_entire_file(fmt.tprintf("%s/pkg/AGENTS.md", repo), transmute([]u8)string("be brief\n"))
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 1)
+	core.run_command(core.Claude_Reload_Later{harness = .Codex}, CX_UI)
+	// saves: another project's AGENTS.md, one above the repository, one in a child folder: nothing
+	other := cx_dir("rscope-other")
+	for p in ([]string{fmt.tprintf("%s/AGENTS.md", other), fmt.tprintf("%s/AGENTS.md", filepath_dir(repo)), fmt.tprintf("%s/deeper/AGENTS.md", sub)}) {
+		core.claude_reload_note_save(p)
+		testing.expectf(t, core.claude_reload_pending_count(.Codex) == 0, "not this tab's: %s", p)
+	}
+	core.claude_reload_note_save(fmt.tprintf("%s/AGENTS.md", repo))
+	testing.expect_value(t, core.claude_reload_pending_count(.Codex), 1)
+}
+
+@(private = "file")
+filepath_dir :: proc(p: string) -> string {
+	i := strings.last_index_byte(p, '/')
+	return i <= 0 ? "/" : p[:i]
+}
+
+// A Codex tab with no conversation yet (its first prompt not sent: SessionStart is lazy) is not
+// told to "restart by hand": the bar says what is true.
+@(test)
+codex_reload_fresh_tab_wording :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	_ = cx_reload_home("rfresh")
+	defer cx_reload_done()
+	_, _, tab := cx_codex_session(t, "rfresh")
+	core.claude_reload_tick()
+	core.run_command(core.Claude_Reload_Watch{paths = {"/x/config.toml"}, scopes = {""}, harness = .Codex})
+	_, tb, _ := core.claude_tab_of(tab)
+	testing.expect(t, tb.reload.stale)
+	msg, can := core.claude_reload_message(false, .Codex)
+	testing.expect(t, !can)
+	testing.expectf(t, !strings.contains(msg, "never reported") && strings.contains(msg, "no conversation yet"), "%s", msg)
 }

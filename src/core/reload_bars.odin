@@ -102,9 +102,9 @@ claude_reload_counts :: proc(update: bool, harness := Harness.Claude) -> (n: Rel
 	codex := harness == .Codex
 	if codex && update do return
 	for &s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's tabs are its core's
 		for &t in s.tabs {
-			if ct, is := t.kind.(Claude_Tab); !is || (ct.harness == .Codex) != codex do continue
+			if ct, is := t.kind.(Claude_Tab); !is || t.machine != 0 || (ct.harness == .Codex) != codex do continue
 			if t.status == .Exited && restart_waiting(t.id) && strings.has_prefix(t.reload.note, "restarting") {
 				n.reloading += 1
 				continue
@@ -202,7 +202,9 @@ codex_reload_message :: proc() -> (msg: string, can: bool) {
 	case n.reloading > 0:
 		return fmt.tprintf("Restarting %d Codex %s…", n.reloading, tabs_word(n.reloading)), false
 	case n.no_bridge > 0:
-		return fmt.tprintf("%s — %d Codex %s never reported its conversation: restart by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
+		// no conversation yet (SessionStart comes with the first prompt), or hooks not running
+		one := n.no_bridge == 1
+		return fmt.tprintf("%s — %d Codex %s %s no conversation yet: new settings apply when you restart %s", head, n.no_bridge, tabs_word(n.no_bridge), one ? "has" : "have", one ? "it" : "them"), false
 	}
 	return fmt.tprintf("%s — new Codex tabs use it", head), false
 }

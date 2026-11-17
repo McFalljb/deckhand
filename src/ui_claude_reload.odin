@@ -87,7 +87,9 @@ tab_line :: proc(s: ^core.Open_Session, t: ^core.Tab, update: bool) -> string {
 		case .Idle:      what = update ? fmt.tprintf("idle, on %s", core.claude_version_label(t.reload.version)) : "idle"
 		case .Busy:      what = "busy: restarts once idle"
 		case .Blocked:   what = "a subagent runs"
-		case .No_Bridge: what = "never reported its conversation (its hooks did not run)"
+		case .No_Bridge:
+			ct, _ := t.kind.(core.Claude_Tab)
+			what = ct.harness == .Codex ? "no conversation yet: new settings apply when you restart it" : "never reported its conversation (its hooks did not run)"
 		}
 	case t.reload.note != "":
 		what = t.reload.note
@@ -158,9 +160,9 @@ details_list :: proc(kind: Bar_Kind) {
 	}
 	tabs := make([dynamic]string, context.temp_allocator)
 	for &s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's tabs are its core's
 		for &t in s.tabs {
-			if ct, is := t.kind.(core.Claude_Tab); !is || t.status != .Running || (ct.harness == .Codex) != codex do continue
+			if ct, is := t.kind.(core.Claude_Tab); !is || t.machine != 0 || t.status != .Running || (ct.harness == .Codex) != codex do continue
 			if l := tab_line(&s, &t, update); l != "" do append(&tabs, l)
 		}
 	}

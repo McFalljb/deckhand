@@ -275,6 +275,10 @@ claude_file_class :: proc(path: string) -> Claude_File_Class {
 // home, Codex's state (codex_credential: never watched).
 CODEX_RESTART_FILES := [?]string{"config.toml", "AGENTS.md", "AGENTS.override.md", "hooks.json"}
 CODEX_RESTART_FOLDERS := [?]string{"prompts", "rules"}
+// Of those, the ones polled: rules/ only on the user's save (Codex appends to rules/default.rules
+// itself on "always allow"); config.toml by its content less what Codex writes itself
+// (codex_config_digest), never by its stamp.
+CODEX_POLLED_FOLDERS := [?]string{"prompts"}
 // The project's instructions Codex reads at start, in the cwd and each folder up to the
 // repository's root.
 CODEX_PROJECT_FILES := [?]string{"AGENTS.md", "AGENTS.override.md"}
@@ -491,9 +495,9 @@ running_harness :: proc(harness: Harness) -> []Claude_Running {
 	h := which(harness)
 	out := make([dynamic]Claude_Running, context.temp_allocator)
 	for &s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's tabs are its core's (machine_mirror.odin)
 		for &t in s.tabs {
-			if ct, is := t.kind.(Claude_Tab); is && which(ct.harness) == h && t.status == .Running do append(&out, Claude_Running{&s, &t})
+			if ct, is := t.kind.(Claude_Tab); is && t.machine == 0 && which(ct.harness) == h && t.status == .Running do append(&out, Claude_Running{&s, &t})
 		}
 	}
 	return out[:]
@@ -561,7 +565,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 			}
 		}
 		if len(now) + len(later) == 0 {
-			if len(cut) > 0 do return fail(codex ? "no Codex tab here has reported its conversation (Deckhand's hooks did not run there): restart it by hand" : "no Claude tab here has reported its conversation (its plugin's hooks did not run): restart it by hand"), false
+			if len(cut) > 0 do return fail(codex ? "no Codex tab here has a conversation yet (or Deckhand's hooks did not run there): new settings apply when you restart it" : "no Claude tab here has reported its conversation (its plugin's hooks did not run): restart it by hand"), false
 			if c.all do return fail(fmt.tprintf("no %s tab is running", name)), false
 			return fail(c.update ? "no Claude tab runs an older Claude Code" : fmt.tprintf("no %s tab needs a restart", name)), false
 		}
@@ -762,6 +766,7 @@ Src_Kind :: enum u8 {
 	Folder, // the stamps of its files (a digest), and whether it is there
 	Exists, // only whether the folder is there
 	Keys, // a settings file: its stamp, then the digest of its CLAUDE_RESTART_KEYS' values
+	Toml, // Codex's config.toml: its stamp, then codex_config_digest
 }
 
 @(private = "file")
@@ -772,7 +777,7 @@ Src :: struct {
 	pk:     Path_Kind,
 	stamp:   Disk_Stamp,
 	digest:  u64,
-	keys_ok: bool, // .Keys: digest is of a file that parsed (one that does not keeps the last)
+	keys_ok: bool, // .Keys, .Toml: digest is of a file that parsed (one that does not keeps the last)
 }
 
 @(private = "file")
@@ -900,10 +905,13 @@ claude_reload_note_save :: proc(path: string) {
 }
 
 // A save of a file a running Codex reads only at start (codex_file_class), while a Codex tab
-// runs: its account's tabs (a home's file) or the tabs at or below its folder (AGENTS.md).
+// runs: its account's tabs (a home's file; config.toml only when more than Codex's own parts
+// changed), or the tabs that read that AGENTS.md (codex_project_dirs).
 @(private = "file")
 codex_reload_note_save :: proc(path: string) {
-	if codex_file_class(path) != .Restart || len(running_harness(.Codex)) == 0 do return
+	if codex_file_class(path) != .Restart do return
+	running := running_harness(.Codex)
+	if len(running) == 0 do return
 	w := &cws[.Codex]
 	p, _ := filepath.clean(path, context.temp_allocator)
 	scope := ""
@@ -913,7 +921,19 @@ codex_reload_note_save :: proc(path: string) {
 		in_home = true
 		scope = account_scope(home, .Codex)
 	}
-	if !in_home do scope = filepath.dir(p) // a project's AGENTS.md: the tabs at or below its folder
+	if in_home {
+		for &s in w.srcs do if s.kind == .Toml && s.path == p && !keys_changed(&s) do return // only Codex's own parts
+	} else {
+		// a project's AGENTS.md: only one a running tab reads
+		dir := filepath.dir(p)
+		reads := false
+		for x in running {
+			cwd := tab_cwd(x.s, x.t)
+			for c in ([2]string{cwd, fs_real(cwd)}) do if c != "" do for d in codex_project_dirs(c) do if d == dir || d == fs_real(dir) do reads = true
+		}
+		if !reads do return
+		scope = dir
+	}
 	pending_add(w, p, scope)
 	w.due = time.tick_now()
 	w.from_save = true
@@ -1055,7 +1075,10 @@ keys_changed :: proc(s: ^Src) -> bool {
 	k, st := path_stat(s.path)
 	if k == s.pk && (k == .Missing || (st.mtime == s.stamp.mtime && st.size == s.stamp.size && st.inode == s.stamp.inode)) do return false
 	s.pk, s.stamp = k, st
-	d, ok := restart_keys_digest(s.path)
+	d: u64
+	ok: bool
+	if s.kind == .Toml do d, ok = codex_config_digest(s.path)
+	else do d, ok = restart_keys_digest(s.path)
 	if !ok do return false // mid-edit or broken: Claude Code keeps what it had too
 	if !s.keys_ok {
 		// the first readable look (made while it did not parse): the baseline
@@ -1097,7 +1120,7 @@ claude_reload_poll :: proc(h: Harness) {
 			if k == s.pk && d == s.digest do continue
 			s.pk, s.digest = k, d
 			pending_add(w, s.path, s.scope, now)
-		case .Keys:
+		case .Keys, .Toml:
 			if keys_changed(&s) do pending_add(w, s.path, s.scope, now)
 		}
 	}
@@ -1183,10 +1206,9 @@ claude_reload_build :: proc(cwds: []string, harness := Harness.Claude) {
 }
 
 // What a running Codex reads only when it starts (codex_file_class), as sources: each running
-// tab's home's CODEX_RESTART_FILES and CODEX_RESTART_FOLDERS (stamps and folder digests only,
-// never contents; nothing else in a home, which add refuses anyway: codex_credential), and the
-// project's instructions, AGENTS.md and AGENTS.override.md from the cwd up to the repository's
-// root (the first folder above it with a .git; none: the cwd only), as Codex finds them.
+// tab's home's CODEX_RESTART_FILES (config.toml by codex_config_digest) and CODEX_POLLED_FOLDERS
+// (stamps and folder digests; nothing else in a home, which add refuses anyway: codex_credential),
+// and the project's instructions in every folder codex_project_dirs names, there or not yet.
 @(private = "file")
 codex_sources :: proc(w: ^Watcher, cwds: []string) {
 	ids := credential_ids()
@@ -1195,29 +1217,144 @@ codex_sources :: proc(w: ^Watcher, cwds: []string) {
 	for home in accts {
 		if home == "" do continue
 		sc := account_scope(home, .Codex)
-		for f in CODEX_RESTART_FILES do add(w, fmt.tprintf("%s/%s", home, f), sc, .File, ids)
-		for d in CODEX_RESTART_FOLDERS do add(w, fmt.tprintf("%s/%s", home, d), sc, .Folder, ids)
+		for f in CODEX_RESTART_FILES do add(w, fmt.tprintf("%s/%s", home, f), sc, f == "config.toml" ? .Toml : .File, ids)
+		for d in CODEX_POLLED_FOLDERS do add(w, fmt.tprintf("%s/%s", home, d), sc, .Folder, ids)
 	}
-	for c in cwds {
-		top, _ := filepath.clean(c, context.temp_allocator)
-		root := top
-		for d, i := top, 0; i < 32; i += 1 {
-			if path_kind(fmt.tprintf("%s/.git", d == "/" ? "" : d)) != .Missing {
-				root = d
-				break
-			}
-			if d == "/" || d == "" || d == "." do break
-			d = filepath.dir(d)
+	for c in cwds do for d in codex_project_dirs(c) do for name in CODEX_PROJECT_FILES do add(w, fmt.tprintf("%s/%s", d == "/" ? "" : d, name), d, .File, ids)
+}
+
+// The folders whose AGENTS.md (AGENTS.override.md) a Codex at cwd reads: the cwd and each folder
+// above it up to the repository's root (the first with a .git; none: the cwd only), at most 32.
+// Temp.
+@(private = "file")
+codex_project_dirs :: proc(cwd: string) -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	top, _ := filepath.clean(cwd, context.temp_allocator)
+	if !filepath.is_abs(top) do return out[:]
+	walk := make([dynamic]string, context.temp_allocator)
+	for d, i := top, 0; i < 32; i += 1 {
+		append(&walk, d)
+		if path_kind(fmt.tprintf("%s/.git", d == "/" ? "" : d)) != .Missing {
+			append(&out, ..walk[:])
+			return out[:]
 		}
-		for d, i := top, 0; i < 32; i += 1 {
-			for name in CODEX_PROJECT_FILES {
-				p := fmt.tprintf("%s/%s", d == "/" ? "" : d, name)
-				if d == top || path_kind(p) == .File do add(w, p, d, .File, ids)
-			}
-			if d == root || d == "/" || d == "" || d == "." do break
-			d = filepath.dir(d)
-		}
+		if d == "/" || d == "" || d == "." do break
+		d = filepath.dir(d)
 	}
+	append(&out, top)
+	return out[:]
+}
+
+// What Codex writes in its config.toml itself, in normal use: a project's trust ([projects."…"]),
+// notices ([notice…]), hook review state ([hooks.state…]), the TUI's one-time checks, and /model's
+// choice (top level and a profile's). Seen in a 0.167.2 home: [projects."…"] trust_level, [tui]
+// screen_reader_detection_done, [tui.model_availability_nux].
+@(private = "file")
+CODEX_SELF_TABLES := [?]string{"projects", "notice", "hooks.state", "tui.model_availability_nux"}
+@(private = "file")
+CODEX_SELF_KEYS := [?]string{"model", "model_reasoning_effort"}
+@(private = "file")
+CODEX_SELF_TUI_KEYS := [?]string{"screen_reader_detection_done"}
+CODEX_CONFIG_READ_MAX :: 1 << 20 // a larger config.toml is not looked into: any change of it is one
+
+// The digest of a Codex config.toml less what Codex writes there itself (CODEX_SELF_*), comments
+// and blank lines. A line filter, not a TOML parser: [table] and [[array]] headers, `key = value`
+// lines, multi-line arrays, inline tables and strings are followed; what it does not take apart (an
+// inline table or a dotted key holding Codex's own keys, `projects = {…}`, `notice.x = …`, a quoted
+// header) stays in the digest, so a change there shows the bar. Nothing of the file is kept, logged
+// or shown: only the hash. ok false: unreadable (the caller keeps the last). A missing file: empty.
+codex_config_digest :: proc(path: string) -> (digest: u64, ok: bool) {
+	h: u64 = 0xcbf29ce484222325
+	k, st := path_stat(path)
+	if k == .Missing do return h, true
+	if k != .File do return 0, false
+	big :: proc(h: u64, st: Disk_Stamp) -> u64 {
+		line := fmt.tprintf("big|%d|%d|%d", st.size, st.mtime, st.inode)
+		return hash.fnv64a(transmute([]u8)line, h)
+	}
+	if st.size > CODEX_CONFIG_READ_MAX do return big(h, st), true
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	if err != nil do return 0, false
+	if len(data) > CODEX_CONFIG_READ_MAX do return big(h, st), true
+	text := string(data)
+	table := ""
+	self_table := false
+	dropping := false // the statement these continuation lines belong to is Codex's own
+	depth := 0 // [ and { open across lines
+	ml := "" // the multi-line string open across lines (`"""` or `'''`)
+	header := "" // the last header, counted with the first kept line under it (a table of Codex's keys only: none)
+	for raw in strings.split_lines_iterator(&text) {
+		line := strings.trim_space(raw)
+		if ml == "" && depth == 0 {
+			if line == "" || line[0] == '#' do continue
+			if line[0] == '[' {
+				// a header: [a.b] or [[a.b]], a comment after it
+				name := line
+				if i := strings.index_byte(name, '#'); i > 0 do name = strings.trim_space(name[:i])
+				name = strings.trim(name, "[]")
+				parts := strings.split(name, ".", context.temp_allocator)
+				for &p in parts do p = strings.trim_space(p)
+				table = strings.join(parts, ".", context.temp_allocator)
+				self_table = false
+				for t in CODEX_SELF_TABLES do if table == t || strings.has_prefix(table, strings.concatenate({t, "."}, context.temp_allocator)) do self_table = true
+				header = self_table ? "" : line
+				continue
+			}
+			key, _, _ := strings.partition(line, "=")
+			key = strings.trim_space(key)
+			dropping = self_table
+			if table == "" || strings.has_prefix(table, "profiles.") do for x in CODEX_SELF_KEYS do if key == x do dropping = true
+			if table == "tui" do for x in CODEX_SELF_TUI_KEYS do if key == x do dropping = true
+		}
+		depth, ml = toml_scan(line, depth, ml)
+		if dropping do continue
+		if header != "" {
+			h = hash.fnv64a(transmute([]u8)strings.concatenate({header, "\n"}, context.temp_allocator), h)
+			header = ""
+		}
+		h = hash.fnv64a(transmute([]u8)strings.concatenate({line, "\n"}, context.temp_allocator), h)
+	}
+	return h, true
+}
+
+// One line's effect on what is open: brackets and braces outside strings, a multi-line string.
+@(private = "file")
+toml_scan :: proc(line: string, depth_in: int, ml_in: string) -> (depth: int, ml: string) {
+	depth, ml = depth_in, ml_in
+	i := 0
+	for i < len(line) {
+		if ml != "" {
+			j := strings.index(line[i:], ml)
+			if j < 0 do return
+			i += j + 3
+			ml = ""
+			continue
+		}
+		c := line[i]
+		switch {
+		case strings.has_prefix(line[i:], `"""`), strings.has_prefix(line[i:], "'''"):
+			ml = line[i:i + 3]
+			i += 3
+			continue
+		case c == '"' || c == '\'':
+			// a one-line string: to its closing quote (a basic string's \" escaped)
+			j := i + 1
+			for j < len(line) && line[j] != c {
+				if c == '"' && line[j] == '\\' do j += 1
+				j += 1
+			}
+			i = j + 1
+			continue
+		case c == '#':
+			return
+		case c == '[' || c == '{':
+			depth += 1
+		case c == ']' || c == '}':
+			depth = max(depth - 1, 0)
+		}
+		i += 1
+	}
+	return
 }
 
 // A source; one per path (a scope of every tab wins); never a credential or state file.
@@ -1244,6 +1381,9 @@ add :: proc(w: ^Watcher, path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 	case .Keys:
 		src.pk, src.stamp = path_stat(p)
 		src.digest, src.keys_ok = restart_keys_digest(p)
+	case .Toml:
+		src.pk, src.stamp = path_stat(p)
+		src.digest, src.keys_ok = codex_config_digest(p)
 	}
 	append(&w.srcs, src)
 }
@@ -1252,7 +1392,7 @@ add :: proc(w: ^Watcher, path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 claude_reload_sources_for_test :: proc(harness := Harness.Claude) -> map[string]string {
 	m := make(map[string]string, context.temp_allocator)
 	for s in cws[which(harness)].srcs {
-		k := s.kind == .File ? s.path : s.kind == .Keys ? strings.concatenate({s.path, "#keys"}, context.temp_allocator) : strings.concatenate({s.path, "/"}, context.temp_allocator)
+		k := s.kind == .File || s.kind == .Toml ? s.path : s.kind == .Keys ? strings.concatenate({s.path, "#keys"}, context.temp_allocator) : strings.concatenate({s.path, "/"}, context.temp_allocator)
 		m[k] = s.scope
 	}
 	return m

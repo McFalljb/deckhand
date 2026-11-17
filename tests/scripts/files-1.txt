@@ -116,6 +116,34 @@ key escape
 wait 800
 paste pwd\n
 waitfor proj/src 5000
+# ---- several rows: letters typed in the tree pick a row and never reach the terminal on screen;
+# ⇧↑ extends; the row menu acts on both; ⌘⌫ asks once for both (cancelled: the rows are used below)
+menu show_files
+wait 200
+assert_state focus.id files
+type util
+wait 200
+assert_not_screen util
+key up shift
+rclickid frow @src/util.c
+wait 200
+assert_menurows Move 2 items to Trash…|-|Copy paths|Copy relative paths
+key escape
+key backspace cmd
+wait 200
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.summary Move 2 items to the Trash? src/app.c, src/util.c (in $homedir/proj)
+shot files/delete-several
+clickid confirm_no
+eventually
+assert_state pending_confirmations.# 0
+assert_files src/\n  app.c\n  util.c\n
+menu show_files
+wait 200
+key escape
+key escape
+wait 200
+assert_state focus.id <missing>
 # a file made outside Deckhand shows up (the watcher); src stays open. Under load the watcher can
 # be behind (#116): a generous deadline, no slower when it passes
 paste touch external.c\n

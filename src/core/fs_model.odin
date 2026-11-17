@@ -756,11 +756,72 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 
 // Moves to the Trash (the platform's; fails where there is none).
 fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
-	p, _, e := fs_check_write(path, caller)
+	p, e := fs_delete_check(path, caller)
 	if e != "" do return e
-	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
-	if !fs_user_here(caller) && fs_credential_place(p) do return CREDENTIAL_PLACE_REFUSED // a caller may delete without asking (confirm: auto)
-	if who := fs_in_use_by(p, caller); who != "" do return who
+	return fs_trash_checked(p)
+}
+
+// fs_delete's rules, nothing moved: inside a project (fs_check_write: never its folder, never .git),
+// there, not a credential place (but for the user here), no running terminal tab in it. p: the
+// checked absolute path.
+fs_delete_check :: proc(path: string, caller: Caller) -> (p: string, err: string) {
+	e: string
+	p, _, e = fs_check_write(path, caller)
+	if e != "" do return "", e
+	if path_kind(p) == .Missing && !os.exists(p) do return "", "no such file or folder" // os.exists: a dangling link
+	if !fs_user_here(caller) && fs_credential_place(p) do return "", CREDENTIAL_PLACE_REFUSED // a caller may delete without asking (confirm: auto)
+	if who := fs_in_use_by(p, caller); who != "" do return "", who
+	return p, ""
+}
+
+// At most this many paths in one delete_path (paths).
+FS_DELETE_MAX :: 500
+// Names a batch's confirmation shows before "and N more".
+FS_DELETE_NAMED :: 5
+
+// A batch delete's paths, checked: every one by fs_delete_check before anything moves (the first
+// refusal names its path, and nothing moves); a path inside another one of the batch, or the same
+// one twice, goes with it (only the outer one is moved). Temp allocator.
+fs_delete_plan :: proc(paths: []string, caller: Caller) -> (plan: []string, err: string) {
+	if len(paths) == 0 do return nil, "path or paths is needed"
+	if len(paths) > FS_DELETE_MAX do return nil, fmt.tprintf("too many at once: %d (at most %d); nothing was moved", len(paths), FS_DELETE_MAX)
+	checked := make([]string, len(paths), context.temp_allocator)
+	for path, i in paths {
+		p, e := fs_delete_check(path, caller)
+		if e != "" do return nil, fmt.tprintf("%s: %s; nothing was moved", path == "" ? "(an empty path)" : path, e)
+		checked[i] = p
+	}
+	out := make([dynamic]string, context.temp_allocator)
+	outer: for p, i in checked {
+		for q, j in checked {
+			if i != j && within(p, q) && (p != q || j < i) do continue outer
+		}
+		append(&out, p)
+	}
+	return out[:], ""
+}
+
+// A batch's confirmation: how many, and the first FS_DELETE_NAMED names in full (relative to their
+// project when all are in one; folders end in /), then "and N more". One path: as delete_path's.
+fs_delete_summary :: proc(plan: []string) -> string {
+	if len(plan) == 1 do return fmt.tprintf("move %s to the Trash?", plan[0])
+	root := ""
+	for r in fs_roots() do if within(plan[0], r) && len(r) > len(root) do root = r
+	for p in plan do if root != "" && !within(p, root) do root = ""
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "move %d items to the Trash? ", len(plan))
+	for p, i in plan[:min(len(plan), FS_DELETE_NAMED)] {
+		if i > 0 do strings.write_string(&b, ", ")
+		strings.write_string(&b, root != "" && p != root ? p[len(root) + 1:] : p)
+		if path_kind(p) == .Dir do strings.write_byte(&b, '/')
+	}
+	if len(plan) > FS_DELETE_NAMED do fmt.sbprintf(&b, ", and %d more", len(plan) - FS_DELETE_NAMED)
+	if root != "" do fmt.sbprintf(&b, " (in %s)", root)
+	return strings.to_string(b)
+}
+
+// Moves a checked path (fs_delete_check) to the Trash; what changed is told.
+fs_trash_checked :: proc(p: string) -> (err: string) {
 	fs_trash_why = ""
 	if !fs_trash_fn(p) {
 		why := fs_trash_why

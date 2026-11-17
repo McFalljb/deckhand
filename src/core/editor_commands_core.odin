@@ -88,6 +88,7 @@ Rename_Path :: struct {
 
 Delete_Path :: struct {
 	path:    string, // moved to the Trash; confirms (class delete)
+	paths:   []string, // a batch (path, if given, is one more): all checked before any moves, one confirmation (fs_delete_plan)
 	confirm: string,
 }
 
@@ -164,6 +165,7 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bo
 		if err := fs_rename(a, b, caller); err != "" do return fail(err), ch
 		return {ok = true}, true // open tabs may have new titles
 	case Delete_Path:
+		if len(c.paths) > 0 do return delete_batch_apply(c, caller)
 		p, _, err := fs_check_write(c.path, caller)
 		if err != "" do return fail(err), false
 		if !os.exists(p) do return fail("no such file or folder"), false
@@ -182,4 +184,31 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bo
 		return {ok = true}, false
 	}
 	return fail("unknown command"), false
+}
+
+// delete_path with paths: every path checked (fs_delete_plan) before the one confirmation (class
+// delete, as one path), then each to the Trash in turn. data {"trashed": n}; a Trash that fails
+// midway stops there: the error says how many went (they stay in the Trash) and data adds
+// "failed": the path it stopped at.
+@(private = "file")
+delete_batch_apply :: proc(c: Delete_Path, caller: Caller) -> (r: Result, changed: bool) {
+	all := make([dynamic]string, context.temp_allocator)
+	if c.path != "" do append(&all, c.path)
+	append(&all, ..c.paths)
+	plan, err := fs_delete_plan(all[:], caller)
+	if err != "" do return fail(err), false
+	// the checked paths park (one left after nesting: as a single delete_path)
+	parked := len(plan) == 1 ? Delete_Path{path = plan[0]} : Delete_Path{paths = plan}
+	gr, go_on, ch := confirm_gate(parked, .Delete, caller, c.confirm, fs_delete_summary(plan))
+	if !go_on do return gr, ch
+	for p, i in plan {
+		if derr := fs_trash_checked(p); derr != "" {
+			r = fail(fmt.tprintf("moved %d of %d to the Trash, then %s: %s (the %d moved stay in the Trash)", i, len(plan), p, derr, i))
+			b := strings.builder_make(context.temp_allocator)
+			json_quote(&b, p)
+			r.data = fmt.aprintf(`{{"trashed":%d,"failed":%s}}`, i, strings.to_string(b))
+			return r, true
+		}
+	}
+	return {ok = true, data = fmt.aprintf(`{{"trashed":%d}}`, len(plan))}, true
 }

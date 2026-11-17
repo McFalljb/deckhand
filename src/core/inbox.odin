@@ -229,7 +229,13 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Create_File:         return Create_File{path = s(c.path, allocator), confirm = s(c.confirm, allocator)}
 	case Create_Dir:          return Create_Dir{path = s(c.path, allocator), confirm = s(c.confirm, allocator)}
 	case Rename_Path:         return Rename_Path{from = s(c.from, allocator), to = s(c.to, allocator), confirm = s(c.confirm, allocator)}
-	case Delete_Path:         return Delete_Path{path = s(c.path, allocator), confirm = s(c.confirm, allocator)}
+	case Delete_Path:
+		paths: []string
+		if len(c.paths) > 0 {
+			paths = make([]string, len(c.paths), allocator)
+			for p, i in c.paths do paths[i] = s(p, allocator)
+		}
+		return Delete_Path{path = s(c.path, allocator), paths = paths, confirm = s(c.confirm, allocator)}
 	case Reveal_In_Finder:    return Reveal_In_Finder{path = s(c.path, allocator)}
 	case Git_Head_Done:       return Git_Head_Done{tab_id = c.tab_id, gen = c.gen, path = s(c.path, allocator), in_repo = c.in_repo, tracked = c.tracked, head = s(c.head, allocator)}
 	case Git_Status_Done:     return Git_Status_Done{root = s(c.root, allocator), gen = c.gen, ok = c.ok, out = s(c.out, allocator)}
@@ -466,6 +472,8 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.confirm, allocator)
 	case Delete_Path:
 		delete(c.path, allocator)
+		for x in c.paths do delete(x, allocator)
+		delete(c.paths, allocator)
 		delete(c.confirm, allocator)
 	case Reveal_In_Finder:    delete(c.path, allocator)
 	case Git_Head_Done:

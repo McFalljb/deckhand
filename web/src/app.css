@@ -819,6 +819,25 @@ a { color: inherit; }
 .file-row.ign .icon.kind, .file-row.ign .title.dot { opacity: 0.6; }
 .file-row.ign.sel .title.dot { opacity: 0.85; }
 .files-head .icon-btn[aria-pressed="true"] { color: var(--accent); }
+/* the checkout switcher (FilesFind.tsx): the root's name, its branch, a caret */
+.files-root { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.files-root-name { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-branch { flex: 0 8 auto; display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-muted); font-weight: 400; font-size: 12px; }
+.files-switch { border: 0; background: none; color: inherit; font: inherit; padding: 2px 4px; margin-left: -4px; border-radius: var(--radius-md); cursor: pointer; }
+.files-switch:hover, .files-switch:focus-visible { background: var(--hover, var(--selected)); }
+.files-ro-note { margin: 0 8px 6px; padding: 4px 8px; border-radius: var(--radius-md); background: var(--bg-field); color: var(--text-secondary); font-size: 12px; }
+/* the filter and its matches in place of the tree */
+.files-filter { margin: 0 8px 6px; height: 28px; }
+.files-find { flex: 1; min-height: 0; overflow-y: auto; }
+.find-row { height: 26px; gap: 6px; cursor: pointer; }
+.find-row.sel { background: var(--selected); color: var(--text); }
+.find-name { font-weight: 600; color: var(--text); white-space: nowrap; flex: 0 0 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.find-row.active .find-name { color: var(--accent); }
+.find-dir { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 12px; direction: rtl; text-align: left; }
+.find-msg { cursor: default; }
+.phone-body .find-row { height: 44px; font-size: 15px; }
+.phone-body .files-filter { height: 38px; }
+.phone-body .files-filter input { font-size: 16px; }
 /* git marks: the window's letters and colours (filetree.ts gitTone; src/ui_files.odin) */
 .file-row .g-add { color: var(--done); }
 .file-row .g-mod { color: var(--waiting); }

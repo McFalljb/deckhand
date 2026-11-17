@@ -738,7 +738,9 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 	if e2 != "" do return e2
 	_, _ = ra, rb
 	if !os.exists(a) do return "no such file or folder"
-	if os.exists(b) do return "the new name already exists"
+	if os.exists(b) && !fs_case_only_rename(a, b) do return "the new name already exists"
+	if fs_credential_named(a) && !fs_credential_named(b) && !fs_user_here(caller) do return CREDENTIAL_RENAME_REFUSED
+	if who := fs_in_use_by(a); who != "" do return who
 	if os.make_directory_all(filepath.dir(b)) != nil && path_kind(filepath.dir(b)) != .Dir do return "cannot create the target folder"
 	if rerr := os.rename(a, b); rerr != nil do return fmt.tprintf("cannot rename: %v", rerr)
 	fs_changed_ours(a)
@@ -753,9 +755,58 @@ fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 	p, _, e := fs_check_write(path, caller)
 	if e != "" do return e
 	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
-	if !fs_trash_fn(p) do return "could not move it to the Trash"
+	if who := fs_in_use_by(p); who != "" do return who
+	fs_trash_why = ""
+	if !fs_trash_fn(p) {
+		why := fs_trash_why
+		fs_trash_why = ""
+		return why != "" ? why : "could not move it to the Trash"
+	}
 	fs_changed_ours(p)
 	window_files_deleted(p) // open buffers of them say so
+	return ""
+}
+
+// Why the last fs_trash_fn failed, when it could say ("" = the plain message): the Linux core's
+// XDG Trash (trash_xdg.odin). A constant or temp string; fs_delete reads and clears it.
+fs_trash_why: string
+
+CREDENTIAL_RENAME_REFUSED :: "credentials file: only you, in Deckhand's window, may rename it to a name that is not a credential's"
+
+// A name file_read and `deckhand show` refuse by itself (settings_credential: .env, pi's sign-ins;
+// show_secret: keys, .netrc…). Renaming one to another name would make it readable.
+fs_credential_named :: proc(path: string) -> bool {return settings_credential(path) || show_secret(path)}
+
+// The user at this machine's own window: not a browser, not another machine's core.
+fs_user_here :: proc(caller: Caller) -> bool {return caller.kind == .UI && !caller_from_web(caller) && !caller_from_hub(caller)}
+
+// A rename that changes only the case of the name (readme.md to README.md) on a volume that
+// ignores case: b "exists" because it is a, spelled otherwise. True only when both name the same file (lstat:
+// device and inode) and no entry in the folder is spelled b exactly (two names of one file, a
+// hard link on a volume that keeps case, is a real collision).
+fs_case_only_rename :: proc(a, b: string) -> bool {
+	if a == b || filepath.dir(a) != filepath.dir(b) || !strings.equal_fold(filepath.base(a), filepath.base(b)) do return false
+	sa, sb: posix.stat_t
+	if posix.lstat(strings.clone_to_cstring(a, context.temp_allocator), &sa) != .OK do return false
+	if posix.lstat(strings.clone_to_cstring(b, context.temp_allocator), &sb) != .OK do return false
+	if sa.st_dev != sb.st_dev || sa.st_ino != sb.st_ino do return false
+	entries, err := os.read_all_directory_by_path(filepath.dir(b), context.temp_allocator)
+	if err != nil do return false
+	for e in entries do if e.name == filepath.base(b) do return false
+	return true
+}
+
+// The running terminal tab on this machine whose folder is at or inside path, said as the refusal
+// ("" = none). A shell tab's own folder, else its session's. Cheap: one realpath per running tab.
+fs_in_use_by :: proc(path: string) -> string {
+	for &s in state.open_sessions do for t in s.tabs {
+		if t.status != .Running || t.machine != 0 || !tab_is_terminal(t) do continue
+		cwd := s.cwd
+		if _, is := t.kind.(Shell_Tab); is && t.cwd != "" do cwd = t.cwd
+		if cwd == "" do continue
+		if !within(cwd, path) && !within(fs_real(cwd), path) do continue
+		return fmt.tprintf("the tab \"%s\" (%s) is running in it: close that tab first", t.title != "" ? t.title : "terminal", open_session_title(&s, refresh = false))
+	}
 	return ""
 }
 

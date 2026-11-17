@@ -13,8 +13,9 @@ package main
 // onto a terminal pastes its quoted path. Keyboard (focus widget "files"):
 // ↑/↓ move, ←/→ close/open or go to the parent/child, Enter opens, Space
 // previews, F2 renames, ⌘⌫ deletes (it asks first), Esc gives the keyboard
-// back. Renaming is inline (focus widget "files_name"); new files and folders
-// get a name field above the list.
+// back. Renaming is inline (focus widget "files_name"; Enter or a click elsewhere
+// renames, Esc cancels); a new file or folder's name field is a row of its own, the first in its
+// folder (files_new_row_at), with the error under it. Right-click selects the row first.
 
 import "base:runtime"
 import "core:fmt"
@@ -111,6 +112,10 @@ Files_Ui :: struct {
 	arena:      virtual.Arena,
 	drawn:      [dynamic]string,
 	drawn_dir:  [dynamic]bool,
+	drawn_row:  [dynamic]int, // the row each slot shows (-1: the new name's field or its error)
+	count:      int, // rows in the list at the last layout (the new name's included)
+	reveal_new: bool, // scroll the new name's field into view at the next layout
+	reveal_near: bool, // the next reveal scrolls only as far as needed (a new file: no jump)
 	first:      int, // row index of slot 0
 	view_h:     f32, // the list's height at the last layout (logical px)
 	// a press on a row: acts on release unless it became a drag
@@ -180,6 +185,7 @@ files_panel :: proc(row_w_: f32) {
 	a := virtual.arena_allocator(&fu.arena)
 	fu.drawn = make([dynamic]string, a)
 	fu.drawn_dir = make([dynamic]bool, a)
+	fu.drawn_row = make([dynamic]int, a)
 	v := core.tree_view()
 	root := core.files_root()
 	files_follow_active(root)
@@ -216,24 +222,38 @@ files_panel :: proc(row_w_: f32) {
 	}
 	files_filter_row(row_w)
 	gap(SP_1)
-	if fu.edit == .New_File || fu.edit == .New_Folder do files_new_row(root)
-
 	if root == "" {
 		empty_state("No project", "Pick a project or open a session", row_w)
 		return
 	}
 	rows := core.tree_rows()
+	// New file / New folder: the name field is a row of the tree (its error one more), the first
+	// in the folder it goes in
+	ph, ph_depth, ph_n := -1, 0, 0
+	if fu.edit == .New_File || fu.edit == .New_Folder {
+		ph, ph_depth = core.files_new_row_at(rows, root, fu.target)
+		if ph < 0 do ph, ph_depth = 0, 0 // its folder's row is not shown (yet): the top
+		ph_n = fu.edit_err != "" ? 2 : 1
+	}
+	n := len(rows) + ph_n
+	fu.count = n
 	if d := clay.GetElementData(clay.ID("files_list")); d.found do fu.view_h = d.boundingBox.height / app.dpi
 	if fu.view_h <= 0 do fu.view_h = 600
 	if v.reveal {
 		v.reveal = false
-		if i := core.files_row_of(rows, v.cursor); i >= 0 do files_scroll_to(i, len(rows), center = true)
+		if i := core.files_row_of(rows, v.cursor); i >= 0 do files_scroll_to(ph >= 0 && i >= ph ? i + ph_n : i, n, center = !fu.reveal_near)
+		fu.reveal_near = false
 	}
-	first, last, sc := core.files_visible(len(rows), v.scroll, fu.view_h, FILES_ROW_H)
+	if fu.reveal_new && ph >= 0 {
+		fu.reveal_new = false
+		files_scroll_to(ph + ph_n - 1, n) // the error under it too, then the field itself
+		files_scroll_to(ph, n)
+	}
+	first, last, sc := core.files_visible(n, v.scroll, fu.view_h, FILES_ROW_H)
 	v.scroll = sc
 	fu.first = first
 	offset := sc - f32(first) * FILES_ROW_H
-	total := f32(len(rows)) * FILES_ROW_H
+	total := f32(n) * FILES_ROW_H
 	overflow := total > fu.view_h
 	if overflow do row_w -= px(FILES_SCROLL_THUMB + 2)
 	if clay.UI(clay.ID("files_list"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, childGap = pu(2)}}) {
@@ -241,13 +261,16 @@ files_panel :: proc(row_w_: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = {0, -px(offset)}},
 		}) {
-			if len(rows) == 0 {
+			if n == 0 {
 				d := core.files_dir(root, false)
 				if state.files.filter != "" do empty_state("No matching files", "Esc in the filter clears it", row_w)
 				else if d.err != "" do empty_state("Cannot list this folder", d.err, row_w)
 				else do empty_state("Empty folder", "New file (the first button) starts one", row_w)
 			}
-			for i in first ..< last do files_row(rows[i], len(fu.drawn), row_w, a)
+			for k in first ..< last {
+				if ph >= 0 && k >= ph && k < ph + ph_n do files_new_slot(k - ph, ph_depth, row_w)
+				else do files_row(rows, ph >= 0 && k >= ph + ph_n ? k - ph_n : k, len(fu.drawn), row_w, a)
+			}
 		}
 		// where the view is, while the rows overflow: a thin thumb in its own track
 		if overflow {
@@ -277,10 +300,12 @@ files_drawn_slot :: proc(suffix: string) -> int {
 
 // One tree row (or "N more…"), drawn as slot `slot`.
 @(private = "file")
-files_row :: proc(r: core.Files_Row, slot: int, row_w: f32, a: runtime.Allocator) {
+files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.Allocator) {
 	th := theme()
+	r := rows[i]
 	append(&fu.drawn, r.more > 0 || r.error != "" ? "" : strings.clone(r.path, a))
 	append(&fu.drawn_dir, r.kind == .Dir)
+	append(&fu.drawn_row, i)
 	id := clay.ID("frow", u32(slot))
 	if r.error != "" {
 		// a folder that could not be listed: why, and Retry (never an empty-looking folder)
@@ -418,17 +443,23 @@ files_filter_row :: proc(row_w: f32) {
 	}
 }
 
-// "New file in <folder>": the name field above the list.
+// New file / New folder's row in the tree (part 0: the name field, where its folder's first child
+// goes) and, while the last try failed, the error under it (part 1).
 @(private = "file")
-files_new_row :: proc(root: string) {
+files_new_slot :: proc(part, depth: int, row_w: f32) {
 	th := theme()
-	if clay.UI(clay.ID("files_new"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, layoutDirection = .TopToBottom, padding = {pu(SP_2), pu(SP_1), 0, pu(SP_1)}, childGap = pu(2)},
+	append(&fu.drawn, "")
+	append(&fu.drawn_dir, false)
+	append(&fu.drawn_row, -1)
+	room := row_w - px(2 * SP_2 + FILES_INDENT * f32(depth) + SP_3 + SP_1)
+	if clay.UI(clay.ID("fnew", u32(part)))({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(depth)), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 	}) {
-		in_dir := fu.target == root ? filepath.base(root) : (root != "" && strings.has_prefix(fu.target, root) && len(fu.target) > len(root) ? fu.target[len(root) + 1:] : core.fs_display(fu.target))
-		clay.TextDynamic(fmt.tprintf("%s in %s", fu.edit == .New_File ? "New file" : "New folder", in_dir), txt(th.text_muted, FONT_UI_SMALL))
-		if state.focus_widget == "files_name" do files_name_box(0)
-		if fu.edit_err != "" do clay.TextDynamic(fu.edit_err, txt(th.error, FONT_UI_SMALL))
+		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(SP_3)), clay.SizingFit()}}}) {
+			if part == 0 && fu.edit == .New_Folder do clay.TextDynamic("▸", txt(th.text_muted, FONT_UI_SMALL))
+		}
+		if part == 1 do clay.TextDynamic(clip(fu.edit_err, room, FONT_UI_SMALL), txt(th.error, FONT_UI_SMALL))
+		else do files_name_box(room, fu.edit == .New_File ? "File name" : "Folder name")
 	}
 }
 
@@ -580,8 +611,10 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		right := e.mouse_button == .RIGHT || (e.mouse_button == .LEFT && e.modifiers & sapp.MODIFIER_CTRL != 0)
 		if right {
-			if (h.what == .Row || h.what == .More) && fu.drawn[h.index] != "" do files_menu_at(fu.drawn[h.index], app.pointer)
-			else if h.what == .List do files_menu_at(core.files_root(), app.pointer)
+			if (h.what == .Row || h.what == .More) && fu.drawn[h.index] != "" {
+				files_mark(fu.drawn[h.index]) // the row the menu is for shows selected
+				files_menu_at(fu.drawn[h.index], app.pointer)
+			} else if h.what == .List do files_menu_at(core.files_root(), app.pointer)
 			return true
 		}
 		if e.mouse_button != .LEFT do return true
@@ -602,6 +635,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if r, ok := files_error_row(h.index); ok do core.files_retry(r.path)
 		case .More:
 			if d := clay.GetElementData(clay.ID("fmore", u32(h.index))); d.found {
+				files_mark(fu.drawn[h.index])
 				b := d.boundingBox
 				files_menu_at(fu.drawn[h.index], {b.x, b.y + b.height})
 			}
@@ -661,7 +695,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		if !files_shown() || !inside(clay.ID("files_list"), e.mouse_x, e.mouse_y) do return false
 		v := core.tree_view()
 		v.scroll -= e.scroll_y * SCROLL_STEP
-		_, _, v.scroll = core.files_visible(len(v.rows), v.scroll, fu.view_h, FILES_ROW_H)
+		_, _, v.scroll = core.files_visible(max(fu.count, len(v.rows)), v.scroll, fu.view_h, FILES_ROW_H)
 		app.redraw = true
 		return true
 	case .KEY_DOWN, .CHAR, .KEY_UP:
@@ -719,6 +753,13 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	return true
 }
 
+// Selects the row at path where the pointer is (a click, its menu), without scrolling.
+@(private = "file")
+files_mark :: proc(path: string) {
+	core.files_select_in(core.tree_view(), path)
+	core.tree_view().reveal = false
+}
+
 // Opens or closes a folder; a failure shows (never a click that does nothing).
 files_toggle :: proc(path: string) {
 	ui_do_menu(core.Files_Expand{path = path, expanded = !core.files_is_open(path)}, "Open folder")
@@ -728,8 +769,9 @@ files_toggle :: proc(path: string) {
 @(private = "file")
 files_error_row :: proc(slot: int) -> (core.Files_Row, bool) {
 	rows := core.tree_rows()
-	i := fu.first + slot
-	if slot < 0 || i >= len(rows) || rows[i].error == "" do return {}, false
+	if slot < 0 || slot >= len(fu.drawn_row) do return {}, false
+	i := fu.drawn_row[slot]
+	if i < 0 || i >= len(rows) || rows[i].error == "" do return {}, false
 	return rows[i], true
 }
 
@@ -791,6 +833,7 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 	if !is_dir {
 		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path, session = files_session()}})
 		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, session = files_session(), preview = true}})
+		append(items, core.Menu_Item{label = "Open to the side", files = .Open_Side})
 		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path, session = files_session()}})
 		sep(items)
 	}
@@ -828,6 +871,16 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 		if path == "" || win_os.set_clipboard == nil do return false
 		win_os.set_clipboard(path)
 		return true
+	case .Open_Side:
+		// open_file, then that tab in a new pane on the right (a pane holding only it shows it already)
+		r := ui_run(core.Open_File{path = path, session = files_session()})
+		if !r.ok {
+			toast_show(r.error, true)
+			return false
+		}
+		if s, t, _ := core.find_tab(r.created_id); s != nil && core.pane_tab_count(s, t.pane) > 1 {
+			ui_do_menu(core.Split_Pane{pane = t.pane, direction = .Right, tab_id = r.created_id}, "Open to the side")
+		}
 	case .Copy_Relative:
 		rel := path
 		if strings.has_prefix(path, root) && len(path) > len(root) do rel = path[len(root) + 1:]
@@ -857,8 +910,12 @@ files_begin_edit :: proc(mode: Files_Edit_Mode, target, text: string, focus := t
 	tf_select_all(&files_name_field)
 	if mode == .Rename {
 		core.files_select_in(core.tree_view(), target)
-	} else if target != core.files_root() {
-		ui_do(core.Files_Expand{path = target, expanded = true})
+	} else {
+		// the field is a row of the tree, the folder's first: the tree shows (not filter
+		// results) with the folder open, scrolled to it
+		if state.files.filter != "" do ui_do(core.Set_Files_Filter{text = ""})
+		if target != core.files_root() do ui_do(core.Files_Expand{path = target, expanded = true})
+		fu.reveal_new = true
 	}
 	if focus do ui_do(core.Set_Focus{"files_name"})
 }
@@ -874,17 +931,29 @@ files_name_error :: proc(name: string) -> string {
 	return ""
 }
 
-// Enter in the name field: create or rename; an error keeps the field.
-files_commit_edit :: proc() {
+// Enter in the name field: create or rename; an error keeps the field. blur: the field lost
+// the keyboard (a click elsewhere): a changed name is renamed all the same, an error is a toast
+// and the edit ends, and the keyboard stays where it went.
+files_commit_edit :: proc(blur := false) {
 	name := strings.trim_space(tf_text(&files_name_field))
 	if fu.edit == .None || (fu.edit == .Rename && name == "") {
 		files_cancel_edit()
 		return
 	}
-	if err := files_name_error(name); err != "" {
+	failed :: proc(err: string, blur: bool) {
+		if blur {
+			toast_show(fmt.tprintf("Not renamed: %s", err), true)
+			files_cancel_edit()
+			return
+		}
 		delete(fu.edit_err)
 		fu.edit_err = strings.clone(err)
+		if fu.edit == .Rename do toast_show(err, true) // the row's field has no line under it: the ring turns red, the toast says why
+		else do fu.reveal_new = true // the error row under the field shows
 		app.redraw = true
+	}
+	if err := files_name_error(name); err != "" {
+		failed(err, blur)
 		return
 	}
 	r: core.Result
@@ -907,13 +976,16 @@ files_commit_edit :: proc() {
 		r = ui_run(core.Create_Dir{path = path})
 	}
 	if !r.ok {
-		delete(fu.edit_err)
-		fu.edit_err = strings.clone(r.error)
-		app.redraw = true
+		failed(r.error, blur)
 		return
 	}
-	core.files_select_in(core.tree_view(), path)
 	fu.edit = .None
+	delete(fu.edit_err)
+	fu.edit_err = ""
+	if blur do return // the click elsewhere decides what is selected
+	// selected where it now sits, scrolled only as far as needed (no jump)
+	core.files_select_in(core.tree_view(), path)
+	fu.reveal_near = true
 	ui_do(core.Set_Focus{"files"})
 }
 
@@ -924,10 +996,15 @@ files_cancel_edit :: proc() {
 	if state.focus_widget == "files_name" do ui_do(core.Set_Focus{"files"})
 }
 
-// The name field lost the keyboard (a click elsewhere): the edit ends.
+// The name field lost the keyboard (a click elsewhere): a rename to a changed name is made (as
+// Finder and VS Code do), anything else ends.
 files_edit_check :: proc() {
 	if client.focus_wait != "" do return // a Set_Focus on its way (machine_edit_begin): not lost yet
 	if fu.edit != .None && state.focus_widget != "files_name" {
+		if fu.edit == .Rename {
+			files_commit_edit(blur = true)
+			return
+		}
 		fu.edit = .None
 		delete(fu.edit_err)
 		fu.edit_err = ""

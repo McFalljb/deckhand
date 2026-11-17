@@ -562,6 +562,16 @@ files_row_of :: proc(rows: []Files_Row, path: string) -> int {
 	return -1
 }
 
+// Where New file / New folder's name field goes (ui_files.odin draws it as a row of its own): the
+// first child of dir, one level below its row; at the root, the first row. index: the row it
+// goes before; -1 = dir's row is not shown (a folder whose parent is closed, filter results).
+files_new_row_at :: proc(rows: []Files_Row, root, dir: string) -> (index, depth: int) {
+	if dir == root do return 0, 0
+	i := files_row_of(rows, dir)
+	if i < 0 || rows[i].kind != .Dir || rows[i].rel != "" do return -1, 0
+	return i + 1, rows[i].depth + 1
+}
+
 // The row of path's nearest shown folder above it, for a path not shown.
 files_parent_row :: proc(rows: []Files_Row, path: string) -> int {
 	for p := filepath.dir(path); len(p) > 1; p = filepath.dir(p) {

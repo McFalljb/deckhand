@@ -47,7 +47,7 @@ def negative(check):
 CHECKS = {"assert_file", "assert_not_file", "assert_tip", "assert_drawn", "assert_not_drawn", "assert_md",
           "assert_not_md", "assert_opened", "assert_menurows", "assert_revealed", "assert_toast", "assert_clipboard",
           "assert_notice", "assert_files", "assert_not_files", "assert_rows", "assert_link", "assert_drawn_selection",
-          "assert_screen", "assert_not_screen", "assert_palette", "assert_selection", "hittest", "assert_in_window",
+          "assert_screen", "assert_not_screen", "assert_palette", "assert_selection", "hittest", "assert_in_window", "assert_under",
           "assert_window", "assert_menu", "assert_state", "assert_result", "assert_finished"}
 OTHER_CHECKS = ("web_assert", "web_title", "web_pixel", "page_assert", "act_assert", "agent_assert", "annot_assert", "beeps")
 

@@ -1423,15 +1423,25 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
   (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
-- **Mouse**: a click opens a folder or previews a file; drag a row onto a terminal to paste its
-  path.
+- **Mouse**: a click opens a folder or previews a file; a right-click selects the row, then opens
+  its menu; drag a row onto a terminal to paste its path.
 - **Keyboard** (while the tree has focus): ↑/↓ move, ←/→ close or open (or go to the parent or
   child), Enter opens, Space previews, F2 renames, ⌘⌫ moves to the Trash (it asks first), Esc
   gives the keyboard back.
 - **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
-- **Row menu** (**…** or right-click): Open, Open in preview, New file…, New folder…, Rename…,
-  Move to Trash…, Reveal in Finder, Copy path, Copy relative path, Open terminal here, and for
-  `.md` files Open Markdown preview.
+- **New file / New folder**: the name field opens as the first row of the folder (the selected
+  folder, the selected file's, else the project's), opened and scrolled to; an error shows under
+  it. Enter creates and selects it, Esc cancels.
+- **Rename**: Enter or a click elsewhere renames, Esc cancels. Changing only the case
+  (`readme.md` → `README.md`) works.
+- **Row menu** (**…** or right-click): Open, Open in preview, Open to the side (in a new pane on
+  the right), New file…, New folder…, Rename…, Move to Trash…, Reveal in Finder, Copy path, Copy
+  relative path, Open terminal here, and for `.md` files Open Markdown preview.
+- **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
+  the tab; close it first). Only you, in the window, can rename a credential's file (`.env`, a
+  key) to a name that is not a credential's; agents and browsers cannot.
+- **Trash on a Linux core**: the XDG Trash (`~/.local/share/Trash`, where file managers restore
+  from); a file on another disk is refused, never deleted for good.
 - **Filter**: type in the field above the tree to match paths loosely.
 - **Folders inside folders**: a folder that is a project of its own (or a session's worktree)
   opens in the tree it sits in like any other folder, and so does a symlinked folder (in place,

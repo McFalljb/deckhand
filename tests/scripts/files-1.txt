@@ -50,6 +50,15 @@ assert_tip New file…
 clickid filestool 0
 eventually
 assert_state focus.id files_name
+# the name field is a row of the tree: src's first child, right under its row; an error goes under it
+assert_under fnew 0 frow 2
+type app.c
+key enter
+eventually
+assert_under fnew 1 fnew 0
+assert_drawn already exists
+assert_state focus.id files_name
+key a cmd
 type notes.md
 shot files/new-file
 key enter

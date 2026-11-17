@@ -79,13 +79,49 @@ fs_copy_busy: map[string]bool
 
 // The source and target checked: both inside a project (fs_check), the source there, the
 // target's folder there. a, b: their absolute paths (b as asked, before a unique name).
+// The user at this window may also copy IN from outside every project (fs_copy_outside_source).
 fs_copy_paths :: proc(from, to: string, caller: Caller) -> (a, b: string, err: string) {
 	e: string
 	a, _, e = fs_check(from, caller)
-	if e != "" do return "", "", e
+	if e != "" {
+		out, oerr, applies := fs_copy_outside_source(from, caller)
+		if !applies do return "", "", e
+		if oerr != "" do return "", "", oerr
+		a = out
+	}
 	b, _, e = fs_check(to, caller)
 	if e != "" do return "", "", e
 	return a, b, ""
+}
+
+// A copy's source outside every project (files dropped from Finder onto the Files tree): only for
+// the user at this window (fs_user_here; never a browser, another machine's core, a script, a
+// control caller or Deckhand itself), only an absolute path, only one in no project at all (one
+// inside a project keeps fs_check's refusal: its .git, the project's own folder), never in or at
+// a .git folder (any case). abs: its folder's real path and its own name (the link itself, never
+// followed: fs_copy_run opens that folder and checks its real path again). Everything else is
+// fs_copy_plan's, unchanged: the target, into itself, credentials (the user's left out and said),
+// .git left out, the caps.
+// applies false: not such a source (the caller keeps fs_check's refusal); else abs, or err.
+fs_copy_outside_source :: proc(from: string, caller: Caller) -> (abs, err: string, applies: bool) {
+	context.allocator = context.temp_allocator // filepath's copies
+	if !fs_user_here(caller) || !filepath.is_abs(from) do return "", "", false
+	base := filepath.base(from)
+	if base == "" || base == "." || base == ".." || base == "/" do return "", "", false
+	parent := fs_real(filepath.dir(from))
+	if parent == "" do return "", "", false
+	full := parent == "/" ? strings.concatenate({"/", base}, context.temp_allocator) : strings.concatenate({parent, "/", base}, context.temp_allocator)
+	roots := fs_roots()
+	for r in roots do if within(full, r) do return "", "", false
+	// nor one reached through a project (a link in it that leads out): every folder on the path as
+	// given, by its real path too
+	for d := filepath.dir(from); ; d = filepath.dir(d) {
+		rd := fs_real(d)
+		for r in roots do if within(d, r) || within(rd, r) do return "", "", false
+		if d == "/" || d == "." || d == "" do break
+	}
+	if fs_in_git(full) do return "", "not inside .git", true
+	return full, "", true
 }
 
 // Every rule of a copy, nothing written: the paths (fs_copy_paths), never into itself, credential

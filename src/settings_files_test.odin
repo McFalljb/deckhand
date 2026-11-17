@@ -10,6 +10,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
@@ -972,4 +973,46 @@ sf_text :: proc() -> string {
 		strings.write_byte(&b, '\n')
 	}
 	return strings.to_string(b)
+}
+
+// New file… in pi's config folders under a strict umask (077): the file Deckhand makes is 0644,
+// so it is not taken for a credential (a private file in the agent dir is one) and opens. A
+// credential's name stays refused, and a private file Deckhand did not make stays a credential.
+@(test)
+settings_files_new_file_strict_umask :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	for sub in ([]string{"prompts", "skills", "themes", "extensions"}) do os.make_directory_all(fmt.tprintf("%s/%s", ad, sub))
+	old := posix.umask(posix.S_IRWXG | posix.S_IRWXO) // 077
+	defer posix.umask(old)
+	for sub in ([]string{"prompts", "skills", "themes", "extensions"}) {
+		p := fmt.tprintf("%s/%s/new-%s.md", ad, sub, sub)
+		r := core.run_command(core.Create_File{path = p}, ui)
+		testing.expectf(t, r.ok, "%s: %s", sub, r.error)
+		_, st := core.path_stat(p)
+		testing.expectf(t, st.mode & 0o777 == 0o644, "%s: made %o", sub, st.mode & 0o777)
+		testing.expectf(t, !core.settings_credential(p), "%s: not a credential", sub)
+		_, editable := core.settings_editable(p)
+		testing.expectf(t, editable, "%s: the user's to rename and delete", sub)
+		o := core.run_command(core.Open_File{path = p}, ui)
+		testing.expectf(t, o.ok, "%s: opens: %s", sub, o.error)
+	}
+	// a credential's name in there: refused, or never made readable
+	env := fmt.tprintf("%s/prompts/.env", ad)
+	if core.run_command(core.Create_File{path = env}, ui).ok {
+		_, st := core.path_stat(env)
+		testing.expectf(t, st.mode & 0o077 == 0, ".env made %o", st.mode & 0o777)
+	}
+	// a private file the user (or pi) made there is still a credential
+	mine := fmt.tprintf("%s/prompts/mine.md", ad)
+	write_mode(mine, "x", 0o600)
+	testing.expect(t, core.settings_credential(mine), "a private file Deckhand did not make")
+	// outside pi's config folders the umask is the user's: a project file stays as made
+	os.make_directory_all(fmt.tprintf("%s/proj/notes", home))
+	pf := fmt.tprintf("%s/proj/notes/x.md", home)
+	if core.run_command(core.Create_File{path = pf}, ui).ok {
+		_, st := core.path_stat(pf)
+		testing.expectf(t, st.mode & 0o077 == 0, "a project file keeps the umask: %o", st.mode & 0o777)
+	}
 }

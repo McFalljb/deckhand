@@ -13,7 +13,7 @@ wait 100
 # + New session: the harness picker, Claude Code once per account (harness.odin)
 clickid new
 eventually
-assert_menurows pi|Claude Code · Claude|Claude Code · Work
+assert_menurows pi|Claude Code · Claude|Claude Code · Work|-|With flags…
 shot claude-accounts/picker-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 200

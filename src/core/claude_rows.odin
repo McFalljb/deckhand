@@ -88,6 +88,7 @@ claude_row_record :: proc(project_id: u64, id: string) -> ^Claude_Record {
 // to Claude Code as its sessionTitle).
 claude_rows_session :: proc(ct: ^Claude_Tab, c: Claude_Session_Report) -> string {
 	if c.source != "compact" do ct.ended = .None // a new conversation (a compaction keeps its turn)
+	claude_mode_report(c.tab_id, ct, c.permission_mode) // its permission mode, when SessionStart says it (claude_mode.odin)
 	rec, _ := claude_record(c.session_id)
 	if rec == nil do return ""
 	// the first path stays: a later report never repoints an entry's transcript (claude_transcript_ok)
@@ -156,8 +157,13 @@ claude_tab_tip :: proc(tab: Tab) -> string {
 		return fmt.tprintf("pi · model %s", pt.model)
 	}
 	ct, is := tab.kind.(Claude_Tab)
-	if !is || ct.model == "" do return ""
-	return fmt.tprintf("%s · model %s", harness_is_codex(ct.harness) ? "Codex" : "Claude Code", ct.model)
+	if !is do return ""
+	who := harness_is_codex(ct.harness) ? "Codex" : "Claude Code"
+	// its permission mode when not the default (claude_mode.odin)
+	mode := claude_mode_tip(ct)
+	if ct.model == "" do return mode != "" ? fmt.tprintf("%s · %s", who, mode) : ""
+	if mode != "" do return fmt.tprintf("%s · model %s · %s", who, ct.model, mode)
+	return fmt.tprintf("%s · model %s", who, ct.model)
 }
 
 // A pi tab's model from its bridge's pi.status: "provider/id" and the thinking level, each a short
@@ -186,5 +192,9 @@ claude_rows_tab_json :: proc(b: ^strings.Builder, ct: Claude_Tab) {
 	if ct.model != "" {
 		strings.write_string(b, `,"model":`)
 		json_quote(b, ct.model)
+	}
+	if ct.permission_mode != "" { // claude_mode.odin
+		strings.write_string(b, `,"permission_mode":`)
+		json_quote(b, ct.permission_mode)
 	}
 }

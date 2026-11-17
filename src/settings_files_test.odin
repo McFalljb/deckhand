@@ -415,6 +415,26 @@ settings_tree_menu_restrictions :: proc(t: ^testing.T) {
 	testing.expect(t, !core.run_command(core.Reveal_In_Finder{path = fmt.tprintf("%s/settings.json", ad)}, {kind = .Control}).ok, "not for the agent")
 }
 
+// pi's themes/ folder (custom themes, ~/.pi/agent/themes/*.json) shows beside prompts/, skills/
+// and extensions/, opens in the tree, and takes the same file commands.
+@(test)
+settings_files_pi_themes :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	os.make_directory_all(fmt.tprintf("%s/themes", ad))
+	write_mode(fmt.tprintf("%s/themes/dusk.json", ad), `{"name":"dusk"}`, 0o644)
+	b := strings.builder_make(context.temp_allocator)
+	for r in core.settings_file_rows() do fmt.sbprintf(&b, "%s|%s|%s|%v|%v\n", r.group, r.label, core.fs_display(r.path), r.exists, r.kind)
+	got := strings.to_string(b)
+	testing.expectf(t, strings.contains(got, "pi|themes|~/.pi/agent/themes|true|Folder"), "themes/ listed:\n%s", got)
+	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/themes/dusk.json", ad)), ad)
+	_, ok := core.settings_editable(fmt.tprintf("%s/themes/dusk.json", ad))
+	testing.expect(t, ok, "a theme file is the user's to rename and delete")
+	r := core.run_command(core.Create_File{path = fmt.tprintf("%s/themes/new.json", ad)}, ui)
+	testing.expect(t, r.ok, r.error)
+}
+
 // Review round 1 (coordinator): each fix's failing test first.
 
 // 1. The filter is cleared only between the two trees (Files ↔ Settings).

@@ -1478,14 +1478,14 @@ buttons), with a search box on top.
   editor tab of the session you opened the page from (this Mac's sessions only; otherwise a toast
   asks you to open a session on this Mac first). A missing file shows **Create**: it is made only
   when you click, then opened. Rarely used files are under **All files… (N more)**. Clicking a
-  folder (`prompts/`, `skills/`, `extensions/`…) shows its files in the search.
+  folder (`prompts/`, `skills/`, `extensions/`, `themes/`…) shows its files in the search.
 - **Search** ("Search settings and files") matches settings by their names, words and hints, and
   files by name and path, including the files inside the listed folders and in the project's
   `.pi/` (git-ignored ones too). It never finds credentials. Esc clears it.
 
 **Right-click a file or folder row** for the same menu as before: **Open**, **Open in preview**,
 **Open Markdown preview** (Markdown files), **New file…** and **New folder…** (inside `prompts/`
-and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`,
+and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`, `themes/`,
 `extensions/` and a project's `.pi/`, never pi's own config files; Trash asks first), **Reveal in
 Finder** and **Copy path**. A file still to create has only **Copy path**. New file, New folder
 and Rename open a name field at the top of the page: Enter saves, Esc cancels. A new file opens

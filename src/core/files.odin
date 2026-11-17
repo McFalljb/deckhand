@@ -718,6 +718,111 @@ files_parent_row :: proc(rows: []Files_Row, path: string) -> int {
 	return -1
 }
 
+// ---- moving by drag (ui_files.odin: each move is a rename_path; the core keeps its rules) ----
+
+Files_Drop_Input :: struct {
+	sources:  []string, // what is dragged: paths captured at the press (never row indices)
+	root:     string, // the tree's root
+	over:     string, // the row under the pointer; "" = the empty space below the rows (the root)
+	over_dir: bool, // that row is a folder
+	exists:   proc(path: string) -> bool, // a name taken (os.exists; tests: a fake)
+}
+
+// Where a drop lands: dir, the folder the sources go into ("" = nowhere: no indicator). noop:
+// nothing moves (each is in dir already, or a lone item onto its own row); refused: why not (no
+// indicator; said on release).
+Files_Drop :: struct {
+	dir:     string,
+	noop:    bool,
+	refused: string,
+}
+
+Files_Move :: struct {
+	from, to: string,
+}
+
+// Where a drop at the row `over` lands, for the dragged sources: into a folder row, into a file
+// row's folder, below the rows into the root. Refused: into one of them or below it, or a name
+// taken in the folder (or two of them with one name). Temp allocator.
+files_drop_at :: proc(input: Files_Drop_Input) -> Files_Drop {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	if input.root == "" || len(input.sources) == 0 do return {}
+	dir := input.root
+	if input.over != "" do dir = input.over_dir ? input.over : filepath.dir(input.over)
+	if !within(dir, input.root) do return {}
+	srcs := files_drop_sources(input.sources)
+	// only this tree's items (the tree may show another root since the press), never the root
+	for s in srcs do if s == input.root || !within(s, input.root) {
+		return {dir = dir, refused = fmt.tprintf("%s is not in this tree", filepath.base(s))}
+	}
+	if len(srcs) == 1 && srcs[0] == input.over do return {dir = dir, noop = true}
+	for s in srcs do if within(dir, s) {
+		return {dir = dir, refused = fmt.tprintf("cannot move %s into itself", filepath.base(s))}
+	}
+	moves := files_drop_moves(srcs, dir)
+	if len(moves) == 0 do return {dir = dir, noop = true}
+	label := files_drop_dir_label(input.root, dir)
+	names := make(map[string]bool, len(moves), context.temp_allocator)
+	for m in moves {
+		name := filepath.base(m.to)
+		if name in names do return {dir = dir, refused = fmt.tprintf("two of them are named %s", name)}
+		names[name] = true
+		if input.exists != nil && input.exists(m.to) do return {dir = dir, refused = fmt.tprintf("%s already has %s", label, name)}
+	}
+	return {dir = dir}
+}
+
+// The sources without those inside another of them (a folder moves what is in it), in order.
+// Temp allocator.
+files_drop_sources :: proc(sources: []string) -> []string {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	set := make(map[string]bool, len(sources))
+	for s in sources do if s != "" do set[s] = true
+	taken := make(map[string]bool, len(sources))
+	out := make([dynamic]string)
+	outer: for s in sources {
+		if s == "" || s in taken do continue // a repeat: the first was taken
+		for d := filepath.dir(s); len(d) > 1 && d != "."; d = filepath.dir(d) do if d in set do continue outer
+		append(&out, s)
+		taken[s] = true
+	}
+	return out[:]
+}
+
+// The renames a drop into dir makes: each source (nested ones left out) not in dir already, to
+// dir/its name. Temp allocator.
+files_drop_moves :: proc(sources: []string, dir: string) -> []Files_Move {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	out := make([dynamic]Files_Move, context.temp_allocator)
+	for s in files_drop_sources(sources) {
+		if filepath.dir(s) == dir do continue
+		append(&out, Files_Move{from = s, to = strings.concatenate({dir, "/", filepath.base(s)}, context.temp_allocator)})
+	}
+	return out[:]
+}
+
+// What a drag dropped on a terminal pastes: every item it carries (nested ones once) when the
+// pressed row is among them, else that row alone. Temp allocator.
+files_drag_paste_paths :: proc(pressed: string, sources: []string) -> []string {
+	for s in sources do if s == pressed do return files_drop_sources(sources)
+	out := make([]string, 1, context.temp_allocator)
+	out[0] = pressed
+	return out
+}
+
+// A folder as a drop's toast and refusal name it: relative to the root, with "/" ("src/x/");
+// the root by its name ("proj/"). Temp allocator.
+files_drop_dir_label :: proc(root, dir: string) -> string {
+	if dir == root || !within(dir, root) do return strings.concatenate({filepath.base(dir), "/"}, context.temp_allocator)
+	return strings.concatenate({dir[len(root) + 1:], "/"}, context.temp_allocator)
+}
+
+// Whether the row at path is in the band a drop highlights: the target folder's row and what is
+// below it (the root: every row). Nothing while the drop moves nothing or is refused.
+files_drop_band :: proc(d: Files_Drop, path: string) -> bool {
+	return d.dir != "" && !d.noop && d.refused == "" && within(path, d.dir)
+}
+
 // "M", "A", "U", "D", "R", "!" for a porcelain code (and the folder mark "•").
 files_git_letter :: proc(code: string, is_dir: bool) -> string {
 	if code == "" do return ""

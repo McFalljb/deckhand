@@ -155,7 +155,7 @@ session_harness :: proc(s: Session) -> Harness {return s.codex ? .Codex : s.clau
 // Codex (a Codex session is a Claude session whose main tab's harness is .Codex: codex.odin), else pi.
 open_session_harness :: proc(s: ^Open_Session) -> Harness {
 	if s.agent != .Claude do return .Pi
-	if len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(Claude_Tab); is do return ct.harness
+	if len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(Claude_Tab); is do return claude_kind_harness(ct.harness)
 	return .Claude
 }
 
@@ -509,7 +509,7 @@ sessions_with_new :: proc(section: Sort_Section, list: []Session, project: u64 =
 claude_rows :: proc(p: Project, out: ^[dynamic]Session) {
 	row :: proc(r: Claude_Record) -> Session {
 		t := time.unix(r.used, 0)
-		s := Session{id = r.id, title = r.title, untitled = r.harness == .Codex ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, account = r.account, codex = r.harness == .Codex}
+		s := Session{id = r.id, title = r.title, untitled = harness_is_codex(r.harness) ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, account = r.account, codex = harness_is_codex(r.harness)}
 		if f := claude_disk_of(r.id); f != nil {
 			if f.created != {} do s.when_ = utc_minute(f.created)
 			s.gone = f.gone

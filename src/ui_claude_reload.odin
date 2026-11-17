@@ -6,6 +6,8 @@ package main
 // Claude Code update ("Claude Code updated to X — Restart N idle Claude tabs"). Each has
 // Details (which files changed, what each Claude tab does), Later and Restart; and Restart anyway
 // while a waiting restart is held only by a subagent silent for hours (claude_restart_anyway).
+// Codex's bar (changed Codex files a running Codex reads only at start: "Codex settings changed —
+// Restart N idle Codex tabs") is the settings bar's twin for Codex tabs (harness codex).
 
 import "core:fmt"
 import "core:os"
@@ -22,6 +24,17 @@ Claude_Reload_Part :: enum u8 {
 	Update_Later,
 	Anyway,
 	Update_Anyway,
+	Codex_Restart,
+	Codex_Details,
+	Codex_Later,
+}
+
+// Which bar: Claude's update and settings bars, Codex's settings bar.
+@(private = "file")
+Bar_Kind :: enum u8 {
+	Settings,
+	Update,
+	Codex,
 }
 
 Hit_Claude_Reload :: struct {
@@ -38,11 +51,14 @@ IDS := [Claude_Reload_Part]string {
 	.Update_Later   = "cupdate_later",
 	.Anyway         = "creload_anyway",
 	.Update_Anyway  = "cupdate_anyway",
+	.Codex_Restart  = "xreload_go",
+	.Codex_Details  = "xreload_details",
+	.Codex_Later    = "xreload_later",
 }
 
 // UI state: the Details lists that are open.
 @(private = "file")
-open_details: [2]bool // [0] settings, [1] update
+open_details: [Bar_Kind]bool
 
 // The bars' model is the core's (reload_bars.odin): a browser shows the same text.
 claude_reload_counts :: core.claude_reload_counts
@@ -71,7 +87,9 @@ tab_line :: proc(s: ^core.Open_Session, t: ^core.Tab, update: bool) -> string {
 		case .Idle:      what = update ? fmt.tprintf("idle, on %s", core.claude_version_label(t.reload.version)) : "idle"
 		case .Busy:      what = "busy: restarts once idle"
 		case .Blocked:   what = "a subagent runs"
-		case .No_Bridge: what = "never reported its conversation (its hooks did not run)"
+		case .No_Bridge:
+			ct, _ := t.kind.(core.Claude_Tab)
+			what = core.harness_is_codex(ct.harness) ? "no conversation yet: new settings apply when you restart it" : "never reported its conversation (its hooks did not run)"
 		}
 	case t.reload.note != "":
 		what = t.reload.note
@@ -81,27 +99,32 @@ tab_line :: proc(s: ^core.Open_Session, t: ^core.Tab, update: bool) -> string {
 	return fmt.tprintf("%s · %s — %s", core.session_where(s), t.title, what)
 }
 
-// Both bars and their Details, at the top of the centre (ui.odin), under pi's.
+// The bars and their Details, at the top of the centre (ui.odin), under pi's.
 claude_reload_bars :: proc() {
-	if claude_bar_shows(true) do bar(true)
-	if claude_bar_shows(false) do bar(false)
+	if claude_bar_shows(true) do bar(.Update)
+	if claude_bar_shows(false) do bar(.Settings)
+	if claude_bar_shows(false, .Codex) do bar(.Codex)
 }
 
 @(private = "file")
-bar :: proc(update: bool) {
+bar :: proc(kind: Bar_Kind) {
 	th := theme()
-	msg, can := claude_reload_message(update)
-	go := update ? Claude_Reload_Part.Update_Restart : .Restart
-	details := update ? Claude_Reload_Part.Update_Details : .Details
-	later := update ? Claude_Reload_Part.Update_Later : .Later
+	update := kind == .Update
+	codex := kind == .Codex
+	msg, can := claude_reload_message(update, codex ? .Codex : .Claude)
+	go := update ? Claude_Reload_Part.Update_Restart : codex ? .Codex_Restart : .Restart
+	details := update ? Claude_Reload_Part.Update_Details : codex ? .Codex_Details : .Details
+	later := update ? Claude_Reload_Part.Update_Later : codex ? .Codex_Later : .Later
 	anyway := update ? Claude_Reload_Part.Update_Anyway : .Anyway
-	open := open_details[update ? 1 : 0]
-	silent, why := claude_reload_silent_tab(update)
+	open := open_details[kind]
+	silent: ^core.Tab
+	why: string
+	if !codex do silent, why = claude_reload_silent_tab(update)
 	if silent != nil do msg = fmt.tprintf("%s · %s: %s", msg, silent.title, why)
 	labels := [4]string{open ? "Hide details" : "Details", "Later", "Restart", "Restart anyway"}
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2)
 	for l, i in labels do if i < 2 || (i == 2 && can) || (i == 3 && silent != nil) do used += text_w(l, i == 2 ? WEIGHT_BOLD : WEIGHT_REGULAR) + px(2 * SP_3 + SP_2)
-	if clay.UI(clay.ID(update ? "claude_update_bar" : "claude_reload_bar"))({
+	if clay.UI(clay.ID(update ? "claude_update_bar" : codex ? "codex_reload_bar" : "claude_reload_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
@@ -114,44 +137,47 @@ bar :: proc(update: bool) {
 		if silent != nil do button(clay.ID(IDS[anyway]), labels[3], false, ui_hover == Hit(Hit_Claude_Reload{anyway}))
 		if can do button(clay.ID(IDS[go]), labels[2], true, ui_hover == Hit(Hit_Claude_Reload{go}))
 	}
-	if open do details_list(update)
+	if open do details_list(kind)
 }
 
 @(private = "file")
-details_list :: proc(update: bool) {
+details_list :: proc(kind: Bar_Kind) {
 	th := theme()
+	update := kind == .Update
+	codex := kind == .Codex
+	info := codex ? &state.reload.codex : &state.reload.claude
 	lines := make([dynamic]string, context.temp_allocator)
 	if !update {
-		ch := state.reload.claude.changed[:]
+		ch := info.changed[:]
 		for p, i in ch {
 			if i == RELOAD_DETAIL_ROWS {
-				append(&lines, fmt.tprintf("+%d more", len(ch) - i + state.reload.claude.changed_more))
+				append(&lines, fmt.tprintf("+%d more", len(ch) - i + info.changed_more))
 				break
 			}
 			append(&lines, short_path(p))
 		}
-		if len(ch) <= RELOAD_DETAIL_ROWS && state.reload.claude.changed_more > 0 do append(&lines, fmt.tprintf("+%d more", state.reload.claude.changed_more))
+		if len(ch) <= RELOAD_DETAIL_ROWS && info.changed_more > 0 do append(&lines, fmt.tprintf("+%d more", info.changed_more))
 	}
 	tabs := make([dynamic]string, context.temp_allocator)
 	for &s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's tabs are its core's
 		for &t in s.tabs {
-			if _, is := t.kind.(core.Claude_Tab); !is || t.status != .Running do continue
+			if ct, is := t.kind.(core.Claude_Tab); !is || t.machine != 0 || t.status != .Running || core.harness_is_codex(ct.harness) != codex do continue
 			if l := tab_line(&s, &t, update); l != "" do append(&tabs, l)
 		}
 	}
-	if clay.UI(clay.ID(update ? "claude_update_list" : "claude_reload_list"))({
+	if clay.UI(clay.ID(update ? "claude_update_list" : codex ? "codex_reload_list" : "claude_reload_list"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(TERM_PAD + DOT + SP_2), pu(TERM_PAD), pu(SP_1), pu(SP_2)}, childGap = pu(SP_1 / 2), layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		room := centre_width() - px(2 * TERM_PAD + DOT + SP_2)
 		if len(lines) > 0 {
-			clay.Text("Changed (read when Claude starts)", txt(th.text_secondary, FONT_UI_SMALL))
+			clay.Text(codex ? "Changed (read when Codex starts)" : "Changed (read when Claude starts)", txt(th.text_secondary, FONT_UI_SMALL))
 			for l in lines do clay.TextDynamic(clip(l, room, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
 		}
 		if len(tabs) > 0 {
-			clay.Text("Claude tabs (each resumes its conversation; its background work stops)", txt(th.text_secondary, FONT_UI_SMALL))
+			clay.Text(codex ? "Codex tabs (each resumes its conversation; what it runs stops)" : "Claude tabs (each resumes its conversation; its background work stops)", txt(th.text_secondary, FONT_UI_SMALL))
 			for l, i in tabs {
 				if i == RELOAD_DETAIL_ROWS {
 					clay.TextDynamic(fmt.tprintf("+%d more", len(tabs) - i), txt(th.text_muted, FONT_UI_SMALL))
@@ -160,7 +186,7 @@ details_list :: proc(update: bool) {
 				clay.TextDynamic(clip(l, room, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
 			}
 		}
-		if len(lines) == 0 && len(tabs) == 0 do clay.Text("No Claude tab is running", txt(th.text_muted, FONT_UI_SMALL))
+		if len(lines) == 0 && len(tabs) == 0 do clay.Text(codex ? "No Codex tab is running" : "No Claude tab is running", txt(th.text_muted, FONT_UI_SMALL))
 	}
 }
 
@@ -173,12 +199,14 @@ claude_reload_tip :: proc(h: Hit_Claude_Reload) -> (label, keys: string) {
 	switch h.part {
 	case .Restart:        return "Restart the idle Claude tabs (each resumes its conversation; background work stops); busy ones once idle", ""
 	case .Update_Restart: return "Restart the idle Claude tabs on the new Claude Code (each resumes its conversation); busy ones once idle", ""
-	case .Details:        return open_details[0] ? "Hide the list" : "Which files changed, and what each Claude tab does", ""
-	case .Update_Details: return open_details[1] ? "Hide the list" : "Which Claude tabs run an older Claude Code", ""
-	case .Later:          return "Hide this until the next change (stops waiting restarts)", ""
+	case .Details:        return open_details[.Settings] ? "Hide the list" : "Which files changed, and what each Claude tab does", ""
+	case .Update_Details: return open_details[.Update] ? "Hide the list" : "Which Claude tabs run an older Claude Code", ""
+	case .Later, .Codex_Later: return "Hide this until the next change (stops waiting restarts)", ""
 	case .Update_Later:   return "Hide this until the next Claude Code update (stops waiting restarts)", ""
 	case .Anyway, .Update_Anyway:
 		return "Restart that tab now: its subagent has reported nothing for hours, but may still be working (it stops)", ""
+	case .Codex_Restart:  return "Restart the idle Codex tabs (each resumes its conversation; what it runs stops); busy ones once idle", ""
+	case .Codex_Details:  return open_details[.Codex] ? "Hide the list" : "Which files changed, and what each Codex tab does", ""
 	}
 	return "", ""
 }
@@ -188,14 +216,19 @@ claude_reload_click :: proc(h: Hit_Claude_Reload) {
 	switch h.part {
 	case .Restart:        ui_do(core.Claude_Restart_Changed{})
 	case .Update_Restart: ui_do(core.Claude_Restart_Changed{update = true})
-	case .Details:        open_details[0] = !open_details[0]
-	case .Update_Details: open_details[1] = !open_details[1]
+	case .Details:        open_details[.Settings] = !open_details[.Settings]
+	case .Update_Details: open_details[.Update] = !open_details[.Update]
 	case .Later:
-		open_details[0] = false
+		open_details[.Settings] = false
 		ui_do(core.Claude_Reload_Later{})
 	case .Update_Later:
-		open_details[1] = false
+		open_details[.Update] = false
 		ui_do(core.Claude_Reload_Later{update = true})
+	case .Codex_Restart:  ui_do(core.Claude_Restart_Changed{harness = .Codex})
+	case .Codex_Details:  open_details[.Codex] = !open_details[.Codex]
+	case .Codex_Later:
+		open_details[.Codex] = false
+		ui_do(core.Claude_Reload_Later{harness = .Codex})
 	case .Anyway, .Update_Anyway:
 		if t, _ := claude_reload_silent_tab(h.part == .Update_Anyway); t != nil do ui_do(core.Claude_Restart_Anyway{tab_id = t.id})
 	}

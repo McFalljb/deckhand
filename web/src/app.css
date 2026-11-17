@@ -436,6 +436,8 @@ a { color: inherit; }
 .tab:hover { background: var(--hover); color: var(--text-secondary); }
 .tab.on { background: var(--selected); color: var(--text); }
 .tab-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-mode { flex: none; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.tab-mode.warn { color: var(--waiting); }
 .tab-close { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0; }
 .tab:hover .tab-close, .tab.on .tab-close { opacity: 1; }
 .tab-close:hover { background: var(--hover); color: var(--text); }
@@ -1027,3 +1029,16 @@ a { color: inherit; }
 .tab-bar.info .dot { background: var(--accent); }
 .tab-bar-text { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
 .tab-bar .btn { flex: none; }
+/* moving (Files.tsx): the folder a drop goes into, the drag's image, the Move to… picker */
+.file-row.drop { background: var(--selection); color: var(--text); border-radius: 0; } /* the folder and its rows: one block */
+.files-tree.drop-root { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--radius-md); }
+.files-drag { position: fixed; top: -200px; left: 0; padding: 3px 8px; border-radius: var(--radius-sm); background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text); font-size: 13px; white-space: nowrap; }
+.move-list { max-height: min(52vh, 440px); overflow-y: auto; margin: 0 -8px; padding: 0 8px; }
+.move-row { height: 30px; gap: 2px; cursor: default; }
+.move-row.sel { background: var(--selection); color: var(--text); }
+.move-chev { flex: 0 0 20px; height: 100%; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+.move-pick { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.move-pick:disabled { color: var(--text-muted); opacity: 0.6; cursor: default; }
+.move-pick:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: var(--radius-sm); }
+.sheet.bottom .move-row { height: 44px; font-size: 15px; }
+.sheet.bottom .move-chev { flex-basis: 36px; }

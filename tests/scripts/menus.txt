@@ -203,7 +203,7 @@ assert_state sidebar.sort.chats recent
 # ==== project rows ====
 rclickid proj 0
 eventually
-assert_menurows Pin|New session|New Claude tab|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Pin|New session|New session with flags…|New Claude tab|New Claude tab with flags…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 revealed_clear
 clickmenu Reveal in Finder
 eventually
@@ -244,7 +244,7 @@ eventually
 assert_state sidebar.pinned_projects.# 2
 rclickid proj 0
 eventually
-assert_menurows Unpin|Move down|New session|New Claude tab|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Unpin|Move down|New session|New session with flags…|New Claude tab|New Claude tab with flags…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 clickmenu Move down
 eventually
 assert_rows projects ~/code/alpha,~/code/bravo
@@ -277,7 +277,7 @@ assert_rows projects ~/code/alpha,~/code/bravo
 rclickid proj 0
 clickmenu New session
 eventually
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 shot menus/harness-picker
 clickmenu pi
 waitfor ARGS: --session-id 15000
@@ -309,7 +309,7 @@ rclickid newshell
 clickmenu New session in bravo
 eventually
 # pi was used last: first and selected, so Enter repeats it
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 key enter
 waitfor ARGS: --session-id 15000
 assert_state open_sessions.# 4
@@ -547,7 +547,7 @@ rclickid wtrow 1
 clickmenu New session here
 eventually
 # the harness picker for the checkout: pi there is a worktree session
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 clickmenu pi
 waitfor ARGS: --session-dir 15000
 assert_state open_sessions.# 6
@@ -627,7 +627,7 @@ clickid lefttab 0
 wait 500
 rclickid proj 0
 eventually
-assert_menurows Pin|New session|New Claude tab|New job for this project…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Pin|New session|New session with flags…|New Claude tab|New Claude tab with flags…|New job for this project…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 clickmenu New job for this project…
 eventually
 assert_state focus.id job_sheet

@@ -186,7 +186,8 @@ search_wide :: proc(cs: ^core.Open_Session, bar_w: f32) -> bool {
 		for tab in cs.tabs {
 			ic, label, extra := tab_label(cs, tab)
 			close := !squeezed || tab.id == cs.active_tab
-			fixed := tab_fixed_w(ic, tab_shows_mark(tab), false, extra, close)
+			badge, _ := tab_badge(tab)
+			fixed := tab_fixed_w(ic, tab_shows_mark(tab), false, extra, close, badge)
 			used += clamp(text_w(label) + fixed, px(TAB_MIN_W), max_tab + (close ? tab_close_w() : 0)) + px(SP_1)
 		}
 	}

@@ -288,11 +288,20 @@ menu_items :: proc() -> []core.Menu_Item {
 		pin_moves(&items, at, len(state.sidebar.pinned_projects), p.id, "")
 		// one "New session": the installed harnesses' picker (harness.odin)
 		append(&items, core.Menu_Item{label = "New session", picker = core.Menu_New_Session{project_id = p.id}})
+		// the same with flags typed first (ui_flags.odin): the picker's flags rows
+		if flags_picker_any(p.id) do append(&items, core.Menu_Item{label = "New session with flags…", picker = core.Menu_New_Session{project_id = p.id, flags = true}})
 		handoff_items(&items, p.id) // New session on <machine> in <project> (ui_handoff.odin)
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
-		// else a new one), once per account while there are several; only while it is installed
-		if p.group == .Projects && core.claude_offered(p.id) do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id, harness = .Claude})
-		if p.group == .Projects && core.codex_offered(p.id) do core.claude_account_items(&items, "New Codex tab", core.New_Claude_Tab{project_id = p.id, harness = .Codex}) // once per Codex account while there are several (codex.odin)
+		// else a new one), once per account while there are several; only while it is installed;
+		// then the same with flags typed first (ui_flags.odin)
+		if p.group == .Projects && core.claude_offered(p.id) {
+			core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id, harness = .Claude})
+			append(&items, core.Menu_Item{label = "New Claude tab with flags…", cmd = core.New_Claude_Tab{project_id = p.id, harness = .Claude}, flags = true})
+		}
+		if p.group == .Projects && core.codex_offered(p.id) { // once per Codex account while there are several (codex.odin)
+			core.claude_account_items(&items, "New Codex tab", core.New_Claude_Tab{project_id = p.id, harness = .Codex})
+			append(&items, core.Menu_Item{label = "New Codex tab with flags…", cmd = core.New_Claude_Tab{project_id = p.id, harness = .Codex}, flags = true})
+		}
 		if core.folder_of(.Jobs) != "" do append(&items, core.Menu_Item{label = "New job for this project…", cmd = core.Job_Sheet{open = true, for_project = core.path_tilde(p.cwd)}})
 		append(&items, core.Menu_Item{label = "Rename…", rename = true})
 		sep(&items)
@@ -417,12 +426,15 @@ menu_run :: proc(i: int) {
 	it := items[i]
 	target := menu.target
 	if ns, ok := it.picker.?; ok {
+		// With flags… in another machine's picker: that machine's run and folder first, as its other rows
+		if t, in_picker := target.(core.Menu_New_Session); in_picker && ns.flags && handoff_picker_stale(t) do return
 		// another menu's "New session": the picker opens where that menu was (harness.odin)
 		at := menu.at
 		cwd := strings.clone(ns.cwd, context.temp_allocator)
 		menu_close()
-		if core.id_machine(ns.project_id) != 0 do handoff_run(i, at) // New session on <machine>…: what row i showed (ui_handoff.odin)
-		else do new_session_ui(ns.project_id, cwd, at, flags = ns.flags)
+		if ns.flags do new_session_ui(ns.project_id, cwd, at, flags = true) // "… with flags…": this window's own rows (ui_flags.odin)
+		else if core.id_machine(ns.project_id) != 0 do handoff_run(i, at) // New session on <machine>…: what row i showed (ui_handoff.odin)
+		else do new_session_ui(ns.project_id, cwd, at)
 		return
 	}
 	if t, ok := target.(core.Menu_New_Session); ok && handoff_picker_stale(t) do return // that machine restarted (ui_handoff.odin)

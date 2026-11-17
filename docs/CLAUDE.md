@@ -69,8 +69,11 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   **Claude Code with flags…** open the palette as a one-line field, prefilled with the
   flags last used from that window; Enter splits the line as a shell splits words (quotes
   honoured, nothing expanded: `flags_split`) and sends them as `args`. The row shows
-  `claude_args_check`'s reason (or an open quote) before anything starts. Only a start on this Mac
-  takes flags from here (another machine's core checks its own). The same entries exist for
+  `claude_args_check`'s reason (or an open quote) before anything starts. A project's menu has
+  **New session with flags…** and **New Claude tab with flags…**, the New session picker ends with
+  **With flags…**. Another machine's start takes them as typed: only the quoting is checked here,
+  that machine's core checks them by its own rule and adds its own defaults, never this Mac's
+  (`machine_takes_flags`: refused to a core before 0.7.0). The same entries exist for
   Codex (CODEX.md §1a) and pi (`pi_args_check`: `--provider`, `--model`, `--thinking`, `--models`,
   `--tui-mode`, `--use-theme`, `--offline`, `--verbose`, `--no-mcp`; never a session, extension,
   print, RPC or tool-switching flag; a pi session uses them when it starts, and pi keeps the
@@ -470,7 +473,16 @@ its files):
   in front; without Claude Code, the toast says how to install it). If DIR cannot be added
   (Chats' folder, say) nothing starts, never in the project selected before; the same for a
   plain `deckhand DIR`'s chat.
-- **Not done:** a permission-mode badge (optional; not built).
+- **Permission mode** (`src/core/claude_mode.odin`): a quiet word after the tab's title (and
+  "· plan mode" in its tooltip, the browser's tab too) when it is not the default: **plan**,
+  **accept edits**, **don't ask**; **auto**, **bypass** and any mode word Deckhand does not know
+  in the warning colour; `Claude_Tab.permission_mode` on the state stream, `permission_mode` in
+  the snapshot. From the hooks' `permission_mode` (`claude.session`, `claude.turn`: Shift+Tab's
+  switch shows at the next prompt or turn's end; `default` clears it), else the start's flags
+  (`--permission-mode`, `--dangerously-skip-permissions`, the defaults as they went); never
+  guessed. A tab started with skip-permissions keeps **bypass** until its process starts again.
+  The badge is information, not a security boundary: any process in the tab holds its token and
+  can report a mode.
 
 ## 4c. Sessions found on disk
 

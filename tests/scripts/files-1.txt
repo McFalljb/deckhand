@@ -50,6 +50,15 @@ assert_tip New file…
 clickid filestool 0
 eventually
 assert_state focus.id files_name
+# the name field is a row of the tree: src's first child, right under its row; an error goes under it
+assert_under fnew 0 frow 2
+type app.c
+key enter
+eventually
+assert_under fnew 1 fnew 0
+assert_drawn already exists
+assert_state focus.id files_name
+key a cmd
 type notes.md
 shot files/new-file
 key enter
@@ -58,6 +67,19 @@ assert_files   notes.md\n
 assert_state open_sessions.0.tabs.3.title notes.md
 # ---- rename inline (F2): the name before the extension is selected
 assert_state focus.id files
+key f2
+eventually
+assert_state focus.id files_name
+# a focus change from outside the window (set_focus is anyone's) cancels: nothing is renamed
+type half
+# a shortcut typed into the field itself (⌃A) does not let an outside focus change commit
+key a ctrl
+wait 300
+command {"type":"set_focus","widget":"files"}
+wait 500
+assert_state focus.id files
+assert_files   notes.md\n
+assert_not_files half.md
 key f2
 eventually
 assert_state focus.id files_name

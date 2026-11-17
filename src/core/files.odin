@@ -101,7 +101,7 @@ files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 			if !c.expanded do return fail("a tree's root is always open"), false
 			return {ok = true}, false // already open: a tree's root always is
 		}
-		if strings.contains(strings.concatenate({"/", rel, "/"}, context.temp_allocator), "/.git/") do return fail("not inside .git"), false
+		if fs_in_git(rel) do return fail("not inside .git"), false
 		if c.expanded && path_kind(p) != .Dir do return fail("not a folder"), false
 		if !files_set_expanded(root, rel, c.expanded) do return {ok = true}, false
 		return {ok = true}, true
@@ -560,6 +560,16 @@ files_filter_rows :: proc(root: string, a: runtime.Allocator) {
 files_row_of :: proc(rows: []Files_Row, path: string) -> int {
 	for r, i in rows do if r.more == 0 && r.error == "" && r.path == path do return i
 	return -1
+}
+
+// Where New file / New folder's name field goes (ui_files.odin draws it as a row of its own): the
+// first child of dir, one level below its row; at the root, the first row. index: the row it
+// goes before; -1 = dir's row is not shown (a folder whose parent is closed, filter results).
+files_new_row_at :: proc(rows: []Files_Row, root, dir: string) -> (index, depth: int) {
+	if dir == root do return 0, 0
+	i := files_row_of(rows, dir)
+	if i < 0 || rows[i].kind != .Dir || rows[i].rel != "" do return -1, 0
+	return i + 1, rows[i].depth + 1
 }
 
 // The row of path's nearest shown folder above it, for a path not shown.

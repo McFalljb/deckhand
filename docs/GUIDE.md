@@ -910,8 +910,8 @@ When you ask an agent to open or show a file "in a tab", it shows it in Deckhand
 if the agent gives one. A pi or Claude tab shows files only in its own session, right after its
 own tab; Atlas names the session. The tab opens behind the one you are looking at, and a file
 already open is not opened twice. It is display only: the agent cannot edit the tab, and nothing
-of it goes back to the agent. Agents are refused credentials and secret files (`.env`, keys,
-`~/.ssh`…), binary files, files over 20 MB, network and iCloud-only files, and more than 20 such
+of it goes back to the agent. Agents are refused coding agents' sign-ins and secret files (keys,
+`~/.ssh`…; a project's `.env` is shown like any file), binary files, files over 20 MB, network and iCloud-only files, and more than 20 such
 tabs per session.
 
 ### Browser tabs
@@ -1391,8 +1391,9 @@ Deckhand has a small code editor with syntax highlighting.
   **Reload** (take the disk's version; one undo step). A file deleted on disk shows "Deleted on
   disk: ⌘S saves it again".
 - Deckhand does not open binary files, files over 20 MB, or **credential files**: pi's sign-ins
-  (`auth.json` and similar), other private files in pi's folder, and `.env` files. They show
-  "Credentials file: managed by pi (/login), not opened".
+  (`auth.json` and similar), other private files in pi's folder, and Claude's and Codex's sign-ins
+  and state. They show "Credentials file: managed by pi (/login), not opened". A project's `.env`
+  opens and saves like any file.
 
 ## Markdown tabs
 
@@ -1423,15 +1424,28 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
   (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
-- **Mouse**: a click opens a folder or previews a file; drag a row onto a terminal to paste its
-  path.
+- **Mouse**: a click opens a folder or previews a file; a right-click selects the row, then opens
+  its menu; drag a row onto a terminal to paste its path.
 - **Keyboard** (while the tree has focus): ↑/↓ move, ←/→ close or open (or go to the parent or
   child), Enter opens, Space previews, F2 renames, ⌘⌫ moves to the Trash (it asks first), Esc
   gives the keyboard back.
 - **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
-- **Row menu** (**…** or right-click): Open, Open in preview, New file…, New folder…, Rename…,
-  Move to Trash…, Reveal in Finder, Copy path, Copy relative path, Open terminal here, and for
-  `.md` files Open Markdown preview.
+- **New file / New folder**: the name field opens as the first row of the folder (the selected
+  folder, the selected file's, else the project's), opened and scrolled to; an error shows under
+  it. Enter (or a click elsewhere) creates and selects it; Esc, or no name, cancels.
+- **Rename**: Enter or a click elsewhere renames, Esc cancels. Changing only the case
+  (`readme.md` → `README.md`) works. Only your own click or shortcut commits; a focus change
+  from an agent or script cancels.
+- **Row menu** (**…** or right-click): Open, Open in preview, Open to the side (in a new pane on
+  the right), New file…, New folder…, Rename…, Move to Trash…, Reveal in Finder, Copy path, Copy
+  relative path, Open terminal here, and for `.md` files Open Markdown preview.
+- **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
+  the tab; close it first). It knows the folder a tab started in, not one a shell `cd`'d to later.
+  Only you, in the window, can rename a credential's file (a sign-in, in any case; a key) to a
+  name that is not a credential's, or move or trash anything into, out of or above an agent's
+  sign-in folder (pi's agent folder, Claude's and Codex's folders); agents and browsers cannot.
+- **Trash on a Linux core**: the XDG Trash (`~/.local/share/Trash`, where file managers restore
+  from); a file on another disk is refused, never deleted for good.
 - **Filter**: type in the field above the tree to match paths loosely.
 - **Folders inside folders**: a folder that is a project of its own (or a session's worktree)
   opens in the tree it sits in like any other folder, and so does a symlinked folder (in place,
@@ -1483,8 +1497,8 @@ What a session changed in its git checkout, and what to do about it.
   - Each row shows **+added −removed** lines (**bin** for a binary file).
 - **On the right**, the selected file's diff (added lines green, removed red). Scroll, select
   and copy (⌘C) as in an editor tab, ⌘F finds. Long diffs stop at 5,000 lines: **Show more**
-  adds 5,000. Binary files and credentials files (`.env`, keys, pi's sign-ins) are listed but
-  never shown.
+  adds 5,000. Binary files, credentials files (pi's sign-ins) and secret-looking names (`.env`,
+  keys) are listed but their diff is never shown.
 - **Moving between files**: **J** / **K** or **↓** / **↑**, or the **↑** **↓** buttons above the
   diff.
 - **Buttons above the diff**: **Open** opens the file in an editor tab at the hunk you clicked
@@ -2547,8 +2561,8 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 
 ### Privacy
 
-- Deckhand never shows, opens or logs credential files (pi's sign-ins, private files in pi's
-  folder, `.env`), not on the Settings page, in the Files tab's editor, or to Atlas.
+- Deckhand never shows, opens or logs credential files (coding agents' sign-ins and state,
+  private files in pi's folder), not on the Settings page, in the Files tab's editor, or to Atlas.
 - Connection tokens for the control socket are never logged or saved.
 - Deckhand's only network call of its own is the [update check](#updates) (and the download
   you start with **Update**), to GitHub. Only pi (and its extensions) talk to model providers.

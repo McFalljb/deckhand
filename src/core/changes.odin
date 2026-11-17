@@ -599,8 +599,8 @@ changes_scan_done :: proc(c: Changes_Scan_Done) {
 	for _, v in changes_views do if v.root == r.root do changes_view_follow(v, r)
 }
 
-// Never shown: what the editor refuses (sign-ins, .env files) and names
-// that look like keys or secrets.
+// Never shown: what the editor refuses (agents' sign-ins and state) and
+// names that look like keys or secrets (wt_secret_name, .env among them).
 changes_credential :: proc(abs: string) -> bool {
 	return settings_credential(abs) || wt_secret_name(filepath.base(abs))
 }

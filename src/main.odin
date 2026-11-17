@@ -363,6 +363,7 @@ on_system_appearance :: proc(light: bool) {
 // UI actions go through the inbox like every other caller; event() drains it
 // right after, so they apply in order before the next event.
 ui_do :: proc(cmd: core.Command) {
+	if sf, is := cmd.(core.Set_Focus); is && sf.widget != "files_name" do ui_focus_away += 1 // files_event_end
 	if window_only_quit(cmd) do return
 	if lost_core_save(cmd) do return
 	// a separate core: which widget has the keyboard is the core's (state.focus_widget), so the
@@ -664,6 +665,8 @@ event :: proc(e: ^sapp.Event) {
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
 	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
+	files_event_begin(e) // did this event move the keyboard off a Files name field? (ui_files.odin)
+	defer files_event_end()
 	term_links_event(e) // ⌘ down or up, before anything takes the key (term_links.odin)
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)

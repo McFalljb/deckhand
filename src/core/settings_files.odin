@@ -24,8 +24,8 @@ package core
 // as in the Files tab). Nothing here edits settings: the editor does, with
 // two guards:
 //
-//   - credential files (pi's sign-ins, other private files in the agent dir,
-//     .env) are never shown, also not inside an opened folder, and the
+//   - credential files (pi's sign-ins, other private files in the agent dir)
+//     are never shown, also not inside an opened folder, and the
 //     editor refuses to open them at all (settings_credential;
 //     editor_commands.odin, editor_file.odin)
 //   - a JSON settings file pi reads (settings_json_kind) is saved only when
@@ -73,41 +73,46 @@ AGENT_CONFIG_FILES :: [?]string{"settings.json", "models.json", "keybindings.jso
 // A file Deckhand never lists, reads or opens: pi's sign-ins (auth.json,
 // models-store.json, cursor-sdk*.json, intercom/), any other private (no
 // group/other access, e.g. 0600) file in the agent dir (any depth; not
-// pi's own config files at its top), .env files anywhere (.env.example and
-// the like are fine), and any other name for those sign-in files (a
-// symlink, a hard link: the same device and inode).
+// pi's own config files at its top), Claude's and Codex's sign-ins and
+// state, and any other name for those sign-in files (a symlink, a hard link:
+// the same device and inode). Names match in any case (AUTH.JSON is
+// auth.json on a volume that ignores case). A project's .env is an ordinary
+// file: whoever can open it here can run a shell in the project anyway.
 // ids: credential_ids() when checking many paths (nil: read now).
 settings_credential :: proc(path: string, ids: []Cred_Id = nil) -> bool {
 	if path == "" do return false
-	check :: proc(p: string) -> bool {
-		base := filepath.base(p)
-		if base == ".env" do return true
-		if strings.has_prefix(base, ".env.") {
-			switch base {
-			case ".env.example", ".env.sample", ".env.template", ".env.dist": return false
-			}
-			return true
-		}
-		for ad in ([2]string{pi_agent_dir(), fs_real(pi_agent_dir())}) {
-			ad := strings.trim_right(ad, "/")
-			if ad == "" || !strings.has_prefix(p, strings.concatenate({ad, "/"}, context.temp_allocator)) do continue
-			rel := p[len(ad) + 1:]
-			if rel == "intercom" || strings.has_prefix(rel, "intercom/") do return true
-			if !strings.contains(rel, "/") {
-				if rel == "auth.json" || rel == "models-store.json" do return true
-				if strings.has_prefix(rel, "cursor-sdk") && strings.has_suffix(rel, ".json") do return true
-				for c in AGENT_CONFIG_FILES do if rel == c do return false
-			}
-			if k, st := path_stat(p); k == .File && st.mode & 0o077 == 0 do return true
-		}
-		// Claude Code's credentials, account state, transcripts (claude_reload.odin); Codex's sign-in,
-		// sessions/ transcripts and state (codex.odin)
-		return claude_credential(p) || codex_credential(p)
-	}
 	clean, _ := filepath.clean(path, context.temp_allocator)
-	if check(clean) || check(fs_real(clean)) do return true
+	if credential_path(clean) || credential_path(fs_real(clean)) do return true
 	if k, st := path_stat(clean); k == .File do return credential_inode(st.dev, st.inode, ids)
 	return false
+}
+
+// settings_credential by the path as written only (not where it leads now): a name about to be
+// given (rename_path's target, which on a volume that ignores case may still lead to the old one).
+settings_credential_name :: proc(path: string) -> bool {
+	if path == "" do return false
+	clean, _ := filepath.clean(path, context.temp_allocator)
+	return credential_path(clean)
+}
+
+@(private = "file")
+credential_path :: proc(p: string) -> bool {
+	lp := strings.to_lower(p, context.temp_allocator)
+	for ad in ([2]string{pi_agent_dir(), fs_real(pi_agent_dir())}) {
+		ad := strings.to_lower(strings.trim_right(ad, "/"), context.temp_allocator)
+		if ad == "" || !strings.has_prefix(lp, strings.concatenate({ad, "/"}, context.temp_allocator)) do continue
+		rel := lp[len(ad) + 1:]
+		if rel == "intercom" || strings.has_prefix(rel, "intercom/") do return true
+		if !strings.contains(rel, "/") {
+			if rel == "auth.json" || rel == "models-store.json" do return true
+			if strings.has_prefix(rel, "cursor-sdk") && strings.has_suffix(rel, ".json") do return true
+			for c in AGENT_CONFIG_FILES do if filepath.base(p) == c do return false // pi's own config: its exact name only
+		}
+		if k, st := path_stat(p); k == .File && st.mode & 0o077 == 0 do return true
+	}
+	// Claude Code's credentials, account state, transcripts (claude_reload.odin); Codex's sign-in,
+	// sessions/ transcripts and state (codex.odin)
+	return claude_credential(p) || codex_credential(p)
 }
 
 Cred_Id :: struct {

@@ -4,12 +4,12 @@ command {"type":"select_project","project_id":$project}
 wait 200
 clickid sess 0
 waitfor ARGS: --session 15000
-# ---- open from the Files tab's row menu: Open, Open in preview, Open Markdown preview
+# ---- open from the Files tab's row menu: Open, Open in preview, Open to the side, Open Markdown preview
 key e cmd shift
 wait 400
 rclickid frow 1
 wait 200
-clickid menurow 2
+clickid menurow 3
 wait 300
 key e cmd shift
 wait 200

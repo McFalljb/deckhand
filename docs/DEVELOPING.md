@@ -253,8 +253,8 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   (a tab's cwd, a process's parent and children; `src/core/proc_linux.odin`); `SO_PEERCRED` in place
   of `LOCAL_PEERTOKEN`, and trust is the same user only, as there is no code signing
   (`src/trust/peer_linux.odin`, [design §8.3](plans/background-core.md#83-trust-in-both-directions));
-  no Obj-C shim, so no banners of its own, no App Nap and no Trash
-  (`src/coremain/platform_linux.odin`); no updater and no quarantine; a core runs as a systemd
+  no Obj-C shim, so no banners of its own and no App Nap, and the XDG Trash
+  (`src/core/trash_xdg.odin`, `src/coremain/platform_linux.odin`); no updater and no quarantine; a core runs as a systemd
   user unit, else directly in its own session (`src/core/launch_linux.odin`).
 - **Dirs:** data in `~/.local/share/deckhand`, sockets in `~/.local/state/deckhand/run` (0700;
   never `$XDG_RUNTIME_DIR`, which logout removes). A data dir given with `DECKHAND_DATA_DIR` keeps

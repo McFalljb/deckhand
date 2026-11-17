@@ -909,7 +909,7 @@ codex_auth_file :: proc() -> string {
 }
 
 codex_credential :: proc(p: string) -> bool {
-	if filepath.base(p) == "auth.json" && filepath.base(filepath.dir(p)) == ".codex" do return true
+	if strings.equal_fold(filepath.base(p), "auth.json") && strings.equal_fold(filepath.base(filepath.dir(p)), ".codex") do return true // any case
 	// the sign-in where Codex keeps it, CODEX_HOME's even when that is HOME or above (codex_home
 	// is not then); symlinks followed
 	if a := codex_auth_file(); a != "" {

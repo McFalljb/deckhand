@@ -143,6 +143,9 @@ def main():
         b0 = time.monotonic()
         # one package at a time (odin uses several cores already)
         built = []
+        # the zstd decoder the core links (src/zstd): build.sh builds it too
+        if subprocess.run([os.path.join(ROOT, "scripts", "build-zstd.sh")]).returncode != 0:
+            sys.exit("unit.py: scripts/build-zstd.sh failed")
         for pkg, binary, _ in packages():
             if subprocess.run(build_cmd(pkg, binary)).returncode != 0:
                 sys.exit(f"unit.py: the test build failed: {binary}")

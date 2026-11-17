@@ -1,0 +1,6 @@
+zstd_tag=v1.5.7
+tarball=https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+tarball_sha256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+generated=build/single_file_libs/create_single_file_decoder.sh (its command: combine.py -r ../../lib -x legacy/zstd_legacy.h -o zstddeclib.c zstddeclib-in.c), unchanged
+zstddeclib.c_sha256=5eb38abe0a7eea13674b312a006df72002d4192f0f0b4d09e6f03fb927a1f3d0
+licence=LICENSE (BSD-3-Clause; the tarball's LICENSE, unchanged; zstd is BSD OR GPLv2, used under BSD)

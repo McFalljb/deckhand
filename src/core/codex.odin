@@ -794,8 +794,10 @@ codex_home :: proc() -> string {
 }
 
 // The files in Codex's folder a user edits: everything else there is Codex's state (its sign-in
-// auth.json, sessions/ transcripts, history, logs, databases) and is never listed, read, watched
-// or opened by Deckhand.
+// auth.json, sessions/ transcripts, history, logs, databases), refused wherever Claude's
+// credentials are (settings_credential: open, show, upload, list, watch) and never written. One
+// exception, read only: the found-row scan lists sessions/, reads each rollout's first line and
+// session_index.jsonl's titles (codex_disk.odin, docs/CODEX.md §2b).
 CODEX_CONFIG_FILES := [?]string{"config.toml", "AGENTS.md", "AGENTS.override.md"}
 CODEX_CONFIG_FOLDERS := [?]string{"prompts", "skills", "rules"}
 // Codex's own hooks (its hooks.json, scripts in hooks/): the user's, shown, never written by
@@ -889,7 +891,7 @@ codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
 // transcript of p's (by stat, claude_disk_find; no scan). A Codex tab never claims one.
 claude_conversation_seen :: proc(p: ^Project, id: string) -> bool {
 	if r, _ := claude_record(id); r != nil && !r.codex do return true
-	if f := claude_disk_of(id); f != nil && !f.codex do return true
+	if f := claude_disk_of(id); f != nil && f.harness != .Codex do return true
 	_, ok := claude_disk_find(p, id)
 	return ok
 }

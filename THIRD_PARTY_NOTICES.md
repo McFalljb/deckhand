@@ -25,6 +25,7 @@ the CEF distribution and are copied into the app bundle (see "In the app bundle"
 | nvim-treesitter (the markdown highlight query) | editor syntax highlighting of Markdown | `vendor/tree-sitter/grammars/markdown/queries/highlights.scm`, built into the binary (`src/editor_syntax.odin`) | Apache-2.0 |
 | [Odin](https://github.com/odin-lang/Odin) core and runtime libraries | the language's runtime, `core:` packages | linked in by the Odin compiler | zlib |
 | [stb_truetype, stb_image](https://github.com/nothings/stb) (via Odin's `vendor:stb`) | text on non-macOS backends; images | compiled from the Odin distribution by `build.sh` / linked from it | MIT OR Public Domain (Unlicense) |
+| [Zstandard (zstd)](https://github.com/facebook/zstd) 1.5.7, its decoder only | reading Codex's compressed conversation files (`src/core/codex_disk.odin`) | `vendor/zstd/zstddeclib.c`, zstd's single-file decoder generated unchanged by its `build/single_file_libs/create_single_file_decoder.sh` from the release tarball (version and sha256 in `vendor/zstd/VERSION`), compiled by `scripts/build-zstd.sh` into the core | BSD-3-Clause (zstd is BSD-3-Clause OR GPL-2.0; used under BSD-3-Clause) |
 | pi logo, Clawd (Claude Code's mascot) | which agent a session runs (rows, tabs, picker) | the marks' pixel grids and colours in `src/logos.odin`; reference copies and sources in `assets/harness/` (Clawd: from Claude Code 2.1.318's own terminal art) | pi: MIT (pi's licence); Clawd: © Anthropic, PBC, its marks under Anthropic's trademark guidelines, see `assets/harness/README.md` |
 | [Tomorrow theme](https://github.com/chriskempson/tomorrow-theme) colours | the `ghostty` look's light variant (`src/theme.odin`) | colour values only | MIT |
 | [xterm.js](https://github.com/xtermjs/xterm.js) (`@xterm/xterm` 6.0.0, `@xterm/addon-fit` 0.11.0) | the browser client's terminals (`web/`) | npm packages pinned in `web/package-lock.json`, bundled into `web/dist/app.js` by `web/build.mjs` and served by the core | MIT |
@@ -1553,6 +1554,41 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+```
+
+### Zstandard (zstd)
+
+```
+BSD License
+
+For Zstandard software
+
+Copyright (c) Meta Platforms, Inc. and affiliates. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+ * Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+ * Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+ * Neither the name Facebook, nor Meta, nor the names of its contributors may
+   be used to endorse or promote products derived from this software without
+   specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 ## Other licenses

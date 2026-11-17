@@ -708,8 +708,19 @@ fs_changed_ours :: proc(path: string) {
 	window_path_changed(path)
 }
 
+// create_file's and create_dir's rules, nothing made: inside a project (fs_check_write), and for
+// anyone but the user here not at or inside a credential place (fs_credential_place, as rename
+// and delete: a file put there would sit with an agent's sign-in). p: the checked absolute path.
+fs_create_check :: proc(path: string, caller: Caller) -> (p: string, err: string) {
+	e: string
+	p, _, e = fs_check_write(path, caller)
+	if e != "" do return "", e
+	if !fs_user_here(caller) && fs_credential_place(p) do return "", CREDENTIAL_PLACE_REFUSED
+	return p, ""
+}
+
 fs_create_file :: proc(path: string, caller: Caller) -> (abs: string, err: string) {
-	p, _, e := fs_check_write(path, caller)
+	p, e := fs_create_check(path, caller)
 	if e != "" do return "", e
 	if os.exists(p) do return "", "already exists"
 	if os.make_directory_all(filepath.dir(p)) != nil && path_kind(filepath.dir(p)) != .Dir do return "", "cannot create its folder"
@@ -727,7 +738,7 @@ fs_create_file :: proc(path: string, caller: Caller) -> (abs: string, err: strin
 }
 
 fs_create_dir :: proc(path: string, caller: Caller) -> (abs: string, err: string) {
-	p, _, e := fs_check_write(path, caller)
+	p, e := fs_create_check(path, caller)
 	if e != "" do return "", e
 	if os.exists(p) do return "", "already exists"
 	if derr := os.make_directory_all(p); derr != nil do return "", fmt.tprintf("cannot create: %v", derr)

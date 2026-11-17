@@ -172,7 +172,7 @@ def write_ready_profile(home):
     send_text is refused, rightly: on Ubuntu, /etc/profile.d/Z99-cloud-locale-test.sh runs
     `locale | locale_warn`, a foreground job with the terminal (#160)."""
     with open(f"{home}/.profile", "w") as f:
-        f.write(': > "$HOME/ready-$$"\n')
+        f.write('case $- in *i*) : > "$HOME/ready-$$" ;; esac\n')  # not pi's stand-in (sh -l -c)
 
 
 def wait_shell_ready(link, tab, home):

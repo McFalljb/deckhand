@@ -35,7 +35,7 @@ jobs:
           DIAG_TRACE=1 DIAG_N=10 python3 tests/i160-diag.py build/deckhand-core-serve
       - name: Diag, no wait (keeps the .profile marker, types at once)
         run: |
-          sed -i 's/^        write_ready_profile(self.home)$/        pass/' tests/linux-holder-smoke.py
+          sed -i 's/^    wait_shell_ready(link, tab, home)$/    pass/' tests/linux-holder-smoke.py
           DIAG_N=100 python3 tests/i160-diag.py build/deckhand-core-serve || true
           git checkout tests/linux-holder-smoke.py
       - name: Diag, waiting for the shell's ~/.profile

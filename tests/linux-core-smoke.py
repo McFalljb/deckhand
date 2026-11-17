@@ -32,9 +32,10 @@ def main():
     os.makedirs(home)
     # a login shell reads ~/.profile last: ready-<its pid> says its login scripts are done and it
     # is at its prompt. Before that send_text is refused, rightly (a program has the terminal: on
-    # Ubuntu, /etc/profile.d/Z99-cloud-locale-test.sh's `locale | locale_warn`; #160)
+    # Ubuntu, /etc/profile.d/Z99-cloud-locale-test.sh's `locale | locale_warn`; #160). Interactive
+    # shells only: pi's stand-in runs in a login shell too (sh -l -c)
     with open(f"{home}/.profile", "w") as f:
-        f.write(': > "$HOME/ready-$$"\n')
+        f.write('case $- in *i*) : > "$HOME/ready-$$" ;; esac\n')
     # pi's stand-in: the session's first tab runs it
     env = dict(os.environ, HOME=home, DECKHAND_SCRIPT="smoke", DECKHAND_CMD="sleep 60")
     if DEFAULT_DIRS:
@@ -82,11 +83,9 @@ def main():
         assert r["result"]["ok"], r
         mark = f"{home}/pty-ok"
         tab = r["result"]["created_id"]
-        deadline = time.time() + 15
+        deadline = time.time() + 15  # the one interactive shell: the shell tab's (state has no pid for a tab not held)
         while time.time() < deadline:
-            st = ask({"id": "g", "v": 1, "type": "command", "command": {"type": "get_state"}})["result"]["data"]
-            pid = next((t.get("pid") for x in st.get("open_sessions", []) for t in x["tabs"] if t.get("id") == tab), None)
-            if pid and os.path.exists(f"{home}/ready-{pid}"):
+            if any(n.startswith("ready-") for n in os.listdir(home)):
                 break
             time.sleep(0.1)
         else:

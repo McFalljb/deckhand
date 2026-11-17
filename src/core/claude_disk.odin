@@ -785,9 +785,28 @@ claude_scan_home: [2]string
 // The home folder's identity (device and inode: a link to it, or its name in another case on a
 // case-insensitive volume, is the same folder), taken with it.
 claude_scan_home_id: struct {
-	dev: posix.dev_t,
-	ino: posix.ino_t,
-	ok:  bool,
+	dev:     posix.dev_t,
+	ino:     posix.ino_t,
+	ok:      bool,
+	unknown: bool, // HOME is set but could not be stat'ed: no found project this scan (fails closed)
+}
+
+when TEST_HOOKS {
+	// Makes the never-home check's stat of a found folder, or of the home folder, fail as an I/O
+	// error would (tests).
+	claude_scan_stat_fail: struct {
+		candidate, home: bool,
+	}
+}
+
+// stat(2) of path for the never-home check; the errno when it fails. Any thread.
+@(private = "file")
+scan_stat :: proc(path: string, st: ^posix.stat_t, home := false) -> (ok: bool, err: posix.Errno) {
+	when TEST_HOOKS {
+		if home ? claude_scan_stat_fail.home : claude_scan_stat_fail.candidate do return false, .EIO
+	}
+	if posix.stat(strings.clone_to_cstring(path, context.temp_allocator), st) == .OK do return true, .NONE
+	return false, posix.errno()
 }
 
 // Whether this thread is the Rescan's worker (scan_worker, commands.odin): there a Codex pass
@@ -830,7 +849,8 @@ claude_scan_prepare :: proc() {
 		c, _ := filepath.clean(h, heap)
 		claude_scan_home = {c, strings.clone(fs_real(c), heap)}
 		st: posix.stat_t
-		if posix.stat(strings.clone_to_cstring(c, context.temp_allocator), &st) == .OK do claude_scan_home_id = {dev = st.st_dev, ino = st.st_ino, ok = true}
+		if ok, _ := scan_stat(c, &st, home = true); ok do claude_scan_home_id = {dev = st.st_dev, ino = st.st_ino, ok = true}
+		else do claude_scan_home_id.unknown = true
 	}
 }
 
@@ -892,9 +912,14 @@ codex_scan_projects :: proc(projects: ^[dynamic]Project, homes: []Disk_Home) {
 @(private = "file")
 found_project :: proc(projects: ^[dynamic]Project, c: string, newest, oldest: time.Time) {
 	for h in claude_scan_home do if h != "" && c == h do return
+	// fails closed: unless it is known not to be the home folder, not a found project on this scan
+	// (the next tries again); a folder that does not exist cannot be it (a missing project, as before)
+	if claude_scan_home_id.unknown do return
 	if claude_scan_home_id.ok {
 		st: posix.stat_t // followed: a link to the home folder is the home folder
-		if posix.stat(strings.clone_to_cstring(c, context.temp_allocator), &st) == .OK && st.st_dev == claude_scan_home_id.dev && st.st_ino == claude_scan_home_id.ino do return
+		ok, err := scan_stat(c, &st)
+		if !ok && err != .ENOENT && err != .ENOTDIR do return
+		if ok && st.st_dev == claude_scan_home_id.dev && st.st_ino == claude_scan_home_id.ino do return
 	}
 	found := false
 	for &p in projects do if p.cwd == c {

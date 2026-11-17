@@ -670,6 +670,35 @@ claude_disk_projects_never_home :: proc(t: ^testing.T) {
 	testing.expect(t, p != nil && !p.claude, "the hand-added home project is untouched")
 }
 
+// The never-home check fails closed: when a found folder cannot be stat'ed now (an I/O error, not
+// "no such folder"), or the home folder's identity is unknown, it is not a found project on this
+// scan; the next scan tries again. A project added by hand stays.
+@(test)
+claude_disk_projects_home_check_fails_closed :: proc(t: ^testing.T) {
+	when core.TEST_HOOKS {
+		env: Ca_Env
+		context.allocator = ca_reset(&env)
+		defer ca_done()
+		defer core.claude_scan_stat_fail = {}
+		work := fmt.tprintf("%s/.claude-work", env.home)
+		ca_config(work)
+		core.claude_accounts_refresh()
+		other, mine := ca_dir("stat-other"), ca_dir("stat-mine")
+		for c, i in ([]string{other, mine}) do ca_write(fmt.tprintf("%s/7878787%d-0000-4000-8000-0000000000b1.jsonl", ca_transcripts(work, c), i), strings.join({ca_user(c, "x"), ""}, "\n", context.temp_allocator))
+		testing.expect(t, core.run_command(core.Add_Project{cwd = mine}, CA_UI).ok)
+		core.claude_scan_stat_fail = {candidate = true}
+		core.rescan_now()
+		testing.expect(t, core.project_by_cwd(other) == nil, "a folder that cannot be stat'ed now: not this scan")
+		testing.expect(t, core.project_by_cwd(mine) != nil, "one added by hand stays")
+		core.claude_scan_stat_fail = {home = true}
+		core.rescan_now()
+		testing.expect(t, core.project_by_cwd(other) == nil, "the home folder's identity unknown: none found")
+		core.claude_scan_stat_fail = {}
+		core.rescan_now()
+		testing.expect(t, core.project_by_cwd(other) != nil, "the next scan has it")
+	}
+}
+
 // A history entry whose transcript is gone (Claude Code's clean-up): greyed, by stat; its created
 // date is the transcript's while it is there.
 @(test)

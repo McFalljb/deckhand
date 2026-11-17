@@ -237,7 +237,9 @@ the selected project and Chats. **Codex's files are read only, never written.**
   folder with pi's and Claude's (`found_project`); never the home folder itself (`HOME`, its
   real path, or any path that is the same folder by device and inode: a link to it, another case
   on a case-insensitive volume; a session started in `~` makes no project; a project added there
-  by hand is left as it is). On the main thread (`rescan_now`: a new Chats or main folder) the scan
+  by hand is left as it is). The check fails closed: a folder that cannot be stat'ed now (other than
+  "no such folder"), or any folder while the home folder's own stat failed, is not a found project
+  on that scan; the next tries again. On the main thread (`rescan_now`: a new Chats or main folder) the scan
   reads no rollout: it takes the cache as it is and starts a pass on the worker, which the next
   Rescan uses; a folder no one else knows is a project
   found on disk only, exactly as a Claude-only folder is (`Project.claude`: saved; a Rescan that

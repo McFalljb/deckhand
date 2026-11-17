@@ -1542,7 +1542,7 @@ launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 		if core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code without pi (harness.odin)
 		if core.codex_installed() do return core.New_Claude_Session{project_id = pid, codex = true} // Codex alone
 	}
-	return core.New_Chat{pid}
+	return core.New_Chat{project_id = pid}
 }
 
 // Whether `deckhand DIR` may choose its harness now: always with --claude; else once detection

@@ -588,12 +588,14 @@ claude_default_args :: proc() -> []string {
 // What turning skip-permissions on asks the user (Set_Claude_Default_Flags).
 CLAUDE_SKIP_CONFIRM :: "Start the Claude tabs you start with --dangerously-skip-permissions? Claude will edit files and run commands without asking you first. Agents' tabs never get it."
 
-// args with the user's default flags as the setting is NOW, after them (claude_start, for a
-// start the user makes: never saved into a tab's or a record's flags, so turning the setting off
-// takes it away from every later start). A default is left out when args already name it, and
-// skipping permissions when they set a permission mode; all of them when they would go past
-// CLAUDE_ARGS_MAX (silently: the tab starts with its own flags). Temp.
-claude_with_defaults :: proc(args: []string) -> []string {
+// args with the user's default flags as the setting is NOW (claude_start, for a start the user
+// makes: never saved into a tab's or a record's flags, so turning the setting off takes it away
+// from every later start): the Default flags line before them (harness_with_defaults), the
+// switches after. A default is left out when the flags already name it, and skipping permissions
+// when they set a permission mode; all of them when they would go past CLAUDE_ARGS_MAX
+// (silently: the tab starts with its own flags). Temp.
+claude_with_defaults :: proc(args_in: []string) -> []string {
+	args := harness_with_defaults(.Claude, args_in)
 	defaults := claude_default_args()
 	if len(defaults) == 0 do return args
 	given :: proc(args: []string, names: ..string) -> bool {
@@ -853,9 +855,9 @@ claude_resume_cwd :: proc(rec: ^Claude_Record, p: ^Project, s: ^Open_Session = n
 // Claude tab first (its Claude session id is the session's), then its other tabs. A gone project
 // folder: "gone", never started.
 claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool) {
-	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || claude_args_check(c.tabs[0].args) != "" do return fail("a Claude session's first tab is its Claude tab"), false
+	// its flags by its harness's rule (restore_tab would drop it: never a session without its main tab)
+	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || (c.tabs[0].codex ? codex_args_check(c.tabs[0].args) : claude_args_check(c.tabs[0].args)) != "" do return fail("a Claude session's first tab is its Claude tab"), false
 	if !(c.tabs[0].codex ? codex_id_ok(c.pi_session_id) : claude_id_ok(c.pi_session_id)) do return fail("not a Claude session id"), false
-	if c.tabs[0].codex && len(c.tabs[0].args) > 0 do return fail("a Codex tab has no flags"), false // restore_tab drops it: never a session without its main tab
 	if claude_open_tab(c.pi_session_id) != 0 do return fail("this session is already open"), false
 	s := Open_Session{agent = .Claude, pi_session_id = strings.clone(c.pi_session_id), project_id = p.id, cwd = strings.clone(p.cwd), restored = true, missing = !os.is_dir(p.cwd)}
 	restore_tabs(&s, c.tabs, c.layout) // its main tab is c.tabs[0], with its own saved pane
@@ -1228,8 +1230,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			// as a report would be: an id that can go into argv, no flags Deckhand sets, an absolute
 			// project, a one-line title of at most CLAUDE_TITLE_MAX
 			if !(r.codex ? codex_id_ok(r.id) : claude_id_ok(r.id)) || len(state.claude_history) >= CLAUDE_HISTORY_MAX do continue
-			if r.codex && len(r.args) > 0 do continue // a Codex conversation has none
-			if claude_args_check(r.args) != "" || !strings.has_prefix(r.project, "/") do continue
+			if (r.codex ? codex_args_check(r.args) : claude_args_check(r.args)) != "" || !strings.has_prefix(r.project, "/") do continue
 			if old, _ := claude_record(r.id); old != nil do continue
 			title := cut_utf8(strings.trim_space(one_line(r.title, context.temp_allocator)), CLAUDE_TITLE_MAX)
 			// the transcript path and model as a report's would be (claude_rows.odin)

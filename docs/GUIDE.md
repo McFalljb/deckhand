@@ -737,9 +737,9 @@ is waiting for you).
 - **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
-- **New sessions** started outside Deckhand (pi or Claude Code in a terminal) show when you come
-  back to the window, or a paired browser connects: Deckhand looks again then, at most once every
-  3 minutes. To look now, use the gear's "Rescan sessions".
+- **New sessions** started outside Deckhand (pi, Claude Code or Codex in a terminal, Codex
+  Desktop) show when you come back to the window, or a paired browser connects: Deckhand looks
+  again then, at most once every 3 minutes. To look now, use the gear's "Rescan sessions".
 
 ### Chats settings
 
@@ -1134,6 +1134,34 @@ you show it, and your Restart. It is never stored with a tab, so once you turn i
 those get it any more. Tabs and sessions that Atlas, a pi tab, a Claude tab or an app opens or
 restarts never get it.
 
+**Flags for a tab.** To start Claude Code, Codex or pi with command-line flags of your own (a
+model, a permission mode, `--mcp-config`, Codex's `-m`, `-s`, `-a`, `-p`, `--search`, pi's
+`--model` or `--thinking`), use **New Claude tab with flags…** or **New Codex tab with flags…**
+(the tab strip's **+** and the palette, while that agent is installed) or **New session with
+flags…** (the **+** and the palette; with more than one agent installed it asks which: **pi with
+flags…**, **Claude Code with flags…**, **Codex with flags…**).
+A one-line field opens, filled with the flags you last used for that agent in this window; type
+them as on a command line (quotes work, `"be brief"` is one word; nothing is expanded: no `$VAR`,
+`~` or globs) and press Enter. Each agent's own rule applies: flags Deckhand sets itself, or that
+pick another session, print instead of opening the agent's screen, or would turn off Deckhand's
+hooks or tools are refused, and the field's row says why before anything starts (it names the
+flag, never its value). Claude Code's own `--settings` is allowed, as your `settings.json` is: a flag or
+setting that turns hooks off (`disableAllHooks`) leaves the tab without Deckhand's status, rows,
+comments and held messages, and the bar over the tab says so. Claude and Codex
+tabs keep their flags (a resume, a restore and your Restart use them again); a pi session uses them
+when it starts (pi itself remembers the session's model when it resumes). These flags are yours
+only: Atlas, scripts and apps cannot pass them, and a tab another machine runs takes flags there.
+
+**Default flags.** Settings › Coding agents has a **Default flags…** row in each agent's card (in
+the palette: **Default Claude Code flags…**, **Default Codex flags…**, **Default pi flags…**): one line each, checked by the same rule
+when you save it. They go before a tab's own flags each time you start that agent yourself (for
+Claude Code and Codex: a new tab, session or chat, your resume, a restored tab you show, your
+Restart; for pi: a new session), and a default the tab's own flags name too is left out, so
+`--model opus` on a tab beats a default `--model sonnet`. Like **Skip permissions in new tabs**
+they are never stored with a tab and never reach a tab Atlas, a script, a pi tab or an app starts.
+Only you, at this Mac, can change them: not an agent, a script, another machine or a paired
+browser.
+
 **Without Claude Code.** Deckhand works the same without it: **New session** and **New chat**
 start pi at once (no picker), and the Claude-only menu rows (**New Claude tab**) are not shown.
 The palette's and the menu bar's **New Claude tab** read "… — Claude Code not installed", and
@@ -1205,15 +1233,15 @@ older one from 0.157.0 runs as a plain terminal tab (below).
   message) appears then. **Resume** from the row continues it (`codex resume`); a session that was
   open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
   title only; Codex keeps its own. Codex conversations you ran outside Deckhand in the project's
-  folder are listed too (from `~/.codex/sessions/`, however old; read, never changed), titled
+  folder are listed too (from `~/.codex/sessions/` and each Codex account's, however old, the
+  ones Codex Desktop compressed too; read, never changed), titled
   with the name Codex gave the thread (its `session_index.jsonl`), else "Untitled Codex session"
   with their date: a click resumes one. The first look reads each conversation's first line once,
   in the background; Deckhand remembers what it read, so later launches read only new ones. Only
   conversations you had with Codex (in a terminal or Codex Desktop) count, never `codex exec`
-  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude Code's do (never your home
-  folder itself); **Rescan
-  sessions** looks again and drops one no conversation records any more (unless you added or
-  named it).
+  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude
+  Code's do (never your home folder itself); **Rescan sessions** looks again and drops one no
+  conversation records any more (unless you added or named it).
 - **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when
   Codex is idle and you have typed nothing), and **Send and close**; Changes' button reads **Ask
   Codex to review**.
@@ -1238,10 +1266,16 @@ older one from 0.157.0 runs as a plain terminal tab (below).
   you start Codex yourself (a new tab or session, your resume, a restored tab you show, your
   Restart), never to a tab Atlas, a script or an app starts, and not to a tab whose own flags pick
   a sandbox or approval mode.
-- **Extra flags** on a tab (yours only, as for Claude) are checked against Codex's own: flags that
-  would change Deckhand's hooks or tools, the tab's folder, Codex features or profiles (set those in
-  your `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …)
-  are refused, with why.
+- **Extra flags** on a tab (yours only, as for Claude: **New Codex tab with flags…**, **Default
+  Codex flags…**, see [Flags for a tab](#claude-code-tabs)) are checked against Codex's own: flags
+  that would change Deckhand's hooks or tools, the tab's folder or Codex features (set those in your
+  `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …) are
+  refused, with why. A profile is allowed by its plain name (`-p work`: Codex reads
+  `<Codex home>/work.config.toml` over your config; Deckhand's own settings still come last); a
+  profile can turn hooks off or bring hooks of its own, which Codex asks you to review, as in
+  `config.toml`.
+- **"Update available"**: at start, Codex shows its own update prompt in the tab until you update it
+  or skip that version; answer it there.
 - **On another machine**: **+ New session** under one of its projects (or **New Codex tab** in its
   menu) starts Codex there, with that machine's own Codex, settings and sign-in (its own **Full
   access in new Codex tabs**, never this Mac's); its Codex rows open there too. It needs Deckhand
@@ -1496,7 +1530,7 @@ buttons), with a search box on top.
   the settings that bound what other machines and agents may do here: **Allow other machines to
   connect**, **Machines over SSH** and your machines list, the pi extensions, and the default
   flags (Claude Code's **Skip permissions in new tabs**, Codex's **Full access in new Codex
-  tabs**); your notifications too. **Next start** and **Next launch** badges say when a change
+  tabs**, and each agent's **Default … flags…**); your notifications too. **Next start** and **Next launch** badges say when a change
   takes effect.
 - **Deckhand writes only its own settings.** pi's, Claude Code's and Codex's config are files:
   under a card, **Advanced: open the file** lists them. Click one to open it in an ordinary
@@ -1550,7 +1584,7 @@ installed; Claude Code's files once it has been used.
 
 **pi.** Its files: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),
 `modes.json`, `keybindings.json`, `mcp.json`, your global instructions file (`AGENTS.md` or
-similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills` and `extensions`.
+similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills`, `extensions` and `themes`.
 Only these: never sessions, logs or sign-ins. Each pi extension's config file and folder, when it
 has one, are here too.
 
@@ -2262,11 +2296,11 @@ editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file
 when you have not edited it, and asks when you have. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
-installed, once per account, the last used first; one starts at once). Over a Claude, Codex or
-pi tab, a strip shows the window's bars as text (held messages, hooks not running, an old
-version, Codex signed out, the hot-reload bars) with their buttons where a browser may use them
-(**Send now**, **Drop**, **Reload**, **Restart**, **Later**, copying the update command); their
-**Dismiss** and **Details** are the window's.
+installed, once per account with the project's own first, the last used agent first; one starts
+at once). Over a Claude, Codex or pi tab, a strip shows the window's bars as text (held messages,
+hooks not running, an old version, Codex signed out, the hot-reload bars) with their buttons where
+a browser may use them (**Send now**, **Drop**, **Reload**, **Restart**, **Restart anyway**,
+**Later**, copying the update command); their **Dismiss** and **Details** are the window's.
 
 **Not in a browser:** browser tabs and app tabs (they show a note there; open them at the Mac),
 adding or removing machines, **Continue this conversation on <machine>**, the Settings page's
@@ -2776,6 +2810,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New browser tab |  | a web page in the session on screen (its address field takes the keyboard) |
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen, with Deckhand's plugin |
 | New Codex tab |  | Codex in the session on screen, with Deckhand's hooks and tools ([Codex tabs](#codex-tabs)) |
+| New Claude tab with flags…, New Codex tab with flags… |  | the same, with flags you type on one line first ([Flags for a tab](#claude-code-tabs)) |
+| New session with flags… |  | a new session in the selected project, picking the agent, with flags you type first |
+| Default Claude Code flags…, Default Codex flags…, Default pi flags… |  | the flags that go before a tab's own in every start of that agent you make (Settings › Coding agents; only you, at this Mac) |
 | Skip permissions in new tabs |  | on or off: your new Claude tabs start with `--dangerously-skip-permissions` (asks first when turned on) |
 | Full access in new Codex tabs |  | on or off: your new Codex tabs start with `--dangerously-bypass-approvals-and-sandbox` (asks first when turned on) |
 | Add Claude account… |  | add a Claude Code config folder as an account (a folder picker) |
@@ -2858,7 +2895,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Text size: Small, Text size: Medium, Text size: Default, Text size: Large |  | the chrome's text size |
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
-| Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts) |
+| Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts, Codex's rollouts) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |

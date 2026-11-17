@@ -242,7 +242,7 @@ handoff_runs_new_session :: proc(t: ^testing.T) {
 		#partial switch x in c {
 		case core.New_Chat:
 			y, ok := theirs[i].(core.New_Chat)
-			testing.expect(t, ok && x == y && x.project_id == pid(3, 7), "pi there")
+			testing.expect(t, ok && x.project_id == y.project_id && x.project_id == pid(3, 7), "pi there")
 		case core.New_Claude_Session:
 			y, ok := theirs[i].(core.New_Claude_Session)
 			// that machine's own account: no folder, account or session of this Mac's

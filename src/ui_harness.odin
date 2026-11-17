@@ -399,6 +399,11 @@ new_session_menu_items :: proc(t: core.Menu_New_Session, items: ^[dynamic]core.M
 	p := core.find_project(t.project_id)
 	if p == nil do return
 	what := p.group == .Chats ? "New chat with…" : t.cwd != "" ? fmt.tprintf("New session in %s with…", filepath.base(t.cwd)) : fmt.tprintf("New session in %s with…", core.project_display(p^))
+	if t.flags { // "New session with flags…": each harness that takes flags here (ui_flags.odin)
+		append(items, core.Menu_Item{label = strings.concatenate({strings.trim_suffix(what, "…"), " flags…"}, context.temp_allocator), note = true})
+		flags_picker_items(p, t.cwd, items)
+		return
+	}
 	append(items, core.Menu_Item{label = what, note = true})
 	append(items, ..core.new_session_choices(p, t.cwd))
 }
@@ -416,11 +421,26 @@ harness_used :: proc(cmd: core.Command) {
 
 // The user's "New session" in project pid (in cwd, a checkout of it; "" = its folder), see the top.
 // at: where the picker opens (nil = new_session_anchor).
-new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
+new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil, flags := false) {
 	p := core.find_project(pid)
 	if p == nil do return
 	// looked up again (stat only): a harness installed since is offered
 	for h in core.Harness do core.harness_installed_now(h)
+	if flags { // "New session with flags…" (ui_flags.odin): the only one asks at once, else the picker's flags rows
+		rows := make([dynamic]core.Menu_Item, context.temp_allocator)
+		flags_picker_items(p, cwd, &rows)
+		switch len(rows) {
+		case 0: toast_show(core.id_machine(pid) != 0 ? "Flags are set on that machine's own Deckhand" : core.NO_HARNESS, err = true)
+		case 1: flags_open(rows[0].cmd)
+		case:
+			menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd, flags = true}, at.? or_else new_session_anchor())
+			for it, i in menu_items() do if !it.note && !it.sep {
+				menu.selected = i
+				break
+			}
+		}
+		return
+	}
 	items := core.new_session_choices(p, cwd)
 	switch len(items) {
 	case 0:

@@ -449,6 +449,14 @@ enum_by_name :: proc(s: string, names: [$E]string) -> (E, bool) {
 	return {}, false
 }
 
+// set_harness_flags's harness: one of HARNESS_KEYS (required).
+harness_key :: proc(r: ^Rd) -> Harness {
+	s := get_str(r, "harness")
+	for k, h in HARNESS_KEYS do if k == s do return h
+	if r.err == "" do r.err = "harness must be pi, claude or codex"
+	return .Pi
+}
+
 // new_claude_tab's and new_claude_session's harness: "claude" (or none) or "codex" (codex.odin).
 @(private = "file")
 harness_codex :: proc(r: ^Rd) -> bool {
@@ -656,7 +664,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "select_project":      cmd = Select_Project{project_id = get_u64(&r, "project_id")}
 	case "rename_project":      cmd = Rename_Project{project_id = get_u64(&r, "project_id"), name = get_str(&r, "name")}
 	case "open_session":        cmd = Open_Session_Cmd{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id")}
-	case "new_chat":            cmd = New_Chat{project_id = get_u64(&r, "project_id")}
+	case "new_chat":            cmd = New_Chat{project_id = get_u64(&r, "project_id"), args = get_strings(&r, "args")}
 	case "focus_session":       cmd = Focus_Session{session = get_u64(&r, "session"), reopen = ui_flag(&r, "reopen")}
 	case "show_no_session":     cmd = Show_No_Session{}
 	case "next_needing_you":    cmd = Next_Needing_You{back = opt_bool(&r, "back").? or_else false}
@@ -715,6 +723,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_machines_reachable": cmd = Set_Machines_Reachable{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
 	case "set_web_access":      cmd = Set_Web_Access{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
 	case "set_web_listen":      cmd = Set_Web_Listen{address = get_str(&r, "address")}
+	case "set_harness_flags":   cmd = Set_Harness_Flags{harness = harness_key(&r), flags = get_str(&r, "flags", optional = true)}
 	case "web_pair":            cmd = Web_Pair{}
 	case "web_devices":         cmd = Web_Devices{}
 	case "file_read":           cmd = File_Read{path = get_str(&r, "path"), since = get_str(&r, "since", true)}

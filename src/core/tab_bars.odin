@@ -50,10 +50,10 @@ held_preview :: proc(text: string) -> string {
 // ("waiting", "error", "info"), text, actions [{label, command {...}} | {label, copy} |
 // {label, settings: section id}]}]. Actions only where a browser may do what the native button
 // does: a command a browser may send (claude_held, pi_reload_all, pi_restart_updated,
-// pi_reload_later, claude_restart_changed, claude_reload_later), copying text, or its own
-// Settings screen; Dismiss and Details are the native window's (no command a browser may send),
-// so the strip shows the text without them. Local tabs only: another machine's tab's bars are
-// its own core's.
+// pi_reload_later, claude_restart_changed, claude_reload_later, claude_restart_anyway), copying
+// text, or its own Settings screen; Dismiss and Details are the native window's (no command a
+// browser may send), so the strip shows the text without them. Local tabs only: another
+// machine's tab's bars are its own core's.
 web_bars_json :: proc() -> string {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_byte(&b, '[')
@@ -124,8 +124,13 @@ web_bars_json :: proc() -> string {
 	}
 	for update in ([2]bool{true, false}) do if claude_bar_shows(update) {
 		msg, can := claude_reload_message(update)
+		// a waiting restart held only by a subagent silent for hours: named, with Restart anyway
+		// (the user's, confirmed); first, so the last command button stays Restart or Later
+		silent, why := claude_reload_silent_tab(update)
+		if silent != nil do msg = fmt.tprintf("%s · %s: %s", msg, silent.title, why)
 		bar(&b, &n, 0, "claude", update ? "claude_update" : "claude_reload", "info", msg)
-		act(&b, true, "Later", "command", update ? `{"type":"claude_reload_later","update":true}` : `{"type":"claude_reload_later"}`)
+		if silent != nil do act(&b, true, "Restart anyway", "command", fmt.tprintf(`{{"type":"claude_restart_anyway","tab_id":%d}}`, silent.id))
+		act(&b, silent == nil, "Later", "command", update ? `{"type":"claude_reload_later","update":true}` : `{"type":"claude_reload_later"}`)
 		if can do act(&b, false, "Restart", "command", update ? `{"type":"claude_restart_changed","update":true}` : `{"type":"claude_restart_changed"}`)
 		strings.write_string(&b, "]}")
 	}

@@ -240,7 +240,7 @@ menu_open :: proc(target: Menu_Target, at: [2]f32) {
 		menu.target = m
 	}
 	if l, ok := target.(Menu_Term_Link); ok do menu.target = Menu_Term_Link{tab_id = l.tab_id, url = strings.clone(l.url)}
-	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd), run = strings.clone(n.run), folder = strings.clone(n.folder)}
+	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd), run = strings.clone(n.run), folder = strings.clone(n.folder), flags = n.flags}
 	menu.at = at
 	menu.selected = -1
 	menu.open = true
@@ -354,8 +354,8 @@ menu_items :: proc() -> []core.Menu_Item {
 			append(&items, core.Menu_Item{label = "Close session", cmd = core.Close_Session{session = id}})
 		}
 	case Menu_New:
-		for id in ([]string{"new_shell_tab", "new_claude_tab", "new_browser_tab", "new_app_tab", "new_chat", "new_session"}) {
-			if t.pane != 0 && (id == "new_chat" || id == "new_session") do continue // a pane's "+": tabs only
+		for id in ([]string{"new_shell_tab", "new_claude_tab", "new_claude_tab_flags", "new_codex_tab_flags", "new_browser_tab", "new_app_tab", "new_chat", "new_session", "new_session_flags"}) {
+			if t.pane != 0 && (id == "new_chat" || id == "new_session" || id == "new_session_flags") do continue // a pane's "+": tabs only
 			a := action_by_id(id)
 			if a == nil || !action_ok(id) do continue
 			label := a.label
@@ -370,7 +370,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			}
 			if id == "new_claude_tab" do label = action_label(a)
 			// several Claude accounts: one row per account (claude_accounts.odin)
-			if strings.has_prefix(id, "new_claude_") && core.claude_accounts_many() && core.claude_installed() || id == "new_codex_tab" && core.claude_accounts_many(codex = true) && core.codex_installed() {
+			if strings.has_prefix(id, "new_claude_") && !strings.has_suffix(id, "_flags") && core.claude_accounts_many() && core.claude_installed() || id == "new_codex_tab" && core.claude_accounts_many(codex = true) && core.codex_installed() {
 				if c, ok := a.make(); ok {
 					core.claude_account_items(&items, strings.trim_suffix(label, core.CLAUDE_MISSING_NOTE), c)
 					continue
@@ -422,10 +422,16 @@ menu_run :: proc(i: int) {
 		cwd := strings.clone(ns.cwd, context.temp_allocator)
 		menu_close()
 		if core.id_machine(ns.project_id) != 0 do handoff_run(i, at) // New session on <machine>…: what row i showed (ui_handoff.odin)
-		else do new_session_ui(ns.project_id, cwd, at)
+		else do new_session_ui(ns.project_id, cwd, at, flags = ns.flags)
 		return
 	}
 	if t, ok := target.(core.Menu_New_Session); ok && handoff_picker_stale(t) do return // that machine restarted (ui_handoff.odin)
+	if it.flags && it.cmd != nil { // "… with flags…": the palette asks for them first (ui_flags.odin)
+		cmd := core.command_clone(it.cmd, context.temp_allocator)
+		menu_close()
+		flags_open(cmd)
+		return
+	}
 	if _, ok := target.(core.Menu_New_Session); ok do harness_used(it.cmd) // first next time
 	if n, ok := target.(Menu_New); ok && n.pane != 0 do ui_do(core.Focus_Pane{pane = n.pane}) // new tabs open in the focused pane
 	if it.peek != 0 {

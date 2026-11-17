@@ -1189,6 +1189,7 @@ claude_restart_anyway_silent_subagent :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.run_command(core.Claude_Restart_Anyway{tab_id = held}, R_UI).error, "this tab's restart waits until it is idle (a subagent runs)")
 	ts, _ := claude_reload_silent_tab(false)
 	testing.expect(t, ts == nil)
+	testing.expect(t, !strings.contains(core.web_bars_json(), "claude_restart_anyway"), "a browser's strip: no Restart anyway yet")
 	when core.TEST_HOOKS {
 		core.claude_agents_clock_skew = core.CLAUDE_AGENT_STALE + 5 * time.Minute
 	}
@@ -1203,6 +1204,17 @@ claude_restart_anyway_silent_subagent :: proc(t: ^testing.T) {
 	ts, why = claude_reload_silent_tab(false)
 	testing.expect(t, ts != nil && ts.id == held)
 	testing.expect_value(t, why, "a subagent silent for 2h 05m")
+	// a browser's status strip carries it too (webbars): the bar names the tab, Restart anyway
+	// targets it, and a browser may send it (the user's, confirmed in its confirmation bar)
+	wb := core.web_bars_json()
+	testing.expectf(t, strings.contains(wb, fmt.tprintf(`{{"label":"Restart anyway","command":{{"type":"claude_restart_anyway","tab_id":%d}}}}`, held)), "%s", wb)
+	testing.expectf(t, strings.contains(wb, ": a subagent silent for 2h 05m"), "%s", wb)
+	testing.expect(t, core.web_may_run("claude_restart_anyway", core.command_spec("claude_restart_anyway").who))
+	R_WEB :: core.Caller{kind = .UI, web = true}
+	rw := core.run_command(core.Claude_Restart_Anyway{tab_id = held}, R_WEB)
+	testing.expect_value(t, rw.error, "needs_confirmation")
+	testing.expect(t, rw.confirm_token != "", "a browser gets the token for its confirmation bar")
+	testing.expect(t, core.run_command(core.Cancel_Confirmation{token = rw.confirm_token}, R_WEB).ok)
 	// the other tab of the same restart goes once idle, without waiting for it
 	core.run_command(core.Claude_Turn_Report{tab_id = other, state = "idle"}, CR_SCRIPT)
 	core.claude_reload_tick()

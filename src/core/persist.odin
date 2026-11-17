@@ -602,6 +602,7 @@ workspace_json :: proc() -> string {
 
 	if st.claude_skip_permissions do kb(&w, "claude_skip_permissions", true)
 	if st.codex_full_access do kb(&w, "codex_full_access", true)
+	for h in Harness do if st.harness_flags[h] != "" do ks(&w, strings.concatenate({HARNESS_KEYS[h], "_flags"}, context.temp_allocator), st.harness_flags[h]) // harness_flags.odin
 	if len(st.pi_extensions) > 0 {
 		k(&w, "pi_extensions")
 		open_obj(&w)
@@ -775,6 +776,7 @@ workspace_restore :: proc(text: string) -> string {
 		// chats_readonly (the removed Start chats read-only) in an older file: ignored
 		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp)})
 		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), codex = true})
+		for h in Harness do if hf, hok := st[strings.concatenate({HARNESS_KEYS[h], "_flags"}, context.temp_allocator)].(json.String); hok do run(Set_Harness_Flags{harness = h, flags = hf}) // checked as the user's would be
 		if pe, pok := st["pi_extensions"].(json.Object); pok {
 			names := make([dynamic]string, context.temp_allocator)
 			for n in pe do append(&names, n)
@@ -1023,7 +1025,7 @@ workspace_restore :: proc(text: string) -> string {
 			codex, _ := o["codex"].(json.Boolean)
 			args := make([dynamic]string, context.temp_allocator)
 			if a, aok := o["args"].(json.Array); aok do for x in a do if xs, xok := x.(json.String); xok do append(&args, string(xs))
-			if id == "" || !strings.has_prefix(project, "/") || claude_args_check(args[:]) != "" do continue
+			if id == "" || !strings.has_prefix(project, "/") || (codex ? codex_args_check(args[:]) : claude_args_check(args[:])) != "" do continue // its harness's rule
 			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), account = string(acct), codex = bool(codex)})
 		}
 	}

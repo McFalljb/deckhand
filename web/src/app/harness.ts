@@ -2,7 +2,7 @@
 // the native window offers there, as the core computed it (web_view_new_choices in
 // src/core/web_view.odin: installed here, or on that machine by its checklist; Claude Code and
 // Codex in Chats here, never another machine's; once per account while there are several), the
-// last used first. The core records the harness a browser starts as the last used.
+// last used first, and the project's own account first as the native picker has it. The core records the harness a browser starts as the last used.
 import type { Store, WebNewChoices } from "../state.ts";
 
 export interface NewSessionChoice {
@@ -19,7 +19,9 @@ export function newSessionChoices(store: Store, projectId: number): NewSessionCh
   const p = store.project(projectId);
   const machine = p?.machine ?? 0;
   const m = there(store, machine);
-  const list = (p?.group === "chats" ? m?.chats : m?.projects) ?? [];
+  // its own rows where they differ (with several accounts, its last used one first), else its kind's
+  const own = m?.project_rows?.find((x) => x.project === projectId)?.rows;
+  const list = own ?? (p?.group === "chats" ? m?.chats : m?.projects) ?? [];
   const out: NewSessionChoice[] = list.map((c) => {
     const account = c.account ? { account: c.account } : {};
     return {

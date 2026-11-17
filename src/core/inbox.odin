@@ -158,6 +158,11 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Cancel_Confirmation: return Cancel_Confirmation{token = s(c.token, allocator)}
 	case Quit:                return Quit{confirm = s(c.confirm, allocator), stop_sessions = c.stop_sessions}
 	case Set_Claude_Default_Flags: return Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, codex = c.codex, confirm = s(c.confirm, allocator)}
+	case Set_Harness_Flags:   return Set_Harness_Flags{harness = c.harness, flags = s(c.flags, allocator)}
+	case New_Chat:
+		args := make([]string, len(c.args), allocator)
+		for x, i in c.args do args[i] = s(x, allocator)
+		return New_Chat{project_id = c.project_id, args = args}
 	case Set_Pi_Extension:    return Set_Pi_Extension{name = s(c.name, allocator), on = c.on}
 	case Pi_Session_Update:   return Pi_Session_Update{tab_id = c.tab_id, pi_session_id = s(c.pi_session_id, allocator), session_file = s(c.session_file, allocator), cwd = s(c.cwd, allocator)}
 	case Pi_Status_Update:
@@ -296,7 +301,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return browser_agent_clone(cmd, allocator)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
 		return browser_act_clone(cmd, allocator)
-	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Set_Sidebar_View, Select_Project, New_Chat, Focus_Session, Show_No_Session, Next_Needing_You, Mark_All_Read, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Zoom_Pane, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Set_Remote_Machines, Machine_Connect, Machine_Login, Machine_Install, Machine_Linger, Web_Pair, Web_Devices, Holder_Replace, Holder_Restart, Holder_Recover, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Dim_Panes, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
+	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Set_Sidebar_View, Select_Project, Focus_Session, Show_No_Session, Next_Needing_You, Mark_All_Read, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Zoom_Pane, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Set_Remote_Machines, Machine_Connect, Machine_Login, Machine_Install, Machine_Linger, Web_Pair, Web_Devices, Holder_Replace, Holder_Restart, Holder_Recover, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Dim_Panes, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
 		return cmd
 	}
 	return cmd
@@ -351,6 +356,10 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Cancel_Confirmation: delete(c.token, allocator)
 	case Quit:                delete(c.confirm, allocator)
 	case Set_Claude_Default_Flags: delete(c.confirm, allocator)
+	case Set_Harness_Flags:   delete(c.flags, allocator)
+	case New_Chat:
+		for x in c.args do delete(x, allocator)
+		delete(c.args, allocator)
 	case Set_Pi_Extension:    delete(c.name, allocator)
 	case Pi_Session_Update:
 		delete(c.pi_session_id, allocator)

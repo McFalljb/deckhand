@@ -192,6 +192,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Setup_Sheet:         return "setup_sheet"
 	case Set_Chats_Readonly:  return "set_chats_readonly"
 	case Set_Claude_Default_Flags: return "set_claude_default_flags"
+	case Set_Harness_Flags:   return "set_harness_flags"
 	case Set_Pi_Extension:    return "set_pi_extension"
 	case Set_Pinned:          return "set_pinned"
 	case Set_Hidden:          return "set_hidden"
@@ -408,6 +409,11 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "pi_session_id", c.pi_session_id)
 	case New_Chat:
 		kv_u64(&w, "project_id", c.project_id)
+		if len(c.args) > 0 && redact do kv_u64(&w, "argc", u64(len(c.args))) // flags may hold a secret: never in the log
+		else if len(c.args) > 0 {
+			key(&w, "args")
+			write_strings(w.b, c.args)
+		}
 	case Focus_Session:
 		kv_u64(&w, "session", c.session)
 	case Show_No_Session:
@@ -505,6 +511,10 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		token(&w, c.confirm, redact)
 	case Set_Web_Listen:
 		kv_str(&w, "address", c.address)
+	case Set_Harness_Flags:
+		kv_str(&w, "harness", HARNESS_KEYS[c.harness])
+		if redact do kv_u64(&w, "flags_bytes", u64(len(c.flags))) // never in the log
+		else do kv_str(&w, "flags", c.flags)
 	case Web_Revoke:
 		kv_str(&w, "id", c.id)
 	case Machine_Add:

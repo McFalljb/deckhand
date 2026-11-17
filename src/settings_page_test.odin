@@ -11,6 +11,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
@@ -48,6 +49,8 @@ sp_test_setup :: proc() {
 	core.harness_checklist_forget()
 	_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/settings.json", home), transmute([]u8)string(`{"packages": []}`))
 	_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/prompts/fix.md", home), transmute([]u8)string("fix"))
+	// readable by others whatever the umask: a private file in pi's folder is a credential (hidden)
+	os.change_mode(fmt.tprintf("%s/.pi/agent/prompts/fix.md", home), os.perm_number(0o644))
 	state.settings.home_dir = strings.clone(fmt.tprintf("%s/Deckhand-main-folder-with-a-long-name", home))
 	p := core.Project{id = 1, group = .Projects, cwd = strings.clone(proj), label = strings.clone("a-project-with-a-long-folder-name")}
 	append(&state.projects, p)
@@ -340,6 +343,10 @@ settings_page_rows_cached :: proc(t: ^testing.T) {
 settings_page_file_menu :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, audit_ui(), "fonts") do return
+	// the file New file… makes is readable by others whatever this process's umask (a private
+	// file in pi's folder is a credential: never opened)
+	old_mask := posix.umask({.IWGRP, .IWOTH})
+	defer posix.umask(old_mask)
 	sp_test_setup()
 	defer sp_test_setup()
 	defer menu_close()

@@ -161,18 +161,26 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller, request_id: u64 = 0) -> (r
 		case Create_File: path, confirm = x.path, x.confirm
 		case Create_Dir:  path, confirm, dir = x.path, x.confirm, true
 		}
+		// the path as this caller names it: what a confirmation is bound to
 		p, _, err := fs_check_write(path, caller)
 		if err != "" do return fail(err), false
+		parked: Command = dir ? Command(Create_Dir{path = p}) : Command(Create_File{path = p})
 		ch := false
-		if caller.kind == .Control && fs_outside_own(p, caller) {
-			parked: Command = dir ? Command(Create_Dir{path = p}) : Command(Create_File{path = p})
-			gr, go_on, gch := confirm_gate(parked, .Fs_Write, caller, confirm, fmt.tprintf("create %s %s?", dir ? "the folder" : "the file", p))
+		rules := caller
+		if confirm != "" {
+			// a confirmation: the entry is used up, then the asker's rules decide
+			gr, go_on, gch, asker := confirm_use(parked, .Fs_Write, caller, confirm)
+			if !go_on do return gr, gch
+			ch, rules = gch, asker
+			if _, _, e := fs_check_write(p, rules); e != "" do return fail(e), ch
+		} else if caller.kind == .Control && fs_outside_own(p, caller) {
+			gr, go_on, gch := confirm_gate(parked, .Fs_Write, caller, "", fmt.tprintf("create %s %s?", dir ? "the folder" : "the file", p))
 			if !go_on do return gr, gch
 			ch = gch
 		}
 		created: string
-		if dir do created, err = fs_create_dir(p, caller)
-		else do created, err = fs_create_file(p, caller)
+		if dir do created, err = fs_create_dir(p, rules)
+		else do created, err = fs_create_file(p, rules)
 		if err != "" do return fail(err), ch
 		return {ok = true, data = fmt.aprintf(`{{"path":%s}}`, quoted(created))}, ch
 	case Rename_Path:
@@ -181,21 +189,39 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller, request_id: u64 = 0) -> (r
 		b, _, e2 := fs_check_write(c.to, caller)
 		if e2 != "" do return fail(e2), false
 		ch := false
-		if caller.kind == .Control && (fs_outside_own(a, caller) || fs_outside_own(b, caller)) {
-			gr, go_on, gch := confirm_gate(Rename_Path{from = a, to = b}, .Fs_Write, caller, c.confirm, fmt.tprintf("rename %s to %s?", a, b))
+		rules := caller
+		if c.confirm != "" {
+			gr, go_on, gch, asker := confirm_use(Rename_Path{from = a, to = b}, .Fs_Write, caller, c.confirm)
+			if !go_on do return gr, gch
+			ch, rules = gch, asker
+			if _, _, e := fs_check_write(a, rules); e != "" do return fail(e), ch
+			if _, _, e := fs_check_write(b, rules); e != "" do return fail(e), ch
+		} else if caller.kind == .Control && (fs_outside_own(a, caller) || fs_outside_own(b, caller)) {
+			gr, go_on, gch := confirm_gate(Rename_Path{from = a, to = b}, .Fs_Write, caller, "", fmt.tprintf("rename %s to %s?", a, b))
 			if !go_on do return gr, gch
 			ch = gch
 		}
-		if err := fs_rename(a, b, caller); err != "" do return fail(err), ch
+		if err := fs_rename(a, b, rules); err != "" do return fail(err), ch
 		return {ok = true}, true // open tabs may have new titles
 	case Delete_Path:
 		if len(c.paths) > 0 do return delete_batch_apply(c, caller)
 		p, _, err := fs_check_write(c.path, caller)
 		if err != "" do return fail(err), false
 		if !os.exists(p) do return fail("no such file or folder"), false
-		gr, go_on, ch := confirm_gate(Delete_Path{path = p}, .Delete, caller, c.confirm, fmt.tprintf("move %s to the Trash?", p))
-		if !go_on do return gr, ch
-		checked, derr := fs_delete_check(p, caller)
+		ch := false
+		rules := caller
+		if c.confirm != "" {
+			gr, go_on, gch, asker := confirm_use(Delete_Path{path = p}, .Delete, caller, c.confirm)
+			if !go_on do return gr, gch
+			ch, rules = gch, asker
+		} else {
+			// every rule before asking (as a batch does), and again when it runs
+			if _, e := fs_delete_check(p, caller); e != "" do return fail(e), false
+			gr, go_on, gch := confirm_gate(Delete_Path{path = p}, .Delete, caller, "", fmt.tprintf("move %s to the Trash?", p))
+			if !go_on do return gr, gch
+			ch = gch
+		}
+		checked, derr := fs_delete_check(p, rules)
 		id := ""
 		if derr == "" do derr, id = fs_trash_checked(checked)
 		if derr != "" do return fail(derr), ch
@@ -237,16 +263,29 @@ delete_batch_apply :: proc(c: Delete_Path, caller: Caller) -> (r: Result, change
 	all := make([dynamic]string, context.temp_allocator)
 	if c.path != "" do append(&all, c.path)
 	append(&all, ..c.paths)
+	// the paths as this caller names them, checked and merged: what a confirmation is bound to
 	plan, err := fs_delete_plan(all[:], caller)
 	if err != "" do return fail(err), false
 	// the checked paths park (one left after nesting: as a single delete_path)
 	parked := len(plan) == 1 ? Delete_Path{path = plan[0]} : Delete_Path{paths = plan}
-	gr, go_on, ch := confirm_gate(parked, .Delete, caller, c.confirm, fs_delete_summary(plan))
-	if !go_on do return gr, ch
+	ch := false
+	rules := caller
+	if c.confirm != "" {
+		// a confirmation: the entry is used up, then every path again by the asker's rules
+		gr, go_on, gch, asker := confirm_use(parked, .Delete, caller, c.confirm)
+		if !go_on do return gr, gch
+		ch, rules = gch, asker
+		plan, err = fs_delete_plan(plan, rules)
+		if err != "" do return fail(err), ch
+	} else {
+		gr, go_on, gch := confirm_gate(parked, .Delete, caller, "", fs_delete_summary(plan))
+		if !go_on do return gr, gch
+		ch = gch
+	}
 	ids := make([]string, len(plan), context.temp_allocator)
 	for p, i in plan {
 		// checked again right before it moves (a tab may have started in it since)
-		_, derr := fs_delete_check(p, caller)
+		_, derr := fs_delete_check(p, rules) // by the asker's rules
 		if derr == "" do derr, ids[i] = fs_trash_checked(p)
 		if derr != "" {
 			r = fail(fmt.tprintf("moved %d of %d to the Trash, then %s: %s (the %d moved stay in the Trash)", i, len(plan), p, derr, i))
@@ -257,6 +296,19 @@ delete_batch_apply :: proc(c: Delete_Path, caller: Caller) -> (r: Result, change
 		}
 	}
 	return {ok = true, data = fmt.aprintf(`{{"trashed":%d%s}}`, len(plan), restore_json(plan, ids))}, true
+}
+
+// A confirmation token sent with a file command: the parked entry it names is used up (confirm_gate:
+// the user, or a trusted asker itself; bound to the exact arguments parked), and asker is the caller
+// that asked for it, whose rules the command then runs by (an agent's rename confirmed by the user
+// still may not move a credential). go_on false: r says why.
+@(private = "file")
+confirm_use :: proc(cmd: Command, class: Command_Class, caller: Caller, token: string) -> (r: Result, go_on, changed: bool, asker: Caller) {
+	asker = caller
+	for p in state.pending_confirmations do if p.token == token do asker = p.caller
+	r, go_on, changed = confirm_gate(cmd, class, caller, token, "", force_ask = false)
+	if !go_on do asker = caller
+	return
 }
 
 // delete_path's restore ids, as `,"restore":[{"path","id"}]` after its other members: one per item
@@ -302,14 +354,12 @@ fs_copy_apply :: proc(c: Fs_Copy, caller: Caller, request_id: u64) -> (r: Result
 		// a confirmation (the bar's Confirm, a browser's, or a trusted asker's own token): the parked
 		// entry is used up, and the copy runs by the rules of whoever asked for it, not of who
 		// confirmed (an agent's copy confirmed by the user still refuses credentials)
-		asker := caller
-		for p in state.pending_confirmations do if p.token == c.confirm {
-			if _, is := p.command.(Fs_Copy); is do asker = p.caller
-		}
-		gr, go_on, gch := confirm_gate(Fs_Copy{from = c.from, to = c.to, unique = c.unique}, .Fs_Write, caller, c.confirm, "")
+		a, b, perr := fs_copy_paths(c.from, c.to, caller) // as this caller names them: what the token is bound to
+		if perr != "" do return fail(perr), false
+		gr, go_on, gch, asker := confirm_use(Fs_Copy{from = a, to = b, unique = c.unique}, .Fs_Write, caller, c.confirm)
 		if !go_on do return gr, gch
 		ch = gch
-		plan, err = fs_copy_plan(c.from, c.to, c.unique, asker, virtual.arena_allocator(arena))
+		plan, err = fs_copy_plan(a, b, c.unique, asker, virtual.arena_allocator(arena))
 		if err != "" do return fail(err), ch
 	} else {
 		plan, err = fs_copy_plan(c.from, c.to, c.unique, caller, virtual.arena_allocator(arena))

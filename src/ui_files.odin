@@ -234,7 +234,7 @@ files_panel :: proc(row_w_: f32) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), 0, 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 	}) {
 		// the folder's name on the left (as the Sessions tab's project rows: a folder), the buttons on the right
-		name := root != "" ? filepath.base(core.files_base()) : "No folder" // the project's; the switcher below names the checkout
+		name := root != "" ? core.files_tree_name() : "No folder" // the project's, as the sidebar names it; the switcher below names the checkout
 		room := row_w - px(PAD_ROW + KIND_ICON + GAP_INLINE + GAP_GROUP) - f32(len(Files_Tool)) * px(FILES_TOOL + GAP_BUTTONS)
 		icon(.Folder, th.text_muted, KIND_ICON)
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
@@ -845,9 +845,12 @@ files_follow_active :: proc(root: string) {
 	if e == nil || e.view != .File || e.path == "" || root == "" do return
 	p := core.fs_real(e.path)
 	if p == core.files_ui.active_file do return
+	// only into the tree it is in: a tree of another project (selected in the sidebar) stays put,
+	// and the file is revealed once the tree shows its project again
+	if !files_reveals(p, root) do return
 	delete(core.files_ui.active_file)
 	core.files_ui.active_file = strings.clone(p)
-	if strings.has_prefix(p, strings.concatenate({root, "/"}, context.temp_allocator)) do ui_do(core.Files_Reveal{path = p})
+	ui_do(core.Files_Reveal{path = p})
 }
 
 // Scrolls so row i shows (centred when far).
@@ -1045,7 +1048,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if fu.press_dir {
 				if fu.press_clicks == 1 do files_toggle(p)
 			} else {
-				if core.path_kind(p) == .File do ui_do(core.Open_File{path = p, session = files_session(), preview = fu.press_clicks < 2})
+				if core.path_kind(p) == .File do files_open(p, preview = fu.press_clicks < 2)
 			}
 		}
 		return true
@@ -1124,7 +1127,7 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	case .ENTER, .KP_ENTER, .SPACE:
 		if i < 0 do break
 		if rows[i].kind == .Dir do files_toggle(rows[i].path)
-		else do ui_do(core.Open_File{path = rows[i].path, session = files_session(), preview = e.key_code == .SPACE})
+		else do files_open(rows[i].path, preview = e.key_code == .SPACE)
 	case .F2:
 		if i >= 0 do files_step(rows[i].path, .Rename)
 	case .BACKSPACE, .DELETE:
@@ -1269,10 +1272,10 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 		return
 	}
 	if !is_dir {
-		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path, session = files_session()}})
-		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, session = files_session(), preview = true}})
+		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path}}) // no session: by the file's project (files_open)
+		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, preview = true}})
 		append(items, core.Menu_Item{label = "Open to the side", files = .Open_Side})
-		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path, session = files_session()}})
+		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path}})
 		sep(items)
 	}
 	append(items, core.Menu_Item{label = "New file…", files = .New_File})
@@ -1288,7 +1291,7 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 	append(items, core.Menu_Item{label = "Reveal in Finder", cmd = core.Reveal_In_Finder{path = path}})
 	append(items, core.Menu_Item{label = "Copy path", files = .Copy_Path})
 	append(items, core.Menu_Item{label = "Copy relative path", files = .Copy_Relative})
-	if s := files_session(); s != 0 {
+	if s := files_session(); s != 0 && files_tree_is_session(core.cur()) { // only into the session whose folder the tree shows
 		dir := is_dir ? path : filepath.dir(path)
 		append(items, core.Menu_Item{label = "Open terminal here", cmd = core.New_Shell_Tab{session = s, cwd = dir}})
 	}
@@ -1314,7 +1317,7 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 		return true
 	case .Open_Side:
 		// open_file, then that tab in a new pane on the right (a pane holding only it shows it already)
-		r := ui_run(core.Open_File{path = path, session = files_session()})
+		r := ui_run(core.Open_File{path = path})
 		if !r.ok {
 			toast_show(r.error, true)
 			return false
@@ -1427,7 +1430,7 @@ files_commit_edit :: proc(blur := false) {
 	case .New_File:
 		path = strings.concatenate({fu.target, "/", name}, context.temp_allocator)
 		r = ui_run(core.Create_File{path = path})
-		if r.ok do ui_do(core.Open_File{path = path, session = files_session()})
+		if r.ok do ui_do(core.Open_File{path = path}) // by the file's project (files_open)
 	case .New_Folder:
 		path = strings.concatenate({fu.target, "/", name}, context.temp_allocator)
 		r = ui_run(core.Create_Dir{path = path})
@@ -1529,7 +1532,7 @@ files_filter_key :: proc(key: sapp.Keycode) -> bool {
 			core.files_select_in(core.tree_view(), rows[0].path)
 			files_scroll_to(0, len(rows))
 			// Enter while filtering opens the best match
-			if key != .DOWN && rows[0].kind == .File && state.files.filter != "" do ui_do(core.Open_File{path = rows[0].path, session = files_session()})
+			if key != .DOWN && rows[0].kind == .File && state.files.filter != "" do ui_do(core.Open_File{path = rows[0].path})
 		}
 		ui_do(core.Set_Focus{"files"})
 		return true

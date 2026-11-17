@@ -1,0 +1,23 @@
+# Files-session scene, first run (tests/scripts/files-session.sh): no session; the project's
+# Files tab; a click on a file opens it in the project's Files session.
+wait 800
+command {"type":"add_project","cwd":"@PROJ@"}
+wait 300
+clickid lefttab 1
+wait 400
+assert_files a.txt\nb.md\n
+assert_state open_sessions.# 0
+clickid frow 0
+eventually
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent files
+assert_state open_sessions.0.tabs.0.kind editor
+assert_state open_sessions.0.tabs.0.title a.txt
+assert_rows open Files
+# the tree stays on the project
+assert_files a.txt\nb.md\n
+shot files-session/opened
+# nothing runs in it
+command {"type":"new_shell_tab","session":$session}
+assert_result error Start a session in notes for a terminal
+quit

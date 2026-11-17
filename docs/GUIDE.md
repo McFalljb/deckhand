@@ -1436,8 +1436,10 @@ guide).
 
 ## The Files tab
 
-**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of the session on
-screen, else of the selected project. Press ⇧⌘E again to go back to Sessions.
+**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of what you picked
+last: the session you showed, or a project you selected in the Sessions tab (even while a session
+of another project stays on screen). The header names the project. Press ⇧⌘E again to go back to
+Sessions.
 
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
@@ -1493,6 +1495,11 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   shown, ⌘⌫ moves the selection to the Trash, ⌘C ⌘X ⌘V ⌘D copy, cut, paste and duplicate, ⌘Z
   undoes, Esc clears a selection of several (then a cut), else gives the keyboard back. Typing letters jumps to the next
   row whose name starts with them (a pause of a second starts over); they never reach a terminal.
+- **Opening goes by the file's project**: in the session on screen when it is that project's,
+  else in the project's **Files** session, which comes on screen (listed as "Files" under Open):
+  file tabs only, no agent, one per project, back after a relaunch (one pane); it closes with its
+  last tab, and terminals, browser and agent tabs need a real session (New session). Any reason a
+  file does not open (sign-ins, too large, binary, gone) shows as a toast.
 - **Header buttons**: New file, New folder, Collapse all, Hide/Show ignored files, Refresh, Reveal
   in Finder.
 - **New file / New folder**: the name field opens as the first row of the folder (the selected
@@ -2387,7 +2394,7 @@ when you have not edited it, and asks when you have. In the Files tab the arrows
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
 Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
-shown; git letters and colours are the window's. ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it.
+shown; git letters and colours are the window's; an icon shows each file's kind; gitignored files show dimmed, and the eye in the tree's header hides them (remembered per browser). ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it.
 Drag rows (or the selection) onto a folder, a file (its folder) or the empty space below (the top folder) to move them there, without asking; a closed folder opens when you hover over it, and a name already there is refused, never renamed. On a phone, or from the keyboard, **Move to…** in the row's menu or the selection bar picks the folder. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents

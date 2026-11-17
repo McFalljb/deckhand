@@ -283,7 +283,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 
 	for &os in r.open_sessions {
 		if state_mirrored_sessions(no) >= MIRROR_SESSIONS_MAX do break
-		if os.home do continue
+		if os.home || os.agent == .Files do continue // a Files session is that machine's window's own (files_session.odin)
 		id, ok := id_pack(no, os.id)
 		if !ok do continue
 		pid, _ := id_pack(no, os.project_id)

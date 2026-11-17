@@ -259,9 +259,10 @@ files_expanded_dirs :: proc(root: string) -> []string {
 // ---- the tree's root ----
 
 // The folder the Files tab is for: the session on screen's, else the
-// selected project's ("" = none). Real path.
+// selected project's ("" = none). Real path. A project selected after the session was shown
+// wins (files_tree_follows_session, files_session.odin).
 files_base :: proc() -> string {
-	if cs := cur(); cs != nil && !cs.home && cs.cwd != "" do return fs_real(cs.cwd)
+	if cs := cur(); cs != nil && !cs.home && cs.cwd != "" && files_tree_follows_session(cs) do return fs_real(cs.cwd)
 	if p := find_project(state.selected_project); p != nil && p.machine == 0 do return fs_real(p.cwd) // another machine's folder is not this Mac's
 	return ""
 }

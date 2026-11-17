@@ -167,6 +167,7 @@ changes_tool_state :: proc(v: ^core.Changes_View, t: Changes_Tool) -> (enabled: 
 			if _, is := s.tabs[0].kind.(core.Claude_Tab); !is do return false, "this session's Claude is not running"
 			return true, ""
 		}
+		if s != nil && s.agent == .Files do return false, "a Files session has no agent: start a session to ask for a review"
 		pt := core.session_pi_tab(s)
 		if pt == nil || pt.status != .Running do return false, "this session's pi is not running"
 		if pt.waiting do return false, "pi is waiting for you"

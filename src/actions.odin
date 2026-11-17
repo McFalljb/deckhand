@@ -241,7 +241,7 @@ ACTIONS := [?]Action {
 	}},
 	{id = "close_tab", label = "Close tab", keys = "⌘W", make = proc() -> (core.Command, bool) {
 		cs := core.cur_view() // another machine's: closed there
-		if cs == nil || len(cs.tabs) == 0 || cs.active_tab == cs.tabs[0].id do return nil, false // the pi tab stays
+		if cs == nil || len(cs.tabs) == 0 || cs.active_tab == core.session_main_tab(cs) do return nil, false // the pi tab stays (a Files session has none)
 		return core.Close_Tab{tab_id = cs.active_tab}, true
 	}, prepare = proc() {
 		// the user's own close (the menu bar's, the palette's): ⇧⌘T reopens it (closed_tabs.odin);

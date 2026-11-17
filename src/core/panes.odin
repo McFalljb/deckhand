@@ -313,7 +313,7 @@ pane_add_tab :: proc(s: ^Open_Session, tab: Tab, pane: u64 = 0, after: u64 = 0) 
 		fp := session_focused_pane(s)
 		t.pane = fp != nil ? fp.id : 0
 	}
-	at = max(at, min(1, len(s.tabs))) // the main tab stays tabs[0]
+	at = max(at, session_main_count(s)) // the main tab stays tabs[0] (a Files session has none)
 	inject_at(&s.tabs, at, t)
 	if p := session_pane(s, t.pane); p != nil && p.active == 0 do p.active = t.id // an empty pane (being built) shows it
 	mirror_sync(s)
@@ -455,7 +455,7 @@ pane_move_tab :: proc(s: ^Open_Session, tab_id: u64, to: u64, index := -1, remov
 	if from != to {
 		if p := session_pane(s, from); p != nil && p.active == tab_id do p.active = pane_next_tab(s, from, tab_id)
 	}
-	if from_i > 0 {
+	if from_i > 0 || s.agent == .Files {
 		tab := s.tabs[from_i]
 		ordered_remove(&s.tabs, from_i)
 		// strip position `index` in `to` (without the tab): before the index-th tab of that pane, else after its last
@@ -468,7 +468,7 @@ pane_move_tab :: proc(s: ^Open_Session, tab_id: u64, to: u64, index := -1, remov
 			last = i
 		}
 		if at < 0 do at = last >= 0 ? last + 1 : len(s.tabs)
-		at = max(at, 1)
+		at = max(at, session_main_count(s))
 		tab.pane = to
 		inject_at(&s.tabs, at, tab)
 	} else {

@@ -788,7 +788,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "create_file":         cmd = Create_File{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
 	case "create_dir":          cmd = Create_Dir{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
 	case "rename_path":         cmd = Rename_Path{from = get_str(&r, "from"), to = get_str(&r, "to"), confirm = get_str(&r, "confirm", optional = true)}
-	case "delete_path":         cmd = Delete_Path{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
+	case "delete_path":         cmd = Delete_Path{path = get_str(&r, "path", optional = true), paths = get_strings(&r, "paths"), confirm = get_str(&r, "confirm", optional = true)}
 	case "reveal_in_finder":    cmd = Reveal_In_Finder{path = get_str(&r, "path")}
 	case "set_left_tab":        cmd = Set_Left_Tab{tab = get_enum(&r, "tab", LEFT_TAB_NAMES)}
 	case "files_expand":        cmd = Files_Expand{path = get_str(&r, "path"), expanded = get_bool(&r, "expanded")}

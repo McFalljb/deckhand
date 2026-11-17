@@ -667,3 +667,66 @@ files_list_dir_error_names_the_path :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(err, locked) && strings.contains(err, "ermission denied"), err)
 	testing.expect(t, !strings.contains(err, "Can't open"), err)
 }
+
+@(private = "file")
+copied_text: string
+
+// A row of a selection of several: its menu acts on them all (Move N items to Trash…, Copy paths
+// one per line) and has nothing for one row (open, new, rename); another row's menu is its own.
+@(test)
+files_menu_for_several_rows :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "a.txt", "x")
+	fwrite(dir, "b.txt", "x")
+	fwrite(dir, "c.txt", "x")
+	win_os.set_clipboard = proc(s: string) {delete(copied_text); copied_text = strings.clone(s)}
+	rows := core.tree_rows()
+	v := core.tree_view()
+	core.files_select_in(v, rows[0].path)
+	core.files_sel_click(v, rows, 1, false, true) // ⌘-click b.txt
+	labels :: proc(path: string) -> string {
+		items := make([dynamic]core.Menu_Item, context.temp_allocator)
+		files_menu_items(path, &items)
+		b := strings.builder_make(context.temp_allocator)
+		for it in items do if !it.sep do fmt.sbprintf(&b, "%s|", it.label)
+		return strings.to_string(b)
+	}
+	a, b, c := fmt.tprintf("%s/a.txt", dir), fmt.tprintf("%s/b.txt", dir), fmt.tprintf("%s/c.txt", dir)
+	testing.expect_value(t, labels(a), "Move 2 items to Trash…|Copy paths|Copy relative paths|")
+	items := make([dynamic]core.Menu_Item, context.temp_allocator)
+	files_menu_items(b, &items)
+	d, ok := items[0].cmd.(core.Delete_Path)
+	testing.expect(t, ok && len(d.paths) == 2 && d.paths[0] == a && d.paths[1] == b, "the batch, in row order")
+	testing.expect(t, files_step(b, .Copy_Path), "copied")
+	testing.expect_value(t, copied_text, fmt.tprintf("%s\n%s", a, b))
+	testing.expect(t, files_step(b, .Copy_Relative), "copied")
+	testing.expect_value(t, copied_text, "a.txt\nb.txt")
+	// a row outside the selection: its own menu
+	testing.expect(t, strings.contains(labels(c), "Rename…|Move to Trash…|"), labels(c))
+	delete(copied_text)
+	copied_text = ""
+}
+
+// The menu's count is the batch's after nesting (a folder and what is in it: one item), as the
+// confirmation and the browser say.
+@(test)
+files_menu_counts_the_merged_batch :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "d/x.txt", "x")
+	fwrite(dir, "z.txt", "x")
+	testing.expect(t, core.run_command(core.Files_Expand{path = "d", expanded = true}, {kind = .UI}).ok)
+	rows := core.tree_rows()
+	v := core.tree_view()
+	core.files_select_in(v, rows[0].path) // d
+	core.files_sel_click(v, rows, 1, true, false) // to d/x.txt
+	labels :: proc(path: string) -> string {
+		items := make([dynamic]core.Menu_Item, context.temp_allocator)
+		files_menu_items(path, &items)
+		return items[0].label
+	}
+	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move to Trash…")
+	core.files_sel_click(v, rows, 2, true, false) // to z.txt
+	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move 2 items to Trash…")
+}

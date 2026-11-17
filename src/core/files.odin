@@ -401,7 +401,9 @@ Files_View :: struct {
 	built:        bool,
 	repo_checked: string, // the root whose repository was registered (owned)
 	// UI state (ui_files.odin)
-	cursor:       string, // selected row's path (owned)
+	cursor:       string, // selected row's path (owned); the keyboard's row
+	selected:     map[string]bool, // the selection (owned keys; empty: the cursor alone): files_sel_*
+	anchor:       string, // where a shift-click or shift-arrow range starts (owned)
 	scroll:       f32, // logical px from the top of the rows
 	reveal:       bool, // scroll the cursor into view at the next layout
 	active_file:  string, // the editor file last revealed (owned)
@@ -418,12 +420,147 @@ tree_rows :: proc() -> []Files_Row {return files_rows(files_root())}
 files_select :: proc(path: string) {files_select_in(&files_ui, path)}
 
 files_select_in :: proc(v: ^Files_View, path: string) {
-	if v.cursor != path {
-		delete(v.cursor)
-		v.cursor = strings.clone(path)
-	}
+	files_sel_cursor(v, path)
+	files_sel_set(v, {path})
+	files_sel_anchor(v, path)
 	v.reveal = true
 	window_state_changed()
+}
+
+// ---- the selection (several rows: ⌘-click, shift-click, shift-arrows, ⌘A; the window's only) ----
+
+@(private = "file")
+files_sel_cursor :: proc(v: ^Files_View, path: string) {
+	if v.cursor == path do return
+	delete(v.cursor)
+	v.cursor = strings.clone(path)
+}
+
+@(private = "file")
+files_sel_anchor :: proc(v: ^Files_View, path: string) {
+	if v.anchor == path do return
+	delete(v.anchor)
+	v.anchor = strings.clone(path)
+}
+
+// The selection becomes paths (cloned).
+files_sel_set :: proc(v: ^Files_View, paths: []string) {
+	// cloned before the old ones go: paths may be (or point into) them
+	next := make(map[string]bool, max(len(paths), 1))
+	for p in paths do if p != "" && p not_in next do next[strings.clone(p)] = true
+	for k in v.selected do delete(k)
+	delete(v.selected)
+	v.selected = next
+}
+
+// Whether path is selected (the cursor alone, while nothing else is).
+files_sel_has :: proc(v: ^Files_View, path: string) -> bool {
+	if path == "" do return false
+	if len(v.selected) == 0 do return path == v.cursor
+	return path in v.selected
+}
+
+// A row a selection may hold: a file or folder (not "N more…" or a folder's error).
+files_sel_row_ok :: proc(r: Files_Row) -> bool {return r.more == 0 && r.error == "" && r.path != ""}
+
+// The selected paths that show, in row order (temp allocator); the cursor's when nothing else is.
+files_sel_paths :: proc(v: ^Files_View, rows: []Files_Row) -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	for r in rows do if files_sel_row_ok(r) && files_sel_has(v, r.path) do append(&out, r.path)
+	return out[:]
+}
+
+// A click on row i (press): alone, it selects only that row; ⌘ adds it or takes it out; shift
+// selects from the anchor to it (⌘⇧ adds that range). The cursor goes to the row; the anchor too,
+// but for shift.
+files_sel_click :: proc(v: ^Files_View, rows: []Files_Row, i: int, shift, cmd: bool) {
+	if i < 0 || i >= len(rows) || !files_sel_row_ok(rows[i]) do return
+	p := rows[i].path
+	switch {
+	case shift:
+		files_sel_range(v, rows, i, keep = cmd)
+	case cmd:
+		if len(v.selected) == 0 && v.cursor != "" do files_sel_set(v, {v.cursor}) // the cursor alone was the selection
+		if p in v.selected {
+			k, _ := delete_key(&v.selected, p)
+			delete(k)
+		} else {
+			v.selected[strings.clone(p)] = true
+		}
+		files_sel_anchor(v, p)
+		files_sel_cursor(v, p)
+		if len(v.selected) == 0 do v.selected[strings.clone(p)] = true // never nothing: the cursor's row stays
+	case:
+		files_sel_set(v, {p})
+		files_sel_anchor(v, p)
+		files_sel_cursor(v, p)
+	}
+	window_state_changed()
+}
+
+// The anchor's row to row i, selected (keep: added to what was); the cursor goes to i. An anchor
+// that does not show: the cursor's row, else i.
+files_sel_range :: proc(v: ^Files_View, rows: []Files_Row, i: int, keep := false) {
+	if i < 0 || i >= len(rows) do return
+	a := files_row_of(rows, v.anchor)
+	if a < 0 {
+		a = files_row_of(rows, v.cursor)
+		if a < 0 do a = i
+		files_sel_anchor(v, rows[a].path)
+	}
+	lo, hi := min(a, i), max(a, i)
+	out := make([dynamic]string, context.temp_allocator)
+	if keep {
+		if len(v.selected) == 0 && v.cursor != "" do append(&out, v.cursor)
+		for s in v.selected do append(&out, s)
+	}
+	for k in lo ..= hi do if files_sel_row_ok(rows[k]) do append(&out, rows[k].path)
+	files_sel_set(v, out[:])
+	files_sel_cursor(v, rows[i].path)
+	window_state_changed()
+}
+
+// ⌘A: every row that shows.
+files_sel_all :: proc(v: ^Files_View, rows: []Files_Row) {
+	out := make([dynamic]string, context.temp_allocator)
+	for r in rows do if files_sel_row_ok(r) do append(&out, r.path)
+	if len(out) == 0 do return
+	files_sel_set(v, out[:])
+	if files_row_of(rows, v.cursor) < 0 do files_sel_cursor(v, out[0])
+	window_state_changed()
+}
+
+// Esc: the cursor's row alone. False: it was already (Esc then gives the keyboard back).
+files_sel_collapse :: proc(v: ^Files_View) -> bool {
+	if len(v.selected) <= 1 do return false
+	files_sel_set(v, {v.cursor})
+	files_sel_anchor(v, v.cursor)
+	window_state_changed()
+	return true
+}
+
+// Type-to-select: the row whose name starts with prefix (any case), from row `from` on, round to
+// the top; -1 = none. Typing the same letter again moves on to the next row with that letter.
+files_type_match :: proc(rows: []Files_Row, from: int, prefix: string) -> int {
+	if prefix == "" || len(rows) == 0 do return -1
+	starts :: proc(name, prefix: string) -> bool {
+		return len(name) >= len(prefix) && strings.equal_fold(name[:len(prefix)], prefix)
+	}
+	look :: proc(rows: []Files_Row, from: int, prefix: string) -> int {
+		n := len(rows)
+		start := clamp(from, 0, n - 1)
+		for k in 0 ..< n {
+			j := (start + k) % n
+			if files_sel_row_ok(rows[j]) && starts(rows[j].name, prefix) do return j
+		}
+		return -1
+	}
+	if j := look(rows, from, prefix); j >= 0 do return j
+	// "aaa" with no name starting so: the next row starting with "a" after the one at from
+	same := true
+	for k in 1 ..< len(prefix) do if prefix[k] != prefix[0] do same = false
+	if same && len(prefix) > 1 do return look(rows, from + 1, prefix[:1])
+	return -1
 }
 
 // The rows of the tree at root, rebuilt if anything they show changed.

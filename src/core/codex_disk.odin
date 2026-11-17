@@ -436,6 +436,14 @@ codex_chat_folder :: proc(cwd: string, roots: [3]string) -> bool {
 	return false
 }
 
+CODEX_CHAT_GONE :: "the chat's folder is gone"
+
+// Whether a Codex conversation of project p's runs in cwd as a Codex Desktop chat in Chats: there
+// and nowhere else (never the chats folder, even once that folder is gone). Main thread.
+codex_chat_cwd :: proc(p: ^Project, harness: Harness, cwd: string) -> bool {
+	return p != nil && p.group == .Chats && harness == .Codex && codex_chat_folder(cwd, codex_chat_roots_here())
+}
+
 // The listed rollouts (codex_source_listed) whose cwd is cwd or real, byte for byte, newest first,
 // with their titles (session_index.jsonl; "" = none); with chat_roots also every one whose cwd is a
 // chat's folder below them (codex_chat_folder; its cwd kept). Only the cache: no file is read. Main

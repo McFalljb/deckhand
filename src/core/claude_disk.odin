@@ -553,7 +553,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 		if m >= MAX_SESSIONS do break
 		if rec, _ := claude_record(c.id); rec != nil do continue
 		if session_listed(state.sessions[:], c.id) || session_listed(state.chats[:], c.id) do continue
-		if c.cwd != "" && (project_by_cwd(c.cwd) != nil || project_by_cwd(fs_real(c.cwd)) != nil) do continue
+		if c.cwd != "" && project_by_cwd(c.cwd) != nil do continue // by text, as the project's own scan matches
 		dup := false
 		for f in out do if f.id == c.id do dup = true
 		if dup do continue
@@ -596,7 +596,7 @@ codex_chats_refile :: proc(chats: ^Project) {
 	roots := codex_chat_roots_here()
 	for &r in state.claude_history {
 		if r.harness != .Codex || r.project == chats.cwd || !codex_chat_folder(r.project, roots) do continue
-		if project_by_cwd(r.project) != nil || project_by_cwd(fs_real(r.project)) != nil do continue
+		if project_by_cwd(r.project) != nil do continue // by text: an entry's project is its project's cwd
 		delete(r.project, runtime.heap_allocator())
 		r.project = strings.clone(chats.cwd, runtime.heap_allocator())
 		persist.gen += 1

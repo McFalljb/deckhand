@@ -849,7 +849,7 @@ codex_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Resul
 	if mr, missing := codex_missing(caller); missing do return mr, false
 	// a Codex Desktop chat (Chats; f.cwd): in the folder it ran in, as Codex needs
 	cwd := f.cwd != "" ? f.cwd : p.cwd
-	if f.cwd != "" && !os.is_dir(cwd) do return fail("the chat's folder is gone"), false
+	if f.cwd != "" && !os.is_dir(cwd) do return fail(CODEX_CHAT_GONE), false
 	if f.cwd == "" && (p.missing || !os.is_dir(p.cwd)) do return fail("the project's folder is gone"), false
 	if claude_open_tab(f.id) != 0 || claude_tab_of_session(f.id) != 0 do return fail("that conversation is open in a tab"), false
 	// under the account whose home it was found in, while that is configured
@@ -861,8 +861,9 @@ codex_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Resul
 // inside its project, else the project's (temp).
 @(private = "file")
 claude_resume_cwd :: proc(rec: ^Claude_Record, p: ^Project, s: ^Open_Session = nil) -> string {
-	// a Codex Desktop chat in Chats: the folder Codex made for it (codex_chat_roots), as Codex wrote it
-	if p.group == .Chats && rec.harness == .Codex && codex_chat_folder(rec.cwd, codex_chat_roots_here()) && os.is_dir(rec.cwd) do return rec.cwd
+	// a Codex Desktop chat in Chats: the folder Codex made for it, as Codex wrote it, gone or not (the
+	// caller refuses a gone one: CODEX_CHAT_GONE)
+	if codex_chat_cwd(p, rec.harness, rec.cwd) do return rec.cwd
 	if rec.cwd != "" && os.is_dir(rec.cwd) {
 		at := fs_real(rec.cwd)
 		if within(at, fs_real(p.cwd)) || (s != nil && within(at, fs_real(s.cwd))) do return at
@@ -1083,7 +1084,9 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 				args = make([]string, len(rec.args), context.temp_allocator)
 				for x, i in rec.args do args[i] = strings.clone(x, context.temp_allocator)
 			}
-			r, ch := claude_open_session(p, claude_resume_cwd(rec, p), id, args, caller, account, harness = .Codex)
+			cwd := claude_resume_cwd(rec, p)
+			if codex_chat_cwd(p, .Codex, cwd) && !os.is_dir(cwd) do return fail(CODEX_CHAT_GONE), false
+			r, ch := claude_open_session(p, cwd, id, args, caller, account, harness = .Codex)
 			if !r.ok do return r, ch
 			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
 		}

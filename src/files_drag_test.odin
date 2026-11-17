@@ -293,6 +293,7 @@ files_drag_keys_go_nowhere :: proc(t: ^testing.T) {
 	qx, qy, _ := fd_row("/q r.txt")
 	qx -= 40 // not where the last press was (that would be a double-click)
 	tb := clay.GetElementData(clay.ID("terminal")).boundingBox // the terminal's area, laid out by fd_row
+	ui_pane_rects(core.cur()) // the panes' rects, as a frame sets them (the release goes to the pane under it)
 	tx, ty := tb.x + tb.width / 2, tb.y + tb.height / 2
 	testing.expect(t, tb.width > 0 && !over_sidebar(tx), "the terminal is laid out")
 	if tv := term_views[101]; tv != nil do tv.x, tv.y, tv.w, tv.h = tb.x, tb.y, tb.width, tb.height // as drawing sets them

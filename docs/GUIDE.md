@@ -672,7 +672,8 @@ is waiting for you).
 ### Everyday tasks
 
 - **To add a project**, click **+** on the PROJECTS heading and pick a folder, drop a folder onto
-  the left column, or use the palette's "Add project…" (with nothing open, the centre has an
+  the left column (anywhere but the Files tab's list, where a drop copies files: see the Files
+  tab), or use the palette's "Add project…" (with nothing open, the centre has an
   **Add project…** button beside **New chat**). From a terminal, `build/deckhand DIR`
   adds DIR and starts a new session there.
 - **To open a session**, click it. If it is already open, Deckhand shows it instead of starting it
@@ -1368,7 +1369,8 @@ as it does anywhere else.
 - **To make the text bigger or smaller**, press ⌘+ or ⌘− (⌘0: back to the look's size), or use
   the View menu. It sets the terminals' and the editor's text size and is remembered.
 - **To paste a file's path**, drag its row from the Files tab onto the terminal (a selection of
-  several: all their paths, separated by spaces).
+  several: all their paths, separated by spaces). It goes to the pane you let go over, not the
+  focused one.
 - **Links**: hold **⌘** over a link to underline it and see where it goes (at the bottom of the
   terminal); **⌘-click** opens it in your default browser, and a mail link in your mail app.
   **⇧⌘-click** opens a web link in a new browser tab of the session, in front (in your default
@@ -1451,8 +1453,35 @@ Sessions.
   binaries, and agent instructions (`AGENTS.md`, `CLAUDE.md`).
 - **Mouse**: a click opens a folder or previews a file; ⌘-click adds or removes a row, shift-click
   selects a range (neither opens anything); a right-click selects the row (one already selected
-  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path (or a
-  selection's paths).
+  keeps the selection), then opens its menu; drag a row out of the tree onto a pane (below).
+- **To drop files on a pane**, drag a row (or a selection it is in) out of the tree. Only the pane
+  under the pointer when you let go gets it, whichever pane is focused; it is outlined while you
+  drag, and the dragged name says what will happen:
+  - **Paste path**: a terminal gets the paths, each quoted for the shell, separated by spaces.
+  - **Insert into prompt**: a pi, Claude Code or Codex tab gets the paths typed into its prompt,
+    separated by spaces (quoted only when a name has a space or a quote; for Codex also one
+    starting with / ! $ or @). Nothing is sent: you press Enter. Codex refuses it while it is
+    working or asking something; a toast says why.
+  - **Open here**: an editor, Markdown, browser, Changes or app tab (or an empty pane) opens the
+    files as tabs in that pane; folders are not opened. A file already open in another pane moves
+    here, unless it is that pane's only tab. A file Deckhand will not open (a credential, for
+    example) is named in a toast.
+
+  A tab whose program has exited takes nothing. Letting go over no pane (the title bar, the
+  drawer) does nothing; **Esc** cancels. A name with a control character (a newline) is never
+  typed anywhere.
+- **To copy files in from Finder**, drop them on the Files tab's list: onto a folder to copy into
+  it, onto a file to copy next to it, below the last row to copy to the top of the project. The
+  target folder is highlighted while you hover. A name that is taken gets " copy" ("a copy.txt",
+  then "a copy 2.txt"); nothing is ever overwritten. Folders are copied whole, except `.git`
+  folders and sign-in files (credentials), which are left out; links are copied as links. Files
+  that look like secrets (keys such as `id_ed25519` or `*.pem`, `~/.ssh`, `~/.aws`, `.netrc`, …)
+  are never copied in this way: dropped alone they are refused, inside a folder they are left out,
+  and the toast names them. Move them yourself if you mean to. A toast
+  says what was copied where and what was left out ("Copied a.txt, pics to src/"). Only you, in
+  Deckhand's own window, can copy files from outside your projects this way; a browser, scripts
+  and agents cannot. Dropped on the left column outside the list (or on the Sessions tab), a
+  folder becomes a project as before.
 - **To move files**, drag a row (or a selection it is in) within the tree: onto a folder to move
   it there, onto a file to move it next to that file, below the last row to move it to the top of
   the project. The target folder is highlighted while you drag. Hold the pointer over a closed

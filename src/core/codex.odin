@@ -398,32 +398,9 @@ codex_args_check :: proc(args: []string) -> string {
 
 // Whether args (passed codex_args_check) choose how Codex asks or sandboxes: -s, -a,
 // --approve-for-me, full access itself, or a -c of approval_policy, sandbox_mode or
-// sandbox_workspace_write.
-@(private = "file")
+// sandbox_workspace_write (codex_access_choices, claude_mode.odin: the tab's badge reads the same).
 codex_args_choose_access :: proc(args: []string) -> bool {
-	for a, i in args {
-		if len(a) < 2 || a[0] != '-' do continue
-		kv := ""
-		if a[1] == '-' {
-			n, _, v := strings.partition(a, "=")
-			switch n {
-			case "--sandbox", "--ask-for-approval", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox": return true
-			case "--config": kv = v != "" ? v : (i + 1 < len(args) ? args[i + 1] : "")
-			}
-		} else {
-			switch a[1] {
-			case 's', 'a': return true
-			case 'c': kv = len(a) > 2 ? strings.trim_prefix(a[2:], "=") : (i + 1 < len(args) ? args[i + 1] : "")
-			}
-		}
-		if kv == "" do continue
-		key, _, _ := strings.partition(kv, "=")
-		first, _, _ := strings.partition(strings.trim_space(key), ".")
-		switch strings.trim(strings.trim_space(first), `"'`) {
-		case "approval_policy", "sandbox_mode", "sandbox_workspace_write": return true
-		}
-	}
-	return false
+	return len(codex_access_choices(args)) > 0
 }
 
 // What turning full access on asks the user (Set_Claude_Default_Flags with harness codex).

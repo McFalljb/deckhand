@@ -475,11 +475,14 @@ its files):
   plain `deckhand DIR`'s chat.
 - **Permission mode** (`src/core/claude_mode.odin`): a quiet word after the tab's title (and
   "· plan mode" in its tooltip, the browser's tab too) when it is not the default: **plan**,
-  **accept edits**, **don't ask**, **auto**, **bypass** (warning colour); `Claude_Tab.
-  permission_mode` on the state stream, `permission_mode` in the snapshot. From the hooks'
-  `permission_mode` (`claude.session`, `claude.turn`: Shift+Tab's switch shows at the next prompt
-  or turn's end; `default` clears it), else the start's flags (`--permission-mode`,
-  `--dangerously-skip-permissions`, the defaults as they went); never guessed.
+  **accept edits**, **don't ask**; **auto**, **bypass** and any mode word Deckhand does not know
+  in the warning colour; `Claude_Tab.permission_mode` on the state stream, `permission_mode` in
+  the snapshot. From the hooks' `permission_mode` (`claude.session`, `claude.turn`: Shift+Tab's
+  switch shows at the next prompt or turn's end; `default` clears it), else the start's flags
+  (`--permission-mode`, `--dangerously-skip-permissions`, the defaults as they went); never
+  guessed. A tab started with skip-permissions keeps **bypass** until its process starts again.
+  The badge is information, not a security boundary: any process in the tab holds its token and
+  can report a mode.
 
 ## 4c. Sessions found on disk
 

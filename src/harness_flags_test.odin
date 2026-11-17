@@ -317,3 +317,40 @@ harness_flags_menus :: proc(t: ^testing.T) {
 	_, is = palette.flags_for.(core.New_Chat)
 	testing.expect(t, palette_is_open() && is, "pi's field")
 }
+
+// Review round 1 (#171): the field is prefilled only with flags typed for the same machine and
+// project (never another project's or another machine's), and a start the core refuses saves
+// nothing.
+@(test)
+harness_flags_last_per_project :: proc(t: ^testing.T) {
+	alloc, _ := hf_reset()
+	context.allocator = alloc
+	defer hf_done()
+	defer core.run_command(core.Set_Focus{""}, HF_UI)
+	a := core.run_command(core.Add_Project{cwd = hf_dir("lasta")}, HF_UI).created_id
+	b := core.run_command(core.Add_Project{cwd = hf_dir("lastb")}, HF_UI).created_id
+	start :: proc(cmd: core.Command, text: string) {
+		flags_open(cmd)
+		core.inbox_drain()
+		tf_set(&palette.field, text)
+		rs := palette_results()
+		if len(rs) == 1 do palette_run(rs[0])
+		core.inbox_drain()
+		core.run_command(core.Set_Focus{""}, HF_UI)
+	}
+	start(core.New_Claude_Session{project_id = a, harness = .Claude}, "--model sonnet")
+	flags_open(core.New_Claude_Session{project_id = a, harness = .Claude})
+	core.inbox_drain()
+	testing.expect_value(t, tf_text(&palette.field), "--model sonnet")
+	core.run_command(core.Set_Focus{""}, HF_UI)
+	flags_open(core.New_Claude_Session{project_id = b, harness = .Claude})
+	core.inbox_drain()
+	testing.expect_value(t, tf_text(&palette.field), "") // another project's: not offered here
+	core.run_command(core.Set_Focus{""}, HF_UI)
+	// refused by the core (a project that is gone): nothing saved
+	gone := a + 9999
+	start(core.New_Claude_Session{project_id = gone, harness = .Claude}, "--model opus")
+	flags_open(core.New_Claude_Session{project_id = a, harness = .Claude})
+	core.inbox_drain()
+	testing.expect_value(t, tf_text(&palette.field), "--model sonnet")
+}

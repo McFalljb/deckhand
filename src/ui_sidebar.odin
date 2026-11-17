@@ -426,6 +426,8 @@ menu_run :: proc(i: int) {
 	it := items[i]
 	target := menu.target
 	if ns, ok := it.picker.?; ok {
+		// With flags… in another machine's picker: that machine's run and folder first, as its other rows
+		if t, in_picker := target.(core.Menu_New_Session); in_picker && ns.flags && handoff_picker_stale(t) do return
 		// another menu's "New session": the picker opens where that menu was (harness.odin)
 		at := menu.at
 		cwd := strings.clone(ns.cwd, context.temp_allocator)

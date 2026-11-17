@@ -68,23 +68,25 @@ export function newTabChoices(store: Store, machine: number, target: { session: 
 }
 
 // A Claude or Codex tab's permission mode as its tab shows it (src/core/claude_mode.odin's
-// claude_mode_label): nothing for the default or an unknown one's absence; warn: acts without asking.
+// claude_mode_label): nothing for the default; warn: anything not known to ask before it acts
+// (auto, bypass, Codex's full access, never asks, approves for you, a word this page does not know).
 const MODE_LABELS: Record<string, [string, boolean]> = {
   plan: ["plan", false],
   acceptEdits: ["accept edits", false],
-  bypassPermissions: ["bypass", true],
   dontAsk: ["don't ask", false],
-  auto: ["auto", false],
+  auto: ["auto", true],
+  bypassPermissions: ["bypass", true],
   "codex-bypass": ["bypass", true],
   "codex-full-access": ["full access", true],
-  "codex-read-only": ["read-only", false],
+  "codex-never-asks": ["never asks", true],
+  "codex-approves": ["approves for you", true],
 };
 export function modeBadge(kind: Record<string, unknown> | null | undefined): { label: string; warn: boolean } | null {
   const ct = kind?.claude_tab as { permission_mode?: unknown } | undefined;
   const m = typeof ct?.permission_mode === "string" ? ct.permission_mode : "";
   if (!m || m === "default") return null;
-  const known = MODE_LABELS[m];
+  const known = Object.prototype.hasOwnProperty.call(MODE_LABELS, m) ? MODE_LABELS[m] : undefined;
   if (known) return { label: known[0], warn: known[1] };
-  // a newer Claude Code's mode: its own word (the core lets only letters through)
-  return /^[A-Za-z]{1,32}$/.test(m) ? { label: m, warn: false } : null;
+  // a newer Claude Code's mode: its own word (the core lets only letters through), in the warning colour
+  return /^[A-Za-z]{1,32}$/.test(m) ? { label: m, warn: true } : null;
 }

@@ -645,14 +645,14 @@ claude_rows_permission_mode :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode", "x;y"}), "") // not a word
 	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--dangerously-bypass-approvals-and-sandbox"}), core.CODEX_MODE_BYPASS)
 	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-s", "danger-full-access"}), core.CODEX_MODE_FULL_ACCESS)
-	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-sread-only"}), core.CODEX_MODE_READ_ONLY)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-sread-only"}), "") // never a safer-sounding Codex badge
 	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--sandbox=workspace-write"}), "")
 	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--search"}), "")
 	// the labels: quiet ones, the warning's
 	for c in ([]struct {
 			mode, label: string,
 			warn:        bool,
-		}{{"", "", false}, {"default", "", false}, {"plan", "plan", false}, {"acceptEdits", "accept edits", false}, {"bypassPermissions", "bypass", true}, {core.CODEX_MODE_FULL_ACCESS, "full access", true}, {core.CODEX_MODE_BYPASS, "bypass", true}, {"newMode", "newMode", false}}) {
+		}{{"", "", false}, {"default", "", false}, {"plan", "plan", false}, {"acceptEdits", "accept edits", false}, {"bypassPermissions", "bypass", true}, {core.CODEX_MODE_FULL_ACCESS, "full access", true}, {core.CODEX_MODE_BYPASS, "bypass", true}, {"newMode", "newMode", true}}) {
 		label, warn := core.claude_mode_label(c.mode)
 		testing.expect_value(t, label, c.label)
 		testing.expect_value(t, warn, c.warn)
@@ -697,6 +697,75 @@ claude_rows_permission_mode :: proc(t: ^testing.T) {
 	if testing.expect(t, ct3 != nil) do testing.expect_value(t, ct3.permission_mode, "")
 	// a Codex tab's hook report is not looked at (Codex reports none)
 	codex := core.Claude_Tab{harness = .Codex}
-	testing.expect(t, !core.claude_mode_report(&codex, "bypassPermissions"))
+	testing.expect(t, !core.claude_mode_report(0, &codex, "bypassPermissions"))
 	testing.expect_value(t, codex.permission_mode, "")
+}
+
+// Review round 1 (#171): every spelling codex_args_check accepts gives the same badge; Codex's
+// other ways of dropping approvals or the sandbox (-c sandbox_mode, -c approval_policy, -a never,
+// --approve-for-me) badge too, from the same parsing as the access decision; never a badge that
+// sounds safer than Codex may be (no "read-only"). auto and an unknown word get the warning colour.
+@(test)
+claude_rows_permission_mode_codex_spellings :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	full := []([]string) {
+		{"-s=danger-full-access"}, {"-sdanger-full-access"}, {"-s", "danger-full-access"}, {"--sandbox=danger-full-access"}, {"--sandbox", "danger-full-access"},
+		{"-c", `sandbox_mode="danger-full-access"`}, {"-csandbox_mode=danger-full-access"}, {"-c=sandbox_mode='danger-full-access'"}, {"--config=sandbox_mode = \"danger-full-access\""}, {"--config", "sandbox_mode=danger-full-access"},
+	}
+	for a in full {
+		testing.expectf(t, core.codex_args_check(a) == "", "%v accepted: %s", a, core.codex_args_check(a))
+		testing.expectf(t, core.claude_mode_of_args(.Codex, a) == core.CODEX_MODE_FULL_ACCESS, "%v: %q", a, core.claude_mode_of_args(.Codex, a))
+		testing.expectf(t, core.codex_args_choose_access(a), "%v: the access decision agrees", a)
+	}
+	never := []([]string){{"-a", "never"}, {"-a=never"}, {"-anever"}, {"--ask-for-approval=never"}, {"-c", "approval_policy=never"}, {"-c", `approval_policy = "never"`}}
+	for a in never {
+		testing.expectf(t, core.codex_args_check(a) == "", "%v accepted", a)
+		testing.expectf(t, core.claude_mode_of_args(.Codex, a) == core.CODEX_MODE_NEVER_ASKS, "%v: %q", a, core.claude_mode_of_args(.Codex, a))
+		testing.expectf(t, core.codex_args_choose_access(a), "%v: the access decision agrees", a)
+	}
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--approve-for-me"}), core.CODEX_MODE_APPROVES)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--dangerously-bypass-approvals-and-sandbox", "-s", "read-only"}), core.CODEX_MODE_BYPASS)
+	// the strongest wins, whatever the order
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-a", "never", "-s", "danger-full-access"}), core.CODEX_MODE_FULL_ACCESS)
+	// never safer than it may be: read-only, workspace-write, on-request say nothing
+	for a in ([]([]string){{"-s", "read-only"}, {"-s=workspace-write"}, {"-a", "on-request"}, {"-c", "sandbox_mode=read-only"}, {"-m", "o3"}}) do testing.expectf(t, core.claude_mode_of_args(.Codex, a) == "", "%v: %q", a, core.claude_mode_of_args(.Codex, a))
+	for m in ([]string{core.CODEX_MODE_BYPASS, core.CODEX_MODE_FULL_ACCESS, core.CODEX_MODE_NEVER_ASKS, core.CODEX_MODE_APPROVES, "auto", "someNewMode", "bypassPermissions"}) {
+		label, warn := core.claude_mode_label(m)
+		testing.expectf(t, label != "" && warn, "%s: %q warn %v", m, label, warn)
+	}
+	for m in ([]string{"plan", "acceptEdits", "dontAsk"}) {
+		_, warn := core.claude_mode_label(m)
+		testing.expectf(t, !warn, "%s: quiet", m)
+	}
+}
+
+// Review round 1 (#171): a tab started with skip-permissions keeps its bypass badge whatever a
+// hook report says until its process starts again (any process in the tab has its token: the
+// badge is information, not a boundary); a tab started without it follows the hooks.
+@(test)
+claude_rows_permission_mode_floor :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	dir := r_dir("modefloor")
+	pid := core.run_command(core.Add_Project{cwd = dir}, R_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}, harness = .Claude}, R_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := core.find_session(r.created_id).tabs[0].id
+	_, _, ct := core.claude_tab_of(tab)
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	for m in ([]string{"default", "plan", "acceptEdits"}) {
+		core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle", permission_mode = m}, R_SCRIPT)
+		testing.expectf(t, ct.permission_mode == "bypassPermissions", "%s lowered it to %q", m, ct.permission_mode)
+	}
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "abababab-0000-4000-8000-000000000001", source = "clear", permission_mode = "default"}, R_SCRIPT)
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	// a tab started without it follows its hooks, up and down
+	r = core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R_UI)
+	tab2 := core.find_session(r.created_id).tabs[0].id
+	_, _, ct2 := core.claude_tab_of(tab2)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab2, state = "idle", permission_mode = "bypassPermissions"}, R_SCRIPT)
+	testing.expect_value(t, ct2.permission_mode, "bypassPermissions")
+	core.run_command(core.Claude_Turn_Report{tab_id = tab2, state = "idle", permission_mode = "default"}, R_SCRIPT)
+	testing.expect_value(t, ct2.permission_mode, "")
 }

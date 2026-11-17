@@ -22,8 +22,10 @@ import "core:fmt"
 import "core:strings"
 import "core"
 
-// The flags each harness was last started with from this window, as typed (this run; heap).
+// The flags each harness was last started with from this window, as typed (this run; heap), and
+// where: the field is prefilled with them only for a start on the same machine and project.
 flags_last: [core.Harness]string
+flags_last_for: [core.Harness][2]u64 // {machine, project id}
 
 // Another machine's start the palette asks flags for: its machine, the run of its core and the
 // project's folder when it asked (heap; machine 0: this Mac's).
@@ -69,7 +71,8 @@ flags_open :: proc(cmd: core.Command) {
 		if p != nil do run, folder = handoff_picker_identity(p^)
 		flags_remote = {machine = no, run = strings.clone(run, runtime.heap_allocator()), folder = strings.clone(folder, runtime.heap_allocator())}
 	}
-	tf_set(&palette.field, flags_last[h])
+	// the last flags, only where they were typed (never another project's or machine's)
+	if no, p := flags_where(cmd); p != nil && flags_last_for[h] == {no, p.id} do tf_set(&palette.field, flags_last[h])
 	palette.was_open = true
 	ui_do(core.Set_Focus{"palette"})
 }
@@ -152,10 +155,19 @@ flags_run :: proc(it: Palette_Item) {
 	case core.New_Claude_Tab:
 		c.args = args
 	}
+	_, p := flags_where(cmd)
+	place := [2]u64{no, p != nil ? p.id : 0}
+	if _, is := cmd.(core.New_Claude_Tab); !is do harness_used(cmd) // a session's harness goes first in the picker next time
+	// its answer first: a start the core refuses is a toast, and its flags are not kept
+	r := client_run(cmd)
+	if !r.ok && !r.pending {
+		if r.error != core.CLAUDE_MISSING do toast_show(fmt.tprintf("%s: %s", label, r.error != "" ? r.error : "it did not work"), err = true) // (Claude Code missing: the command said how to install it)
+		return
+	}
+	if p == nil do return
 	delete(flags_last[h])
 	flags_last[h] = strings.clone(text, runtime.heap_allocator())
-	if _, is := cmd.(core.New_Claude_Tab); !is do harness_used(cmd) // a session's harness goes first in the picker next time
-	ui_do_menu(cmd, label) // a refusal from the core is a toast
+	flags_last_for[h] = place
 }
 
 // The harness picker in flags mode: one "<harness> with flags…" row per choice that takes flags

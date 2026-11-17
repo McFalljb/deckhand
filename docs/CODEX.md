@@ -141,10 +141,13 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   `core.flags_split`), and send them as `args`; the row shows `codex_args_check`'s reason before
   anything starts (also in a project's menu, and the picker's **With flags…**). A start on another
   machine sends them as typed, checked and given that machine's own defaults there (CLAUDE.md §1).
-  The tab's badge (`claude_mode.odin`) names the mode its flags set: **bypass**
-  (`--dangerously-bypass-approvals-and-sandbox`) and **full access** (`-s danger-full-access`) in the
-  warning colour, **read-only**; Codex's hooks report none, so a mode from `config.toml` or a profile
-  shows no badge.
+  The tab's badge (`claude_mode.odin`), in the warning colour, names how its start flags let Codex
+  act without asking, read as full access's rule reads them (`codex_access_choices`): **bypass**
+  (`--dangerously-bypass-approvals-and-sandbox`), **full access** (`-s`/`-c sandbox_mode`
+  `danger-full-access`, every spelling), **never asks** (`-a`/`-c approval_policy` `never`),
+  **approves for you** (`--approve-for-me`); never a safer-sounding one. Codex reports no mode:
+  a Codex tab with no badge is not known to be in the default mode (a mode changed inside Codex
+  or set in `config.toml` or a profile is not seen).
 - **Default Codex flags** (`set_harness_flags` with `"harness": "codex"`, Settings › Coding agents ›
   Codex › **Default flags…**, the palette's **Default Codex flags…**; `User_Here`; blank in a hub's
   or a browser's state stream): one line, checked by `codex_args_check` when set

@@ -477,7 +477,7 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 	{
 		margs := flags ? ct.args : nil
 		if defaults do margs = harness_is_codex(ct.harness) ? codex_with_defaults(margs) : claude_with_defaults(margs)
-		claude_mode_set(ct, claude_mode_of_args(ct.harness, margs))
+		claude_mode_started(tab_id, ct, margs)
 	}
 	switch ct.harness {
 	case .Codex:       return codex_start(s, t, tab_id, ct, cwd, flags, defaults) // codex.odin: its own flags' rule and account; no plugin
@@ -925,6 +925,7 @@ tab_free_kind :: proc(tab: ^Tab) {
 	delete(ct.account)
 	delete(ct.resume_path)
 	delete(ct.permission_mode)
+	claude_mode_forget(tab.id)
 	for a in ct.args do delete(a)
 	delete(ct.args)
 	for h in ct.held {
@@ -1161,7 +1162,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if harness_is_codex(ct.harness) do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
 		defer if claude_status_turn(ts, tab, was, c.state, c.idle_prompt) do window_state_changed() // dots without OSC 7501 (claude_status.odin)
 		ended := claude_rows_turn(ct, c.state, c.question, c.idle_prompt) // the question and error dots (claude_rows.odin)
-		if claude_mode_report(ct, c.permission_mode) do ended = true // Shift+Tab's switch, at the next prompt or turn's end (claude_mode.odin)
+		if claude_mode_report(tab.id, ct, c.permission_mode) do ended = true // Shift+Tab's switch, at the next prompt or turn's end (claude_mode.odin)
 		switch c.state {
 		case "submitted":
 			ct.turn = .Working

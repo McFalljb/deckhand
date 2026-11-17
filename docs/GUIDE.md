@@ -1156,7 +1156,10 @@ when it starts (pi itself remembers the session's model when it resumes). These 
 only: Atlas, scripts and apps cannot pass them. For another machine's project they go there as you
 typed them: that machine's Deckhand checks them and adds its own default flags, never this Mac's
 (its Deckhand must be 0.7.0 or later). A Claude or Codex tab whose permission mode is not the
-default says so after its title (**plan**, **accept edits**, **bypass** in the warning colour…).
+default says so after its title (**plan**, **accept edits**; **auto**, **bypass** in the warning colour…).
+A Codex tab shows only what its start flags allowed (**bypass**, **full access**, **never asks**):
+no badge there does not mean Codex asks first, since a mode set inside Codex or in its config is
+not seen. The badge is information, not a lock.
 
 **Default flags.** Settings › Coding agents has a **Default flags…** row in each agent's card (in
 the palette: **Default Claude Code flags…**, **Default Codex flags…**, **Default pi flags…**): one line each, checked by the same rule

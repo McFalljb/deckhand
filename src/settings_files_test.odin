@@ -1079,3 +1079,44 @@ settings_files_codex_plugins :: proc(t: ^testing.T) {
 	core.harness_installed_probe[.Codex] = proc() -> bool {return false}
 	testing.expect_value(t, text(), "")
 }
+
+// Review round 1 (#171): a folder name that looks like a token is never shown; a big marketplace
+// folder is read only up to the cap; nothing is walked again while no folder's stamp changed.
+@(test)
+settings_files_codex_plugins_guarded :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	os.unset_env("CODEX_HOME")
+	core.codex_plugins_forget()
+	defer core.codex_plugins_forget()
+	cache := fmt.tprintf("%s/.codex/plugins/cache", home)
+	for name in ([]string{"ghp_abcdefghijklmnopqrstuvwxyz0123456789", "sk-proj-abc", "xoxb-123-456", "0123456789abcdef0123456789abcdef", "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF3h", "okplugin"}) do os.make_directory_all(fmt.tprintf("%s/mk/%s/1.0.0", cache, name))
+	os.make_directory_all(fmt.tprintf("%s/mk/okplugin/0123456789abcdef0123456789abcdef01234567", cache))
+	got := core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+	b := strings.builder_make(context.temp_allocator)
+	for e in got do fmt.sbprintf(&b, "%s|%s\n", e.name, core.codex_plugin_detail(e))
+	testing.expect_value(t, strings.to_string(b), "okplugin@mk|version 1.0.0\n")
+when core.TEST_HOOKS { // codex_plugins_expire
+		// many plugins: at most the cap listed, and a walk reads at most CODEX_PLUGINS_SCAN entries a folder
+		core.codex_plugins_forget()
+		for i in 0 ..< 300 do os.make_directory_all(fmt.tprintf("%s/zbig/p%03d", cache, i)) // after mk: mk is listed first
+		n0 := core.codex_plugins_walks
+		got = core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+		testing.expect(t, len(got) <= 200, "capped")
+		testing.expect_value(t, core.codex_plugins_walks, n0 + 1)
+		testing.expect(t, core.codex_plugins_entries_read <= 3 * core.CODEX_PLUGINS_SCAN, "read up to the cap")
+		// again, nothing changed: not walked again, even once the throttle has passed
+		core.codex_plugins_expire()
+		_ = core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+		testing.expect_value(t, core.codex_plugins_walks, n0 + 1)
+		// a new plugin: its marketplace folder's stamp changed, walked again
+		time.sleep(20 * time.Millisecond)
+		os.make_directory_all(fmt.tprintf("%s/mk/newone/2.0.0", cache))
+		core.codex_plugins_expire()
+		got = core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+		testing.expect_value(t, core.codex_plugins_walks, n0 + 2)
+		found := false
+		for e in got do if e.name == "newone@mk" do found = true
+		testing.expect(t, found, "the new one listed")
+	}
+}

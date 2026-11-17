@@ -594,3 +594,28 @@ handoff_flags_remote :: proc(t: ^testing.T) {
 	testing.expect_value(t, toast.text, HANDOFF_RESTARTED)
 	testing.expect_value(t, flags_last[.Claude], "")
 }
+
+// Review round 1 (#171): With flags… in another machine's picker checks that machine's core run and
+// the project's folder first, as the picker's other rows do: a restart there since, and nothing
+// opens (the ids may name something else now).
+@(test)
+handoff_flags_picker_stale :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	remote := pid(3, 7)
+	run, folder := handoff_picker_identity(core.find_project(remote)^)
+	menu_open(core.Menu_New_Session{project_id = remote, run = run, folder = folder}, {0, 0})
+	at := -1
+	for it, i in menu_items() do if it.label == "With flags…" do at = i
+	testing.expect(t, at >= 0, labels(menu_items()))
+	state.machines[0].core_run = "r-nuc-2"
+	toast_clear()
+	menu_run(at)
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, HANDOFF_RESTARTED)
+	ns, is := menu.target.(core.Menu_New_Session)
+	testing.expect(t, !(menu.open && is && ns.flags), "no flags picker")
+	testing.expect(t, !palette_is_open(), "no field")
+}

@@ -88,7 +88,7 @@ claude_row_record :: proc(project_id: u64, id: string) -> ^Claude_Record {
 // to Claude Code as its sessionTitle).
 claude_rows_session :: proc(ct: ^Claude_Tab, c: Claude_Session_Report) -> string {
 	if c.source != "compact" do ct.ended = .None // a new conversation (a compaction keeps its turn)
-	claude_mode_report(ct, c.permission_mode) // its permission mode, when SessionStart says it (claude_mode.odin)
+	claude_mode_report(c.tab_id, ct, c.permission_mode) // its permission mode, when SessionStart says it (claude_mode.odin)
 	rec, _ := claude_record(c.session_id)
 	if rec == nil do return ""
 	// the first path stays: a later report never repoints an entry's transcript (claude_transcript_ok)

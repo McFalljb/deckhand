@@ -1,0 +1,33 @@
+# TEMPORARY (#160 diagnosis; removed before merge)
+name: diag-i160
+on:
+  push:
+    branches: [i160-flakes]
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  ODIN_VERSION: dev-2026-09
+  ODIN_SHA256: 3e6cbc1f247d8d14fe02c3151272d0a5b8d6d77acb7219f5b62914e4d95d97f7
+  ODIN_SHA256_LINUX: 167c3e1d7056419dad2e04bb3bd98715b7ff286d4c125f3c5a5ee337c6254283
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/setup
+        with: { cef: "false" }
+      - name: Build
+        run: |
+          mkdir -p build
+          scripts/build-zstd.sh
+          odin build src/coremain -out:build/deckhand-core-serve -o:speed
+          odin build src/holder -out:build/deckhand-core -o:speed
+      - name: Login profile
+        run: |
+          cat /etc/profile
+          for f in /etc/profile.d/*.sh; do echo "=== $f"; grep -v '^\s*#' "$f" | head -40; done
+      - name: Diag
+        run: DIAG_N=60 python3 tests/i160-diag.py build/deckhand-core-serve

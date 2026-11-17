@@ -190,13 +190,16 @@ show_file_paths_and_refusals :: proc(t: ^testing.T) {
 		}
 		r = core.run_command(core.Show_File{path = fmt.tprintf("%s/log.txt", core.fs_real(outside)), line = 2}, caller)
 		testing.expectf(t, r.ok, "a text file outside the project: %s", r.error)
+		// a project's .env is an ordinary file: shown
+		r = core.run_command(core.Show_File{path = ".env"}, caller)
+		testing.expectf(t, r.ok, ".env shows: %s", r.error)
 		n := sf_count(a)
 		refused :: proc(t: ^testing.T, r: core.Result, want: string, hint := "", loc := #caller_location) {
 			testing.expectf(t, !r.ok && strings.contains(r.error, want), "refused (%s): %s", want, r.error, loc = loc)
 			testing.expectf(t, !strings.has_prefix(core.json_path(r.data, "code"), "<") && !strings.has_prefix(core.json_path(r.data, "hint"), "<"), "a code and a hint: %s", r.data, loc = loc)
 			if hint != "" do testing.expectf(t, strings.contains(r.error, hint) || strings.contains(core.json_path(r.data, "hint"), hint), "with a hint (%s): %s %s", hint, r.error, r.data, loc = loc)
 		}
-		refused(t, core.run_command(core.Show_File{path = ".env"}, caller), "redentials")
+		refused(t, core.run_command(core.Show_File{path = ".credentials.json"}, caller), "redentials") // Claude's sign-in, by name
 		refused(t, core.run_command(core.Show_File{path = "nope.md"}, caller), "no such file", cwd)
 		refused(t, core.run_command(core.Show_File{path = "docs"}, caller), "folder")
 		refused(t, core.run_command(core.Show_File{path = "b.bin"}, caller), "Binary", "text")

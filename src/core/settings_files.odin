@@ -24,8 +24,8 @@ package core
 // as in the Files tab). Nothing here edits settings: the editor does, with
 // two guards:
 //
-//   - credential files (pi's sign-ins, other private files in the agent dir,
-//     .env) are never shown, also not inside an opened folder, and the
+//   - credential files (pi's sign-ins, other private files in the agent dir)
+//     are never shown, also not inside an opened folder, and the
 //     editor refuses to open them at all (settings_credential;
 //     editor_commands.odin, editor_file.odin)
 //   - a JSON settings file pi reads (settings_json_kind) is saved only when
@@ -73,10 +73,11 @@ AGENT_CONFIG_FILES :: [?]string{"settings.json", "models.json", "keybindings.jso
 // A file Deckhand never lists, reads or opens: pi's sign-ins (auth.json,
 // models-store.json, cursor-sdk*.json, intercom/), any other private (no
 // group/other access, e.g. 0600) file in the agent dir (any depth; not
-// pi's own config files at its top), .env files anywhere (.env.example and
-// the like are fine), and any other name for those sign-in files (a
-// symlink, a hard link: the same device and inode). Names match in any case
-// (.ENV is .env on a volume that ignores case, and is refused everywhere).
+// pi's own config files at its top), Claude's and Codex's sign-ins and
+// state, and any other name for those sign-in files (a symlink, a hard link:
+// the same device and inode). Names match in any case (AUTH.JSON is
+// auth.json on a volume that ignores case). A project's .env is an ordinary
+// file: whoever can open it here can run a shell in the project anyway.
 // ids: credential_ids() when checking many paths (nil: read now).
 settings_credential :: proc(path: string, ids: []Cred_Id = nil) -> bool {
 	if path == "" do return false
@@ -96,14 +97,6 @@ settings_credential_name :: proc(path: string) -> bool {
 
 @(private = "file")
 credential_path :: proc(p: string) -> bool {
-	base := strings.to_lower(filepath.base(p), context.temp_allocator)
-	if base == ".env" do return true
-	if strings.has_prefix(base, ".env.") {
-		switch base {
-		case ".env.example", ".env.sample", ".env.template", ".env.dist": return false
-		}
-		return true
-	}
 	lp := strings.to_lower(p, context.temp_allocator)
 	for ad in ([2]string{pi_agent_dir(), fs_real(pi_agent_dir())}) {
 		ad := strings.to_lower(strings.trim_right(ad, "/"), context.temp_allocator)

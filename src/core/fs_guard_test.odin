@@ -54,32 +54,48 @@ fs_rename_case_only :: proc(t: ^testing.T) {
 	testing.expect(t, !fs_case_only_rename(fmt.tprintf("%s/README.md", dir), fmt.tprintf("%s/b.txt", dir)), "another name")
 }
 
+// pi's agent folder inside a project (PI_CODING_AGENT_DIR), for the tests below; restored by the
+// returned proc's caller.
+@(private = "file")
+agent_in :: proc(dir: string) -> (agent: string, old: string, had: bool) {
+	old, had = os.lookup_env("PI_CODING_AGENT_DIR", context.temp_allocator)
+	agent = fmt.tprintf("%s/agent", dir)
+	os.make_directory_all(agent)
+	os.set_env("PI_CODING_AGENT_DIR", agent)
+	return
+}
+
 @(test)
 fs_rename_keeps_credential_names :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := gsetup("cred")
 	defer {os.remove_all(dir); state = State{}}
-	env := fmt.tprintf("%s/.env", dir)
-	plain := fmt.tprintf("%s/x.txt", dir)
-	gwrite(env)
+	agent, old, had := agent_in(dir)
+	defer {if had do os.set_env("PI_CODING_AGENT_DIR", old); else do os.unset_env("PI_CODING_AGENT_DIR")}
+	auth := fmt.tprintf("%s/auth.json", agent)
+	plain := fmt.tprintf("%s/x.txt", agent)
+	gwrite(auth)
 	others := []Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}, {kind = .UI, hub = true}, {kind = .Panel, tab_id = 7, claude = true}}
 	for c in others {
-		e := fs_rename(env, plain, c)
+		e := fs_rename(auth, plain, c)
 		if c.kind == .Panel do testing.expect(t, e != "", "a tab's agent: refused (outside its own folder or by name)")
 		else do testing.expect_value(t, e, CREDENTIAL_RENAME_REFUSED)
-		testing.expect(t, os.exists(env) && !os.exists(plain), "not moved")
+		testing.expect(t, os.exists(auth) && !os.exists(plain), "not moved")
 	}
 	// a key by its name (show_secret) too
 	key := fmt.tprintf("%s/server.pem", dir)
 	gwrite(key)
-	testing.expect_value(t, fs_rename(key, plain, Caller{kind = .Control}), CREDENTIAL_RENAME_REFUSED)
+	testing.expect_value(t, fs_rename(key, fmt.tprintf("%s/k.txt", dir), Caller{kind = .Control}), CREDENTIAL_RENAME_REFUSED)
 	// to another credential's name: still hidden, so allowed
-	testing.expect_value(t, fs_rename(env, fmt.tprintf("%s/.env.local", dir), Caller{kind = .Control}), "")
+	testing.expect_value(t, fs_rename(auth, fmt.tprintf("%s/models-store.json", agent), Caller{kind = .Control}), "")
 	// the user at this window may
-	testing.expect_value(t, fs_rename(fmt.tprintf("%s/.env.local", dir), plain, Caller{kind = .UI}), "")
+	testing.expect_value(t, fs_rename(fmt.tprintf("%s/models-store.json", agent), plain, Caller{kind = .UI}), "")
 	testing.expect(t, os.exists(plain), "renamed by the user")
-	// the other way round is no secret's business
-	testing.expect_value(t, fs_rename(plain, fmt.tprintf("%s/y.txt", dir), Caller{kind = .Control}), "")
+	// the other way round is no secret's business; nor is a project's .env (an ordinary file)
+	testing.expect_value(t, fs_rename(plain, fmt.tprintf("%s/y.txt", agent), Caller{kind = .Control}), "")
+	env := fmt.tprintf("%s/.env", dir)
+	gwrite(env)
+	testing.expect_value(t, fs_rename(env, fmt.tprintf("%s/env.txt", dir), Caller{kind = .Control}), "")
 }
 
 @(test)
@@ -187,30 +203,54 @@ files_new_row_place :: proc(t: ^testing.T) {
 	testing.expect(t, i == 0 && d == 0, "an empty tree")
 }
 
-// A credential's name in another case is a credential's name: a case-only rename (.env to .ENV)
-// keeps it, and file_read refuses .ENV. The target is judged by its name as typed (on a volume
-// that ignores case, .ENV's real path is still .env until the rename).
+// A credential's name in another case is a credential's name: a case-only rename (auth.json to
+// AUTH.JSON) keeps it, and file_read refuses AUTH.JSON. The target is judged by its name as typed
+// (on a volume that ignores case, AUTH.JSON's real path is still auth.json until the rename).
 @(test)
 fs_credential_names_ignore_case :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := gsetup("credcase")
 	defer {os.remove_all(dir); state = State{}}
-	testing.expect(t, settings_credential(fmt.tprintf("%s/.ENV", dir)), ".ENV")
-	testing.expect(t, settings_credential(fmt.tprintf("%s/.Env.Local", dir)), ".Env.Local")
-	testing.expect(t, !settings_credential(fmt.tprintf("%s/.ENV.EXAMPLE", dir)), ".ENV.EXAMPLE is not one")
+	agent, old, had := agent_in(dir)
+	defer {if had do os.set_env("PI_CODING_AGENT_DIR", old); else do os.unset_env("PI_CODING_AGENT_DIR")}
+	testing.expect(t, settings_credential(fmt.tprintf("%s/AUTH.JSON", agent)), "AUTH.JSON")
+	testing.expect(t, settings_credential(fmt.tprintf("%s/Models-Store.Json", agent)), "Models-Store.Json")
+	testing.expect(t, settings_credential(fmt.tprintf("%s/x/.CODEX/Auth.json", dir)), ".CODEX/Auth.json")
+	testing.expect(t, settings_credential(fmt.tprintf("%s/.CREDENTIALS.JSON", dir)), ".CREDENTIALS.JSON")
 	web := Caller{kind = .UI, web = true}
 	ctl := Caller{kind = .Control}
-	for pair in ([][2]string{{".env", ".ENV"}, {".env.local", ".ENV.LOCAL"}}) {
-		from, to := fmt.tprintf("%s/%s", dir, pair[0]), fmt.tprintf("%s/%s", dir, pair[1])
+	for pair in ([][2]string{{"auth.json", "AUTH.JSON"}, {"models-store.json", "Models-Store.JSON"}}) {
+		from, to := fmt.tprintf("%s/%s", agent, pair[0]), fmt.tprintf("%s/%s", agent, pair[1])
 		gwrite(from)
 		testing.expect_value(t, fs_rename(from, to, ctl), "")
-		testing.expect(t, listed(dir, pair[1]), pair[1])
+		testing.expect(t, listed(agent, pair[1]), pair[1])
 		r := run_command(File_Read{path = to}, web)
 		testing.expectf(t, !r.ok && strings.contains(r.error, "credentials"), "file_read %s: %v %q", pair[1], r.ok, r.error)
 		// and from there to a plain name: refused
-		testing.expect_value(t, fs_rename(to, fmt.tprintf("%s/plain.txt", dir), ctl), CREDENTIAL_RENAME_REFUSED)
+		testing.expect_value(t, fs_rename(to, fmt.tprintf("%s/plain.txt", agent), ctl), CREDENTIAL_RENAME_REFUSED)
 		os.remove(to)
 	}
+}
+
+// A project's .env is an ordinary file: listed, read and saved (a browser's editor), opened by
+// `deckhand show`; whoever reaches these can run a shell in the project anyway.
+@(test)
+fs_env_files_are_ordinary :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := gsetup("envok")
+	defer {os.remove_all(dir); state = State{}}
+	for n in ([]string{".env", ".env.local", ".ENV"}) do testing.expect(t, !settings_credential(fmt.tprintf("%s/%s", dir, n)), n)
+	env := fmt.tprintf("%s/.env", dir)
+	_ = os.write_entire_file(env, transmute([]u8)string("K=V\n"))
+	data, err := fs_list_json(dir, Caller{kind = .UI}, false)
+	testing.expect(t, err == "" && strings.contains(data, `"name":".env"`), data)
+	web := Caller{kind = .UI, web = true}
+	r := run_command(File_Read{path = env}, web)
+	testing.expect(t, r.ok && strings.contains(r.data, "K=V"), r.error)
+	s := run_command(File_Save{path = env, text = "K=W\n", force = true}, web)
+	testing.expect(t, s.ok, s.error)
+	got, _ := os.read_entire_file(env, context.temp_allocator)
+	testing.expect_value(t, string(got), "K=W\n")
 }
 
 // A folder at or above a place whose files are credentials by where they are (pi's agent dir, a

@@ -37,7 +37,7 @@ printf '{"compact": true}\n' > "$AD/extensions/subagent/config.json"
 printf 'Fix the failing test.\n' > "$AD/prompts/fix.md"
 printf '{"token":"%s"}\n' "$SECRET" > "$AD/prompts/token.json"
 chmod 600 "$AD/prompts/token.json"
-printf 'KEY=%s\n' "$SECRET" > "$AD/prompts/.env"
+printf 'KEY=dummy\n' > "$AD/prompts/.env" # an ordinary file: listed (.env is not a credential)
 cp "$AD/settings.json" "$W/settings.before"
 HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/settings.txt DECKHAND_DATA_DIR="$W/data" \
   DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true

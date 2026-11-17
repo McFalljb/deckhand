@@ -740,7 +740,7 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 	if !os.exists(a) do return "no such file or folder"
 	if os.exists(b) && !fs_case_only_rename(a, b) do return "the new name already exists"
 	if !fs_user_here(caller) {
-		// the target by its name as typed: on a volume that ignores case, .ENV still leads to .env
+		// the target by its name as typed: on a volume that ignores case, AUTH.JSON still leads to auth.json
 		if fs_credential_named(a) && !settings_credential_name(b) && !show_secret(b) do return CREDENTIAL_RENAME_REFUSED
 		if fs_credential_place(a) do return CREDENTIAL_PLACE_REFUSED
 	}
@@ -779,7 +779,7 @@ CREDENTIAL_RENAME_REFUSED :: "credentials file: only you, in Deckhand's window, 
 CREDENTIAL_PLACE_REFUSED :: "it holds a coding agent's sign-in (by where it is): only you, in Deckhand's window, may rename it"
 FS_IN_USE :: "a running terminal tab is in it: close it first"
 
-// A name file_read and `deckhand show` refuse by itself (settings_credential: .env, pi's sign-ins;
+// A name file_read and `deckhand show` refuse by itself (settings_credential: agents' sign-ins;
 // show_secret: keys, .netrc…). Renaming one to another name would make it readable.
 fs_credential_named :: proc(path: string) -> bool {return settings_credential(path) || show_secret(path)}
 

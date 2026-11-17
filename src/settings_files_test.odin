@@ -135,7 +135,7 @@ settings_files_credentials_refused :: proc(t: ^testing.T) {
 	}
 	env := fmt.tprintf("%s/.env", proj)
 	write_mode(env, "TOKEN=x", 0o644)
-	testing.expect(t, !core.run_command(core.Open_File{path = env}, ui).ok, ".env refused")
+	testing.expect(t, core.run_command(core.Open_File{path = env}, ui).ok, ".env opens (an ordinary file)")
 	write_mode(fmt.tprintf("%s/.env.example", proj), "TOKEN=", 0o644)
 	testing.expect(t, core.run_command(core.Open_File{path = fmt.tprintf("%s/.env.example", proj)}, ui).ok, "examples open")
 	// through a symlink too
@@ -374,7 +374,7 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	defer delete(found)
 	for q in ([]string{"skill", "json", "fix", "index", "notes", "token", "env", "secret"}) do for h in core.settings_search(q, deep = true) do if h.kind == .File do found[filepath.base(h.row.path)] = true
 	testing.expectf(t, found["SKILL.md"] && found["fix.md"] && found["index.ts"], "the page's search finds files inside folders: %v", found)
-	for never in ([]string{"notes.json", "token.json", ".env", "secret.json", "auth.json"}) do testing.expectf(t, !found[never], "the page's search shows %s", never)
+	for never in ([]string{"notes.json", "token.json", "secret.json", "auth.json"}) do testing.expectf(t, !found[never], "the page's search shows %s", never)
 	searched :: proc(q, name: string) -> bool {
 		for h in core.settings_search(q, deep = true) do if h.kind == .File && filepath.base(h.row.path) == name do return true
 		return false
@@ -998,11 +998,11 @@ settings_files_new_file_strict_umask :: proc(t: ^testing.T) {
 		o := core.run_command(core.Open_File{path = p}, ui)
 		testing.expectf(t, o.ok, "%s: opens: %s", sub, o.error)
 	}
-	// a credential's name in there: refused, or never made readable
+	// a .env made there is an ordinary file (0644, readable), not a credential
 	env := fmt.tprintf("%s/prompts/.env", ad)
 	if core.run_command(core.Create_File{path = env}, ui).ok {
 		_, st := core.path_stat(env)
-		testing.expectf(t, st.mode & 0o077 == 0, ".env made %o", st.mode & 0o777)
+		testing.expectf(t, st.mode & 0o777 == 0o644 && !core.settings_credential(env), ".env made %o", st.mode & 0o777)
 	}
 	// a private file the user (or pi) made there is still a credential
 	mine := fmt.tprintf("%s/prompts/mine.md", ad)

@@ -1176,7 +1176,7 @@ file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Ope
 		p, _ = filepath.join({base, p}, context.temp_allocator)
 	}
 	p, _ = filepath.clean(p, context.temp_allocator)
-	if settings_credential(p) do return nil, "", CREDENTIAL_REFUSED // sign-ins and .env files: never shown (settings_files.odin)
+	if settings_credential(p) do return nil, "", CREDENTIAL_REFUSED // agents' sign-ins and state: never shown (settings_files.odin)
 	switch path_kind(p) {
 	case .Missing: return nil, "", "no such file"
 	case .Dir:     return nil, "", "that is a folder"

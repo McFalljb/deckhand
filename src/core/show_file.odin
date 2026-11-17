@@ -84,7 +84,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	rp := fs_real(p)
 	if show_device(rp) do return refuse("device", "a device (/dev)", "only regular text files are shown"), false
 	if agent && show_slow_path(rp) do return refuse("slow_path", "on a network or removable volume (/net, /Volumes)", SLOW_HINT), false
-	CRED_HINT :: "sign-ins and .env files are never shown: tell the user which file to open themselves"
+	CRED_HINT :: "a coding agent's sign-ins and state are never shown: tell the user which file to open themselves"
 	if settings_credential(p) || settings_credential(rp) do return refuse("credentials", CREDENTIAL_REFUSED, CRED_HINT), false
 	if agent && (show_secret(p) || show_secret(rp)) do return refuse("secret", "it looks like a secret (keys, tokens, sign-ins)", "an agent never shows keys, tokens or sign-ins: tell the user the file's path if they want to open it themselves"), false
 	switch path_kind(p) {

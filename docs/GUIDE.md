@@ -910,8 +910,8 @@ When you ask an agent to open or show a file "in a tab", it shows it in Deckhand
 if the agent gives one. A pi or Claude tab shows files only in its own session, right after its
 own tab; Atlas names the session. The tab opens behind the one you are looking at, and a file
 already open is not opened twice. It is display only: the agent cannot edit the tab, and nothing
-of it goes back to the agent. Agents are refused credentials and secret files (`.env`, keys,
-`~/.ssh`…), binary files, files over 20 MB, network and iCloud-only files, and more than 20 such
+of it goes back to the agent. Agents are refused coding agents' sign-ins and secret files (keys,
+`~/.ssh`…; a project's `.env` is shown like any file), binary files, files over 20 MB, network and iCloud-only files, and more than 20 such
 tabs per session.
 
 ### Browser tabs
@@ -1391,8 +1391,9 @@ Deckhand has a small code editor with syntax highlighting.
   **Reload** (take the disk's version; one undo step). A file deleted on disk shows "Deleted on
   disk: ⌘S saves it again".
 - Deckhand does not open binary files, files over 20 MB, or **credential files**: pi's sign-ins
-  (`auth.json` and similar), other private files in pi's folder, and `.env` files. They show
-  "Credentials file: managed by pi (/login), not opened".
+  (`auth.json` and similar), other private files in pi's folder, and Claude's and Codex's sign-ins
+  and state. They show "Credentials file: managed by pi (/login), not opened". A project's `.env`
+  opens and saves like any file.
 
 ## Markdown tabs
 
@@ -1440,8 +1441,8 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   relative path, Open terminal here, and for `.md` files Open Markdown preview.
 - **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
   the tab; close it first). It knows the folder a tab started in, not one a shell `cd`'d to later.
-  Only you, in the window, can rename a credential's file (`.env` in any case, a key) to a name
-  that is not a credential's, or a folder holding an agent's sign-in (pi's agent folder, a
+  Only you, in the window, can rename a credential's file (a sign-in, in any case; a key) to a
+  name that is not a credential's, or a folder holding an agent's sign-in (pi's agent folder, a
   `.codex` folder, Claude's config folders); agents and browsers cannot.
 - **Trash on a Linux core**: the XDG Trash (`~/.local/share/Trash`, where file managers restore
   from); a file on another disk is refused, never deleted for good.
@@ -1496,8 +1497,8 @@ What a session changed in its git checkout, and what to do about it.
   - Each row shows **+added −removed** lines (**bin** for a binary file).
 - **On the right**, the selected file's diff (added lines green, removed red). Scroll, select
   and copy (⌘C) as in an editor tab, ⌘F finds. Long diffs stop at 5,000 lines: **Show more**
-  adds 5,000. Binary files and credentials files (`.env`, keys, pi's sign-ins) are listed but
-  never shown.
+  adds 5,000. Binary files, credentials files (pi's sign-ins) and secret-looking names (`.env`,
+  keys) are listed but their diff is never shown.
 - **Moving between files**: **J** / **K** or **↓** / **↑**, or the **↑** **↓** buttons above the
   diff.
 - **Buttons above the diff**: **Open** opens the file in an editor tab at the hunk you clicked
@@ -2555,8 +2556,8 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 
 ### Privacy
 
-- Deckhand never shows, opens or logs credential files (pi's sign-ins, private files in pi's
-  folder, `.env`), not on the Settings page, in the Files tab's editor, or to Atlas.
+- Deckhand never shows, opens or logs credential files (coding agents' sign-ins and state,
+  private files in pi's folder), not on the Settings page, in the Files tab's editor, or to Atlas.
 - Connection tokens for the control socket are never logged or saved.
 - Deckhand's only network call of its own is the [update check](#updates) (and the download
   you start with **Update**), to GitHub. Only pi (and its extensions) talk to model providers.

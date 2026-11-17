@@ -102,7 +102,7 @@ fd_stamp :: proc(f: ^os.File) -> (st: core.Disk_Stamp, ok: bool) {
 // Opened non-blocking and checked again on the open file, so a FIFO or a
 // device (even one swapped in after the stat) never blocks or streams.
 disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, st: core.Disk_Stamp, refused: string) {
-	// sign-ins and .env files are never read, by any name (settings_files.odin)
+	// agents' sign-ins and state are never read, by any name (settings_files.odin)
 	if core.settings_credential(path) do return nil, {}, core.CREDENTIALS_NOT_OPENED
 	kind, pre := core.path_stat(path)
 	switch kind {

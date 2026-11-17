@@ -40,7 +40,7 @@ clickid spi @agent/prompts
 eventually
 assert_drawn fix.md
 assert_not_drawn token.json
-assert_not_drawn .env
+assert_drawn .env
 assert_not_drawn DUMMY-AUTH-SECRET
 shot settings/prompts-search
 # a prompt: New file… (the page's field, then it opens), Rename…, Move to Trash…

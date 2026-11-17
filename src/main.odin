@@ -550,7 +550,8 @@ frame :: proc "c" () {
 	browser_tick() // browser tabs follow the pane; new textures (browser.odin)
 	annot_tick() // their annotation overlays and markers (browser_annotate.odin)
 	browser_polish_tick() // their zoom, bars and fields (browser_polish.odin)
-	if app.pending_start && app.pane.z > 0 {
+	// the harness is chosen once pi's detection settled (launch_settled): kept pending till then
+	if app.pending_start && app.pane.z > 0 && launch_settled(app_args.claude) {
 		app.pending_start = false
 		cmd := launch_start(app_args.claude, app.launch_project)
 		if _, is := cmd.(core.New_Claude_Session); is do client_call(cmd) // the user's: in front, toast if Claude Code is missing
@@ -1157,6 +1158,7 @@ confirm_pending :: proc(token: string) {
 		case core.Pi_Reload_All: cmd = core.Pi_Reload_All{only_changed = c.only_changed, confirm = token}
 		case core.Pi_Restart_Updated: cmd = core.Pi_Restart_Updated{confirm = token}
 		case core.Claude_Restart_Changed: cmd = core.Claude_Restart_Changed{update = c.update, all = c.all, confirm = token}
+		case core.Claude_Restart_Anyway: cmd = core.Claude_Restart_Anyway{tab_id = c.tab_id, confirm = token}
 		case core.Reload_File: cmd = core.Reload_File{tab_id = c.tab_id, confirm = token}
 		case core.Delete_Path: cmd = core.Delete_Path{path = c.path, confirm = token}
 		case core.Create_File: cmd = core.Create_File{path = c.path, confirm = token}
@@ -1533,11 +1535,22 @@ launch_project :: proc(r: core.Result) -> u64 {
 launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 	if pid == 0 || core.find_project(pid) == nil do return nil // never the project that happened to be selected
 	if claude do return core.New_Claude_Session{project_id = pid}
+	if !launch_settled(claude) do return nil // not yet: the frame asks again (launch_settled)
 	if !core.pi_installed() {
 		if core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code without pi (harness.odin)
 		if core.codex_installed() do return core.New_Claude_Session{project_id = pid, codex = true} // Codex alone
 	}
 	return core.New_Chat{pid}
+}
+
+// Whether `deckhand DIR` may choose its harness now: always with --claude; else once pi's detection
+// settled. On a cold launch pi counts as there while the login shell is asked (pi_installed,
+// harness.odin), and a user without pi would get a pi chat that exits 127; the lookup always
+// answers (pi_lookup_timeout) and wakes the window.
+launch_settled :: proc(claude: bool) -> bool {
+	if claude do return true
+	_ = core.pi_installed() // starts the lookup when nothing found pi by stat
+	return core.pi_lookup_state() != .Asking
 }
 
 // Test mode's backing scale from DECKHAND_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty

@@ -721,3 +721,42 @@ harness_texts_use_the_manifest_commands :: proc(t: ^testing.T) {
 	msg := core.pi_status_message(&tab)
 	testing.expect(t, strings.contains(msg, "(pi update --self,"), msg)
 }
+
+// Review: `deckhand DIR` chooses its harness only once pi's detection has settled: on a cold
+// launch pi counts as there while the login shell is asked, and a Codex-only user would get a pi
+// chat that exits 127.
+@(test)
+launch_waits_for_the_pi_lookup :: proc(t: ^testing.T) {
+	context.allocator = h_reset()
+	defer h_done()
+	defer core.codex_installed_probe = nil
+	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
+	defer os.set_env("PATH", old_path)
+	os.set_env("DECKHAND_CMD", "")
+	defer os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("PI_CODING_AGENT_DIR", "")
+	old_cap := core.pi_lookup_timeout
+	defer core.pi_lookup_timeout = old_cap
+	core.pi_lookup_timeout = 4 * time.Second
+	dir := h_dir("launchwait")
+	empty := fmt.tprintf("%s/empty", dir)
+	os.make_directory_all(empty)
+	os.set_env("PATH", fmt.tprintf("%s:/usr/bin:/bin", empty))
+	pid := core.run_command(core.Add_Project{cwd = dir}, H_UI).created_id
+	core.pi_installed_probe = nil
+	core.claude_installed_probe = proc() -> bool {return false}
+	core.codex_installed_probe = proc() -> bool {return true}
+	sh := fmt.tprintf("%s/slow-none-sh", dir)
+	h_write(sh, "#!/bin/sh\nsleep 1\nexit 1\n", exec = true) // no pi, after a while
+	os.set_env("SHELL", sh)
+	core.pi_recheck()
+	testing.expect(t, launch_start(false, pid) == nil, "while the login shell is asked: nothing chosen yet")
+	testing.expect(t, h_wait_lookup(), "the login shell answered")
+	c, is := launch_start(false, pid).(core.New_Claude_Session)
+	testing.expect(t, is && c.codex, "Codex, once pi is known to be missing")
+	// --claude never waits for pi
+	core.pi_recheck()
+	_, is = launch_start(true, pid).(core.New_Claude_Session)
+	testing.expect(t, is, "--claude: a Claude session at once")
+	testing.expect(t, h_wait_lookup())
+}

@@ -136,6 +136,13 @@ harness_flags_merge :: proc(t: ^testing.T) {
 	testing.expect_value(t, j(codex_with_defaults(nil)), "-s workspace-write")
 	set(.Codex, "--search")
 	testing.expect_value(t, j(codex_with_defaults(nil)), "--search --dangerously-bypass-approvals-and-sandbox")
+	// a plain (too old for hooks) Codex tab: the same flags, checked, before `--no-daemon -C`
+	state.settings.codex_full_access = false
+	set(.Codex, "-m o3")
+	plain, why := codex_plain_args("/w/p", "", codex_with_defaults({"-p", "work"}))
+	testing.expectf(t, why == "" && j(plain) == "-m o3 -p work --no-daemon -C /w/p", "%v %s", plain, why)
+	_, why = codex_plain_args("/w/p", "", {"--profile=../x"})
+	testing.expect_value(t, why, CODEX_PROFILE_NAME_WHY)
 }
 
 // Settings › Coding agents › Default flags: only this Mac's user (never a machine viewing it, a

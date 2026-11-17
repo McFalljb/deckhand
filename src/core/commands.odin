@@ -2784,7 +2784,7 @@ test_mode_refused :: proc(what: string) {
 
 // What a pi tab runs: DECKHAND_CMD (tests, benchmarks), else pi (PI_TAB_CMD); in test mode the
 // real pi only with DECKHAND_REAL_PI=1 (real-pi scenes), else TEST_NO_PI_CMD.
-pi_tab_cmd :: proc() -> string {
+pi_tab_cmd :: proc(bin := "") -> string {
 	if c := hook_env(.Cmd); c != "" do return c
 	when TEST_HOOKS {
 		if test_mode() && hook_env(.Real_Pi) != "1" {
@@ -2792,7 +2792,7 @@ pi_tab_cmd :: proc() -> string {
 			return TEST_NO_PI_CMD
 		}
 	}
-	return strings.concatenate({harness_found_sh(.Pi), PI_TAB_CMD}, context.temp_allocator)
+	return strings.concatenate({harness_found_sh(bin), PI_TAB_CMD}, context.temp_allocator)
 }
 
 @(private = "file")
@@ -2801,7 +2801,11 @@ start_pi :: proc(t: ^Term, tab: ^Tab, pi_session_id, path, session_dir, cwd: str
 	// A login shell finds pi on the user's PATH (from Finder or the Dock, PATH
 	// is the interactive shell's: login_env.odin). DECKHAND_CMD replaces pi (benchmarks: e.g.
 	// "cat big.log"); it sees the pi arguments as "$@". Test mode fails closed (pi_tab_cmd).
-	argv = shell_script_argv(login_shell(), pi_tab_cmd(), "pi") // fish and co.: /bin/sh
+	// the pi this start runs, decided once: its version decides `-e` and the tab starts it
+	bin := hook_env(.Cmd) != "" ? "" : harness_path(.Pi) // DECKHAND_CMD replaces pi: none
+	pi_start_bin = bin
+	defer pi_start_bin = ""
+	argv = shell_script_argv(login_shell(), pi_tab_cmd(bin), "pi") // fish and co.: /bin/sh
 	append(&argv, ..pi_integration_args()) // first: Deckhand's pi integration, `-e` per extension (pi_integration.odin)
 	tab.reload.extras = pi_integration_extras() // which optional ones: a later change offers a restart (reload_outdated)
 	if session_dir != "" do append(&argv, "--session-dir", session_dir)

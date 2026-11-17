@@ -75,7 +75,7 @@ CODEX_TAB_CMD :: HARNESS_FOUND_CODEX_SH + `command -v codex >/dev/null 2>&1 || {
 
 // What a Codex tab runs: DECKHAND_CODEX_CMD (tests: a fake codex), else codex (CODEX_TAB_CMD); in
 // test mode never the real codex.
-codex_tab_cmd :: proc() -> string {
+codex_tab_cmd :: proc(bin := "") -> string {
 	if c := hook_env(.Codex_Cmd); c != "" do return c
 	when TEST_HOOKS {
 		if test_mode() {
@@ -83,7 +83,7 @@ codex_tab_cmd :: proc() -> string {
 			return TEST_NO_CODEX_CMD
 		}
 	}
-	return strings.concatenate({harness_found_sh(.Codex), CODEX_TAB_CMD}, context.temp_allocator)
+	return strings.concatenate({harness_found_sh(bin), CODEX_TAB_CMD}, context.temp_allocator)
 }
 
 when TEST_HOOKS {
@@ -448,8 +448,25 @@ codex_with_defaults :: proc(args_in: []string) -> []string {
 // flags: the tab's own flags (an agent's restart starts without them); defaults: a start the user
 // makes, with the default flags as set now (codex_with_defaults). Its account: CODEX_HOME for a
 // home the user added (none for the default), set again after the login profile.
+// Why a Codex start can't go yet ("" = it can): no binary to read its version from (codex counts as
+// installed only because the login shell has not answered, or gave no clear answer), so the
+// minimum version could not be checked. The user tries again; a recheck asks the shell again.
+codex_start_path_why :: proc(bin: string) -> string {
+	if bin != "" do return ""
+	if harness_lookup_state(.Codex) == .Asking do return "Deckhand is still looking for Codex in your login shell: open the tab again in a moment."
+	return "Deckhand can't find the Codex your login shell starts, so it can't check its version: install it, or add its folder to PATH in your shell's login profile, then Restart."
+}
+
 codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
+	// the codex this start runs, decided once: its version is checked and the tab is told its
+	// folder (codex_tab_cmd), so the tab never starts another copy than the one checked
 	bin := harness_path(.Codex) // by stat, else what the login shell named
+	if hook_env(.Codex_Cmd) == "" {
+		if why = codex_start_path_why(bin); why != "" {
+			term_note(t, why)
+			return false, why
+		}
+	}
 	codex_plain_forget(tab_id)
 	plain := ""
 	if v := codex_version_of(bin); claude_version_below(v, CODEX_MIN_VERSION) {
@@ -483,7 +500,7 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 		term_note(t, why)
 		return false, why
 	}
-	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator) // the account again after the login profile
+	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd(bin)}, context.temp_allocator) // the account again after the login profile
 	argv := shell_script_argv(login_shell(), cmd, "codex")
 	append(&argv, ..args)
 	env := make([dynamic]string, context.temp_allocator)
@@ -833,7 +850,7 @@ codex_login_check :: proc(account := "") {
 	for e in claude_account_env(account, codex = true) do if strings.has_prefix(e, "DECKHAND_CODEX_ACCOUNT=") {
 		set = strings.concatenate({"DECKHAND_CODEX_ACCOUNT=", sh_quote(e[len("DECKHAND_CODEX_ACCOUNT="):]), "; "}, context.temp_allocator)
 	}
-	script := strings.clone(strings.concatenate({"set -- login status; ", set, CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator))
+	script := strings.clone(strings.concatenate({"set -- login status; ", set, CODEX_ACCOUNT_SH, codex_tab_cmd(harness_path(.Codex))}, context.temp_allocator))
 	Job :: struct {
 		slot:   int,
 		gen:    i32,

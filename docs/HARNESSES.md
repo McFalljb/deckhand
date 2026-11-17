@@ -281,21 +281,34 @@ Claude Code's `~/.local/bin` and `~/.claude/local`, none for Codex; the same one
 (`src/core/harness_node.odin`: nvm's under `$NVM_DIR` or `~/.nvm`, its default alias's version
 first, so nvm loaded lazily from `.zshrc` is found; fnm's default alias and versions), then the
 login shell's `command -v <name>` on a worker (at most 10 s), so one that only a `.zprofile` puts
-on PATH (asdf, mise, pnpm) is found; only an absolute path that stats as executable counts (a
-shell function or alias does not). Stat, `access(X_OK)`, reading alias files and `command -v`
-only: a harness, nvm, fnm or node is never run to find it. Until the shell answers, the harness
-counts as there; only a clean "no" says it is missing. What is cached has its folder's links
-resolved, so fnm's per-shell folder (`fnm_multishells/<id>`), which goes away with its shell,
-becomes the install it points to. A tab starts the harness Deckhand found: its command gets that
-folder (`_dh_found=<dir>`, `harness_found_sh`) and puts it first on PATH when neither the login
-shell's PATH nor the harness's own folders have it (the node next to it comes too). Its version is
-read from where the binary links, per harness (`harness_version_of`), from the stat's binary or
-else the path the shell named; a Volta shim (`~/.volta/bin/<name>` -> `volta-shim`) is read
-through the package Volta installed (`tools/image/packages/<package>/lib/node_modules/<package>`),
-and with none there it has no version (never run). Test mode never looks at PATH (`detect_path`)
-or asks the login shell (unless
-`DECKHAND_REAL_PI=1`), only the fake HOME's install folders; unit tests ask the login shell only
-when a test turns `harness_lookup_in_unit_tests` on.
+on PATH (asdf, mise, pnpm) is found. The shell's answer is the last line of its output that is an
+absolute path (rc and logout noise around it); a shell function or alias does not count. Stat,
+`access(X_OK)`, reading alias files and `command -v` only: a harness, nvm, fnm or node is never run
+to find it. Until the shell answers, the harness counts as there. Only a clean "no" says it is
+missing (`command -v`'s exit 1, or a path that is not a runnable binary); a timeout, a signal, any
+other exit or exit 0 naming no path is unknown: never cached, the harness counts as there, and the
+shell is asked again later (after 15 s, doubling to 5 min; a recheck resets it). What is cached has
+its folder's links resolved, so fnm's per-shell folder (`fnm_multishells/<id>`), which goes away
+with its shell, becomes the install it points to.
+
+**Which binary a tab starts.** Each start decides its binary once (`harness_path`: by stat, else
+what the login shell named) and uses it for both its version checks (Codex's minimum, pi's `-e`
+rule) and what the tab runs: the command gets that folder (`_dh_found=<dir>`, `harness_found_sh`)
+and puts it first on PATH (the node next to it comes too). A Codex start with no binary to check
+(the login shell still asked, or no clear answer) does not start: the tab says why.
+
+**Versions** are read from where the binary links, per harness (`harness_version_of`). A Volta shim
+(`~/.volta/bin/<name>` -> `volta-shim`) is read through the package Volta installed
+(`tools/image/packages/<package>/lib/node_modules/<package>`), and with none there it has no
+version. That is Volta's default copy: in a project whose `package.json` depends on the same
+package, Volta's shim runs the project's own copy instead, which Deckhand does not read, so the
+version shown can differ from the one that tab runs. Nothing is run for a version, with one
+exception: a Codex install whose layout Deckhand does not recognise (a plain `~/.local/bin/codex`
+from Codex's older installer) gets `codex --version` run once per binary, with a throwaway
+`CODEX_HOME` (`codex_version_run`, [CODEX.md §5](CODEX.md#5-installed-version-signed-in)); never
+for a Volta shim, and never to find Codex. Test mode never looks at PATH (`detect_path`) or asks
+the login shell (unless `DECKHAND_REAL_PI=1`), only the fake HOME's install folders; unit tests ask
+the login shell only when a test turns `harness_lookup_in_unit_tests` on.
 
 **Other machines** (Machines over SSH, [GUIDE.md](GUIDE.md)). Each machine's core checks its own
 harnesses with this manifest. This Mac shows that machine's checklist read-only under Settings ›

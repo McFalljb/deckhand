@@ -142,7 +142,7 @@ fnm_multishell_resolved :: proc(t: ^testing.T) {
 	testing.expect_value(t, path, fmt.tprintf("%s/bin/claude", inst))
 	os.remove(multi) // the shell ended
 	testing.expect_value(t, path_kind(path), Path_Kind.File)
-	testing.expect_value(t, harness_found_sh(.Claude), fmt.tprintf("_dh_found='%s/bin'; ", inst))
+	testing.expect_value(t, harness_found_sh(path), fmt.tprintf("_dh_found='%s/bin'; ", inst))
 }
 
 // Volta's shims (~/.volta/bin/<name> -> volta-shim) are read through the package Volta installed
@@ -176,4 +176,45 @@ volta_shim_versions :: proc(t: ^testing.T) {
 	testing.expect(t, path_kind(ran) == .Missing, "the shim was never run")
 	// anything else is left as it was
 	testing.expect_value(t, volta_target(.Claude, "/usr/bin/true"), "/usr/bin/true")
+}
+
+// Review: a tab starts the binary whose version was checked. The tab's command is told the folder
+// of the path its start decided (not a cached one), for Codex, Claude Code and pi alike.
+@(test)
+tab_cmd_names_the_checked_binary :: proc(t: ^testing.T) {
+	saved_cmds := [3]string{os.get_env("DECKHAND_CMD", context.temp_allocator), os.get_env("DECKHAND_CLAUDE_CMD", context.temp_allocator), os.get_env("DECKHAND_CODEX_CMD", context.temp_allocator)}
+	saved_script := os.get_env("DECKHAND_SCRIPT", context.temp_allocator)
+	defer {
+		os.set_env("DECKHAND_CMD", saved_cmds[0])
+		os.set_env("DECKHAND_CLAUDE_CMD", saved_cmds[1])
+		os.set_env("DECKHAND_CODEX_CMD", saved_cmds[2])
+		os.set_env("DECKHAND_SCRIPT", saved_script)
+	}
+	os.unset_env("DECKHAND_CMD")
+	os.unset_env("DECKHAND_CLAUDE_CMD")
+	os.unset_env("DECKHAND_CODEX_CMD")
+	os.unset_env("DECKHAND_SCRIPT")
+	testing.expect_value(t, codex_tab_cmd("/v/new/bin/codex"), strings.concatenate({"_dh_found='/v/new/bin'; ", CODEX_TAB_CMD}, context.temp_allocator))
+	testing.expect_value(t, claude_tab_cmd("/v/new/bin/claude"), strings.concatenate({"_dh_found='/v/new/bin'; ", CLAUDE_TAB_CMD}, context.temp_allocator))
+	testing.expect_value(t, pi_tab_cmd("/v/new/bin/pi"), strings.concatenate({"_dh_found='/v/new/bin'; ", PI_TAB_CMD}, context.temp_allocator))
+	testing.expect_value(t, codex_tab_cmd(""), CODEX_TAB_CMD) // nothing decided: no folder
+}
+
+// Review: a Codex start with no path to read the version from never skips the minimum check: it
+// waits for the login shell, or says Codex can't be checked.
+@(test)
+codex_start_needs_a_path :: proc(t: ^testing.T) {
+	testing.expect_value(t, codex_start_path_why("/usr/local/bin/codex"), "")
+	testing.expect(t, codex_start_path_why("") != "")
+}
+
+// Review: a command killed by a signal never reads as an exit code (SIGHUP is 1, command -v's "no").
+@(test)
+run_bounded_exit_signal_is_not_an_exit :: proc(t: ^testing.T) {
+	_, code, ran := run_bounded_exit("", {"/bin/sh", "-c", "kill -HUP $$"}, 5 * time.Second)
+	testing.expect(t, ran)
+	testing.expect(t, code != 1 && code != 0, "a signal is not exit 1")
+	testing.expect_value(t, code, 128 + 1)
+	_, code, _ = run_bounded_exit("", {"/bin/sh", "-c", "exit 1"}, 5 * time.Second)
+	testing.expect_value(t, code, 1)
 }

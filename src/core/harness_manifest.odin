@@ -499,7 +499,7 @@ harness_facts_now :: proc() -> Harness_Facts {
 		_, f.installed[h] = harness_installed(h)
 		b := harness_binary(h)
 		f.bin[h] = b
-		if b == "" && f.installed[h] && harness_found[h] == .Unknown && harness_lookup_state(h) == .Asking do f.asking[h] = true
+		if st := harness_lookup_state(h); b == "" && f.installed[h] && harness_found[h] == .Unknown && (st == .Asking || st == .Unknown) do f.asking[h] = true // not answered, or no clear answer yet (asked again)
 		if b != "" {
 			r := fs_real(b)
 			f.real[h] = r != "" ? r : b

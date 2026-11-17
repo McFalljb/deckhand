@@ -125,11 +125,15 @@ pi_integration_from_env :: proc(test: bool) -> string {
 // pi is known to be older than PI_MIN_VERSION (unknown or unparsable: false).
 pi_too_old :: proc() -> bool {return pi_version_below(pi_version_known())}
 
-// pi's version: the probed one (reload.odin: once a pi tab runs), else, before that, pi as new
-// tabs find it (harness_binary: the tabs' PATH, then pi's managed install), its package read by
-// stat, never run; looked at again after PI_VERSION_GUESS_EVERY while frames are drawn (the
-// restart bar asks every frame). "" = unknown, and while DECKHAND_CMD replaces pi (tests).
+// pi's version: during a start, that of the binary the start runs (pi_start_bin); else the probed
+// one (reload.odin: once a pi tab runs), else, before that, pi as new tabs find it (harness_path:
+// the tabs' PATH, pi's managed install, nvm's and fnm's folders, then what the login shell named),
+// its package read by stat, never run; looked at again after PI_VERSION_GUESS_EVERY while frames
+// are drawn (the restart bar asks every frame). "" = unknown, and while DECKHAND_CMD replaces pi.
 pi_version_known :: proc() -> string {
+	if pi_start_bin != "" {
+		if v := harness_version_of(.Pi, pi_start_bin); v != "" do return v
+	}
 	if v := state.reload.pi_version; v != "" do return v
 	if hook_env(.Cmd) != "" do return "" // as probe_again: pi is replaced
 	@(static) guess: struct {
@@ -137,7 +141,7 @@ pi_version_known :: proc() -> string {
 		version: string,
 	}
 	if app_frames_called != 0 && guess.at != {} && time.tick_since(guess.at) < PI_VERSION_GUESS_EVERY do return guess.version
-	v := harness_version_of(.Pi, harness_binary(.Pi))
+	v := harness_version_of(.Pi, harness_path(.Pi))
 	if app_frames_called == 0 do return v // unit tests draw no frames: no cache
 	delete(guess.version, runtime.heap_allocator())
 	guess = {at = time.tick_now(), version = strings.clone(v, runtime.heap_allocator())}
@@ -333,3 +337,7 @@ pi_setup_note :: proc() -> string {
 	if !pi_too_old() do return ""
 	return fmt.tprintf(" pi %s is older than %s, which Deckhand needs for its features in pi tabs: update it (%s).", pi_version_known(), PI_MIN_VERSION, PI_UPDATE_COMMAND)
 }
+
+// The pi binary a start runs, while start_pi decides its arguments ("" = none): its version
+// decides `-e` (pi_version_known), and the tab is told its folder (pi_tab_cmd).
+pi_start_bin: string

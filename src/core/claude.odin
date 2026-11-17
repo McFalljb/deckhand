@@ -427,7 +427,7 @@ CLAUDE_TAB_CMD :: `command -v claude >/dev/null 2>&1 || for d in "$HOME/.local/b
 
 // What a Claude tab runs: DECKHAND_CLAUDE_CMD (tests: a fake claude), else claude (CLAUDE_TAB_CMD);
 // in test mode never the real claude: TEST_NO_CLAUDE_CMD (commands.odin).
-claude_tab_cmd :: proc() -> string {
+claude_tab_cmd :: proc(bin := "") -> string {
 	if c := hook_env(.Claude_Cmd); c != "" do return c
 	when TEST_HOOKS {
 		if test_mode() {
@@ -435,7 +435,7 @@ claude_tab_cmd :: proc() -> string {
 			return TEST_NO_CLAUDE_CMD
 		}
 	}
-	return strings.concatenate({harness_found_sh(.Claude), CLAUDE_TAB_CMD}, context.temp_allocator)
+	return strings.concatenate({harness_found_sh(bin), CLAUDE_TAB_CMD}, context.temp_allocator)
 }
 
 // Starts claude in the tab's terminal: `$SHELL -l -c` (the user's PATH), --plugin-dir, --resume
@@ -462,7 +462,9 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		term_note(t, why)
 		return false, why
 	}
-	cmd := strings.concatenate({CLAUDE_ACCOUNT_SH, claude_tab_cmd()}, context.temp_allocator) // the account again after the login profile
+	// the claude found now (harness_path, as the version bar reads it) is the one the tab starts;
+	// the account again after the login profile
+	cmd := strings.concatenate({CLAUDE_ACCOUNT_SH, claude_tab_cmd(harness_path(.Claude))}, context.temp_allocator)
 	argv := shell_script_argv(login_shell(), cmd, "claude") // fish and co.: /bin/sh (commands.odin)
 	append(&argv, "--plugin-dir", plugin)
 	if ct.session_id != "" {

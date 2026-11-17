@@ -541,6 +541,9 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 		{"slow", "#!/bin/sh\nexec sleep 5\n"}, // past the cap
 		{"broken", "#!/bin/sh\nexit 127\n"}, // no output, a failure that is not command -v's
 		{"crashed", "#!/bin/sh\nkill -9 $$\n"}, // killed by a signal
+		{"hangup", "#!/bin/sh\nkill -HUP $$\n"}, // SIGHUP (1): a signal, never command -v's exit 1
+		{"no path", "#!/bin/sh\nexit 0\n"}, // exit 0 naming nothing: command -v never does that
+		{"noise only", "#!/bin/sh\necho 'rc noise'\nexit 0\n"},
 	}
 	for c in cases {
 		sh := fmt.tprintf("%s/%s-sh", dir, c.name)
@@ -551,6 +554,8 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 		_ = core.pi_installed()
 		testing.expectf(t, h_wait_lookup(), "%s: the lookup ended", c.name)
 		testing.expectf(t, core.pi_installed(), "%s: no clean answer, so pi counts as there", c.name)
+		testing.expectf(t, core.harness_lookup_state(.Pi) == .Unknown, "%s: unknown, not missing", c.name)
+		testing.expectf(t, core.harness_found[.Pi] == .Unknown, "%s: never cached: asked again later", c.name)
 	}
 	// a shell that cannot start at all
 	core.harness_lookup_timeout = LONG_CAP
@@ -559,8 +564,8 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 	_ = core.pi_installed()
 	testing.expect(t, h_wait_lookup(), "spawn error: the lookup ended")
 	testing.expect(t, core.pi_installed(), "spawn error: pi counts as there")
-	// the clean answers still say no: exit 0 with nothing, command -v's exit 1
-	for script in ([]string{"#!/bin/sh\nexit 0\n", "#!/bin/sh\nexit 1\n"}) {
+	// the clean answers still say no: command -v's exit 1, or a path that is not a runnable pi
+	for script in ([]string{"#!/bin/sh\nexit 1\n", "#!/bin/sh\necho /nonexistent/pi\nexit 0\n"}) {
 		sh := fmt.tprintf("%s/clean-sh", dir)
 		h_write(sh, script, exec = true)
 		os.set_env("SHELL", sh)
@@ -603,7 +608,7 @@ claude_codex_found_through_login_shell :: proc(t: ^testing.T) {
 	h_write(fmt.tprintf("%s/codex", zbin), "#!/bin/sh\nexit 1\n", exec = true)
 	// the login shell: -l -c 'command -v <name>' sh
 	found := fmt.tprintf("%s/found-sh", dir)
-	h_write(found, fmt.tprintf("#!/bin/sh\necho 'rc noise'\ncase \"$3\" in *claude) echo '%s/claude';; *codex) echo '%s/codex';; *) exit 1;; esac\n", zbin, zbin), exec = true)
+	h_write(found, fmt.tprintf("#!/bin/sh\necho 'rc noise'\ncase \"$3\" in *claude) echo '%s/claude';; *codex) echo '%s/codex';; *) exit 1;; esac\necho 'logout noise'\n", zbin, zbin), exec = true) // rc noise before and after: the last absolute line counts
 	os.set_env("SHELL", found)
 	for h in ([]core.Harness{.Claude, .Codex}) {
 		core.harness_recheck(h)
@@ -630,6 +635,41 @@ claude_codex_found_through_login_shell :: proc(t: ^testing.T) {
 		testing.expectf(t, !ok, "%v: nowhere", h)
 		testing.expectf(t, !core.harness_installed_now(h), "%v: a re-look stats again, still none", h)
 	}
+}
+
+// Review: a pi older than 1.4.0 that only the login shell finds (pi's own version probe found none)
+// is too old for the integration: no `-e`. Its version is read from the path the shell named.
+@(test)
+pi_too_old_found_through_login_shell :: proc(t: ^testing.T) {
+	context.allocator = h_reset()
+	defer h_done()
+	h_lookup_on(true)
+	defer h_lookup_on(false)
+	defer core.pi_recheck()
+	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
+	defer os.set_env("PATH", old_path)
+	os.set_env("DECKHAND_CMD", "")
+	defer os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("PI_CODING_AGENT_DIR", "")
+	dir := h_dir("old-pi")
+	empty := fmt.tprintf("%s/empty", dir)
+	os.make_directory_all(empty)
+	os.set_env("PATH", fmt.tprintf("%s:/usr/bin:/bin", empty))
+	pkg := fmt.tprintf("%s/lazy/pkg", dir)
+	os.make_directory_all(fmt.tprintf("%s/bin", pkg))
+	h_write(fmt.tprintf("%s/package.json", pkg), `{"name":"@earendil-works/pi-coding-agent","version":"1.3.0"}`)
+	h_write(fmt.tprintf("%s/bin/pi", pkg), "#!/bin/sh\nexit 1\n", exec = true) // never run
+	sh := fmt.tprintf("%s/found-sh", dir)
+	h_write(sh, fmt.tprintf("#!/bin/sh\necho '%s/bin/pi'\n", pkg), exec = true)
+	os.set_env("SHELL", sh)
+	core.state.reload.pi_version = "" // pi's own probe found none
+	core.pi_recheck()
+	_ = core.pi_installed()
+	testing.expect(t, h_wait_lookup(), "the login shell answered")
+	testing.expect(t, core.pi_installed())
+	testing.expect_value(t, core.pi_version_known(), "1.3.0")
+	testing.expect(t, core.pi_too_old(), "1.3.0 is older than 1.4.0")
+	testing.expect_value(t, len(core.pi_integration_args()), 0) // no -e
 }
 
 // The install folders Deckhand looks in (harness_folders) are the ones each tab's command falls

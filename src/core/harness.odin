@@ -146,14 +146,21 @@ Harness_Lookup :: enum i32 {
 	Asking,
 	Found,
 	Missing,
+	Unknown, // no clear answer (a timeout, a failure, a signal, no path): asked again later
 }
 @(private = "file")
 Lookup :: struct {
-	state: Harness_Lookup, // atomic
-	gen:   i32, // atomic: a recheck while asking drops the old answer
-	lock:  sync.Mutex,
-	path:  string, // heap, under lock: what the shell named ("" = no clear answer)
+	state:    Harness_Lookup, // atomic
+	gen:      i32, // atomic, changed under lock: a recheck while asking drops the old answer
+	lock:     sync.Mutex,
+	path:     string, // heap, under lock: what the shell named ("" = no clear answer)
+	retry_at: time.Tick, // main thread: when an Unknown answer is asked again ({} = not set)
+	backoff:  time.Duration, // main thread: the wait before that, doubled each time
 }
+
+// After an unclear answer the login shell is asked again, first after this, doubling to the most.
+HARNESS_LOOKUP_RETRY :: 15 * time.Second
+HARNESS_LOOKUP_RETRY_MAX :: 5 * time.Minute
 @(private = "file")
 lookups: [Harness]Lookup
 
@@ -201,25 +208,34 @@ harness_lookup_start :: proc(h: Harness) {
 		defer free_all(context.temp_allocator)
 		name := HARNESS_BIN_NAMES[h]
 		out, code, ran := run_bounded_exit("", shell_script_argv(login_shell(), strings.concatenate({"command -v ", name}, context.temp_allocator), "sh")[:], harness_lookup_timeout)
-		// only a clean answer says no: exit 0 without a runnable binary, or command -v's 1. A
-		// timeout, a shell that cannot start, or any other failure (127, a broken rc file, a signal)
-		// proves nothing: the harness counts as there (a recheck asks again; a tab that exits 127
-		// rechecks)
-		found, bin := true, ""
+		// only a clean answer says no: command -v's exit 1, or exit 0 naming a path that is not a
+		// runnable binary. Exit 0 names the last line that is an absolute path (rc and logout noise
+		// around it). A timeout, a shell that cannot start, a signal, any other exit (127, a broken
+		// rc file), or exit 0 naming no path proves nothing: Unknown (the harness counts as there,
+		// and the shell is asked again later)
+		answer, bin := Harness_Lookup.Unknown, ""
 		if ran && code == 0 {
 			lines := strings.split_lines(strings.trim_space(out), context.temp_allocator)
-			bin = len(lines) > 0 ? strings.trim_space(lines[len(lines) - 1]) : ""
-			found = filepath.is_abs(bin) && exe_in(filepath.dir(bin), filepath.base(bin))
-			if !found do bin = ""
+			#reverse for line in lines {
+				l := strings.trim_space(line)
+				if filepath.is_abs(l) {
+					bin = l
+					break
+				}
+			}
+			if bin != "" {
+				answer = exe_in(filepath.dir(bin), filepath.base(bin)) ? .Found : .Missing
+				if answer == .Missing do bin = ""
+			}
 		} else if ran && code == 1 {
-			found = false
+			answer = .Missing
 		}
 		l := &lookups[h]
 		sync.lock(&l.lock)
 		if sync.atomic_load(&l.gen) == gen {
 			delete(l.path, runtime.heap_allocator())
 			l.path = strings.clone(bin, runtime.heap_allocator())
-			sync.atomic_compare_exchange_strong(&l.state, .Asking, found ? .Found : .Missing)
+			sync.atomic_compare_exchange_strong(&l.state, .Asking, answer)
 		}
 		sync.unlock(&l.lock)
 		if platform.wake != nil do platform.wake()
@@ -257,17 +273,40 @@ harness_installed :: proc(h: Harness) -> (path: string, found: bool) {
 		case .None:
 			harness_lookup_start(h)
 			if harness_lookup_state(h) == .Missing do harness_cache_set(h, .No, "")
+		case .Unknown:
+			// never cached: asked again once the backoff passed (meanwhile, there)
+			l := &lookups[h]
+			if l.retry_at == {} {
+				l.backoff = l.backoff == 0 ? HARNESS_LOOKUP_RETRY : min(2 * l.backoff, HARNESS_LOOKUP_RETRY_MAX)
+				l.retry_at = time.tick_add(time.tick_now(), l.backoff)
+			} else if time.tick_diff(time.tick_now(), l.retry_at) <= 0 {
+				l.retry_at = {}
+				harness_lookup_reset(h)
+				harness_lookup_start(h)
+			}
+			return "", true
 		case .Asking:
 		}
 	}
 	return harness_where[h], harness_found[h] != .No // asking: there
 }
 
+// The login shell's answer dropped (under its lock: a worker still asking never writes over the
+// next lookup's answer).
+@(private = "file")
+harness_lookup_reset :: proc(h: Harness) {
+	l := &lookups[h]
+	sync.lock(&l.lock)
+	sync.atomic_add(&l.gen, 1)
+	sync.atomic_store(&l.state, .None)
+	sync.unlock(&l.lock)
+}
+
 // Everything looked up again, the login shell too.
 harness_recheck :: proc(h: Harness) {
 	harness_found[h] = .Unknown
-	sync.atomic_add(&lookups[h].gen, 1)
-	sync.atomic_store(&lookups[h].state, .None)
+	harness_lookup_reset(h)
+	lookups[h].retry_at, lookups[h].backoff = {}, 0
 }
 
 // harness_installed after a fresh stat (the user may have installed it since); the login shell's
@@ -444,17 +483,19 @@ machine_no_harness_note :: proc(no: u64) -> string {
 // ---- where a tab starts its harness from ----
 
 // Each tab's command (PI_TAB_CMD, CLAUDE_TAB_CMD, CODEX_TAB_CMD) finds its harness on the login
-// shell's PATH and in its own folders. Where Deckhand found it elsewhere (a Node version manager's
-// folder: nvm loaded lazily, fnm; or what the login shell named), harness_found_sh tells the
-// script that folder (`_dh_found=<dir>; `), and this step puts it first on PATH when nothing else
-// has the harness: the binary Deckhand found starts, with the node next to it (nvm, fnm).
-HARNESS_FOUND_PI_SH :: `command -v pi >/dev/null 2>&1 || { case "${_dh_found:-}" in /*) if [ -f "$_dh_found/pi" ] && [ -x "$_dh_found/pi" ]; then printf '%s\n' "Deckhand: starting pi from $_dh_found/pi, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; }; `
-HARNESS_FOUND_CLAUDE_SH :: `command -v claude >/dev/null 2>&1 || { case "${_dh_found:-}" in /*) if [ -f "$_dh_found/claude" ] && [ -x "$_dh_found/claude" ]; then printf '%s\n' "Deckhand: starting Claude Code from $_dh_found/claude, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; }; `
-HARNESS_FOUND_CODEX_SH :: `command -v codex >/dev/null 2>&1 || { case "${_dh_found:-}" in /*) if [ -f "$_dh_found/codex" ] && [ -x "$_dh_found/codex" ]; then printf '%s\n' "Deckhand: starting Codex from $_dh_found/codex, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; }; `
+// shell's PATH and in its own folders. Each start decides its binary once (harness_path: the one
+// whose version it checks), and harness_found_sh tells the script that binary's folder
+// (`_dh_found=<dir>; `); this step puts the folder first on PATH, so the tab starts that binary
+// (with the node next to it: nvm, fnm), never another copy a login profile puts first. A line
+// says so when the login shell's PATH did not have it at all.
+HARNESS_FOUND_PI_SH :: `case "${_dh_found:-}" in /*) if [ -f "$_dh_found/pi" ] && [ -x "$_dh_found/pi" ]; then command -v pi >/dev/null 2>&1 || printf '%s\n' "Deckhand: starting pi from $_dh_found/pi, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; `
+HARNESS_FOUND_CLAUDE_SH :: `case "${_dh_found:-}" in /*) if [ -f "$_dh_found/claude" ] && [ -x "$_dh_found/claude" ]; then command -v claude >/dev/null 2>&1 || printf '%s\n' "Deckhand: starting Claude Code from $_dh_found/claude, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; `
+HARNESS_FOUND_CODEX_SH :: `case "${_dh_found:-}" in /*) if [ -f "$_dh_found/codex" ] && [ -x "$_dh_found/codex" ]; then command -v codex >/dev/null 2>&1 || printf '%s\n' "Deckhand: starting Codex from $_dh_found/codex, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; `
 
-// `_dh_found=<the folder Deckhand found h in>; ` for the front of its tab's command ("" = not
-// found, or found by a stand-in). Temp.
-harness_found_sh :: proc(h: Harness) -> string {
-	if harness_found[h] != .Yes || !filepath.is_abs(harness_where[h]) do return ""
-	return strings.concatenate({"_dh_found=", sh_quote(filepath.dir(harness_where[h])), "; "}, context.temp_allocator)
+// `_dh_found=<bin's folder, links resolved>; ` for the front of a tab's command. bin is the path the
+// start decided once (harness_path), the one its version was read from ("" = none decided:
+// nothing). Temp.
+harness_found_sh :: proc(bin: string) -> string {
+	if !filepath.is_abs(bin) do return ""
+	return strings.concatenate({"_dh_found=", sh_quote(filepath.dir(harness_real_dir(bin))), "; "}, context.temp_allocator)
 }

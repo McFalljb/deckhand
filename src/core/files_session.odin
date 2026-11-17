@@ -68,7 +68,7 @@ FILES_TABS_MAX :: 64
 // (a checkout). A file a nested project or a worktree inside it also holds stays in s.
 session_holds_file :: proc(s: ^Open_Session, p: string) -> bool {
 	rp := fs_real(p)
-	if within(rp, fs_real(s.cwd)) do return true
+	if s.cwd != "" && within(rp, fs_real(s.cwd)) do return true // no folder: none of it
 	if proj := find_project(s.project_id); proj != nil && proj.machine == 0 {
 		root := fs_real(proj.cwd)
 		if within(rp, root) || within(rp, files_root_for(root)) do return true

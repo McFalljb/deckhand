@@ -36,3 +36,12 @@ files_session_agent_on_the_wire :: proc(t: ^testing.T) {
 	testing.expect_value(t, replica_apply(&num, n, context.temp_allocator), "")
 	testing.expect_value(t, num.open_sessions[0].agent, Session_Agent.Pi)
 }
+
+// A session with no folder (cwd "") holds no file: within(path, "") would hold every one.
+@(test)
+files_session_no_folder_holds_nothing :: proc(t: ^testing.T) {
+	s := Open_Session{id = 1, project_id = 0, cwd = ""}
+	testing.expect(t, !session_holds_file(&s, "/etc/hosts"))
+	s.cwd = "/etc"
+	testing.expect(t, session_holds_file(&s, "/etc/hosts"))
+}

@@ -200,6 +200,8 @@ file_save_apply :: proc(c: File_Save, caller: Caller) -> Result {
 	if !utf8.valid_string(c.text) do return fail("not UTF-8 text")
 	p, dir, name, err := web_file_where(c.path, caller)
 	if err != "" do return fail(err)
+	// Codex's hooks: shown, never written (codex_view_only), as in the window's editor
+	if codex_view_only(p) || codex_view_only(strings.concatenate({strings.trim_right(dir, "/"), "/", name}, context.temp_allocator)) do return fail("Codex's hooks are read-only here")
 	dirfd, derr := web_file_dir(dir, name, caller)
 	if derr != "" do return fail(derr)
 	defer posix.close(dirfd)

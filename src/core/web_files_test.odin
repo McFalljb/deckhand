@@ -155,3 +155,40 @@ web_files_read_and_save :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(j, "TOP-SECRET") && strings.contains(j, `"text_bytes":15`), j)
 	os.remove_all(base)
 }
+
+// Codex's hooks in a project that holds a Codex home (CODEX_HOME there): a browser reads them, never
+// saves them (codex_view_only), as the window's editor; its config there saves.
+@(test)
+web_files_codex_hooks_read_only :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	tmpl := strings.clone_to_cstring(fmt.tprintf("%s/wfc-XXXXXX", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")), context.temp_allocator)
+	base := fs_real(string(posix.mkdtemp(([^]u8)(tmpl))))
+	defer os.remove_all(base)
+	proj := fmt.tprintf("%s/proj", base)
+	cx := fmt.tprintf("%s/codex-home", proj)
+	os.make_directory_all(cx)
+	old, had := os.lookup_env("CODEX_HOME", context.temp_allocator)
+	os.set_env("CODEX_HOME", cx)
+	defer if had do os.set_env("CODEX_HOME", old); else do os.unset_env("CODEX_HOME")
+	_ = os.write_entire_file(fmt.tprintf("%s/hooks.json", cx), transmute([]u8)string("{}\n"))
+	_ = os.write_entire_file(fmt.tprintf("%s/config.toml", cx), transmute([]u8)string("a = 1\n"))
+	append(&state.projects, Project{id = new_id(), group = .Projects, cwd = strings.clone(proj)})
+	web := Caller{kind = .UI, web = true}
+	for name in ([]string{"hooks.json", "config.toml"}) {
+		path := fmt.tprintf("%s/%s", cx, name)
+		r := run_command(File_Read{path = path}, web)
+		testing.expectf(t, r.ok, "%s read: %s", name, r.error)
+		if !r.ok do continue
+		v, _ := json.parse_string(r.data, allocator = context.temp_allocator)
+		h := strings.clone(v.(json.Object)["hash"].(json.String), context.temp_allocator)
+		r = run_command(File_Save{path = path, text = "changed\n", base = h}, web)
+		if name == "hooks.json" {
+			testing.expect_value(t, r.error, "Codex's hooks are read-only here")
+			data, _ := os.read_entire_file(path, context.temp_allocator)
+			testing.expect_value(t, string(data), "{}\n")
+		} else do testing.expect(t, r.ok, r.error)
+	}
+}

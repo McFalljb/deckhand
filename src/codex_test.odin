@@ -1707,3 +1707,37 @@ codex_recheck_on_127_and_refresh :: proc(t: ^testing.T) {
 	core.run_command(core.Refresh_Shell_Env_Done{ok = false}, {kind = .Internal})
 	testing.expect_value(t, core.harness_found[.Codex], core.Claude_Found.Unknown)
 }
+
+// Reopen closed tab (⇧⌘T; closed_tabs.odin) brings a closed Codex tab back as a Codex tab
+// resuming its conversation, never as Claude Code (its harness is kept with the entry).
+@(test)
+codex_reopen_closed_tab :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	closed_tabs_clear()
+	defer closed_tabs_clear()
+	state.settings.confirm_close[.Claude] = .Never
+	dir := cx_dir("reopen")
+	defer os.remove_all(dir)
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	sess := r.created_id
+	r = core.run_command(core.New_Claude_Tab{session = sess, harness = .Codex}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := r.created_id
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad5ab"
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid}, CX_SCRIPT)
+	close_tab_click(tab)
+	core.inbox_drain()
+	closed_tabs_settle()
+	_, gone, _ := core.find_tab(tab)
+	testing.expect(t, gone == nil, "closed")
+	testing.expect_value(t, len(closed_tabs), 1)
+	state.current_session = sess
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	if tid := core.claude_tab_of_session(sid); tid != 0 {
+		_, tb, _ := core.find_tab(tid)
+		testing.expect(t, tb != nil && core.tab_harness(tb^) == .Codex, "reopened in Codex")
+	} else do testing.fail(t)
+}

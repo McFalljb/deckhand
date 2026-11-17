@@ -209,7 +209,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		for t, i in c.tabs {
 			args := make([]string, len(t.args), allocator)
 			for x, j in t.args do args[j] = s(x, allocator)
-			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, account = s(t.account, allocator), pane = t.pane, pane_active = t.pane_active, held = t.held, harness = .Claude} // as before this field: a clone's Claude tab is Claude Code's
+			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, account = s(t.account, allocator), pane = t.pane, pane_active = t.pane_active, held = t.held, harness = t.harness}
 		}
 		layout := c.layout
 		layout.nodes = make([]Restore_Node, len(c.layout.nodes), allocator)

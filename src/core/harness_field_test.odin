@@ -116,3 +116,19 @@ harness_command_defaults :: proc(t: ^testing.T) {
 	_, err := parse_command(`{"type":"new_claude_tab","session":1,"harness":"pi"}`, context.temp_allocator)
 	testing.expect_value(t, err, "harness must be claude or codex")
 }
+
+// A Restore_Session queued from another thread (inbox_submit copies it: command_clone) keeps each
+// Claude tab's harness: a Codex tab is restored as Codex.
+@(test)
+harness_restore_session_clone :: proc(t: ^testing.T) {
+	cmd := Restore_Session{project_id = 1, pi_session_id = "x", agent = .Claude, tabs = {
+		{kind = .Claude, claude_id = "01a1d0d6-5353-7ff3-9308-ff91070ad5fd", harness = .Codex},
+		{kind = .Claude, claude_id = "aaaa1111-0000-4000-8000-000000000001", harness = .Claude},
+	}}
+	c, is := command_clone(cmd, context.temp_allocator).(Restore_Session)
+	testing.expect(t, is && len(c.tabs) == 2)
+	if is && len(c.tabs) == 2 {
+		testing.expect_value(t, c.tabs[0].harness, Harness.Codex)
+		testing.expect_value(t, c.tabs[1].harness, Harness.Claude)
+	}
+}

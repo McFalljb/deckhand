@@ -1467,7 +1467,10 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   it, onto a file to copy next to it, below the last row to copy to the top of the project. The
   target folder is highlighted while you hover. A name that is taken gets " copy" ("a copy.txt",
   then "a copy 2.txt"); nothing is ever overwritten. Folders are copied whole, except `.git`
-  folders and sign-in files (credentials), which are left out; links are copied as links. A toast
+  folders and sign-in files (credentials), which are left out; links are copied as links. Files
+  that look like secrets (keys such as `id_ed25519` or `*.pem`, `~/.ssh`, `~/.aws`, `.netrc`, …)
+  are never copied in this way: dropped alone they are refused, inside a folder they are left out,
+  and the toast names them. Move them yourself if you mean to. A toast
   says what was copied where and what was left out ("Copied a.txt, pics to src/"). Only you, in
   Deckhand's own window, can copy files from outside your projects this way; a browser, scripts
   and agents cannot. Dropped on the left column outside the list (or on the Sessions tab), a

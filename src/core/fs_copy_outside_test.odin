@@ -144,3 +144,60 @@ fs_copy_outside_source_rules :: proc(t: ^testing.T) {
 	_, e = ocopy(fmt.tprintf("%s/nope", outside), fmt.tprintf("%s/nope", proj), Caller{kind = .UI})
 	testing.expect_value(t, e, "no such file or folder")
 }
+
+// Review (#169 round 2): a project's own folder spelled in another case (a volume that ignores
+// case) is no outside source.
+@(test)
+fs_copy_outside_source_case_variant :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	proj, outside := osetup("case")
+	defer {os.remove_all(tdir(proj)); state = State{}}
+	other := fmt.aprintf("%s/other", tdir(proj))
+	os.make_directory_all(other)
+	append(&state.projects, Project{id = new_id(), cwd = strings.clone(other), label = "other"})
+	owrite(fmt.tprintf("%s/f.txt", proj), "f")
+	variant := fmt.tprintf("%s/PROJ", tdir(proj))
+	if !os.exists(variant) do return // a volume that keeps case: no such spelling
+	_, e := ocopy(variant, fmt.tprintf("%s/p", other), Caller{kind = .UI})
+	testing.expect(t, e != "", "the project's folder by another case is refused")
+	testing.expect(t, !os.exists(fmt.tprintf("%s/p", other)), "nothing copied")
+	// (a file inside it by another case is an ordinary copy from the project: fs_check reads its folder's real path)
+	_ = outside
+}
+
+// Review (#169 round 2): the user's own secrets from outside (keys, ~/.aws, ~/.netrc) are never
+// copied in by a drop: one dropped alone is refused; inside a dropped folder, left out and said.
+// A secret already inside a project copies as before (the user's own tree copy).
+@(test)
+fs_copy_outside_source_secrets :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	proj, outside := osetup("secrets")
+	defer {os.remove_all(tdir(proj)); state = State{}}
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	home := fmt.tprintf("%s/home", outside)
+	os.set_env("HOME", home)
+	owrite(fmt.tprintf("%s/.aws/credentials", home), "[default]")
+	owrite(fmt.tprintf("%s/.netrc", home), "machine x")
+	owrite(fmt.tprintf("%s/id_ed25519", outside), "key")
+	owrite(fmt.tprintf("%s/keys/server.pem", outside), "pem")
+	owrite(fmt.tprintf("%s/keys/ok.txt", outside), "ok")
+	for src in ([]string{fmt.tprintf("%s/.aws/credentials", home), fmt.tprintf("%s/.aws", home), fmt.tprintf("%s/.netrc", home), fmt.tprintf("%s/id_ed25519", outside)}) {
+		_, e := ocopy(src, fmt.tprintf("%s/s", proj), Caller{kind = .UI})
+		testing.expectf(t, e == FS_COPY_SECRET, "%s: %s", src, e)
+		testing.expect(t, !os.exists(fmt.tprintf("%s/s", proj)), "nothing copied")
+	}
+	plan, e := ocopy(fmt.tprintf("%s/keys", outside), fmt.tprintf("%s/keys", proj), Caller{kind = .UI})
+	testing.expect_value(t, e, "")
+	testing.expect_value(t, oread(fmt.tprintf("%s/keys/ok.txt", proj)), "ok")
+	testing.expect(t, !os.exists(fmt.tprintf("%s/keys/server.pem", proj)), "the key is left out")
+	testing.expect(t, len(plan.skipped) == 1 && plan.skipped[0].rel == "server.pem" && plan.skipped[0].why == FS_COPY_SECRET, "said")
+	// a home folder dropped whole: .aws and .netrc left out
+	plan, e = ocopy(home, fmt.tprintf("%s/h", proj), Caller{kind = .UI})
+	testing.expect_value(t, e, "")
+	testing.expect(t, !os.exists(fmt.tprintf("%s/h/.aws", proj)) && !os.exists(fmt.tprintf("%s/h/.netrc", proj)), "secrets left out")
+	// inside a project: the user's own tree copy, as before
+	owrite(fmt.tprintf("%s/in.pem", proj), "pem")
+	_, e = ocopy(fmt.tprintf("%s/in.pem", proj), fmt.tprintf("%s/in2.pem", proj), Caller{kind = .UI})
+	testing.expect_value(t, e, "")
+}

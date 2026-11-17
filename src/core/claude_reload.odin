@@ -262,6 +262,7 @@ claude_binary_path :: proc() -> string {
 // ident is the version, or for an unknown layout its file's identity ("build:…"); both "" when
 // bin is missing.
 claude_version_of :: proc(bin: string) -> (label, ident: string) {
+	bin := volta_target(.Claude, bin) // a Volta shim: the package it runs (harness_node.odin)
 	real := fs_real(bin)
 	k, st := path_stat(real != "" ? real : bin)
 	if k != .File do return "", ""

@@ -970,6 +970,7 @@ PI_PACKAGE :: "@earendil-works/pi-coding-agent"
 // first package.json above pi's real entry point (npm, bun, mise's npm backend: links into a
 // node_modules) that is pi's (a package.json of something else, like a home folder's, is skipped).
 pi_package_of :: proc(bin: string) -> string {
+	bin := volta_target(.Pi, bin) // a Volta shim: the package it runs (harness_node.odin)
 	real := fs_real(bin)
 	if real == "" do real = bin
 	if pkg := script_target(real, "node_modules/" + PI_PACKAGE); pkg != "" {

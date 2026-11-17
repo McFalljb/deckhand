@@ -423,7 +423,7 @@ claude_cli_path :: proc() -> string {
 // Not on PATH: Claude Code's own install folders (~/.local/bin, the native
 // installer's; ~/.claude/local, the older local install) are tried, after a
 // line saying where it was found. Neither: what to do, exit 127.
-CLAUDE_TAB_CMD :: `command -v claude >/dev/null 2>&1 || for d in "$HOME/.local/bin" "$HOME/.claude/local"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/claude" ] && [ -x "$d/claude" ]; then printf '%s\n' "Deckhand: Claude Code is installed at $d/claude but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v claude >/dev/null 2>&1 || { printf '%s\n' "Claude Code (claude) was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.local/bin or ~/.claude/local." "Install Claude Code, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh; for bash ~/.bash_profile if you have one, else ~/.profile), then open a Claude tab again."; exit 127; }; exec claude "$@"`
+CLAUDE_TAB_CMD :: `command -v claude >/dev/null 2>&1 || for d in "$HOME/.local/bin" "$HOME/.claude/local"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/claude" ] && [ -x "$d/claude" ]; then printf '%s\n' "Deckhand: Claude Code is installed at $d/claude but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; ` + HARNESS_FOUND_CLAUDE_SH + `command -v claude >/dev/null 2>&1 || { printf '%s\n' "Claude Code (claude) was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.local/bin or ~/.claude/local." "Install Claude Code, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh; for bash ~/.bash_profile if you have one, else ~/.profile), then open a Claude tab again."; exit 127; }; exec claude "$@"`
 
 // What a Claude tab runs: DECKHAND_CLAUDE_CMD (tests: a fake claude), else claude (CLAUDE_TAB_CMD);
 // in test mode never the real claude: TEST_NO_CLAUDE_CMD (commands.odin).
@@ -435,7 +435,7 @@ claude_tab_cmd :: proc() -> string {
 			return TEST_NO_CLAUDE_CMD
 		}
 	}
-	return CLAUDE_TAB_CMD
+	return strings.concatenate({harness_found_sh(.Claude), CLAUDE_TAB_CMD}, context.temp_allocator)
 }
 
 // Starts claude in the tab's terminal: `$SHELL -l -c` (the user's PATH), --plugin-dir, --resume

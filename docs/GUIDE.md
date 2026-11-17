@@ -675,9 +675,10 @@ is waiting for you).
   starts a Claude session in DIR.
 - **To start a new chat**, click the New chat button in the top bar or **+ New chat**, or press ⌘N.
 - **Which agent starts.** Deckhand looks for pi, Claude Code and Codex the same way, as a new tab
-  would find them: on your PATH, in the folder its own installer uses, then by asking your login
-  shell (so one that nvm, fnm or another setup in `~/.zprofile` puts on PATH is found too); it
-  never runs them to find out. With more than one installed, **New session** and **New chat** open a small picker: **pi**,
+  would find them: on your PATH, in the folder its own installer uses, in nvm's and fnm's folders
+  (nvm loaded lazily too), then by asking your login shell (so one that another setup in
+  `~/.zprofile` puts on PATH is found too); a tab starts the copy Deckhand found. It never runs
+  them to find out. With more than one installed, **New session** and **New chat** open a small picker: **pi**,
   **Claude Code** and **Codex** (once per account when you have several), each with its icon,
   under the button or row you used. ↑↓ and Enter, a number key (1, 2…, the keypad's too) or a click picks; Esc closes it. The one you used last comes first and is selected, so
   Enter starts it again. With only one installed it starts at once, without a picker; with

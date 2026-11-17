@@ -270,12 +270,22 @@ too, the login shell's included, and pi's version probed again).
 all three, in the order a tab's own command finds it: the PATH new tabs get, then the folders its
 own installer uses (`harness_folders`: pi's `$PI_CODING_AGENT_DIR/bin` and `~/.pi/agent/bin`,
 Claude Code's `~/.local/bin` and `~/.claude/local`, none for Codex; the same ones `PI_TAB_CMD` and
-`CLAUDE_TAB_CMD` fall back to), then the login shell's `command -v <name>` on a worker (at most
-10 s), so one that only a `.zprofile` puts on PATH (nvm, fnm, asdf, mise, pnpm) is found. Stat,
-`access(X_OK)` and `command -v` only: a harness is never run to find it. Until the shell answers,
-the harness counts as there; only a clean "no" says it is missing. Its version is read from where
-the binary links, per harness (`harness_version_of`), from the stat's binary or else the path the
-shell named. Test mode never looks at PATH (`detect_path`) or asks the login shell (unless
+`CLAUDE_TAB_CMD` fall back to), then the Node version managers' folders read from disk
+(`src/core/harness_node.odin`: nvm's under `$NVM_DIR` or `~/.nvm`, its default alias's version
+first, so nvm loaded lazily from `.zshrc` is found; fnm's default alias and versions), then the
+login shell's `command -v <name>` on a worker (at most 10 s), so one that only a `.zprofile` puts
+on PATH (asdf, mise, pnpm) is found; only an absolute path that stats as executable counts (a
+shell function or alias does not). Stat, `access(X_OK)`, reading alias files and `command -v`
+only: a harness, nvm, fnm or node is never run to find it. Until the shell answers, the harness
+counts as there; only a clean "no" says it is missing. What is cached has its folder's links
+resolved, so fnm's per-shell folder (`fnm_multishells/<id>`), which goes away with its shell,
+becomes the install it points to. A tab starts the harness Deckhand found: its command gets that
+folder (`_dh_found=<dir>`, `harness_found_sh`) and puts it first on PATH when neither the login
+shell's PATH nor the harness's own folders have it (the node next to it comes too). Its version is
+read from where the binary links, per harness (`harness_version_of`), from the stat's binary or
+else the path the shell named; a Volta shim (`~/.volta/bin/<name>` -> `volta-shim`) is read
+through the package Volta installed (`tools/image/packages/<package>/lib/node_modules/<package>`),
+and with none there it has no version (never run). Test mode never looks at PATH (`detect_path`) or asks the login shell (unless
 `DECKHAND_REAL_PI=1`), only the fake HOME's install folders; unit tests ask the login shell only
 when a test turns `harness_lookup_in_unit_tests` on.
 

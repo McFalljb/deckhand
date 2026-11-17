@@ -448,6 +448,14 @@ launch_dir_without_pi :: proc(t: ^testing.T) {
 
 // ---- review round 1 ----
 
+// The login shell is asked in this test (core.harness_lookup_in_unit_tests: a hook-only switch).
+@(private = "file")
+h_lookup_on :: proc(on: bool) {
+	when core.TEST_HOOKS {
+		core.harness_lookup_in_unit_tests = on
+	}
+}
+
 @(private = "file")
 h_wait_lookup :: proc(h := core.Harness.Pi) -> bool {
 	for _ in 0 ..< 500 {
@@ -464,8 +472,8 @@ h_wait_lookup :: proc(h := core.Harness.Pi) -> bool {
 pi_detect_asks_login_shell :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
 	defer h_done()
-	core.harness_lookup_in_unit_tests = true // the login shell is asked (never otherwise in a unit test)
-	defer core.harness_lookup_in_unit_tests = false
+	h_lookup_on(true) // the login shell is asked (never otherwise in a unit test)
+	defer h_lookup_on(false)
 	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
 	defer os.set_env("PATH", old_path)
 	os.set_env("DECKHAND_CMD", "")
@@ -510,8 +518,8 @@ pi_detect_asks_login_shell :: proc(t: ^testing.T) {
 pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
 	defer h_done()
-	core.harness_lookup_in_unit_tests = true
-	defer core.harness_lookup_in_unit_tests = false
+	h_lookup_on(true)
+	defer h_lookup_on(false)
 	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
 	defer os.set_env("PATH", old_path)
 	os.set_env("DECKHAND_CMD", "")
@@ -571,8 +579,8 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 claude_codex_found_through_login_shell :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
 	defer h_done()
-	core.harness_lookup_in_unit_tests = true
-	defer core.harness_lookup_in_unit_tests = false
+	h_lookup_on(true)
+	defer h_lookup_on(false)
 	defer {
 		core.claude_recheck()
 		core.codex_recheck()
@@ -605,8 +613,9 @@ claude_codex_found_through_login_shell :: proc(t: ^testing.T) {
 		testing.expectf(t, h_wait_lookup(h), "%v: the login shell answered", h)
 		path, ok := core.harness_installed(h)
 		testing.expectf(t, ok, "%v: the login shell finds it", h)
-		testing.expect_value(t, path, fmt.tprintf("%s/%s", zbin, h == .Claude ? "claude" : "codex"))
-		testing.expect_value(t, core.harness_path(h), path) // its version is read from there
+		named := fmt.tprintf("%s/%s", zbin, h == .Claude ? "claude" : "codex")
+		testing.expect_value(t, path, core.harness_real_dir(named)) // kept with its folder resolved (/tmp -> /private/tmp)
+		testing.expect_value(t, core.harness_path(h), named) // its version is read from what the shell named
 	}
 	testing.expect(t, core.claude_installed() && core.codex_installed())
 	// a login shell without them: no, once it answered

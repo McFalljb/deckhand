@@ -93,11 +93,13 @@ harness_folders :: proc(h: Harness, home, agent_dir: string) -> []string {
 	return out[:]
 }
 
-// The harness binary on `path` (absolute entries only), else in its folders ("" = neither). Temp.
-harness_find :: proc(h: Harness, path, home, agent_dir: string) -> string {
+// The harness binary on `path` (absolute entries only), else in its folders, else in a Node version
+// manager's (managers: node_manager_dirs, harness_node.odin). "" = none of them. Temp.
+harness_find :: proc(h: Harness, path, home, agent_dir: string, managers: []string = nil) -> string {
 	name := HARNESS_BIN_NAMES[h]
 	for dir in strings.split(path, ":", context.temp_allocator) do if exe_in(dir, name) do return strings.concatenate({strings.trim_right(dir, "/"), "/", name}, context.temp_allocator)
 	for dir in harness_folders(h, home, agent_dir) do if exe_in(dir, name) do return strings.concatenate({dir, "/", name}, context.temp_allocator)
+	for dir in managers do if exe_in(dir, name) do return strings.concatenate({dir, "/", name}, context.temp_allocator)
 	return ""
 }
 
@@ -125,7 +127,16 @@ harness_binary :: proc(h: Harness) -> string {
 			if ODIN_TEST || test_mode() do return ""
 		}
 	}
-	return harness_find(h, detect_path(), os.get_env("HOME", context.temp_allocator), pi_agent_dir())
+	home := os.get_env("HOME", context.temp_allocator)
+	// nvm's and fnm's folders (harness_node.odin): $NVM_DIR and $FNM_DIR as new tabs get them; test
+	// mode and unit tests only their defaults under the (fake) HOME, never the developer's
+	nvm_dir, fnm_dir: string
+	if !(ODIN_TEST || test_mode()) {
+		env := child_base_env()
+		nvm_dir, _ = env_lookup(env, "NVM_DIR")
+		fnm_dir, _ = env_lookup(env, "FNM_DIR")
+	}
+	return harness_find(h, detect_path(), home, pi_agent_dir(), node_manager_dirs(home, nvm_dir, fnm_dir))
 }
 
 // The login shell's answer about a harness: `$SHELL -l -c 'command -v <name>'` (or /bin/sh for
@@ -218,6 +229,7 @@ harness_lookup_start :: proc(h: Harness) {
 @(private = "file")
 harness_cache_set :: proc(h: Harness, found: Claude_Found, path: string) {
 	harness_found[h] = found
+	path := harness_real_dir(path) // a per-shell folder (fnm's) resolved to the install, which stays
 	if harness_where[h] == path do return
 	delete(harness_where[h], runtime.heap_allocator())
 	harness_where[h] = strings.clone(path, runtime.heap_allocator())
@@ -415,4 +427,22 @@ machine_no_harness_note :: proc(no: u64) -> string {
 		}
 	}
 	return "No coding agent is installed on that machine yet: its pi tab says how to install one, and ⌘T opens a terminal there"
+}
+
+// ---- where a tab starts its harness from ----
+
+// Each tab's command (PI_TAB_CMD, CLAUDE_TAB_CMD, CODEX_TAB_CMD) finds its harness on the login
+// shell's PATH and in its own folders. Where Deckhand found it elsewhere (a Node version manager's
+// folder: nvm loaded lazily, fnm; or what the login shell named), harness_found_sh tells the
+// script that folder (`_dh_found=<dir>; `), and this step puts it first on PATH when nothing else
+// has the harness: the binary Deckhand found starts, with the node next to it (nvm, fnm).
+HARNESS_FOUND_PI_SH :: `command -v pi >/dev/null 2>&1 || { case "${_dh_found:-}" in /*) if [ -f "$_dh_found/pi" ] && [ -x "$_dh_found/pi" ]; then printf '%s\n' "Deckhand: starting pi from $_dh_found/pi, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; }; `
+HARNESS_FOUND_CLAUDE_SH :: `command -v claude >/dev/null 2>&1 || { case "${_dh_found:-}" in /*) if [ -f "$_dh_found/claude" ] && [ -x "$_dh_found/claude" ]; then printf '%s\n' "Deckhand: starting Claude Code from $_dh_found/claude, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; }; `
+HARNESS_FOUND_CODEX_SH :: `command -v codex >/dev/null 2>&1 || { case "${_dh_found:-}" in /*) if [ -f "$_dh_found/codex" ] && [ -x "$_dh_found/codex" ]; then printf '%s\n' "Deckhand: starting Codex from $_dh_found/codex, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; }; `
+
+// `_dh_found=<the folder Deckhand found h in>; ` for the front of its tab's command ("" = not
+// found, or found by a stand-in). Temp.
+harness_found_sh :: proc(h: Harness) -> string {
+	if harness_found[h] != .Yes || !filepath.is_abs(harness_where[h]) do return ""
+	return strings.concatenate({"_dh_found=", sh_quote(filepath.dir(harness_where[h])), "; "}, context.temp_allocator)
 }

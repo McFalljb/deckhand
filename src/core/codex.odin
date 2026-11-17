@@ -65,7 +65,7 @@ CODEX_HOOKS := [?]Codex_Hook {
 }
 
 // codex, or why there is none: it is not on the login shell's PATH (npm's global bin).
-CODEX_TAB_CMD :: `command -v codex >/dev/null 2>&1 || { printf '%s\n' "Codex (codex) was not found on your login shell's PATH:" "  $PATH" "Install it with: npm install -g @openai/codex@latest (or add its folder to PATH in your shell's login profile, ~/.zprofile for zsh), then open a Codex tab again."; exit 127; }; exec codex "$@"`
+CODEX_TAB_CMD :: HARNESS_FOUND_CODEX_SH + `command -v codex >/dev/null 2>&1 || { printf '%s\n' "Codex (codex) was not found on your login shell's PATH:" "  $PATH" "Install it with: npm install -g @openai/codex@latest (or add its folder to PATH in your shell's login profile, ~/.zprofile for zsh), then open a Codex tab again."; exit 127; }; exec codex "$@"`
 
 // What a Codex tab runs: DECKHAND_CODEX_CMD (tests: a fake codex), else codex (CODEX_TAB_CMD); in
 // test mode never the real codex.
@@ -77,7 +77,7 @@ codex_tab_cmd :: proc() -> string {
 			return TEST_NO_CODEX_CMD
 		}
 	}
-	return CODEX_TAB_CMD
+	return strings.concatenate({harness_found_sh(.Codex), CODEX_TAB_CMD}, context.temp_allocator)
 }
 
 when TEST_HOOKS {
@@ -521,6 +521,7 @@ codex_installed_now :: proc() -> bool {return harness_installed_now(.Codex)}
 // (Caskroom/codex/<v>/); else, only then, from `codex --version` (codex_version_run). "" = unknown.
 codex_version_of :: proc(bin: string) -> string {
 	if bin == "" do return ""
+	bin := volta_target(.Codex, bin) // a Volta shim: the package it runs (harness_node.odin)
 	real := fs_real(bin)
 	if real == "" do real = bin
 	if i := strings.index(real, "/Caskroom/codex/"); i >= 0 {
@@ -540,6 +541,7 @@ codex_version_of :: proc(bin: string) -> string {
 		}
 	}
 	if v := codex_standalone_version(real); v != "" do return v
+	if filepath.base(real) == "volta-shim" do return "" // a Volta shim whose package is not on disk: never run (it would run codex)
 	return codex_version_run(real)
 }
 

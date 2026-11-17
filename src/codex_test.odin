@@ -1057,6 +1057,61 @@ codex_disk_long_cwd_skipped :: proc(t: ^testing.T) {
 	}
 }
 
+// Folders where only Codex ran are projects, as folders where only Claude ran are
+// (claude_scan_projects): by the cwd of an interactive rollout (source "cli" or "vscode"; never
+// `codex exec`'s or a subagent's); a folder pi knows stays one row; the launch's scan reads no
+// rollout; a Rescan that no longer finds the folder drops it.
+@(test)
+codex_only_folders_are_projects :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("codexproj")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	day := fmt.tprintf("%s/sessions/2026/11/12", home)
+	os.make_directory_all(day)
+	cli, ide, ex, sub := cx_dir("p-cli"), cx_dir("p-ide"), cx_dir("p-exec"), cx_dir("p-sub")
+	rollout :: proc(day, n, cwd, source: string) -> string {
+		id := fmt.tprintf("01a1d0d6-5353-7ff3-9308-ff91070ad5%s", n)
+		path := fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id)
+		_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":%s}}}}`+"\n", id, cwd, source))
+		return path
+	}
+	cli_path := rollout(day, "a1", cli, `"cli"`)
+	rollout(day, "a2", ide, `"vscode"`)
+	rollout(day, "a3", ex, `"exec"`)
+	rollout(day, "a4", sub, `{"subagent":"review"}`)
+	has :: proc(cwd: string) -> bool {
+		p := core.project_by_cwd(cwd)
+		return p != nil && p.group == .Projects
+	}
+	// the launch's scan: no rollout read (a Rescan follows: claude_startup_rescan_due)
+	before := core.claude_disk_bytes_read
+	core.rescan_now(claude = false)
+	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
+	testing.expect(t, !has(cli), "the launch reads no rollout")
+	testing.expect(t, core.claude_startup_rescan_due(), "a Codex home with sessions/")
+	core.rescan_now()
+	testing.expect(t, has(cli) && has(ide), "interactive threads' folders")
+	testing.expect(t, !has(ex) && !has(sub), "never codex exec's or a subagent's")
+	if p := core.project_by_cwd(cli); p != nil do testing.expect(t, p.claude && p.dir == "", "found on disk only")
+	// one row a folder, merged with the scan's others by cwd
+	projects := make([dynamic]core.Project, context.temp_allocator)
+	append(&projects, core.Project{cwd = cli, dir = "/pi/store"})
+	core.claude_scan_prepare()
+	core.claude_scan_projects(&projects)
+	n := 0
+	for p in projects do if p.cwd == cli do n += 1
+	testing.expect_value(t, n, 1)
+	testing.expect(t, !projects[0].claude, "pi's folder stays pi's")
+	// the rollout gone: the next Rescan drops the folder
+	os.remove(cli_path)
+	core.rescan_now()
+	testing.expect(t, !has(cli) && has(ide), "dropped once no rollout records it")
+}
+
 // ---- Codex accounts (claude_accounts.odin with codex; docs/CODEX.md §6a) ----
 
 // A fresh HOME with a login profile that sets CODEX_HOME elsewhere, a project, and a Codex home

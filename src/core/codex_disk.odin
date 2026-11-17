@@ -66,7 +66,7 @@ disk_first_line :: proc(h: Harness, path: string) -> (cwd: string, skip: bool) {
 
 // A rollout's session_meta (its first line, at most CODEX_DISK_LINE_MAX, never more of the file):
 // the cwd it ran in. skip: not a conversation to list (no session_meta, an id that is not the
-// file's, a subagent's or another non-string source). Never written to; nothing in it reaches a
+// file's, a subagent's, `codex exec`'s or any source but "cli" and "vscode"). Never written to; nothing in it reaches a
 // shell or the screen (the cwd is only compared with the project's folder). Any thread.
 codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
 	skip = true
@@ -90,7 +90,8 @@ codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
 	pl, _ := o["payload"].(json.Object)
 	id, _ := pl["id"].(json.String)
 	c, _ := pl["cwd"].(json.String)
-	if _, src_ok := pl["source"].(json.String); !src_ok do return // a subagent's ({"subagent": …})
+	// an interactive thread only: never a subagent's ({"subagent": …}) nor `codex exec`'s
+	if src, _ := pl["source"].(json.String); src != "cli" && src != "vscode" do return
 	name := strings.trim_suffix(filepath.base(path), ".jsonl")
 	if !codex_id_ok(string(id)) || !strings.has_suffix(name, string(id)) || !filepath.is_abs(string(c)) do return
 	if len(c) > CODEX_CWD_MAX || strings.index_byte(string(c), 0) >= 0 do return
@@ -98,8 +99,7 @@ codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
 }
 
 // A Codex home's sessions folder ("" = none; in tests and test mode never the developer's own
-// ~/.codex: the default only when they set CODEX_HOME, ~/.codex of the real home never).
-@(private = "file")
+// ~/.codex: the default only when they set CODEX_HOME, ~/.codex of the real home never). Main thread.
 codex_sessions_dir :: proc(home: string) -> string {
 	when TEST_HOOKS {
 		if ODIN_TEST || test_mode() {
@@ -122,9 +122,14 @@ codex_disk_files :: proc() -> []Disk_File {
 
 @(private = "file")
 codex_disk_files_of :: proc(all: ^[dynamic]Disk_File, home: string) {
+	codex_disk_files_in(all, home, codex_sessions_dir(home))
+}
+
+// codex_disk_files_of with home's sessions folder given (root: codex_sessions_dir, taken on the
+// main thread). Any thread.
+codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 	out := make([dynamic]Disk_File, context.temp_allocator)
 	defer append(all, ..out[:])
-	root := codex_sessions_dir(home)
 	if root == "" do return
 	// the numbered folders under dir, newest (largest) first
 	numbered :: proc(dir: string) -> []os.File_Info {

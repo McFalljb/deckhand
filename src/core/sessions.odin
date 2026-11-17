@@ -39,7 +39,7 @@ Project :: struct {
 	missing: bool, // cwd does not exist (any more)
 	repo:    bool, // cwd has a .git (a repository's root, or a worktree): always a top-level row
 	by_hand: bool, // added by hand (add_project; saved): a top-level row
-	claude:  bool, // only found in a Claude Code account's projects/ (claude_disk.odin; saved): a Rescan that does not find it again drops it
+	claude:  bool, // only found on disk: a Claude Code account's projects/ or a Codex home's sessions/ (claude_disk.odin; saved): a Rescan that does not find it again drops it
 	// project_tidy.odin: a temp folder; the listed project this one's row is
 	// nested under (0 = none), or the folder of the group row it is in ("" = none)
 	temp:      bool,
@@ -111,7 +111,7 @@ scan_projects :: proc(scan: ^Scan_Result) {
 		if cwd == "" do cwd = decode_dir_name(d.name)
 		append(&scan.projects, Project{dir = d.fullpath, cwd = cwd, label = short_label(cwd), newest = newest.modification_time, created = oldest.modification_time, missing = !os.exists(cwd), repo = is_repo_root(cwd)})
 	}
-	claude_scan_projects(&scan.projects) // folders where only Claude Code ran (claude_disk.odin)
+	claude_scan_projects(&scan.projects) // folders where only Claude Code or Codex ran (claude_disk.odin)
 	slice.sort_by(scan.projects[:], proc(a, b: Project) -> bool {return time.diff(b.newest, a.newest) < 0})
 }
 
@@ -155,7 +155,7 @@ apply_scan :: proc(scan: ^Scan_Result) {
 		found := home_root != "" && o.cwd == chats.cwd // a project added at the Chats folder goes
 		for p in scan.projects do if p.cwd == o.cwd do found = true
 		if !found && o.dir == "" {
-			// a folder only Claude ran in that this scan did not find (its account removed, its
+			// a folder only Claude or Codex ran in that this scan did not find (its account removed, its
 			// transcripts gone): dropped unless the user added or named it or a session is open in it
 			if o.claude && !o.by_hand && o.name == "" {
 				open := false

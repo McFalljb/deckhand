@@ -29,7 +29,9 @@ package core
 //     line (session_meta: its id and cwd); rows with no title and no path, resumed by id.
 //   - Projects where only Claude ran (scan_projects, on the Rescan worker): every folder under
 //     each account's projects/ whose newest transcript records a `cwd` whose own folder name is
-//     that folder's; never a folder decoded from its name.
+//     that folder's; never a folder decoded from its name. Projects where only Codex ran: the
+//     same, by the cwd of each interactive rollout the found rows' lister lists (source "cli"
+//     or "vscode"; never a subagent's or `codex exec`'s), cached alike (found_cwd).
 
 import "base:runtime"
 import "core:encoding/json"
@@ -64,11 +66,13 @@ claude_disk_cache_max := 20_000
 // Bytes a listing reads on the main thread (tests lower it).
 claude_disk_inline_budget := i64(TITLE_INLINE_BUDGET)
 
-// Whether the launch needs a Rescan for Claude's projects (any account has a projects/ folder):
+// Whether the launch needs a Rescan for Claude's and Codex's projects (any account has a
+// projects/ folder, any Codex home a sessions/ folder):
 // after the saved accounts are back (main.odin).
 claude_startup_rescan_due :: proc() -> bool {
 	for p in state.projects do if p.claude do return true // saved: confirmed or dropped
 	for a in claude_accounts() do if path_kind(strings.concatenate({a.dir, "/projects"}, context.temp_allocator)) == .Dir do return true
+	for a in claude_accounts(codex = true) do if s := codex_sessions_dir(a.dir); s != "" && path_kind(s) == .Dir do return true
 	return false
 }
 
@@ -651,20 +655,14 @@ cwd_cache: struct {
 	order:   [dynamic]string,
 }
 
-// The cwd a transcript records first, and whether it is a side chain: from its first 8 KB, else
-// its first chunk. Temp.
+// The cwd a Claude transcript records first, and whether it is a side chain: from its first 8 KB,
+// else its first chunk. ok: the file was read. Temp.
 @(private = "file")
-found_cwd :: proc(path: string, size, mtime: i64) -> (cwd: string, sidechain: bool) {
-	heap := runtime.heap_allocator()
-	sync.lock(&cwd_cache.mu)
-	if e, ok := cwd_cache.entries[path]; ok && e.size == size && e.mtime == mtime {
-		cwd, sidechain = strings.clone(e.cwd, context.temp_allocator), e.sidechain
-		sync.unlock(&cwd_cache.mu)
-		return
-	}
-	sync.unlock(&cwd_cache.mu)
+transcript_cwd :: proc(path: string, size: i64) -> (cwd: string, sidechain, ok: bool) {
 	f, err := os.open(path)
 	if err != nil do return
+	ok = true
+	defer os.close(f)
 	decided := false
 	for want in ([2]i64{CLAUDE_CWD_CHUNK, CLAUDE_DISK_CHUNK}) {
 		n := min(size, want)
@@ -693,7 +691,27 @@ found_cwd :: proc(path: string, size, mtime: i64) -> (cwd: string, sidechain: bo
 		}
 		if cwd != "" || size <= n do break
 	}
-	os.close(f)
+	return
+}
+
+// The cwd a conversation file of harness h records, and whether to skip it (Claude: a side
+// chain, transcript_cwd; another harness: what its reader reads, disk_first_line), cached by
+// path, size and date. Temp.
+@(private = "file")
+found_cwd :: proc(path: string, size, mtime: i64, h := Harness.Claude) -> (cwd: string, sidechain: bool) {
+	heap := runtime.heap_allocator()
+	sync.lock(&cwd_cache.mu)
+	if e, ok := cwd_cache.entries[path]; ok && e.size == size && e.mtime == mtime {
+		cwd, sidechain = strings.clone(e.cwd, context.temp_allocator), e.sidechain
+		sync.unlock(&cwd_cache.mu)
+		return
+	}
+	sync.unlock(&cwd_cache.mu)
+	if h != .Claude do cwd, sidechain = disk_first_line(h, path)
+	else {
+		ok: bool
+		if cwd, sidechain, ok = transcript_cwd(path, size); !ok do return
+	}
 	sync.lock(&cwd_cache.mu)
 	defer sync.unlock(&cwd_cache.mu)
 	if cwd_cache.entries.allocator.procedure == nil do cwd_cache.entries = make(map[string]Cwd_Info, heap)
@@ -715,10 +733,12 @@ found_cwd :: proc(path: string, size, mtime: i64) -> (cwd: string, sidechain: bo
 	return
 }
 
-// Each account's folder and its CLAUDE_CODE_PROJECT_DIR_NAME, taken on the main thread before a
-// scan (scan_projects runs on a worker and touches no State). Heap.
+// Each account's folder and its CLAUDE_CODE_PROJECT_DIR_NAME (a Codex account's: its home and its
+// sessions folder), taken on the main thread before a scan (scan_projects runs on a worker and
+// touches no State). Heap.
 Claude_Scan_Dir :: struct {
 	dir, override: string,
+	harness:       Harness, // .Claude, or .Codex: override is its sessions folder (codex_sessions_dir)
 }
 claude_scan_dirs: [dynamic]Claude_Scan_Dir
 
@@ -747,12 +767,19 @@ claude_scan_prepare :: proc() {
 	clear(&claude_scan_dirs)
 	if claude_scan_dirs.allocator.procedure == nil do claude_scan_dirs = make([dynamic]Claude_Scan_Dir, heap)
 	for a in claude_accounts() do append(&claude_scan_dirs, Claude_Scan_Dir{dir = strings.clone(a.dir, heap), override = strings.clone(claude_project_dir_override(a.dir), heap)})
+	for a in claude_accounts(codex = true) {
+		if s := codex_sessions_dir(a.dir); s != "" do append(&claude_scan_dirs, Claude_Scan_Dir{dir = strings.clone(a.dir, heap), override = strings.clone(s, heap), harness = .Codex})
+	}
 }
 
-// Adds the folders Claude ran in to scan.projects (allocated there), merged with pi's by cwd.
-// Any thread (reads only claude_scan_dirs, set before the scan).
+// Adds the folders Claude or Codex ran in to scan.projects (allocated there), merged with pi's by
+// cwd. Any thread (reads only claude_scan_dirs, set before the scan).
 claude_scan_projects :: proc(projects: ^[dynamic]Project) {
 	for sd in claude_scan_dirs {
+		if sd.harness == .Codex {
+			codex_scan_projects(projects, sd)
+			continue
+		}
 		root := strings.concatenate({sd.dir, "/projects"}, context.temp_allocator)
 		dirs, err := os.read_all_directory_by_path(root, context.temp_allocator)
 		if err != nil do continue
@@ -775,19 +802,40 @@ claude_scan_projects :: proc(projects: ^[dynamic]Project) {
 					s := claude_project_slug(c)
 					if s != d.name && !(len(s) > CLAUDE_SLUG_MAX && strings.has_prefix(d.name, s[:CLAUDE_SLUG_MAX])) && !(has_non_ascii(c) && strings.has_prefix(d.name, slug_prefix(c))) do continue
 				}
-				newest, oldest := list[0].modification_time, list[len(list) - 1].modification_time
-				found := false
-				for &p in projects do if p.cwd == c {
-					if time.diff(p.newest, newest) > 0 do p.newest = newest
-					if p.created == {} || time.diff(oldest, p.created) > 0 do p.created = oldest
-					found = true
-				}
-				if !found {
-					cc := strings.clone(c)
-					append(projects, Project{cwd = cc, label = short_label(cc), newest = newest, created = oldest, missing = !os.exists(cc), repo = is_repo_root(cc), claude = true})
-				}
+				found_project(projects, c, list[0].modification_time, list[len(list) - 1].modification_time)
 				if !shared do break
 			}
 		}
+	}
+}
+
+// The folders Codex ran in, for claude_scan_projects: each interactive rollout's cwd (its first
+// line, codex_first_line: never a subagent's or `codex exec`'s), absolute; the rollouts the found
+// rows' lister lists (codex_disk_files_in). Any thread.
+@(private = "file")
+codex_scan_projects :: proc(projects: ^[dynamic]Project, sd: Claude_Scan_Dir) {
+	files := make([dynamic]Disk_File, context.temp_allocator)
+	codex_disk_files_in(&files, sd.dir, sd.override)
+	for f in files {
+		cwd, skip := found_cwd(f.path, f.size, f.modified._nsec, .Codex)
+		if skip || cwd == "" || !filepath.is_abs(cwd) do continue
+		c, _ := filepath.clean(cwd, context.temp_allocator)
+		found_project(projects, c, f.modified, f.modified)
+	}
+}
+
+// A folder a harness ran in (cwd, clean and absolute; its newest and oldest file's dates) into
+// projects: merged by cwd (dates widened), else a row found on disk only (claude = true).
+@(private = "file")
+found_project :: proc(projects: ^[dynamic]Project, c: string, newest, oldest: time.Time) {
+	found := false
+	for &p in projects do if p.cwd == c {
+		if time.diff(p.newest, newest) > 0 do p.newest = newest
+		if p.created == {} || time.diff(oldest, p.created) > 0 do p.created = oldest
+		found = true
+	}
+	if !found {
+		cc := strings.clone(c)
+		append(projects, Project{cwd = cc, label = short_label(cc), newest = newest, created = oldest, missing = !os.exists(cc), repo = is_repo_root(cc), claude = true})
 	}
 }

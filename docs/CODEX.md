@@ -35,6 +35,7 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   review** work for a Codex tab.
 - **Sessions found on disk** (§2b): Codex conversations of the project's folder in
   `~/.codex/sessions/` (and each account's home) are rows; a click runs `codex resume <id>`.
+  Folders where only Codex ran are projects, as Claude-only ones are.
 - **Palette**: **New Codex tab** in the session on screen.
 - **Deckhand's tools** (phase 2a): the `deckhand` command's show, browser and app commands, as MCP
   tools of a per-run stdio server (§7).
@@ -191,8 +192,9 @@ the selected project and Chats. **Read only, never written.**
   never the real home's `~/.codex`.
 - **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
   through the Claude scan's cache, budget and worker (`found_info`). The payload's `id` must be
-  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source` a string (a
-  subagent's is an object: skipped). The cwd is only compared; no title is read (rows read
+  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source`
+  `"cli"` or `"vscode"` (an interactive thread: `codex exec`'s and a subagent's, an object, are
+  skipped). The cwd is only compared; no title is read (rows read
   "Untitled Codex session" with the file's date); nothing from the file reaches a shell, the
   terminal or the snapshot but the id (a UUID). The file's path is not kept.
 - **Which**: not one Deckhand's history has (its row is the history's), a pi session's id, or an
@@ -202,6 +204,15 @@ the selected project and Chats. **Read only, never written.**
   project running `codex resume <id>` in the project's folder, under the account whose home it was
   found in (refused once that account is removed); the history keeps it from then on.
   An agent's `open_session` finds only the rows listed for the selected project and Chats.
+- **Projects where only Codex ran** (`claude_scan_projects`, Claude's own path, on the Rescan
+  worker): the `cwd` of each rollout that lister lists and that first-line check keeps (cleaned,
+  absolute), merged by folder with pi's and Claude's; a folder no one else knows is a project
+  found on disk only, exactly as a Claude-only folder is (`Project.claude`: saved; a Rescan that
+  no longer finds it drops it unless you added, named or opened it; temp and missing folders are
+  hidden by the tidy rules, as any project's). Cached by path, size and date (one first line per
+  new or changed rollout); the launch's first scan reads no rollout, and a Rescan follows when a
+  Codex home has a `sessions/` folder (`claude_startup_rescan_due`). Each Codex home's sessions
+  folder is taken on the main thread before the scan (`claude_scan_prepare`).
 
 ## 3. The token and the process check
 

@@ -1191,7 +1191,11 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
   title only; Codex keeps its own. Codex conversations you ran outside Deckhand in the project's
   folder are listed too (from `~/.codex/sessions/`, the last 60 days or so; read, never changed),
-  as "Untitled Codex session" with their date: a click resumes one.
+  as "Untitled Codex session" with their date: a click resumes one. Only conversations you had
+  with Codex (in a terminal or your editor) count, never `codex exec` runs or Codex's own
+  subagents. Folders where only Codex ran show up as projects, as Claude Code's do; **Rescan
+  sessions** looks again and drops one no conversation records any more (unless you added or
+  named it).
 - **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when
   Codex is idle and you have typed nothing), and **Send and close**; Changes' button reads **Ask
   Codex to review**.

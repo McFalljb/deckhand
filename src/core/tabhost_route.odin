@@ -531,8 +531,8 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if tab == nil do return fail("no such editor tab"), false
 		if _, is := tab.kind.(Editor_Tab); !is do return fail("no such editor tab"), false
 		return keep_tab(tab)
-	case List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Git_Status_Done, File_List_Done:
-		return files_cmd_apply(cmd, caller) // the project's files: the core's own
+	case List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Git_Status_Done, File_List_Done, Fs_Copy, Fs_Copy_Done, Restore_Path:
+		return files_cmd_apply(cmd, caller, request_id) // the project's files: the core's own
 	case Request_Cancel:
 		// the requester cancelled, or its connection closed: the window's action or read ends,
 		// or a claude_wait_idle

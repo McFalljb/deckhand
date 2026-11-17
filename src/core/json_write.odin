@@ -283,6 +283,9 @@ command_type :: proc(cmd: Command) -> string {
 	case Create_Dir:          return "create_dir"
 	case Rename_Path:         return "rename_path"
 	case Delete_Path:         return "delete_path"
+	case Fs_Copy:             return "fs_copy"
+	case Fs_Copy_Done:        return "fs_copy_done"
+	case Restore_Path:        return "restore_path"
 	case Git_Head_Done:       return "git_head_done"
 	case Git_Status_Done:     return "git_status_done"
 	case Reveal_In_Finder:    return "reveal_in_finder"
@@ -872,6 +875,16 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		token(&w, c.confirm, redact)
 	case Reveal_In_Finder:
 		kv_str(&w, "path", c.path)
+	case Fs_Copy:
+		kv_str(&w, "from", c.from)
+		kv_str(&w, "to", c.to)
+		if c.unique do kv_bool(&w, "unique", true)
+		token(&w, c.confirm, redact)
+	case Fs_Copy_Done: // internal
+		kv_str(&w, "path", c.path)
+		if c.err != "" do kv_str(&w, "err", c.err)
+	case Restore_Path:
+		kv_str(&w, "id", c.id)
 	case Git_Head_Done: // internal; the file's text stays out of events and the log
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_bool(&w, "tracked", c.tracked)

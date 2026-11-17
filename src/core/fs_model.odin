@@ -102,7 +102,9 @@ fs_trash_or_fake :: proc(path: string) -> bool {
 	dir := "build/test-trash"
 	os.make_directory_all(dir)
 	to, _ := filepath.join({dir, fmt.tprintf("%d-%s", fs_model.gen, filepath.base(path))}, context.temp_allocator)
-	return os.rename(path, to) == nil
+	if os.rename(path, to) != nil do return false
+	fs_trash_where = fs_real(to) // restore_path can bring it back (fs_restore.odin)
+	return true
 }
 
 // The real path (symlinks resolved): realpath of the longest part that
@@ -701,7 +703,6 @@ fs_model_changed :: proc(path: string, watcher_flags: Maybe(u32) = nil) {
 // window's when it is another process. Its watcher would tell it too, but behind whatever queued
 // first: a burst of thousands of events (a checkout, npm install) held the user's new file back
 // for seconds (the files scene under load).
-@(private = "file")
 fs_changed_ours :: proc(path: string) {
 	fs_model_changed(path)
 	window_path_changed(path)
@@ -761,7 +762,8 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 	p, e := fs_delete_check(path, caller)
 	if e != "" do return e
-	return fs_trash_checked(p)
+	err, _ = fs_trash_checked(p)
+	return
 }
 
 // fs_delete's rules, nothing moved: inside a project (fs_check_write: never its folder, never .git),
@@ -906,17 +908,23 @@ fs_delete_summary :: proc(plan: []string) -> string {
 	return strings.to_string(b)
 }
 
-// Moves a checked path (fs_delete_check) to the Trash; what changed is told.
-fs_trash_checked :: proc(p: string) -> (err: string) {
-	fs_trash_why = ""
+// Moves a checked path (fs_delete_check) to the Trash; what changed is told. restore_id: what
+// restore_path takes to put it back ("" = the Trash did not say where it went; fs_restore.odin).
+fs_trash_checked :: proc(p: string) -> (err: string, restore_id: string) {
+	fs_trash_why, fs_trash_where = "", ""
+	st: posix.stat_t
+	known := posix.lstat(strings.clone_to_cstring(p, context.temp_allocator), &st) == .OK
 	if !fs_trash_fn(p) {
 		why := fs_trash_why
-		fs_trash_why = ""
-		return why != "" ? why : "could not move it to the Trash"
+		fs_trash_why, fs_trash_where = "", ""
+		return why != "" ? why : "could not move it to the Trash", ""
 	}
+	where_ := fs_trash_where
+	fs_trash_where = ""
+	if known do restore_id = fs_trashed_add(p, where_, u64(st.st_dev), u64(st.st_ino))
 	fs_changed_ours(p)
 	window_files_deleted(p) // open buffers of them say so
-	return ""
+	return "", restore_id
 }
 
 // Why the last fs_trash_fn failed, when it could say ("" = the plain message): the Linux core's

@@ -237,6 +237,9 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		}
 		return Delete_Path{path = s(c.path, allocator), paths = paths, confirm = s(c.confirm, allocator)}
 	case Reveal_In_Finder:    return Reveal_In_Finder{path = s(c.path, allocator)}
+	case Fs_Copy:             return Fs_Copy{from = s(c.from, allocator), to = s(c.to, allocator), unique = c.unique, confirm = s(c.confirm, allocator)}
+	case Fs_Copy_Done:        return Fs_Copy_Done{request_id = c.request_id, path = s(c.path, allocator), copied = c.copied, total = c.total, failed = s(c.failed, allocator), err = s(c.err, allocator), skipped = s(c.skipped, allocator)}
+	case Restore_Path:        return Restore_Path{id = s(c.id, allocator)}
 	case Git_Head_Done:       return Git_Head_Done{tab_id = c.tab_id, gen = c.gen, path = s(c.path, allocator), in_repo = c.in_repo, tracked = c.tracked, head = s(c.head, allocator)}
 	case Git_Status_Done:     return Git_Status_Done{root = s(c.root, allocator), gen = c.gen, ok = c.ok, out = s(c.out, allocator)}
 	case File_List_Done:      return File_List_Done{root = s(c.root, allocator), out = s(c.out, allocator)}
@@ -476,6 +479,16 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.paths, allocator)
 		delete(c.confirm, allocator)
 	case Reveal_In_Finder:    delete(c.path, allocator)
+	case Fs_Copy:
+		delete(c.from, allocator)
+		delete(c.to, allocator)
+		delete(c.confirm, allocator)
+	case Fs_Copy_Done:
+		delete(c.path, allocator)
+		delete(c.failed, allocator)
+		delete(c.err, allocator)
+		delete(c.skipped, allocator)
+	case Restore_Path:        delete(c.id, allocator)
 	case Git_Head_Done:
 		delete(c.path, allocator)
 		delete(c.head, allocator)

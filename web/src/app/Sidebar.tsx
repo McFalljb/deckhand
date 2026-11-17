@@ -8,6 +8,7 @@ import type { OpenSession, Store, WebProjectRow, WebSessionRow } from "../state.
 import { sessionView, tabView, type Dot } from "../status.ts";
 import { ago, keysLabel, menuAt, useApp, type App, type MenuItem, shownSession, wished } from "./ctx.ts";
 import { narrowTree } from "./treefilter.ts";
+import { newSessionChoices } from "./harness.ts";
 import { HarnessIcon, Icon, StatusMark, dotMark } from "./icons.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { fold } from "./fold.ts";
@@ -494,18 +495,12 @@ function GroupRow({ r, open }: { r: WebProjectRow; open: boolean }) {
 }
 
 export function newSessionItems(app: App, projectId: number): MenuItem[] {
-  const p = app.store.project(projectId);
-  const chats = p?.group === "chats";
   const go = async (cmd: object) => {
     const r = await app.run(cmd);
     if (r.ok && r.created_id) app.go({ screen: "session", session: r.created_id });
   };
-  const items: MenuItem[] = [{ label: "pi", run: () => go({ type: "new_chat", project_id: projectId }) }];
-  if (!chats) {
-    items.push({ label: "Claude Code", run: () => go({ type: "new_claude_session", project_id: projectId }) });
-    if (codexAvailable(app.store, p?.machine ?? 0)) items.push({ label: "Codex", run: () => go({ type: "new_claude_session", project_id: projectId, harness: "codex" }) });
-  }
-  return items;
+  // what the native picker offers there (harness.ts), the last used first
+  return newSessionChoices(app.store, projectId).map((c) => (c.note ? { label: c.label, note: true } : { label: c.label, run: () => go(c.cmd!) }));
 }
 
 const FOUND = new Set(["ok", "too_old", "unchecked"]);

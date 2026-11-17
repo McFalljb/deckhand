@@ -13,7 +13,8 @@ package core
 //
 //   web           {fleet {waiting, errors, unseen, working}, next (open session id, 0), open [ids],
 //                 attention [{session, group, tab}], deck [same], filtered (waiting rows the
-//                 filter hides), here {name, label}, watch [project ids]}
+//                 filter hides), here {name, label}, watch [project ids], new [{machine,
+//                 projects, chats, note}]: the New session picker's harnesses (web_view_new_choices)}
 //   webo:<id>     an open session's row: {title, place, chat, at (Unix ns, 0 = new)}
 //   webm          [{no, open [ids], projects [{id, depth, name}]}]: each other machine
 //   webtree       the Projects tree in order: [[key, depth, kids, forced] or key (0, 0, 0)]; key = a project's
@@ -146,6 +147,8 @@ web_view_cached :: proc(sections: [][2]string) -> [][2]string {
 	}
 	gen := web_watch_gen
 	h = hash.fnv64a(mem.ptr_to_bytes(&gen), h)
+	nk := web_view_new_key()
+	h = hash.fnv64a(mem.ptr_to_bytes(&nk), h)
 	if web_view_last.builds > 0 && h == web_view_last.key do return web_view_last.sections[:]
 	heap := runtime.heap_allocator()
 	for x in web_view_last.sections {
@@ -209,7 +212,9 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 		if i > 0 do strings.write_byte(&b, ',')
 		fmt.sbprintf(&b, "%d", w.pid)
 	}
-	strings.write_string(&b, "]}")
+	strings.write_string(&b, `],"new":`)
+	web_view_new_choices(&b)
+	strings.write_string(&b, "}")
 	put(out, WEB_VIEW_SECTION, &b)
 
 	// ---- webo:<id>: an open session's title row ----
@@ -292,6 +297,54 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 		web_view_session_rows(out, .Sessions, list, w.pid, fmt.tprintf("websl:%d", w.pid), fmt.tprintf("webs:%d:", w.pid))
 	}
 	web_view_session_rows(out, .Chats, state.chats[:], 0, "webcl", "webc:")
+}
+
+// The New session picker's harnesses per machine (0 = this one) and kind of project, as the native
+// picker offers them (new_session_choices: installed here, or on that machine by its checklist;
+// Claude Code and Codex in Chats here, never another machine's): [{machine, projects [{harness,
+// label}], chats [same], note}] in the picker's order (the last used first), one row per harness
+// (the account is the core's pick). note: why a list is empty.
+@(private = "file")
+web_view_new_choices :: proc(b: ^strings.Builder) {
+	list :: proc(b: ^strings.Builder, no: u64, group: Sidebar_Group) {
+		p := Project{id = no << MACHINE_ID_SHIFT, machine = no, group = group}
+		seen: bit_set[Harness]
+		strings.write_byte(b, '[')
+		for it in new_session_choices(&p, "") {
+			h, ok := harness_of(it.cmd)
+			if !ok || h in seen do continue
+			if card(seen) > 0 do strings.write_byte(b, ',')
+			seen += {h}
+			fmt.sbprintf(b, `{{"harness":"%s","label":`, HARNESS_KEYS[h])
+			json_quote(b, HARNESSES[h].name)
+			strings.write_byte(b, '}')
+		}
+		strings.write_byte(b, ']')
+	}
+	strings.write_byte(b, '[')
+	for i in 0 ..= len(state.machines) {
+		no := i == 0 ? 0 : state.machines[i - 1].no
+		if i > 0 do strings.write_byte(b, ',')
+		fmt.sbprintf(b, `{{"machine":%d,"projects":`, no)
+		list(b, no, .Projects)
+		strings.write_string(b, `,"chats":`)
+		list(b, no, .Chats)
+		strings.write_string(b, `,"note":`)
+		json_quote(b, no == 0 ? NO_HARNESS : machine_no_harness_note(no))
+		strings.write_byte(b, '}')
+	}
+	strings.write_byte(b, ']')
+}
+
+// What the New session picker reads besides the other sections (web_view_cached's key): which
+// harnesses this machine has and the last used one.
+@(private = "file")
+web_view_new_key :: proc() -> u64 {
+	k := u64(state.settings.last_harness)
+	if pi_installed() do k |= 1 << 8
+	if claude_installed() do k |= 1 << 9
+	if codex_installed() do k |= 1 << 10
+	return k
 }
 
 // A tree row's key: its project's id, or g and a hash of a group row's folder.

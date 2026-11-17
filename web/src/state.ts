@@ -143,6 +143,17 @@ export interface WebView {
   filtered: number;
   here: { name: string; label: string };
   watch: number[];
+  new?: WebNewChoices[]; // the New session picker's harnesses, per machine (web_view_new_choices)
+}
+export interface WebNewChoice {
+  harness: "pi" | "claude" | "codex";
+  label: string;
+}
+export interface WebNewChoices {
+  machine: number; // 0 = this machine
+  projects: WebNewChoice[];
+  chats: WebNewChoice[];
+  note: string; // why a list is empty
 }
 
 export interface PaneLeaf {

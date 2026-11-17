@@ -7,8 +7,10 @@ package core
 import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 @(test)
 web_view_section :: proc(t: ^testing.T) {
@@ -75,4 +77,64 @@ web_view_section :: proc(t: ^testing.T) {
 	r := run_command(Web_Watch{projects = {p.id}}, Caller{kind = .UI})
 	testing.expect(t, !r.ok && r.error != "", "refused for the window")
 	state = State{}
+}
+
+// The New session picker's choices a browser gets ("web".new): the native picker's
+// (new_session_choices) per machine and kind of project, one row per harness, the last used first;
+// a change of what is installed computes the section again.
+@(test)
+web_view_new_choices_section :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	// never the developer's own Claude or Codex folders
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	home := fmt.tprintf("%s/deckhand-web-new-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+	os.make_directory_all(home)
+	defer os.remove_all(home)
+	os.set_env("HOME", home)
+	os.unset_env("CLAUDE_CONFIG_DIR")
+	pi_installed_probe = proc() -> bool {return true}
+	claude_installed_probe = proc() -> bool {return true}
+	codex_installed_probe = proc() -> bool {return false}
+	defer pi_installed_probe, claude_installed_probe, codex_installed_probe = nil, nil, nil
+	state.settings.last_harness = .Claude
+	checks := []Machine_Check{{id = "pi", state = .Ok}, {id = "claude", state = .Too_Old}, {id = "codex", state = .Ok}}
+	machines := []Machine_View{{no = 2, name = "m2", checklist = checks, codex = true}, {no = 3, name = "m3", checklist = checks[2:]}}
+	state.machines = machines
+
+	new_of :: proc() -> string {
+		secs := state_sections(&state)
+		for x in web_view_cached(secs[:]) do if x[0] == "web" {
+			v, err := json.parse_string(x[1], allocator = context.temp_allocator)
+			if err != nil do return "bad json"
+			b := strings.builder_make(context.temp_allocator)
+			for m in v.(json.Object)["new"].(json.Array) {
+				o := m.(json.Object)
+				fmt.sbprintf(&b, "%d:", int(o["machine"].(json.Float)))
+				for kind in ([]string{"projects", "chats"}) {
+					strings.write_string(&b, " ")
+					for c, i in o[kind].(json.Array) {
+						if i > 0 do strings.write_byte(&b, ',')
+						fmt.sbprintf(&b, "%s=%s", c.(json.Object)["harness"].(json.String), c.(json.Object)["label"].(json.String))
+					}
+					strings.write_string(&b, " |")
+				}
+				if strings.contains(o["note"].(json.String), "Codex") do strings.write_string(&b, " (codex note)")
+				strings.write_byte(&b, '\n')
+			}
+			return strings.to_string(b)
+		}
+		return "no web section"
+	}
+	// here: Claude Code first (the last used), in Chats too; m2: Codex while its core starts it, never
+	// Claude Code or Codex in its Chats; m3: Codex there but its core too old: none, and why
+	testing.expect_value(t, new_of(), "0: claude=Claude Code,pi=pi | claude=Claude Code,pi=pi |\n2: claude=Claude Code,pi=pi,codex=Codex | pi=pi |\n3:  |  | (codex note)\n")
+	// Codex installed here (no other section changes): offered at once, in Chats too
+	codex_installed_probe = proc() -> bool {return true}
+	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,pi=pi,codex=Codex | claude=Claude Code,pi=pi,codex=Codex |\n"), new_of())
+	pi_installed_probe = proc() -> bool {return false}
+	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,codex=Codex | claude=Claude Code,codex=Codex |\n"), new_of())
 }

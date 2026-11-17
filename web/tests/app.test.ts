@@ -187,3 +187,32 @@ test("file tabs: a read belongs to the path it was made for (#148 review)", () =
   assert.notEqual(reads.begin(false), null);
   assert.equal(reads.current(a!), false);
 });
+
+import { newSessionChoices } from "../src/app/harness.ts";
+
+test("new session: the core's choices per machine and kind, Chats too; none says why", () => {
+  const s = new Store();
+  const pi = { harness: "pi", label: "pi" }, cc = { harness: "claude", label: "Claude Code" }, cx = { harness: "codex", label: "Codex" };
+  s.applyFull({ version: 1, state: {
+    projects: { projects: [{ id: 7, group: "projects", machine: 0 }, { id: 8, group: "chats", machine: 0 }, { id: 9, group: "projects", machine: 2 }, { id: 10, group: "projects", machine: 3 }] },
+    web: { watch: [], new: [
+      { machine: 0, projects: [cc, pi, cx], chats: [cc, cx], note: "install one" },
+      { machine: 2, projects: [cx], chats: [], note: "nothing on m2" },
+      { machine: 3, projects: [], chats: [], note: "nothing on m3" },
+    ] },
+  } });
+  const view = (id: number) => newSessionChoices(s, id).map((c) => [c.label, JSON.stringify(c.cmd ?? null)]);
+  assert.deepEqual(view(7), [
+    ["Claude Code", '{"type":"new_claude_session","project_id":7}'],
+    ["pi", '{"type":"new_chat","project_id":7}'],
+    ["Codex", '{"type":"new_claude_session","project_id":7,"harness":"codex"}'],
+  ]);
+  assert.deepEqual(view(8).map((x) => x[0]), ["Claude Code", "Codex"], "Claude Code and Codex in Chats, no pi when it is not there");
+  assert.deepEqual(view(9).map((x) => x[0]), ["Codex"]);
+  // another machine with nothing: why, and a session anyway (its pi tab says how to install one)
+  assert.deepEqual(view(10), [["nothing on m3", "null"], ["New session", '{"type":"new_chat","project_id":10}']]);
+  assert.equal(newSessionChoices(s, 10)[0].note, true);
+  // this machine with nothing: only why
+  s.applyDelta({ version: 2, sections: { web: { watch: [], new: [{ machine: 0, projects: [], chats: [], note: "install one" }] } } });
+  assert.deepEqual(view(7), [["install one", "null"]]);
+});

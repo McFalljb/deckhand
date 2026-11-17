@@ -300,3 +300,28 @@ test("status strip: another machine's tab shows none of this machine's bars (#15
   assert.deepEqual(barsFor(s, remote), [], "a remote pi tab: its own core's bars, not this one's Reload");
   assert.equal(barsFor(s, { ...remote, machine: 0 }).length, 1);
 });
+
+import { modeBadge } from "../src/app/harness.ts";
+
+test("tab badge: a Claude or Codex tab's permission mode, quiet unless it acts without asking (src/core/claude_mode.odin)", () => {
+  assert.equal(modeBadge(null), null);
+  assert.equal(modeBadge({ shell_tab: {} }), null);
+  assert.equal(modeBadge({ claude_tab: {} }), null); // an older core: no field
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "" } }), null);
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "default" } }), null);
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "plan" } }), { label: "plan", warn: false });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "acceptEdits" } }), { label: "accept edits", warn: false });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "bypassPermissions" } }), { label: "bypass", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { codex: true, permission_mode: "codex-full-access" } }), { label: "full access", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "newMode" } }), { label: "newMode", warn: true });
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "<b>x</b>" } }), null);
+  assert.equal(modeBadge({ claude_tab: { permission_mode: 3 } }), null);
+});
+
+test("tab badge: auto and an unknown mode get the warning colour; Codex's other ways of not asking too", () => {
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "auto" } }), { label: "auto", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "someNewMode" } }), { label: "someNewMode", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "codex-never-asks" } }), { label: "never asks", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "codex-approves" } }), { label: "approves for you", warn: true });
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "codex-read-only" } }), null); // never a safer-sounding Codex badge
+});

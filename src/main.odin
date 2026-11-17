@@ -505,6 +505,7 @@ frame :: proc "c" () {
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
+	if files_drag_tick() do app.redraw = true // a Files drag: a held folder opens, edge scroll (ui_files.odin)
 	holder_ask_tick() // a session holder from another build: asked once (below)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
 	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
@@ -692,6 +693,9 @@ event :: proc(e: ^sapp.Event) {
 	// a peek (ui_peek.odin) is for looking: like the bell's popover it takes the keys and clicks
 	// (nothing reaches its terminal or what is under it); a ⌘ chord not its own closes it and goes on
 	if peek_event(e) do return
+	// a Files drag takes every key, paste and dropped file until it ends (Esc cancels): before the
+	// global shortcuts, so none acts mid-drag and nothing reaches a terminal (ui_files.odin)
+	if files_drag_event(e) do return
 	// ⌘K opens the palette from anywhere, and closes it
 	if e.type == .KEY_DOWN && e.key_code == .K && only_cmd {
 		ime_cancel()
@@ -1161,7 +1165,7 @@ confirm_pending :: proc(token: string) {
 		case core.Pi_Reload: cmd = core.Pi_Reload{tab_id = c.tab_id, confirm = token}
 		case core.Pi_Reload_All: cmd = core.Pi_Reload_All{only_changed = c.only_changed, confirm = token}
 		case core.Pi_Restart_Updated: cmd = core.Pi_Restart_Updated{confirm = token}
-		case core.Claude_Restart_Changed: cmd = core.Claude_Restart_Changed{update = c.update, all = c.all, confirm = token}
+		case core.Claude_Restart_Changed: cmd = core.Claude_Restart_Changed{update = c.update, all = c.all, confirm = token, harness = c.harness}
 		case core.Claude_Restart_Anyway: cmd = core.Claude_Restart_Anyway{tab_id = c.tab_id, confirm = token}
 		case core.Reload_File: cmd = core.Reload_File{tab_id = c.tab_id, confirm = token}
 		case core.Delete_Path: cmd = core.Delete_Path{path = c.path, paths = c.paths, confirm = token}

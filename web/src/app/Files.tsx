@@ -8,7 +8,9 @@
 // the confirmation bar asks), Esc clears it. Several rows can be picked (pick): ⌘/Ctrl-click,
 // shift-click, shift-arrows, ⌘/Ctrl-A in the tree; on a phone, Select in a row's sheet (taps then
 // pick, a bar acts on them). Delete then trashes them all with one confirmation (delete_path paths);
-// typing a name's first letters goes to it. Right-click, the row's "…" or a long press (a phone:
+// typing a name's first letters goes to it. Rows move (rename_path, one per item, no confirmation)
+// by dragging them onto a folder with a mouse, or with Move to… (a folder picker: a phone, the
+// keys); where they may go is filetree.ts planMove. Right-click, the row's "…" or a long press (a phone:
 // a sheet) shows its menu. New file, New folder and Rename are typed in the tree, where the name
 // goes (filetree.ts); the core refuses what it refuses, shown under the field. The active file tab
 // is shown (its folders opened). The tabs read and save the file with file_read / file_save
@@ -26,7 +28,7 @@ import { FileReads, knowFile, knownFile } from "./filecache.ts";
 import { CodeBlock, CodeEdit } from "./Code.tsx";
 import { longPressProps } from "./Peek.tsx";
 import { fileTabPath } from "./Panes.tsx";
-import { clickPick, entryPaths, extendPick, gitLetter, gitTone, isEditRow, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
+import { clickPick, dragText, dropDir, entryPaths, extendPick, folderRows, gitLetter, gitTone, isEditRow, movedPath, moveResult, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, planMove, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -46,6 +48,25 @@ let typeBuf = { text: "", at: 0 }; // type-to-select's letters
 let edit: Edit | null = null; // the name field (new file or folder, rename)
 let focusWanted = ""; // a row to focus once it is drawn
 let scrollWanted: { key: string; center: boolean } | null = null; // a row to bring into view once listed
+let after: { paths: string[]; until: number } | null = null; // rows to select once drawn (moved items in their new place)
+let mover: { sources: string[] } | null = null; // the Move to… picker, for these paths
+const pickerOpen = new Set<string>(); // folders opened in the picker
+let moving = false;
+// A drag in this tree (a desktop's mouse; a phone has Move to…): the paths dragged, taken at
+// dragstart (the tree is listed again meanwhile), the row it started on (kept drawn: a removed
+// source never ends its drag), and the folder a drop goes into now (highlighted). nonce: this
+// drag's own (in the DataTransfer too: a drop must carry it); root: the tree it began in. Cleared
+// on dragend, drop, Esc, a root change, and when its sources leave the tree (a re-list).
+const DRAG_TYPE = "application/x-deckhand-files";
+let drag: { sources: string[]; from: string; nonce: string; root: string } | null = null;
+// The last press on a row: a mouse or pen drags; a touch (a touch laptop, an iPad) never does, its
+// long press is the menu.
+let lastPointer = "mouse";
+let dropAt = "";
+let hover = { path: "", timer: 0 }; // a closed folder hovered: opened after HOVER_OPEN_MS
+let edge = { dir: 0, timer: 0 }; // scrolling while the pointer is near the top or bottom edge
+const HOVER_OPEN_MS = 600;
+const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 async function list(app: App, path: string) {
   if (asking.has(path)) return void again.add(path);
@@ -178,12 +199,7 @@ async function commitEdit(app: App, root: string, text: string) {
       edit = { ...e, err: r.error || "Could not rename it" };
       return bump();
     }
-    // what was open under it follows it
-    for (const d of [...open]) if (d === from || d.startsWith(from + "/")) {
-      open.delete(d);
-      if (r.ok) open.add(to + d.slice(from.length));
-    }
-    for (const k of [...listed.keys()]) if (k === from || k.startsWith(from + "/")) listed.delete(k);
+    follow(from, r.ok ? to : "");
     const now = r.ok ? to : from;
     focusOne(now);
     scrollWanted = { key: now, center: false };
@@ -207,6 +223,117 @@ async function commitEdit(app: App, root: string, text: string) {
   if (r.ok && e.kind === "file") openFile(app, made, true); // its tab, quietly (no session on screen: none)
 }
 
+// What was open under a moved or renamed folder follows it (to "": closed); its listings go.
+function follow(from: string, to: string) {
+  for (const d of [...open]) if (d === from || d.startsWith(from + "/")) {
+    open.delete(d);
+    if (to) open.add(movedPath(d, from, to));
+  }
+  for (const k of [...listed.keys()]) if (k === from || k.startsWith(from + "/")) listed.delete(k);
+}
+
+// Move into dir (no confirmation): one rename_path per item (the core's rules), in order, stopping
+// at the first it refuses (the toast names it; what moved stays moved). First dir is listed again
+// with its ignored names: a name already there refuses the lot, nothing moved, never renamed to
+// make room. Then the folder shows open, the moved items selected in it.
+async function moveTo(app: App, root: string, sources: string[], dir: string) {
+  if (moving) return void app.toast("A move is still running; try again when it is done", true);
+  moving = true;
+  try {
+    const l = await app.link.run({ type: "list_dir", path: dir, ignored: true });
+    if (!l.ok) return void app.toast(l.error || "Could not look in that folder", true);
+    const plan = planMove(root, sources, dir, { entries: json(l.data).entries ?? [], err: "" });
+    if (plan.why) return void app.toast(plan.why, true);
+    const done: typeof plan.moves = [];
+    let failed: { from: string; error: string } | undefined;
+    let waiting: number | undefined;
+    for (const m of plan.moves) {
+      const r = await app.link.run({ type: "rename_path", from: m.from, to: m.to });
+      if (r.ok) {
+        done.push(m);
+        follow(m.from, m.to);
+        continue;
+      }
+      // the confirmation bar asks about this one (it moves when answered); the rest are not moved
+      if (r.error === "needs_confirmation") waiting = plan.moves.length - done.length - 1;
+      else failed = { from: m.from, error: r.error || "refused" };
+      break;
+    }
+    if (done.length) {
+      for (const d of parentsOf(root, dir + "/x")) if (!open.has(d)) open.add(d);
+      after = { paths: sources.map((s) => done.reduce((p, m) => movedPath(p, m.from, m.to), s)), until: performance.now() + 8000 };
+    }
+    if (done.length || failed || waiting !== undefined) app.toast(moveResult(root, dir, done.map((m) => m.from), failed, waiting), !!failed);
+    refresh(app, root);
+  } finally {
+    moving = false;
+    bump();
+  }
+}
+
+function openMover(sources: string[]) {
+  if (!sources.length) return;
+  mover = { sources };
+  pickerOpen.clear();
+  bump();
+}
+
+// The paths a drag takes: the picked rows when it starts on one of several, else that row (then
+// selected alone).
+function startDrag(ev: DragEvent, root: string, path: string) {
+  const dt = ev.dataTransfer;
+  if (!dt || lastPointer === "touch") return void ev.preventDefault();
+  if (pick.paths.size > 1 && pick.paths.has(path)) sel = path;
+  else focusOne(path);
+  const sources = pick.paths.size > 1 ? outermost(order, pick.paths) : [path];
+  const nonce = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
+  drag = { sources, from: path, nonce, root };
+  dt.effectAllowed = "move";
+  dt.setData(DRAG_TYPE, nonce); // ours: only a drop carrying this drag's nonce moves (and only what is in memory)
+  // paths shell-quoted a space apart, never contents, never a newline (dropped on a terminal: typed, not run)
+  dt.setData("text/plain", dragText(sources));
+  // the image: the name, or "N items" (text only)
+  const img = document.createElement("div");
+  img.className = "files-drag";
+  img.textContent = sources.length === 1 ? baseName(sources[0]) : `${sources.length} items`;
+  document.body.appendChild(img);
+  dt.setDragImage(img, 12, 12);
+  window.setTimeout(() => img.remove(), 0);
+  bump();
+}
+
+function stopEdge() {
+  window.clearInterval(edge.timer);
+  edge = { dir: 0, timer: 0 };
+}
+
+function clearHover() {
+  window.clearTimeout(hover.timer);
+  hover = { path: "", timer: 0 };
+}
+
+function hoverOver(app: App, path: string) {
+  if (path === hover.path) return;
+  clearHover();
+  hover.path = path;
+  const inSource = drag?.sources.some((s) => path === s || path.startsWith(s + "/"));
+  if (!path || open.has(path) || inSource) return;
+  hover.timer = window.setTimeout(() => {
+    if (!drag || hover.path !== path || open.has(path)) return;
+    open.add(path); // stays open after the drag
+    list(app, path);
+    bump();
+  }, HOVER_OPEN_MS);
+}
+
+function endDrag() {
+  drag = null;
+  dropAt = "";
+  clearHover();
+  stopEdge();
+  bump();
+}
+
 function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[] {
   const keys = (k: string) => (app.phone ? undefined : k);
   const items: MenuItem[] = [];
@@ -214,6 +341,7 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
   if (many.length > 1) {
     // several rows: what acts on them all (no open, rename or new here)
     const out = outermost(order, new Set(many));
+    items.push({ label: "Move to…", run: () => openMover(out) });
     items.push({ label: out.length > 1 ? `Move ${out.length} items to Trash` : "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trashMany(app, out) });
     items.push({ sep: true });
     items.push({ label: "Copy paths", run: () => copyPaths(app, root, many, false) });
@@ -232,6 +360,7 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
   items.push({ label: "New folder…", run: () => startNew(app, root, into, "dir") });
   items.push({ sep: true });
   items.push({ label: "Rename…", keys: keys("F2"), run: () => startRename(path) });
+  items.push({ label: "Move to…", run: () => openMover([path]) });
   items.push({ label: "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trash(app, path) });
   items.push({ sep: true });
   items.push({ label: "Copy path", run: () => copyText(app, path) });
@@ -280,6 +409,8 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     if (edit && !under(edit.kind === "rename" ? edit.path : edit.dir)) edit = null;
     refresh(app, root);
     picking = false;
+    if (drag && drag.root !== root) endDrag();
+    mover = null;
     const t = window.setInterval(() => !document.hidden && refresh(app, root), 5000);
     const seen = () => !document.hidden && refresh(app, root);
     document.addEventListener("visibilitychange", seen);
@@ -288,6 +419,12 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
       document.removeEventListener("visibilitychange", seen);
     };
   }, [root]);
+  // Esc ends a drag here (the browser cancels its own too: dragend)
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && drag && endDrag();
+    window.addEventListener("keydown", esc, true);
+    return () => window.removeEventListener("keydown", esc, true);
+  }, []);
   // a confirmation answered (a delete): look again, now and once it has run
   // a confirmed delete or rename has finished (ConfirmBar): look again (a batch that failed midway
   // moved some)
@@ -328,7 +465,29 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   const rows = root ? treeRows(root, listed, open, edit) : [];
   // the picked rows still drawn (listed again: what went drops out; a closed folder's rows too)
   order = entryPaths(rows);
+  // a move's items selected in their new place once they are listed there (or as many as are, a
+  // while later)
+  if (after) {
+    const drawn = new Set(order);
+    const there = after.paths.filter((x) => drawn.has(x));
+    if (there.length === after.paths.length || performance.now() > after.until) {
+      if (there.length) {
+        pick = { paths: new Set(there), anchor: there[0] };
+        sel = there[0];
+        scrollWanted = { key: there[0], center: false };
+        if (!app.phone) focusWanted = there[0];
+      }
+      after = null;
+    }
+  }
   pick = prunePick(order, pick);
+  // a drag whose rows went (listed again: moved or deleted elsewhere) or another tree's: over
+  if (drag && (drag.root !== root || drag.sources.some((x) => !order.includes(x)))) {
+    drag = null;
+    dropAt = "";
+    clearHover();
+    stopEdge();
+  }
   // a row wanted in view: scrolled to once it is listed (the windowed list then draws it)
   useLayoutEffect(() => {
     const el = nav.current;
@@ -438,7 +597,59 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   const first = rows.find((r) => r.t === "entry");
   const stop = selRow ? sel : first ? rowKey(first) : "";
   // the name field's row is always drawn: out of view it would be removed, and a removed field blurs
-  const items: WItem[] = rows.map((r) => ({ key: rowKey(r), h: rowH, keep: isEditRow(r, edit), draw: () => drawRow(app, root, r, active, rowKey(r) === stop) }));
+  // ... and so is the row a drag started on (a source removed from the page never ends its drag)
+  const items: WItem[] = rows.map((r) => ({ key: rowKey(r), h: rowH, keep: isEditRow(r, edit) || drag?.from === rowKey(r), draw: () => drawRow(app, root, r, active, rowKey(r) === stop) }));
+  // A drag over the tree: ours only (a file from the desktop or text from elsewhere is never
+  // dropped, nor opened by the page). Its folder: a folder row, a file row's folder, empty space
+  // the root; refused (planMove): no highlight, no drop.
+  const ours = (e: DragEvent) => !!drag && Array.from(e.dataTransfer?.types ?? []).includes(DRAG_TYPE);
+  const dropFolder = (e: DragEvent): string => {
+    const row = (e.target as HTMLElement).closest?.<HTMLElement>(".file-row");
+    if (!row) return root;
+    return row.dataset.path ? dropDir(root, { path: row.dataset.path, dir: row.dataset.dir === "1" }) : "";
+  };
+  const onDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    if (!ours(e)) return void (dt.dropEffect = "none");
+    const el = nav.current!;
+    const box = el.getBoundingClientRect();
+    const d = e.clientY < box.top + 28 ? -1 : e.clientY > box.bottom - 28 ? 1 : 0;
+    if (d !== edge.dir) {
+      stopEdge();
+      // (a drag that never ended, its source gone: it stops)
+      if (d) edge = { dir: d, timer: window.setInterval(() => (drag ? (el.scrollTop += d * 8) : stopEdge()), 16) };
+    }
+    const row = (e.target as HTMLElement).closest?.<HTMLElement>(".file-row");
+    hoverOver(app, row?.dataset.dir === "1" ? row.dataset.path ?? "" : "");
+    const dir = dropFolder(e);
+    const at = dir && !planMove(root, drag!.sources, dir, listed.get(dir)).why ? dir : "";
+    dt.dropEffect = at ? "move" : "none";
+    if (at !== dropAt) {
+      dropAt = at;
+      bump();
+    }
+  };
+  const onDragLeave = (e: DragEvent) => {
+    if (!drag || nav.current?.contains(e.relatedTarget as Node | null)) return;
+    dropAt = "";
+    clearHover();
+    stopEdge();
+    bump();
+  };
+  // the drop: this drag's nonce in it, or nothing (what moves is the memory's sources, never the
+  // DataTransfer's); onto its own row, or where they all already are: a slipped click, nothing
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    const d = drag;
+    if (!d || !ours(e) || e.dataTransfer?.getData(DRAG_TYPE) !== d.nonce || d.root !== root) return void (d && endDrag());
+    const dir = dropFolder(e);
+    const onRow = (e.target as HTMLElement).closest?.<HTMLElement>(".file-row")?.dataset.path;
+    endDrag();
+    if (!dir || onRow === d.from || planMove(root, d.sources, dir, listed.get(dir)).noop) return;
+    moveTo(app, root, d.sources, dir);
+  };
   const target = () => newTarget(root, sel, selRow?.t === "entry" && selRow.e.kind === "dir");
   const name = root.slice(root.lastIndexOf("/") + 1);
   return (
@@ -461,12 +672,15 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         </button>
       </div>
       <div
-        class="nav files-tree"
+        class={"nav files-tree" + (drag && dropAt === root ? " drop-root" : "")}
         ref={nav}
         role="tree"
         aria-multiselectable="true"
         aria-label={"Files in " + name}
         onKeyDown={onKey}
+        onDragOver={onDragOver}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
         onContextMenu={(e) => {
           if ((e.target as HTMLElement).closest(".file-row")) return;
           e.preventDefault();
@@ -476,6 +690,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         <Windowed items={items} />
       </div>
       {picking ? <PickBar app={app} root={root} /> : null}
+      {mover ? <MovePicker key={mover.sources.join("\n")} app={app} root={root} sources={mover.sources} /> : null}
     </div>
   );
 }
@@ -488,6 +703,7 @@ function PickBar({ app, root }: { app: App; root: string }) {
     <div class="files-pick" role="toolbar" aria-label="Selected files">
       <span class="files-pick-n">{many.length} selected</span>
       <span class="spacer" />
+      <button type="button" class="btn small" disabled={!out.length} onClick={() => openMover(out)}>Move to…</button>
       <button type="button" class="btn small danger" disabled={!out.length} onClick={() => trashMany(app, out)}>Move to Trash</button>
       <button type="button" class="btn small" disabled={!many.length} onClick={() => copyPaths(app, root, many, false)}>Copy paths</button>
       <button
@@ -501,6 +717,82 @@ function PickBar({ app, root }: { app: App; root: string }) {
       >
         Done
       </button>
+    </div>
+  );
+}
+
+// Move to… (a phone's sheet and selection bar; the desktop's menu): the tree's folders, the root at
+// the top, opened here; folders the items cannot go to (planMove) disabled; Move here moves them.
+function MovePicker({ app, root, sources }: { app: App; root: string; sources: string[] }) {
+  const [chosen, setChosen] = useState("");
+  const list0 = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => list0.current?.querySelector<HTMLElement>(".move-pick:not([disabled])")?.focus({ preventScroll: true }), []);
+  const close = () => {
+    mover = null;
+    bump();
+  };
+  const why = (dir: string) => planMove(root, sources, dir, listed.get(dir)).why;
+  const ok = !!chosen && !why(chosen);
+  const title = sources.length === 1 ? `Move ${baseName(sources[0])} to…` : `Move ${sources.length} items to…`;
+  const flip = (path: string) => {
+    if (pickerOpen.has(path)) pickerOpen.delete(path);
+    else {
+      pickerOpen.add(path);
+      if (!listed.has(path)) list(app, path);
+    }
+    bump();
+  };
+  return (
+    <div class="scrim" onMouseDown={close}>
+      <div
+        class={"sheet move-picker" + (app.phone ? " bottom" : "")}
+        role="dialog"
+        aria-label={title}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key !== "Escape") return;
+          e.preventDefault();
+          e.stopPropagation();
+          close();
+        }}
+      >
+        <div class="sheet-title">{title}</div>
+        <div class="move-list" ref={list0}>
+          {folderRows(root, listed, pickerOpen).map((r) => {
+            const bad = why(r.path);
+            return (
+              <div key={r.path} class={"row move-row" + (chosen === r.path ? " sel" : "")} style={{ paddingLeft: 4 + r.depth * 16 + "px" }}>
+                {r.depth && r.kids ? (
+                  <button type="button" class="move-chev" aria-label={(r.open ? "Collapse " : "Expand ") + r.name} aria-expanded={r.open ? "true" : "false"} onClick={() => flip(r.path)}>
+                    <Icon name={r.open ? "chevron-down" : "chevron-right"} size={12} />
+                  </button>
+                ) : (
+                  <span class="move-chev" />
+                )}
+                <button type="button" class="move-pick" disabled={!!bad} title={bad || r.path} aria-pressed={chosen === r.path ? "true" : "false"} onClick={() => setChosen(r.path)}>
+                  <Icon name="folder" size={14} class="muted" />
+                  <span class="title">{r.depth ? r.name : r.name + "/"}</span>
+                  {r.open && r.state === "wait" ? <span class="muted small">Listing…</span> : r.open && r.state === "err" ? <span class="error-ink small">cannot list it</span> : null}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <div class="prompt-actions">
+          <button type="button" class="btn" onClick={close}>Cancel</button>
+          <button
+            type="button"
+            class="btn primary"
+            disabled={!ok}
+            onClick={() => {
+              close();
+              moveTo(app, root, sources, chosen);
+            }}
+          >
+            Move here
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -598,6 +890,12 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
   });
   const renaming = edit?.kind === "rename" && edit.path === path;
   const selected = picking || pick.paths.size ? pick.paths.has(path) : sel === path;
+  // a drop's folder shaded with its rows under it (the folder's own row may be out of view; the
+  // root: the tree's outline)
+  const inDrop = !!drag && !!dropAt && dropAt !== root && (path === dropAt || path.startsWith(dropAt + "/"));
+  // a drag only from a mouse or pen press: a touch's long press is the menu (a touch laptop, an iPad)
+  const canDrag = !app.phone && !renaming && !picking;
+  const press = longPressProps(() => !renaming && !picking, (at) => menu({ clientX: at.x, clientY: at.y }));
   const menu = (at: { clientX: number; clientY: number }) => {
     // on a picked row the picking stays (the menu acts on them all); elsewhere the row alone
     if (pick.paths.has(path)) sel = path;
@@ -608,7 +906,7 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
   return (
     <div
       ref={me}
-      class={"row file-row" + (selected ? " sel" : "")}
+      class={"row file-row" + (selected ? " sel" : "") + (inDrop ? " drop" : "")}
       style={{ paddingLeft: 8 + depth * 16 + "px" }}
       role="treeitem"
       aria-level={depth + 1}
@@ -617,6 +915,10 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
       tabIndex={stop ? 0 : -1}
       title={path}
       data-path={path}
+      data-dir={isDir ? "1" : undefined}
+      draggable={canDrag && lastPointer !== "touch"}
+      onDragStart={(ev) => startDrag(ev, root, path)}
+      onDragEnd={endDrag}
       onFocus={(ev) => {
         if (ev.target === me.current && sel !== path) {
           sel = path;
@@ -649,7 +951,12 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
         ev.preventDefault();
         if (!renaming) menu(ev);
       }}
-      {...longPressProps(() => !renaming && !picking, (at) => menu({ clientX: at.x, clientY: at.y }))}
+      {...press}
+      onPointerDown={(ev: PointerEvent) => {
+        lastPointer = ev.pointerType || "mouse";
+        if (me.current) me.current.draggable = canDrag && lastPointer !== "touch";
+        press.onPointerDown(ev);
+      }}
     >
       {isDir ? <Icon name={on ? "chevron-down" : "chevron-right"} size={12} class="chev" /> : <span class="chev-gap" />}
       <Icon name={isDir ? "folder" : "file"} size={14} class="muted" />

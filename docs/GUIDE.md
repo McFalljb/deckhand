@@ -1139,9 +1139,10 @@ restarts never get it.
 **Flags for a tab.** To start Claude Code, Codex or pi with command-line flags of your own (a
 model, a permission mode, `--mcp-config`, Codex's `-m`, `-s`, `-a`, `-p`, `--search`, pi's
 `--model` or `--thinking`), use **New Claude tab with flags…** or **New Codex tab with flags…**
-(the tab strip's **+** and the palette, while that agent is installed) or **New session with
-flags…** (the **+** and the palette; with more than one agent installed it asks which: **pi with
-flags…**, **Claude Code with flags…**, **Codex with flags…**).
+(the tab strip's **+**, a project's menu and the palette, while that agent is installed) or **New
+session with flags…** (the **+**, a project's menu, the palette, and **With flags…** at the end of
+the New session picker; with more than one agent installed it asks which: **pi with flags…**,
+**Claude Code with flags…**, **Codex with flags…**).
 A one-line field opens, filled with the flags you last used for that agent in this window; type
 them as on a command line (quotes work, `"be brief"` is one word; nothing is expanded: no `$VAR`,
 `~` or globs) and press Enter. Each agent's own rule applies: flags Deckhand sets itself, or that
@@ -1152,7 +1153,13 @@ setting that turns hooks off (`disableAllHooks`) leaves the tab without Deckhand
 comments and held messages, and the bar over the tab says so. Claude and Codex
 tabs keep their flags (a resume, a restore and your Restart use them again); a pi session uses them
 when it starts (pi itself remembers the session's model when it resumes). These flags are yours
-only: Atlas, scripts and apps cannot pass them, and a tab another machine runs takes flags there.
+only: Atlas, scripts and apps cannot pass them. For another machine's project they go there as you
+typed them: that machine's Deckhand checks them and adds its own default flags, never this Mac's
+(its Deckhand must be 0.7.0 or later). A Claude or Codex tab whose permission mode is not the
+default says so after its title (**plan**, **accept edits**; **auto**, **bypass** in the warning colour…).
+A Codex tab shows only what its start flags allowed (**bypass**, **full access**, **never asks**):
+no badge there does not mean Codex asks first, since a mode set inside Codex or in its config is
+not seen. The badge is information, not a lock.
 
 **Default flags.** Settings › Coding agents has a **Default flags…** row in each agent's card (in
 the palette: **Default Claude Code flags…**, **Default Codex flags…**, **Default pi flags…**): one line each, checked by the same rule
@@ -1278,6 +1285,12 @@ older one from 0.157.0 runs as a plain terminal tab (below).
   `config.toml`.
 - **"Update available"**: at start, Codex shows its own update prompt in the tab until you update it
   or skip that version; answer it there.
+- **Settings changed**: edit a file a running Codex reads only when it starts (your Codex home's
+  `config.toml`, `AGENTS.md`, `hooks.json`, `prompts/`, `rules/` when saved in Deckhand, or the
+  project's `AGENTS.md`) and a bar says *Codex settings changed — Restart N idle Codex tabs*:
+  **Restart** resumes each conversation in its tab (busy ones once idle), after you confirm. What
+  Codex writes there itself (trusting a folder, `/model`, "always allow") does not count; skills
+  need no restart: Codex picks them up itself.
 - **On another machine**: **+ New session** under one of its projects (or **New Codex tab** in its
   menu) starts Codex there, with that machine's own Codex, settings and sign-in (its own **Full
   access in new Codex tabs**, never this Mac's); its Codex rows open there too. It needs Deckhand
@@ -1354,7 +1367,8 @@ as it does anywhere else.
 - **To scroll**, use the wheel or trackpad (pi handles its own scrolling).
 - **To make the text bigger or smaller**, press ⌘+ or ⌘− (⌘0: back to the look's size), or use
   the View menu. It sets the terminals' and the editor's text size and is remembered.
-- **To paste a file's path**, drag its row from the Files tab onto the terminal.
+- **To paste a file's path**, drag its row from the Files tab onto the terminal (a selection of
+  several: all their paths, separated by spaces).
 - **Links**: hold **⌘** over a link to underline it and see where it goes (at the bottom of the
   terminal); **⌘-click** opens it in your default browser, and a mail link in your mail app.
   **⇧⌘-click** opens a web link in a new browser tab of the session, in front (in your default
@@ -1430,7 +1444,18 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
 - **Mouse**: a click opens a folder or previews a file; ⌘-click adds or removes a row, shift-click
   selects a range (neither opens anything); a right-click selects the row (one already selected
-  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path.
+  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path (or a
+  selection's paths).
+- **To move files**, drag a row (or a selection it is in) within the tree: onto a folder to move
+  it there, onto a file to move it next to that file, below the last row to move it to the top of
+  the project. The target folder is highlighted while you drag. Hold the pointer over a closed
+  folder to open it, or near the top or bottom of the list to scroll. **Esc** cancels the drag;
+  other keys and ⌘V do nothing until you let go.
+  Nothing asks first; a toast says where the items went ("Moved a.txt to src/"). Nothing moves
+  if the target is the item itself, a folder inside it, or the folder it is already in. Nothing
+  moves either if the target has an item with the same name; a toast says so. If a move is
+  refused part-way (a terminal working in that folder, for example), the toast names the item;
+  what already moved stays moved.
 - **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
   (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
   shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
@@ -1657,7 +1682,9 @@ new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tab
 Once Codex is installed and has its folder (`~/.codex` or your `CODEX_HOME`): `config.toml`,
 `AGENTS.md`, `AGENTS.override.md`, and the folders `prompts`, `skills`, `rules`, each account's
 own, open and save like Claude Code's; `hooks.json` and `hooks/` show **read-only**. Its sign-in
-(`auth.json`), its sessions, history and `plugins/` are never listed, opened or saved over.
+(`auth.json`), its sessions and history are never listed, opened or saved over; **Plugins** lists
+the plugins Codex installed by name and version only (their folders' names; nothing in them is
+opened).
 
 ### Machines
 
@@ -2321,7 +2348,8 @@ when you have not edited it, and asks when you have. In the Files tab the arrows
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
 Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
-shown; git letters and colours are the window's. ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it. The Settings page shows every setting; the
+shown; git letters and colours are the window's. ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it.
+Drag rows (or the selection) onto a folder, a file (its folder) or the empty space below (the top folder) to move them there, without asking; a closed folder opens when you hover over it, and a name already there is refused, never renamed. On a phone, or from the keyboard, **Move to…** in the row's menu or the selection bar picks the folder. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
 installed, once per account with the project's own first, the last used agent first; one starts
@@ -2822,7 +2850,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Space | Open in preview |
 | F2 | Files: rename |
 | ⌘⌫ | Files: move the selection to Trash (asks first, once) |
-| Esc | Clear a selection of several, else give the keyboard back |
+| Esc | Clear a selection of several, else give the keyboard back (while dragging: cancel the move) |
 
 **Atlas's drawer**: ⌃L opens pi's model selector (the Model button).
 

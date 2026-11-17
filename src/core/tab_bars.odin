@@ -82,14 +82,14 @@ web_bars_json :: proc() -> string {
 			if t.machine != 0 do continue
 			#partial switch &k in t.kind {
 			case Claude_Tab:
-				h := k.harness == .Codex ? "codex" : "claude"
+				h := harness_is_codex(k.harness) ? "codex" : "claude"
 				if msg := claude_status_message(&t); msg != "" {
 					hooks := claude_hooks_silent(&t)
 					bar(&b, &n, t.id, h, "status", hooks ? "error" : "waiting", msg)
 					// the native bar's action: Show settings (hooks), Copy update command (an old
 					// Claude Code); a Codex tab's bars say what to do in Codex itself
-					if k.harness != .Codex && hooks do act(&b, true, "Show settings", "settings", `"agents"`)
-					else if k.harness != .Codex do if cmd := claude_update_command_now(); cmd != "" do act(&b, true, "Copy update command", "copy", quoted(cmd))
+					if !harness_is_codex(k.harness) && hooks do act(&b, true, "Show settings", "settings", `"agents"`)
+					else if !harness_is_codex(k.harness) do if cmd := claude_update_command_now(); cmd != "" do act(&b, true, "Copy update command", "copy", quoted(cmd))
 					strings.write_string(&b, "]}")
 				}
 				if len(k.held) > 0 {
@@ -132,6 +132,14 @@ web_bars_json :: proc() -> string {
 		if silent != nil do act(&b, true, "Restart anyway", "command", fmt.tprintf(`{{"type":"claude_restart_anyway","tab_id":%d}}`, silent.id))
 		act(&b, silent == nil, "Later", "command", update ? `{"type":"claude_reload_later","update":true}` : `{"type":"claude_reload_later"}`)
 		if can do act(&b, false, "Restart", "command", update ? `{"type":"claude_restart_changed","update":true}` : `{"type":"claude_restart_changed"}`)
+		strings.write_string(&b, "]}")
+	}
+	// Codex's settings bar (every Codex tab's): Later and Restart, as Claude's
+	if claude_bar_shows(false, .Codex) {
+		msg, can := claude_reload_message(false, .Codex)
+		bar(&b, &n, 0, "codex", "codex_reload", "info", msg)
+		act(&b, true, "Later", "command", `{"type":"claude_reload_later","harness":"codex"}`)
+		if can do act(&b, false, "Restart", "command", `{"type":"claude_restart_changed","harness":"codex"}`)
 		strings.write_string(&b, "]}")
 	}
 	strings.write_byte(&b, ']')

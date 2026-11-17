@@ -201,6 +201,9 @@ CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 // folder + "|" + its name. No button: Claude Code's /plugin and `claude mcp` change them.
 CLAUDE_PLUGIN_ROW :: "deckhand:claude-plugin:"
 CLAUDE_MCP_ROW :: "deckhand:claude-mcp:"
+// The Codex card's read-only list of installed plugins (codex_plugins.odin: folder names only):
+// CODEX_PLUGIN_ROW + its Codex home + "|" + "<plugin>@<marketplace>". No button.
+CODEX_PLUGIN_ROW :: "deckhand:codex-plugin:"
 
 // The Machines group (machines.odin; Settings › Machines over SSH on, or other
 // machines allowed in): a machine's row is MACHINE_ROW + its number (Connect / Take back, Remove);
@@ -427,6 +430,12 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 			for f in CODEX_CONFIG_FOLDERS do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f), kind = .Folder})
 			for f in CODEX_VIEW_FILES do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f)})
 			for f in CODEX_VIEW_FOLDERS do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f), kind = .Folder})
+		}
+		// its installed plugins, by folder names only (codex_plugins.odin): never plugins/' files
+		for a in caccts {
+			if !os.is_dir(a.dir) do continue
+			who := len(caccts) > 1 ? strings.concatenate({" · ", a.label}, context.temp_allocator) : ""
+			for e in codex_plugins_of(a.dir) do add(&out, {group = "codex-plugin", label = e.name, detail = strings.concatenate({codex_plugin_detail(e), who}, context.temp_allocator), path = strings.concatenate({CODEX_PLUGIN_ROW, a.dir, "|", e.name}, context.temp_allocator)})
 		}
 	}
 	// Atlas (agent.odin): its prompt file (made on its first start; Create
@@ -1028,6 +1037,7 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))
 	case "claude-plugin": return "Claude Code plugins"
 	case "claude-mcp": return "Claude Code MCP servers (user)"
+	case "codex-plugin": return "Codex plugins"
 	}
 	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])
 	if group == "codex" do return "Codex (global)"

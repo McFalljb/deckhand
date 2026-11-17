@@ -28,6 +28,7 @@ HOOK_CRONS_MAX :: 16 // session crons sent from a Stop
 HOOK_TEXT_MAX :: 200 // bytes of a todo's, task's or subagent's text sent (Deckhand keeps less)
 HOOK_ID_MAX :: 64 // bytes of a task or agent id
 HOOK_MODEL_MAX :: 100 // bytes of a model name
+HOOK_MODE_MAX :: 32 // bytes of a permission mode
 HOOK_PATH_MAX :: 4096 // bytes of the transcript's path
 HOOK_ASYNC_HELLO_MS :: 1000 // the async hooks (todos, tasks, subagents): short, they only report
 HOOK_ASYNC_CALL_MS :: 2000
@@ -103,14 +104,25 @@ hook_call :: proc(c: ^Ctx, event, cmd: string, hello_ms := HOOK_HELLO_MS, call_m
 	return r, true
 }
 
-turn_cmd :: proc(state: string, title := "", question := false, idle_prompt := false) -> string {
+turn_cmd :: proc(state: string, title := "", question := false, idle_prompt := false, mode := "") -> string {
 	w := jw_begin()
 	jw_str(&w, "type", "claude.turn")
 	jw_str(&w, "state", state)
 	if title != "" do jw_str(&w, "title", title)
 	if question do jw_raw(&w, "question", "true")
 	if idle_prompt do jw_raw(&w, "idle_prompt", "true")
+	if mode != "" do jw_str(&w, "permission_mode", mode)
 	return jw_end(&w)
+}
+
+// Claude Code's permission mode as its hook input says it ("default", "plan", "acceptEdits",
+// "bypassPermissions"…; the tab's badge): one word of letters, else "" (not sent). Deckhand
+// checks it again (claude_mode_word).
+permission_mode :: proc(input: json.Object) -> string {
+	m, _ := get_str(input, "permission_mode")
+	if len(m) == 0 || len(m) > HOOK_MODE_MAX do return ""
+	for ch in transmute([]u8)m do if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z') do return ""
+	return m
 }
 
 // Whether Claude's last answer asks the user something: it ends with "?" (pi-kit's desk-bridge rule).
@@ -255,6 +267,7 @@ run_hook :: proc(c: ^Ctx, event: string) {
 		if src, ok := get_str(input, "source"); ok && src != "" do jw_str(&w, "source", src)
 		if p := get_text(input, "transcript_path"); p != "" && len(p) <= HOOK_PATH_MAX do jw_str(&w, "transcript_path", p)
 		if m := get_text(input, "model"); m != "" && len(m) <= HOOK_MODEL_MAX do jw_str(&w, "model", m)
+		if pm := permission_mode(input); pm != "" do jw_str(&w, "permission_mode", pm)
 		r, ok := hook_call(c, event, jw_end(&w))
 		// the user renamed it in Deckhand: Claude Code shows that title too
 		if ok do if title := title_of(get_text(get_obj(r, "data"), "title"), HOOK_TITLE_MAX); title != "" do c.write_out(c, session_title_output(title))
@@ -266,12 +279,12 @@ run_hook :: proc(c: ^Ctx, event: string) {
 		if src == "startup" || src == "resume" || src == "clear" do hook_call(c, event, turn_cmd("idle"))
 	case "prompt-submit":
 		prompt, _ := get_str(input, "prompt")
-		if _, ok := hook_call(c, event, turn_cmd("submitted", title_of(prompt, HOOK_TITLE_MAX))); !ok do return
+		if _, ok := hook_call(c, event, turn_cmd("submitted", title_of(prompt, HOOK_TITLE_MAX), mode = permission_mode(input))); !ok do return
 		attach_comments(c, event, IMAGES_HEAD)
 	case "stop":
 		// what still runs in the background first: a wait never sees the idle without it
 		if cmd := background_snapshot(c, input); cmd != "" do hook_call(c, event, cmd)
-		hook_call(c, event, turn_cmd("idle", question = ends_with_question(get_text(input, "last_assistant_message"))))
+		hook_call(c, event, turn_cmd("idle", question = ends_with_question(get_text(input, "last_assistant_message")), mode = permission_mode(input)))
 	case "stop-failure":
 		// the turn ended on an API error (rate limit, overload, …): the error dot; its words never go
 		hook_call(c, event, turn_cmd("error"))
@@ -405,10 +418,10 @@ run_hook :: proc(c: ^Ctx, event: string) {
 		kind, _ := get_str(input, "notification_type")
 		switch kind {
 		case "permission_prompt", "elicitation_dialog", "elicitation_url_dialog", "agent_needs_input":
-			hook_call(c, event, turn_cmd("waiting"))
+			hook_call(c, event, turn_cmd("waiting", mode = permission_mode(input)))
 		case "idle_prompt":
 			// idle, but not a turn's end: Deckhand keeps the last Stop's question or error dot
-			hook_call(c, event, turn_cmd("idle", idle_prompt = true))
+			hook_call(c, event, turn_cmd("idle", idle_prompt = true, mode = permission_mode(input)))
 		}
 	case:
 		hook_fail(c, event, "unknown hook event")

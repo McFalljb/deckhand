@@ -357,10 +357,10 @@ web_view_new_choices :: proc(b: ^strings.Builder) {
 	tabs :: proc(b: ^strings.Builder, no: u64, harness: Harness) {
 		strings.write_byte(b, '[')
 		on: bool
-		if no == 0 do on = harness == .Codex ? codex_installed() : claude_installed()
+		if no == 0 do on = harness_is_codex(harness) ? codex_installed() : claude_installed()
 		else {
 			_, claude, cx := machine_harnesses(no)
-			on = harness == .Codex ? cx : claude
+			on = harness_is_codex(harness) ? cx : claude
 		}
 		if on {
 			items := make([dynamic]Menu_Item, context.temp_allocator)

@@ -70,6 +70,9 @@ window_request_run :: proc(q: core.Window_Request) -> (r: core.Window_Reply) {
 		// and a frame, to read them: the command may have sent this window no delta (changed false)
 		if client_separate() {
 			core.fs_model_changed(q.path)
+			// a Changes action's checkout: its list here is read now, not after the watcher's event
+			// (fseventsd under load: never within seconds) and the debounce (#160)
+			if q.count == 1 do for r in core.changes_repos do if r.root == q.path do core.changes_refresh(r)
 			app.redraw = true
 		}
 	case .Changes_Diff:

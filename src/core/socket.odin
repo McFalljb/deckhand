@@ -460,7 +460,7 @@ command_session :: proc(cmd: Command) -> u64 {
 
 // ---- pi tab bridge (main thread) ----
 
-// Sends a pi_prompt/pi_reload/pi_wait_idle to the tab's bridge connection
+// Sends a pi_prompt/pi_reload/pi_wait_idle/pi_rename to the tab's bridge connection
 // (the newest one with that tab's token). The bridge's result line finishes
 // `request_id`. False if no bridge is connected or it is not reading.
 socket_bridge_send :: proc(tab_id: u64, request_id: u64, cmd: Command) -> bool {
@@ -488,6 +488,9 @@ socket_bridge_send :: proc(tab_id: u64, request_id: u64, cmd: Command) -> bool {
 		write_prompt_images(&b, c.images) // Send now's crops (comments.odin)
 	case Pi_Reload:
 		strings.write_string(&b, `"pi.reload"`)
+	case Pi_Rename:
+		strings.write_string(&b, `"pi.name","name":`)
+		json_quote(&b, c.name)
 	case Pi_Wait_Idle:
 		strings.write_string(&b, `"pi.wait_idle"`)
 		if c.timeout_ms > 0 do fmt.sbprintf(&b, `,"timeout_ms":%d`, c.timeout_ms) // none = no timeout
@@ -1239,8 +1242,10 @@ socket_request_conn :: proc(request_id: u64) -> u64 {
 // Body (JSON, after the macfile header):
 //   {"v":1,"terms":[{"term":7,"kind":"pi","extras":5,"claude_root":4242,
 //     "tokens":[{"sha256":"<hex>","caller":"panel","claude":false,"single_use":false}]}]}
-// `kind` (shell, pi, claude) always; `extras` for pi; `command` for a shell tab started as a
-// command (Log in…'s ssh; an older Deckhand ignores it); `claude_root` only when set. An older
+// `kind` (shell, pi, claude, codex) always; `extras` for pi; `command` for a shell tab started as a
+// command (Log in…'s ssh; an older Deckhand ignores it); `codex_plain` ("0.160.0") for a Codex
+// tab started plain (an old Codex, codex.odin; an older Deckhand ignores it); `claude_root` only
+// when set. An older
 // file's `pi_ro` and `ro` (the removed read-only chats') are ignored. A pi env token that was
 // used is not listed (it was swapped
 // for a reconnect token, which is): an unlisted token is unknown, as a used one must be.
@@ -1287,6 +1292,7 @@ Held_Start :: struct {
 	kind:   Held_Kind,
 	extras: u64, // pi: the optional extensions it loaded (Tab.reload.extras)
 	command: bool, // shell: a command run in place (Log in…'s ssh), never a shell at its prompt
+	plain:   [3]u32, // codex: started plain (an old Codex, codex.odin), its version; {} = not
 }
 
 @(private = "file")
@@ -1521,6 +1527,7 @@ tokens_save :: proc() {
 		fmt.sbprintf(&b, `{{"term":%d,"kind":"%s"`, id, HELD_KIND_NAMES[o.start.kind])
 		if o.start.kind == .Pi do fmt.sbprintf(&b, `,"extras":%d`, transmute(i64)o.start.extras)
 		if o.start.command do strings.write_string(&b, `,"command":true`)
+		if o.start.kind == .Codex && o.start.plain != {} do fmt.sbprintf(&b, `,"codex_plain":"%d.%d.%d"`, o.start.plain[0], o.start.plain[1], o.start.plain[2])
 		if o.root > 1 do fmt.sbprintf(&b, `,"claude_root":%d`, o.root)
 		slice.sort(o.toks[:]) // stable output: the map's order is not
 		strings.write_string(&b, `,"tokens":[`)
@@ -1618,6 +1625,12 @@ tokens_load :: proc(path: string, key: []u8) -> (ok: bool, why: string) {
 			v, vok := r.(json.Boolean)
 			if !vok || st.kind != .Shell do return false, "bad command"
 			st.command = bool(v)
+		}
+		if r, has := o["codex_plain"]; has {
+			v, vok := r.(json.String)
+			n, nok := version_triple(string(v))
+			if !vok || !nok || n == {} || st.kind != .Codex do return false, "bad codex_plain"
+			st.plain = n
 		}
 		starts[term] = st
 		if r, has := o["claude_root"]; has {

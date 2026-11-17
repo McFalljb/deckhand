@@ -150,6 +150,7 @@ init :: proc "c" () {
 	if !core.autotest_active || core.hook_env(.Data_Dir) != "" do core.titles_load(core.data_dir(context.temp_allocator))
 	core.claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
 	core.rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
+	core.rescan_at = time.tick_now() // a Rescan when the window comes to the front waits from here (commands.odin)
 	// control socket (socket.odin); `--print-token script|control` mints a
 	// token for local scripts and prints it once, as shell exports
 	// (development and test builds only: a release build mints a control token only from
@@ -550,7 +551,8 @@ frame :: proc "c" () {
 	browser_tick() // browser tabs follow the pane; new textures (browser.odin)
 	annot_tick() // their annotation overlays and markers (browser_annotate.odin)
 	browser_polish_tick() // their zoom, bars and fields (browser_polish.odin)
-	if app.pending_start && app.pane.z > 0 {
+	// the harness is chosen once pi's detection settled (launch_settled): kept pending till then
+	if app.pending_start && app.pane.z > 0 && launch_settled(app_args.claude) {
 		app.pending_start = false
 		cmd := launch_start(app_args.claude, app.launch_project)
 		if _, is := cmd.(core.New_Claude_Session); is do client_call(cmd) // the user's: in front, toast if Claude Code is missing
@@ -1157,6 +1159,7 @@ confirm_pending :: proc(token: string) {
 		case core.Pi_Reload_All: cmd = core.Pi_Reload_All{only_changed = c.only_changed, confirm = token}
 		case core.Pi_Restart_Updated: cmd = core.Pi_Restart_Updated{confirm = token}
 		case core.Claude_Restart_Changed: cmd = core.Claude_Restart_Changed{update = c.update, all = c.all, confirm = token}
+		case core.Claude_Restart_Anyway: cmd = core.Claude_Restart_Anyway{tab_id = c.tab_id, confirm = token}
 		case core.Reload_File: cmd = core.Reload_File{tab_id = c.tab_id, confirm = token}
 		case core.Delete_Path: cmd = core.Delete_Path{path = c.path, confirm = token}
 		case core.Create_File: cmd = core.Create_File{path = c.path, confirm = token}
@@ -1245,7 +1248,8 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			} else if in_filter {
 				filter_enter()
 			} else if state.focus_widget == "rename_session" {
-				ui_do(core.Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				if r, _ := core.claude_record(rename_session); r != nil do ui_do(core.Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				else do ui_do_menu(core.Pi_Rename{pi_session_id = rename_session, name = tf_text(f)}, "Rename") // a pi session: its pi names it (pi_rename.odin); a refusal toasts
 				ui_do(core.Set_Focus{""})
 			} else {
 				ui_do(core.Rename_Project{state.selected_project, tf_text(f)})
@@ -1526,15 +1530,30 @@ launch_project :: proc(r: core.Result) -> u64 {
 	return r.ok ? r.created_id : 0
 }
 
-// What `deckhand DIR` starts in project pid once the pane has a size: a pi chat (a Claude session when
-// Claude Code is the only harness installed), or with --claude a
-// Claude session (the user's own launch: it comes to the front; without Claude Code a toast says
-// how to install it).
+// What `deckhand DIR` starts in project pid once the pane has a size: a pi chat (without pi, a
+// Claude session when Claude Code is installed, else a Codex session when Codex is), or with
+// --claude a Claude session (the user's own launch: it comes to the front; without Claude Code a
+// toast says how to install it).
 launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 	if pid == 0 || core.find_project(pid) == nil do return nil // never the project that happened to be selected
 	if claude do return core.New_Claude_Session{project_id = pid}
-	if !core.pi_installed() && core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code alone (harness.odin)
+	if !launch_settled(claude) do return nil // not yet: the frame asks again (launch_settled)
+	if !core.pi_installed() {
+		if core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code without pi (harness.odin)
+		if core.codex_installed() do return core.New_Claude_Session{project_id = pid, codex = true} // Codex alone
+	}
 	return core.New_Chat{pid}
+}
+
+// Whether `deckhand DIR` may choose its harness now: always with --claude; else once detection
+// settled. On a cold launch a harness counts as there while the login shell is asked
+// (harness_installed, harness.odin), and a user without pi would get a pi chat that exits 127 (or
+// without Claude Code, a Claude tab that does); the lookups always answer (harness_lookup_timeout)
+// and wake the window.
+launch_settled :: proc(claude: bool) -> bool {
+	if claude do return true
+	for h in core.Harness do _, _ = core.harness_installed(h) // starts a lookup where nothing found it by stat
+	return !core.harness_lookup_asking()
 }
 
 // Test mode's backing scale from DECKHAND_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty

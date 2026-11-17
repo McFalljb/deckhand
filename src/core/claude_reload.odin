@@ -14,6 +14,9 @@ package core
 //   MCP servers   the cwd's .mcp.json
 //   new folders   <config>/{agents,skills}/ and the cwd's .claude/{agents,skills}/ when they
 //                 appear (Claude Code watches only folders that existed at its start)
+//   plugins       `enabledPlugins` in <config>/settings.json and the cwd's
+//                 .claude/settings{,.local}.json (CLAUDE_RESTART_KEYS): the rest of those files
+//                 is live, so only that key's value is compared (restart_keys_digest)
 //   the plugin    Deckhand's own plugin (--plugin-dir): its manifest, hooks, skill, bin
 //
 // There is no /reload for those: the bar offers Restart (claude_restart_changed), the same
@@ -32,14 +35,18 @@ package core
 // size). Each Claude tab records it when first seen running (Tab.reload.version); another one
 // on disk shows "Claude Code updated to X — Restart N idle Claude tabs".
 //
-// Never read, watched or listed: credentials, account state, transcripts, caches
+// Never read, watched or listed here: credentials, account state, transcripts, caches
 // (claude_credential: .credentials.json, .claude.json, everything in the config folder but its
 // config files). Only file times and sizes are looked at, never contents (an npm install's
-// package.json excepted, for its version).
+// package.json excepted, for its version; and a settings file's CLAUDE_RESTART_KEYS, only once
+// its stamp changed). Transcripts are read elsewhere, for rows only: claude_disk.odin (sessions
+// found on disk; never credentials).
 
 import "base:runtime"
+import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
+import jg "../jsonguard"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
@@ -92,6 +99,17 @@ Claude_Reload_Watch :: struct {
 Claude_Reload_Kick :: struct {
 	tab_id: u64,
 }
+// claude_restart_anyway: a Claude tab whose restart waits only for subagents silent for
+// CLAUDE_AGENT_STALE (claude_subagents_silent; they may still work) restarts now; the user's, who
+// confirms. Nothing restarts such a tab automatically.
+Claude_Restart_Anyway :: struct {
+	tab_id:  u64,
+	confirm: string, // class session_restart
+}
+
+// What a waiting restart's note says of a tab whose subagents are all silent (busy_why): the
+// window's bar finds the tab by it and offers Restart anyway.
+CLAUDE_SILENT_NOTE :: "a subagent silent for "
 
 // ---- where Claude Code keeps things ----
 
@@ -133,6 +151,8 @@ under :: proc(p, dir: string) -> bool {return dir != "" && len(p) > len(dir) && 
 // claude_config_dirs (~/.claude and CLAUDE_CONFIG_DIR, each also where it links to), and any
 // folder that directly holds a .credentials.json or .claude.json (another profile's). A folder
 // that is HOME or above it (by any name) is never one: the names only (never all of HOME).
+// One reader looks into the account file on purpose: claude_lists.odin keeps the names (and
+// transport) of its top-level mcpServers for Settings, nothing else of it.
 // p: clean and absolute (settings_credential also checks where it links to, and hard links by
 // inode).
 claude_credential :: proc(p: string) -> bool {
@@ -348,9 +368,19 @@ busy_why :: proc(t: ^Tab) -> string {
 	case ct.turn == .Unknown:                      return "starting"
 	case claude_typed(t.id):                       return "you are typing"
 	case len(ct.held) > 0:                         return "a message waits for it"
-	case claude_subagents_running(t.id) > 0:       return "a subagent runs"
+	case claude_subagents_running(t.id) > 0:
+		if d := claude_subagents_silent(t.id); d > 0 do return strings.concatenate({CLAUDE_SILENT_NOTE, silent_span(d)}, context.temp_allocator)
+		return "a subagent runs"
 	}
 	return "working"
+}
+
+// "2h 05m", "45m" (whole minutes: the note changes at most once a minute).
+@(private = "file")
+silent_span :: proc(d: time.Duration) -> string {
+	m := int(d / time.Minute)
+	if m < 60 do return fmt.tprintf("%dm", m)
+	return fmt.tprintf("%dh %02dm", m / 60, m % 60)
 }
 
 @(private = "file")
@@ -587,6 +617,20 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		if claude_restart_class(t) != .Idle do return {ok = true}, false // again when idle
 		restart_now(t, t.reload.flags)
 		return {ok = true}, true
+	case Claude_Restart_Anyway:
+		_, t, ct := claude_tab_of(c.tab_id)
+		if ct == nil || ct.codex do return fail("no such Claude tab"), false
+		if t.status != .Running do return fail("Claude is not running in this tab"), false
+		if t.reload.queued != .Restart do return fail("no restart waits in this tab"), false
+		class := claude_restart_class(t)
+		silent := claude_subagents_silent(t.id)
+		if class != .Idle && (class != .Blocked || silent == 0) do return fail(fmt.tprintf("this tab's restart waits until it is idle (%s)", busy_why(t))), false
+		what := fmt.tprintf("restart %s anyway? It resumes its conversation; background work Claude started there stops.", cut_utf8(one_line(t.title, context.temp_allocator), 40))
+		if silent > 0 do what = fmt.tprintf("restart %s anyway? Its subagent has reported nothing for %s, but may still be working (one long step): it stops, with the background work Claude started there.", cut_utf8(one_line(t.title, context.temp_allocator), 40), silent_span(silent))
+		gr, go_on, ch := confirm_gate(cmd, .Session_Restart, caller, c.confirm, what, force_ask = true)
+		if !go_on do return gr, ch
+		restart_now(t, t.reload.flags)
+		return {ok = true}, true
 	}
 	return fail("not a Claude reload command"), false
 }
@@ -598,6 +642,7 @@ claude_reload_type :: proc(cmd: Command) -> string {
 	case Claude_Reload_Later:    return "claude_reload_later"
 	case Claude_Reload_Watch:    return "claude_reload_watch"
 	case Claude_Reload_Kick:     return "claude_reload_kick"
+	case Claude_Restart_Anyway:  return "claude_restart_anyway"
 	}
 	return ""
 }
@@ -618,12 +663,16 @@ claude_reload_write :: proc(b: ^strings.Builder, cmd: Command) {
 		}
 	case Claude_Reload_Kick:
 		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
+	case Claude_Restart_Anyway:
+		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
+		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
 	}
 }
 
 claude_reload_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
 	#partial switch c in cmd {
 	case Claude_Restart_Changed: return Claude_Restart_Changed{update = c.update, all = c.all, confirm = strings.clone(c.confirm, a)}
+	case Claude_Restart_Anyway:  return Claude_Restart_Anyway{tab_id = c.tab_id, confirm = strings.clone(c.confirm, a)}
 	case Claude_Reload_Watch:
 		paths := make([]string, len(c.paths), a)
 		scopes := make([]string, len(c.scopes), a)
@@ -637,6 +686,7 @@ claude_reload_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
 claude_reload_free :: proc(cmd: Command, a: runtime.Allocator) {
 	#partial switch c in cmd {
 	case Claude_Restart_Changed: delete(c.confirm, a)
+	case Claude_Restart_Anyway:  delete(c.confirm, a)
 	case Claude_Reload_Watch:
 		for x in c.paths do delete(x, a)
 		for x in c.scopes do delete(x, a)
@@ -663,6 +713,7 @@ Src_Kind :: enum u8 {
 	File, // its stamp
 	Folder, // the stamps of its files (a digest), and whether it is there
 	Exists, // only whether the folder is there
+	Keys, // a settings file: its stamp, then the digest of its CLAUDE_RESTART_KEYS' values
 }
 
 @(private = "file")
@@ -671,8 +722,9 @@ Src :: struct {
 	scope:  string, // owned
 	kind:   Src_Kind,
 	pk:     Path_Kind,
-	stamp:  Disk_Stamp,
-	digest: u64,
+	stamp:   Disk_Stamp,
+	digest:  u64,
+	keys_ok: bool, // .Keys: digest is of a file that parsed (one that does not keeps the last)
 }
 
 @(private = "file")
@@ -745,7 +797,19 @@ claude_reload_pending_count :: proc() -> int {return len(cw.pending)}
 // The editor saved a file (settings_after_save): one a running Claude session reads only at
 // start shows the bar at once; one it applies live, nothing.
 claude_reload_note_save :: proc(path: string) {
-	if claude_file_class(path) != .Restart do return
+	if claude_file_class(path) != .Restart {
+		// a live settings file: only a change of its CLAUDE_RESTART_KEYS (a watched one)
+		p, _ := filepath.clean(path, context.temp_allocator)
+		for &s in cw.srcs do if s.kind == .Keys && s.path == p {
+			if !keys_changed(&s) do return
+			pending_add(s.path, s.scope)
+			cw.due = time.tick_now()
+			cw.from_save = true
+			window_state_changed()
+			return
+		}
+		return
+	}
 	p, _ := filepath.clean(path, context.temp_allocator)
 	scope := ""
 	plugin := claude_plugin_dir()
@@ -789,7 +853,13 @@ claude_reload_tick :: proc() {
 			set_version(t, state.reload.claude.ident)
 			if strings.has_prefix(t.reload.note, "restarting") do set_note(t, "restarted")
 		}
-		if t.reload.queued == .Restart && claude_restart_class(t) == .Idle do append(&kicks, t.id)
+		if t.reload.queued == .Restart {
+			switch claude_restart_class(t) {
+			case .Idle:    append(&kicks, t.id)
+			case .Blocked: set_note(t, fmt.tprintf("restarts when idle (%s)", busy_why(t))) // a subagent's silence, as it grows (the bar's Restart anyway)
+			case .Busy, .No_Bridge:
+			}
+		}
 	}
 	for id in kicks do run_command(Claude_Reload_Kick{tab_id = id})
 	if len(tabs) == 0 {
@@ -851,6 +921,57 @@ folder_digest :: proc(dir: string) -> u64 {
 	return h
 }
 
+// The keys of a settings file a running Claude Code reads only at its start (the rest of the
+// file it applies live): plugins load when it starts.
+CLAUDE_RESTART_KEYS :: [?]string{"enabledPlugins"}
+@(private = "file")
+SETTINGS_READ_MAX :: 4 << 20 // a settings file larger than this is not looked into
+
+// The digest of a settings file's CLAUDE_RESTART_KEYS values (key order inside them not
+// counting); ok false: unreadable, too large or not a JSON object (the caller keeps the last).
+// Only those keys are kept; nothing of the file is stored or shown.
+@(private = "file")
+restart_keys_digest :: proc(path: string) -> (digest: u64, ok: bool) {
+	obj: json.Object // a missing file: none of the keys, as a file without them
+	if k, st := path_stat(path); k == .File {
+		if st.size > SETTINGS_READ_MAX do return 0, false
+		data, err := os.read_entire_file(path, context.temp_allocator)
+		if err != nil do return 0, false
+		v, jerr := jg.parse(data, .JSON, true, context.temp_allocator)
+		if jerr != nil do return 0, false
+		is: bool
+		if obj, is = v.(json.Object); !is do return 0, false
+	} else if k != .Missing do return 0, false
+	h: u64 = 0xcbf29ce484222325
+	for key in CLAUDE_RESTART_KEYS {
+		val, has := obj[key]
+		out, merr := json.marshal(val, {sort_maps_by_key = true}, context.temp_allocator)
+		if merr != nil do return 0, false
+		line := fmt.tprintf("%s=%v:%s\n", key, has, string(out))
+		h = hash.fnv64a(transmute([]u8)line, h)
+	}
+	return h, true
+}
+
+// A .Keys source looked at again: true when its restart keys changed since the last look that
+// parsed (a missing file has none).
+@(private = "file")
+keys_changed :: proc(s: ^Src) -> bool {
+	k, st := path_stat(s.path)
+	if k == s.pk && (k == .Missing || (st.mtime == s.stamp.mtime && st.size == s.stamp.size && st.inode == s.stamp.inode)) do return false
+	s.pk, s.stamp = k, st
+	d, ok := restart_keys_digest(s.path)
+	if !ok do return false // mid-edit or broken: Claude Code keeps what it had too
+	if !s.keys_ok {
+		// the first readable look (made while it did not parse): the baseline
+		s.digest, s.keys_ok = d, true
+		return false
+	}
+	if d == s.digest do return false
+	s.digest = d
+	return true
+}
+
 // One poll: the sources again if the tabs' folders changed, every source, claude's version.
 @(private = "file")
 claude_reload_poll :: proc() {
@@ -880,6 +1001,8 @@ claude_reload_poll :: proc() {
 			if k == s.pk && d == s.digest do continue
 			s.pk, s.digest = k, d
 			pending_add(s.path, s.scope, now)
+		case .Keys:
+			if keys_changed(&s) do pending_add(s.path, s.scope, now)
 		}
 	}
 	// claude's version on disk: found again now and then (PATH may change), looked at each poll
@@ -926,6 +1049,7 @@ claude_reload_build :: proc(cwds: []string) {
 			add(fmt.tprintf("%s/CLAUDE.md", cfg), sc, .File, ids)
 			for d in RESTART_FOLDERS do add(fmt.tprintf("%s/%s", cfg, d), sc, .Folder, ids)
 			for d in NEW_FOLDERS do add(fmt.tprintf("%s/%s", cfg, d), sc, .Exists, ids)
+			add(fmt.tprintf("%s/settings.json", cfg), sc, .Keys, ids)
 		}
 		if plugin := claude_plugin_dir(); plugin != "" do for f in PLUGIN_FILES do add(fmt.tprintf("%s/%s", plugin, f), "", .File, ids)
 		for c in cwds {
@@ -942,11 +1066,12 @@ claude_reload_build :: proc(cwds: []string) {
 			add(fmt.tprintf("%s/.mcp.json", c), c, .File, ids)
 			for f in RESTART_FOLDERS do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Folder, ids)
 			for f in NEW_FOLDERS do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Exists, ids)
+			for f in ([]string{"settings.json", "settings.local.json"}) do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Keys, ids)
 		}
 	}
 	for &s in cw.srcs {
 		for &o in old do if o.path == s.path && o.kind == s.kind {
-			s.pk, s.stamp, s.digest = o.pk, o.stamp, o.digest
+			s.pk, s.stamp, s.digest, s.keys_ok = o.pk, o.stamp, o.digest, o.keys_ok
 			break
 		}
 	}
@@ -978,6 +1103,9 @@ add :: proc(path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 	case .Folder:
 		src.pk = path_kind(p)
 		if src.pk == .Dir do src.digest = folder_digest(p)
+	case .Keys:
+		src.pk, src.stamp = path_stat(p)
+		src.digest, src.keys_ok = restart_keys_digest(p)
 	}
 	append(&cw.srcs, src)
 }
@@ -985,6 +1113,9 @@ add :: proc(path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 // For tests: the sources now (path → scope; folders end in "/").
 claude_reload_sources_for_test :: proc() -> map[string]string {
 	m := make(map[string]string, context.temp_allocator)
-	for s in cw.srcs do m[s.kind == .File ? s.path : strings.concatenate({s.path, "/"}, context.temp_allocator)] = s.scope
+	for s in cw.srcs {
+		k := s.kind == .File ? s.path : s.kind == .Keys ? strings.concatenate({s.path, "#keys"}, context.temp_allocator) : strings.concatenate({s.path, "/"}, context.temp_allocator)
+		m[k] = s.scope
+	}
 	return m
 }

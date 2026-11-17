@@ -399,6 +399,7 @@ titles_load :: proc(dir: string) {
 	sync.lock(&titles.mu)
 	titles.path = path
 	sync.unlock(&titles.mu)
+	codex_disk_cache_at(dir) // the Codex rollouts' meta cache beside it (codex_disk.odin)
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return
 	text := string(data)

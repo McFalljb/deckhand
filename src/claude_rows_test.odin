@@ -602,3 +602,28 @@ claude_rows_polish :: proc(t: ^testing.T) {
 	cmd, _ := changes_review_command(&odd, "x")
 	testing.expect(t, cmd == nil, "not a Claude tab")
 }
+
+// Audit: `deckhand DIR` with Codex the only harness installed starts a Codex session there, as
+// with Claude Code alone, never a pi chat that cannot start.
+@(test)
+launch_start_codex_alone :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	pid := core.run_command(core.Add_Project{cwd = r_dir("launchcodex")}, R_UI).created_id
+	defer core.harness_installed_probe[.Pi] = nil
+	defer core.harness_installed_probe[.Claude] = nil
+	defer core.harness_installed_probe[.Codex] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
+	core.harness_installed_probe[.Codex] = proc() -> bool {return true}
+	c, is := launch_start(false, pid).(core.New_Claude_Session)
+	testing.expect(t, is && c.codex && c.project_id == pid, "a Codex session in DIR's project")
+	// Claude Code and Codex: Claude Code, as before
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
+	c, is = launch_start(false, pid).(core.New_Claude_Session)
+	testing.expect(t, is && !c.codex, "a Claude session")
+	// pi there: a pi chat
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	_, is_chat := launch_start(false, pid).(core.New_Chat)
+	testing.expect(t, is_chat, "a pi chat")
+}

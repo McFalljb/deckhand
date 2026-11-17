@@ -342,19 +342,25 @@ setup_detect :: proc() -> (string, string) {
 	return "", ""
 }
 
-// The setup sheet's line about the harnesses (pi_installed, claude_installed: looked for, never
-// run; harness.odin): which are installed, and what that means.
+// The setup sheet's line about the harnesses (pi_installed, claude_installed, codex_installed:
+// looked for, never run; harness.odin): which are installed, and what that means.
 setup_claude_line :: proc() -> string {
-	pi, claude := pi_installed(), claude_installed()
-	if !pi && !claude do return NO_HARNESS
+	pi, claude, codex := pi_installed(), claude_installed(), codex_installed()
+	if !pi && !claude && !codex do return NO_HARNESS
+	NO_PI :: " pi isn't installed (optional: Atlas and jobs run on pi)."
 	if claude {
 		// one account (a config folder there): which; several: the step before listed them
 		which := "Claude Code is installed"
 		if accts := claude_accounts(); len(accts) == 1 && path_kind(accts[0].dir) == .Dir do which = fmt.tprintf("Claude Code is installed (its account: %s)", path_tilde(accts[0].dir))
-		if !pi do return fmt.tprintf("%s: New session starts it. pi isn't installed (optional: Atlas and jobs run on pi).", which)
-		return fmt.tprintf("%s, and pi: New session asks which one to start.%s", which, pi_setup_note())
+		if !pi && !codex do return fmt.tprintf("%s: New session starts it.%s", which, NO_PI)
+		if !pi do return fmt.tprintf("%s, and Codex: New session asks which one to start.%s", which, NO_PI)
+		return fmt.tprintf("%s, and %s: New session asks which one to start.%s", which, codex ? "pi and Codex" : "pi", pi_setup_note())
 	}
-	return fmt.tprintf("Claude Code isn't installed (optional): install it to open Claude tabs and sessions; everything else works without it.%s", pi_setup_note()) // here pi is installed (neither: NO_HARNESS above)
+	if codex {
+		if !pi do return fmt.tprintf("Codex is installed: New session starts it.%s Claude Code isn't installed (optional): install it to open Claude tabs and sessions.", NO_PI)
+		return fmt.tprintf("Codex and pi are installed: New session asks which one to start. Claude Code isn't installed (optional): install it to open Claude tabs and sessions.%s", pi_setup_note())
+	}
+	return fmt.tprintf("Claude Code isn't installed (optional): install it to open Claude tabs and sessions; everything else works without it.%s", pi_setup_note()) // here pi alone is installed (none: NO_HARNESS above)
 }
 
 // ---- the chats' instructions (pi reads AGENTS.md from its cwd) ----

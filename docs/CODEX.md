@@ -27,14 +27,15 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   so its SessionStart hook, lazily: before that the tab has no session id and no row), titled by
   that prompt; **Resume** from the row runs `codex resume <id>`; a restored tab resumes when shown.
 - **Held prompts** (`claude_prompt`, Atlas, scripts), with a stricter rule than Claude's (below).
-- **Bars**: signed out, hooks not running; a Codex older than 0.163.0 is not started (§5); not
-  installed.
+- **Bars**: signed out, hooks not running; a Codex older than 0.163.0 runs as a plain tab with a
+  bar (0.157.0 or later; older ones are not started, §5); not installed.
 - **Dead tab**: Restart resumes the conversation (no "Restart with model…").
 - **Comments** (§2a): pending comments go with the user's next message as UserPromptSubmit's
   `additionalContext`, as for Claude; **Send now**, **Send and close** and Changes' **Ask Codex to
   review** work for a Codex tab.
 - **Sessions found on disk** (§2b): Codex conversations of the project's folder in
   `~/.codex/sessions/` (and each account's home) are rows; a click runs `codex resume <id>`.
+  Folders where only Codex ran are projects, as Claude-only ones are.
 - **Palette**: **New Codex tab** in the session on screen.
 - **Deckhand's tools** (phase 2a): the `deckhand` command's show, browser and app commands, as MCP
   tools of a per-run stdio server (§7).
@@ -180,21 +181,47 @@ at each file rather than "the Read tool". Nothing pending: nothing printed. If t
 
 ## 2b. Sessions found on disk
 
-`claude_disk_scan` (`src/core/claude_disk.odin`) lists Codex conversations beside Claude Code's for
-the selected project and Chats. **Read only, never written.**
+`claude_disk_scan` (`src/core/claude_disk.odin`; Codex's lister, first-line reader and saved cache in `src/core/codex_disk.odin`) lists Codex conversations beside Claude Code's for
+the selected project and Chats. **Codex's files are read only, never written.**
 
 - **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), and each Codex
-  account's `<home>/sessions` (§6a), `YYYY/MM/DD/` folders
-  newest first: at most 60 day folders and 400 files a home (`CODEX_DISK_DAYS_MAX`, `CODEX_DISK_FILES_MAX`),
-  regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
+  account's `<home>/sessions` (§6a), every `YYYY/MM/DD/` folder, newest first (no age or count
+  limit; hard ceilings against a broken folder: 20,000 folders walked and 50,000 files a home,
+  `CODEX_DISK_DIRS_MAX`, `CODEX_DISK_FILES_MAX`; each folder read entry by entry, names only, and
+  no further than 20,000 entries, `codex_disk_dir_entries_max`, so a folder of millions is never
+  statted, kept or sorted whole; only rollout names are statted),
+  regular files named `rollout-<time>-<uuid>.jsonl` or `.jsonl.zst` (Codex Desktop compresses older
+  rollouts with zstd; when both are there, the plain one) only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
   (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set or a home they added,
   never the real home's `~/.codex`.
-- **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
-  through the Claude scan's cache, budget and worker (`found_info`). The payload's `id` must be
-  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source` a string (a
-  subagent's is an object: skipped). The cwd is only compared; no title is read (rows read
-  "Untitled Codex session" with the file's date); nothing from the file reaches a shell, the
-  terminal or the snapshot but the id (a UUID). The file's path is not kept.
+- **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped;
+  of a `.zst`, only what decodes it, `codex_zst_first_line` with the vendored zstd decoder,
+  `src/zstd`: at most 256 KB of it read, decoded no further than its first newline or the 64 KB
+  line cap, a frame window of at most 8 MiB; a decode error, a truncated file or a cap reached
+  without a newline skips the file, `CODEX_ZST_*`),
+  once per file ever, never on the main thread (`codex_pass`, `codex_disk.odin`). The scan asks
+  for a pass (`codex_disk_refresh`: one at a time, at most one per 10 s) and shows the cache
+  (`codex_disk_found`); the pass lists every home, drops the entries of files gone, reads the
+  first line of each new or changed rollout (size or mtime), and has the rows made again every 64
+  files. What was read and found wanting is remembered; a rollout that could not be read (open,
+  stat or read failed: permissions, an I/O error) is not, so each pass reads it again. The payload's `id` must be
+  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source`
+  `"cli"` (the CLI) or `"vscode"` (Codex Desktop) to be a row (`codex_source_listed`:
+  `codex exec`'s, a subagent's, an object, and any source Deckhand does not know are not). The
+  cwd is only compared; nothing from the file reaches a shell, the terminal or the snapshot but
+  the id (a UUID). The file's path is not kept in a row.
+- **The saved cache**: `codex-sessions.tsv` in the data dir, beside the session-title cache
+  (`titles_load`): a version line (`deckhand codex sessions 1`), then per rollout its size, mtime,
+  created time, source, id, account (home), cwd and path, tab-separated; written atomically, 0600,
+  at the end of a pass that changed anything; at most 100,000 entries (`CODEX_CACHE_MAX`). A file
+  over 64 MB, of another version, or a row over 16 KB, without exactly 8 tab-separated fields (counted
+  before it is split) or that does not parse is not used (those rollouts are
+  read again). A launch reads only new or changed rollouts.
+- **Titles**: each home's `session_index.jsonl` (one object a line: `id`, `thread_name`,
+  `updated_at`; the last line for an id wins), joined to the listed rows only (a row it does not
+  name stays "Untitled Codex session" with the file's date). Read on the pass's worker, again only
+  when its size or mtime changes; its last 16 MB at most, lines over 16 KB skipped; the name made
+  one line as other titles are (`clean_title`, `one_line`, at most 80 bytes). Never written.
 - **Which**: not one Deckhand's history has (its row is the history's), a pi session's id, or an
   id Claude Code's transcript has (one id, one harness: Claude's wins, in the scan and again at
   resume, `claude_conversation_seen`); at most `MAX_SESSIONS`.
@@ -202,6 +229,24 @@ the selected project and Chats. **Read only, never written.**
   project running `codex resume <id>` in the project's folder, under the account whose home it was
   found in (refused once that account is removed); the history keeps it from then on.
   An agent's `open_session` finds only the rows listed for the selected project and Chats.
+- **Projects where only Codex ran** (`claude_scan_projects`, Claude's own path, on the Rescan
+  worker): the `cwd` of each listed rollout (source `"cli"` or `"vscode"`), from the found rows'
+  saved cache after a pass on the Rescan worker (`codex_disk_pass_now`, `codex_disk_folders`: a
+  Rescan reads no rollout the cache knows). The cwd is cleaned once, when it enters the cache, so
+  a project and its rows match byte for byte (a trailing slash is the same folder). Merged by
+  folder with pi's and Claude's (`found_project`); never the home folder itself (`HOME`, its
+  real path, or any path that is the same folder by device and inode: a link to it, another case
+  on a case-insensitive volume; a session started in `~` makes no project; a project added there
+  by hand is left as it is). The check fails closed: a folder that cannot be stat'ed now (other than
+  "no such folder"), or any folder while the home folder's own stat failed, is not a found project
+  on that scan; the next tries again. On the main thread (`rescan_now`: a new Chats or main folder) the scan
+  reads no rollout: it takes the cache as it is and starts a pass on the worker, which the next
+  Rescan uses; a folder no one else knows is a project
+  found on disk only, exactly as a Claude-only folder is (`Project.claude`: saved; a Rescan that
+  no longer finds it drops it unless you added, named or opened it; temp and missing folders are
+  hidden by the tidy rules, as any project's). The launch's first scan reads no rollout, and a Rescan follows when a
+  Codex home has a `sessions/` folder (`claude_startup_rescan_due`). Each Codex home's sessions
+  folder is taken on the main thread before the scan (`claude_scan_prepare`).
 
 ## 3. The token and the process check
 
@@ -269,11 +314,23 @@ commands either.
   cached by its path, size, mtime and inode). Codex writes its helper links under
   `$CODEX_HOME/tmp/arg0` at every start, `--version` too, so that run gets `CODEX_HOME` set to a new
   empty 0700 folder in `$TMPDIR` (`deckhand-codex-XXXXXX`), removed right after: nothing under
-  `~/.codex` is written (#135). Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab
-  says how to update for its install (npm, Homebrew, bun or pnpm: that command; Codex's own
-  installer: run it again, `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the
-  command's refusal says the same in one line (`Codex 0.135.0 is older than 0.163.0: update it
-  with …`), and the checklist offers Update (for Codex's own installer: that command, to copy).
+  `~/.codex` is written (#135). Below **0.163.0** (OSC 7501) and from **0.157.0** (`--no-daemon`,
+  `CODEX_PLAIN_MIN_VERSION`) a Codex tab starts **plain**: `codex [resume <id>] <user flags>
+  --no-daemon -C <cwd>`, with no hooks, no `hooks.state`, no MCP server and **no token** in its
+  environment (nothing of it can reach Deckhand, so the process check has nothing to admit), and a
+  bar (`Codex 0.160.0 is older than 0.163.0: it runs here without Deckhand's hooks and status …
+  Update it with …, then Restart the tab`; Dismiss hides it for that run). Deckhand types nothing
+  into it: `claude_prompt` and every paste but the user's own are refused (`codex_paste_refusal`;
+  held prompts would wait forever for an OSC 7501 that never comes), and the "hooks silent" bar
+  never shows. The plain mark is the core's (`codex_plain_version`; the snapshot's
+  `codex_version_old`), and is kept with the tab's start record in the MAC'd `tokens.json`
+  (`"codex_plain":"0.160.0"`): a plain tab adopted from the session holder after a relaunch is
+  marked again from that record, whatever its token trust and whatever codex is on disk now. Below **0.157.0** a
+  Codex tab does not start: the tab says how to update for its install (npm, Homebrew, bun or
+  pnpm: that command; Codex's own installer: run it again,
+  `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the command's refusal says
+  the same in one line (`Codex 0.135.0 is older than 0.157.0: update it with …`), and the
+  checklist offers Update (for Codex's own installer: that command, to copy).
 - **Signed out**: `codex login status` (exit 1), run once per recheck through the login shell on a
   worker when a Codex tab starts or the checklist looks, per Codex home: a tab of an account asks
   under its `CODEX_HOME` (set after the login profile, as the tab's), the checklist for the
@@ -333,7 +390,13 @@ Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/C
   `codex_account_last`, `codex_account_default`; the snapshot lists `codex_accounts` as
   `claude_accounts` (labels and folders, no secret).
 - Not done: the setup sheet's accounts step (Claude's lists found folders; Codex finds none),
-  per-account hot-reload or settings-file rows, and a copy button for the sign-in command.
+  per-account hot-reload, and a copy button for the sign-in command.
+- **Settings files** (Coding agents › Codex › Advanced): each home's `CODEX_CONFIG_FILES` and
+  `CODEX_CONFIG_FOLDERS` (one group per account once there are several), edited by the user as
+  Claude's; `CODEX_VIEW_FILES`/`CODEX_VIEW_FOLDERS` (`hooks.json`, `hooks/`) read-only in the editor
+  (`codex_view_only`); never a Create. A save is refused over a credentials or state file by any
+  name (`settings_credential` on the path and on where it leads at save time), so nothing outside
+  the allowlist in a Codex home is written. `plugins/` stays Codex's (not listed, refused).
 - Not checked without a real sign-in: that `codex login status` under an added home answers for
   that home, and that Codex's own sign-in screen in such a tab writes that home's `auth.json`.
 
@@ -395,7 +458,7 @@ tab, which that core checks under its own flag rule (§1a), as it would its own 
   know `harness` and would start Claude Code). A Codex row is listed only by a core that has
   Codex tabs, so its click is forwarded as any row's.
 - **What that machine says** comes back as for its Claude tabs: not installed (`"on <machine>:
-  Codex is not installed …"`), too old (`"on <machine>: Codex 0.135.0 is older than 0.163.0: update it with …"`), signed out as
+  Codex is not installed …"`), too old (`"on <machine>: Codex 0.135.0 is older than 0.157.0: update it with …"`; from 0.157.0 to 0.163.0 it starts plain there), signed out as
   Codex's own sign-in screen in the tab's relayed terminal; its checklist on the machine's row.
   The bars over a tab (signed out, hooks not running) are that machine's core's and are not
   mirrored, as for its Claude tabs; this Mac's own sign-in never puts one over it.

@@ -12,7 +12,7 @@ installs the harnesses. The Claude and Codex tabs themselves: [CLAUDE.md](CLAUDE
 | Deckhand's part | `integrations/pi`: extensions, Atlas's skill (§3) | `integrations/claude-code`: a plugin (hooks, the `deckhand` command, a skill) (§5) | none on disk: hooks and an MCP server, both the bundled CLI (§5a) |
 | Loaded with | `-e <dir>` per extension | `--plugin-dir <dir>` | `-c hooks.…`, `-c hooks.state=…`, `-c mcp_servers.deckhand=…` |
 | Minimum | 1.4.0 (`PI_MIN_VERSION`) | 2.1.295 (`CLAUDE_MIN_VERSION`) | 0.163.0 (`CODEX_MIN_VERSION`) |
-| Older than that | starts without the integration; a bar with the update command | starts; status from the hooks only; a bar saying how to update | not started; the tab says how to update |
+| Older than that | starts without the integration; a bar with the update command | starts; status from the hooks only; a bar saying how to update | from 0.157.0 (`--no-daemon`): starts plain (no hooks, MCP server or token; nothing typed into it); a bar saying how to update. Older: not started; the tab says how to update |
 | Version read from | its `package.json`, never run | where `claude` links, never run | its install's files; else `codex --version` under a throwaway `CODEX_HOME` |
 | Accounts | — | config folders ([CLAUDE.md §1b](CLAUDE.md#1b-accounts)) | Codex homes ([CODEX.md §6a](CODEX.md#6a-accounts)) |
 | On another machine | yes | yes | when that machine's core starts Codex tabs (§6) |
@@ -202,7 +202,9 @@ extra flags and **Full access in new Codex tabs** come before Deckhand's own: CO
 recipe shows its review dialog for Deckhand's hooks; status still works from its OSC 7501 and the
 tab's bar explains. The details: [CODEX.md](CODEX.md).
 
-- **Minimum Codex 0.163.0** (`CODEX_MIN_VERSION`): OSC 7501 program status. Older ones are not
+- **Minimum Codex 0.163.0** (`CODEX_MIN_VERSION`): OSC 7501 program status. Older ones from
+  0.157.0 (`CODEX_PLAIN_MIN_VERSION`, `--no-daemon`) start as plain tabs: no hooks, no MCP server,
+  no token, nothing typed into them by Deckhand, a bar saying how to update; older still are not
   started. The version is read from the install's files; only an install that gives none runs
   `codex --version`, with `CODEX_HOME` at a new empty temp folder, so nothing is written under
   `~/.codex` ([CODEX.md §5](CODEX.md#5-installed-version-signed-in)).
@@ -263,8 +265,9 @@ either: its hooks are Deckhand's own CLI, passed per run (§5a).
 | `needs_harness` | a third-party item whose harness is missing or too old | Needs pi first |
 
 The checklist is looked at again when the sheet opens, on Settings' **Refresh**, after Refresh
-shell environment, and when a run ends (then the cached `harness_installed` answers are dropped
-too, the login shell's included, and pi's version probed again).
+shell environment, and when a run ends; after Refresh shell environment and a run's end the cached
+`harness_installed` answers are dropped too, the login shell's included (after a run's end, pi's
+version is probed again as well), and a tab whose command exits 127 (not found) drops its own.
 
 **Whether a harness is installed** (`harness_installed`, `src/core/harness.odin`) is one lookup for
 all three, in the order a tab's own command finds it: the PATH new tabs get, then the folders its
@@ -285,7 +288,8 @@ shell's PATH nor the harness's own folders have it (the node next to it comes to
 read from where the binary links, per harness (`harness_version_of`), from the stat's binary or
 else the path the shell named; a Volta shim (`~/.volta/bin/<name>` -> `volta-shim`) is read
 through the package Volta installed (`tools/image/packages/<package>/lib/node_modules/<package>`),
-and with none there it has no version (never run). Test mode never looks at PATH (`detect_path`) or asks the login shell (unless
+and with none there it has no version (never run). Test mode never looks at PATH (`detect_path`)
+or asks the login shell (unless
 `DECKHAND_REAL_PI=1`), only the fake HOME's install folders; unit tests ask the login shell only
 when a test turns `harness_lookup_in_unit_tests` on.
 

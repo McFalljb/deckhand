@@ -599,3 +599,57 @@ claude_subagent_todos :: proc(t: ^testing.T) {
 	rows = f_rows(id, "subagents")
 	testing.expect(t, strings.contains(rows, "  Todos 0/30") && !strings.contains(rows, "○ t0"), rows)
 }
+
+// Audit: a turn that went through a permission dialog, on a Claude Code without OSC 7501 (the
+// hooks only: no hook says it works again after the answer), still leaves the unseen dot and a
+// bell entry at its Stop.
+@(test)
+claude_dot_after_dialog_from_hooks :: proc(t: ^testing.T) {
+	context.allocator = f_reset()
+	defer f_done()
+	sess, id := f_claude(t, "dialogend")
+	pitab := core.find_session(sess).tabs[0].id
+	_, tab, _ := core.find_tab(id)
+	core.run_command(core.Focus_Tab{tab_id = pitab}, F_UI) // the user looks elsewhere
+	f_turn(id, "submitted")
+	f_turn(id, "waiting") // a permission dialog, answered in the tab
+	testing.expect(t, f_last_bell(id) == core.Notice_Kind.Waiting, "the dialog's entry")
+	f_turn(id, "idle")
+	testing.expect(t, tab.unseen, "unseen")
+	testing.expect_value(t, f_dot(id), core.Row_Status.Unseen)
+	testing.expect(t, f_last_bell(id) == core.Notice_Kind.Finished, "the session's entry, now finished")
+	// a Stop with no turn before it (idle already) is no end of a turn
+	tab.unseen = false
+	f_turn(id, "idle")
+	testing.expect(t, !tab.unseen, "a second Stop")
+}
+
+// The kind of the bell's newest entry for a tab (entries of one session coalesce: notify.odin).
+@(private = "file")
+f_last_bell :: proc(tab_id: u64) -> Maybe(core.Notice_Kind) {
+	#reverse for x in state.notices.items do if x.tab_id == tab_id do return x.kind
+	return nil
+}
+
+// Review: a subagent silent past CLAUDE_AGENT_STALE may be in one long tool call (silence never
+// proves it ended): it still counts as running, so a queued restart still waits for it.
+@(test)
+claude_subagent_silent_still_blocks :: proc(t: ^testing.T) {
+	context.allocator = f_reset()
+	defer f_done()
+	_, id := f_claude(t, "agentlost")
+	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = id, event = "start", agent_id = "a1", agent_type = "Explore"}, F_SCRIPT).ok)
+	now := time.tick_now()
+	later := time.tick_add(now, core.CLAUDE_AGENT_STALE + time.Second)
+	testing.expect_value(t, core.claude_subagents_running(id), 1)
+	// silent that long: still running, and how long it has been silent is known (Restart anyway)
+	testing.expect_value(t, core.claude_subagents_silent(id, time.tick_add(now, core.CLAUDE_AGENT_STALE - time.Minute)), time.Duration(0))
+	testing.expect(t, core.claude_subagents_silent(id, later) >= core.CLAUDE_AGENT_STALE)
+	// one that reported lately: not silent; ended: none
+	testing.expect(t, core.run_command(core.Claude_Subagent{tab_id = id, event = "start", agent_id = "a2", agent_type = "Explore"}, F_SCRIPT).ok)
+	testing.expect_value(t, core.claude_subagents_silent(id, time.tick_add(time.tick_now(), time.Hour)), time.Duration(0))
+	core.run_command(core.Claude_Subagent{tab_id = id, event = "stop", agent_id = "a1", agent_type = "Explore"}, F_SCRIPT)
+	core.run_command(core.Claude_Subagent{tab_id = id, event = "stop", agent_id = "a2", agent_type = "Explore"}, F_SCRIPT)
+	testing.expect_value(t, core.claude_subagents_running(id), 0)
+	testing.expect_value(t, core.claude_subagents_silent(id, later), time.Duration(0))
+}

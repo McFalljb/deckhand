@@ -257,6 +257,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Pi_Reload:           return "pi_reload"
 	case Pi_Restart:          return "pi_restart"
 	case Pi_Wait_Idle:        return "pi_wait_idle"
+	case Pi_Rename:           return "pi_rename"
 	case Panel_Set:           return "panel.set"
 	case Panel_Remove:        return "panel.remove"
 	case Set_Panel_Collapsed: return "set_panel_collapsed"
@@ -346,7 +347,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Pi_Reload_Later:     return "pi_reload_later"
 	case Reload_Watch:        return "reload_watch"
 	case Reload_Kick:      return "reload_kick"
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		return claude_reload_type(cmd)
 	case Comment_Add:         return "comment_add"
 	case Comment_Edit:        return "comment_edit"
@@ -588,7 +589,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		update_write(w.b, cmd) // update.odin: never the release body
 	case Pi_Reload_All, Pi_Restart_Updated, Pi_Reload_Later, Reload_Watch, Reload_Kick:
 		reload_write(w.b, cmd) // reload.odin; confirmation tokens never
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		claude_reload_write(w.b, cmd) // claude_reload.odin; confirmation tokens never
 	case New_Shell_Tab:
 		kv_u64(&w, "session", c.session)
@@ -686,6 +687,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "agent", AGENT_NAMES[c.agent])
 		kv_bool(&w, "waiting", c.waiting)
 		kv_bool(&w, "question", c.question)
+		if c.model != "" do kv_str(&w, "model", c.model)
+		if c.provider != "" do kv_str(&w, "provider", c.provider)
+		if c.thinking != "" do kv_str(&w, "thinking", c.thinking)
 		key(&w, "blockers")
 		// events and the log: what kind and which id only ("shell sh1"), never a command or a
 		// task, as panel rows are only counted; the state keeps the text (Tab.blockers)
@@ -710,6 +714,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Pi_Wait_Idle:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "timeout_ms", c.timeout_ms)
+	case Pi_Rename:
+		kv_str(&w, "pi_session_id", c.pi_session_id)
+		kv_str(&w, "name", redact ? fmt.tprintf("<redacted %d bytes>", len(c.name)) : c.name)
 	case Panel_Set:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_str(&w, "panel", c.panel)
@@ -1220,6 +1227,13 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
 		obj_end(&w)
 		return
+	case Claude_Restart_Anyway:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		kv_u64(&w, "tab_id", c.tab_id)
+		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+		obj_end(&w)
+		return
 	case App_Input:
 		w := obj_begin(b)
 		kv_str(&w, "type", command_type(cmd))
@@ -1664,6 +1678,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_str(&to, "agent", AGENT_NAMES[t.agent])
 				kv_bool(&to, "waiting", t.waiting)
 				kv_bool(&to, "question", t.question)
+				if pt := t.kind.(Pi_Tab); pt.model != "" do kv_str(&to, "model", pt.model)
+				if pt := t.kind.(Pi_Tab); pt.thinking != "" do kv_str(&to, "thinking", pt.thinking)
 				key(&to, "blockers")
 				write_strings(b, t.blockers[:])
 				key(&to, "reload") // hot reload (reload.odin)

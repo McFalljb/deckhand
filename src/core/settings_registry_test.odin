@@ -18,6 +18,10 @@ settings_registry_commands :: proc(t: ^testing.T) {
 		testing.expectf(t, !seen[s.id], "setting %s twice", s.id)
 		seen[s.id] = true
 		testing.expectf(t, s.label != "", "setting %s has no label", s.id)
+		if s.read_only { 	// shows what is there: sends nothing, so nothing to gate
+			testing.expectf(t, s.kind == .List && s.command == "" && s.action == "" && len(s.also) == 0 && s.row != "", "setting %s: a read-only list only", s.id)
+			continue
+		}
 		spec := command_spec(s.command)
 		testing.expectf(t, spec != nil, "setting %s: no command %q", s.id, s.command)
 		if spec == nil do continue
@@ -52,7 +56,7 @@ settings_registry_commands :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, n >= 3, "optional pi extensions read")
 	// every group settings_file_rows makes has a section
-	for g in ([]string{"pi", "pi-ext", "ext", "project", "claude", "claude:work", "claude-project", "claude-accounts", "codex-accounts", "agents", "atlas", "jobs", "chats", "folders", "machines"}) {
+	for g in ([]string{"pi", "pi-ext", "ext", "project", "claude", "claude:work", "claude-project", "claude-accounts", "claude-plugin", "claude-mcp", "codex-accounts", "agents", "atlas", "jobs", "chats", "folders", "machines"}) {
 		_, _, ok := settings_group_section(g)
 		testing.expectf(t, ok, "group %s has no section", g)
 	}

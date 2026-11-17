@@ -26,6 +26,10 @@ import "core:time"
 
 Pi_Tab :: struct {
 	readonly: bool, // the removed read-only chats': kept on the grow-only wire (schema/released-v1.json), always false
+	// pi's model as its bridge last reported it (pi.status): "provider/id" and the thinking level;
+	// "" = not reported (an older bridge, or none connected). Not saved.
+	model:    string,
+	thinking: string,
 }
 Shell_Tab :: struct {}
 Tab_Kind :: union {

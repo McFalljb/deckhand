@@ -57,7 +57,12 @@ On its first run `build.sh` also compiles the sokol C libraries, Clay (from the 
 `vendor/clay/clay.h` into `build/clay-odin/`, next to a copy of the submodule's Odin bindings), the
 CoreText text backend and stb_truetype. `src/` imports `build/clay-odin`, so `odin test src` and
 the editor's Odin tooling need one `./build.sh` first. (The submodule's prebuilt macOS `clay.a`
-targets macOS 15, so it is not used.)
+targets macOS 15, so it is not used.) The core's one C library, zstd's decoder (it reads Codex's
+compressed rollouts), is compiled by `scripts/build-zstd.sh` from `vendor/zstd/zstddeclib.c` (zstd's
+own single-file decoder, generated from a release: `vendor/zstd/VERSION`) into
+`build/zstd/libzstddec.a`, which `src/zstd` links: `build.sh` and `tests/unit.py` run it, and so
+must anything that runs `odin build` or `odin test` on `src/core`, `src/coremain` or `src` by hand
+(`odin check` does not need it).
 
 The minimum macOS is 14.0 (`MACOS_MIN` in `build.sh`). `scripts/check-minos.sh` checks it twice:
 on every native library Odin links, and after bundling on every Mach-O in `Deckhand.app`, CEF
@@ -178,7 +183,8 @@ installs over SSH (Settings › Machines; removing it:
 (Odin `dev-2026-09`, clang):
 
 ```sh
-mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
+mkdir -p build && scripts/build-zstd.sh   # the zstd decoder the core links (vendor/zstd, cc)
+odin build src/coremain -out:build/deckhand-core-serve -o:speed
 odin build src/holder -out:build/deckhand-core -o:speed   # the session holder, beside it
 build/deckhand-core-serve serve --run ~/.local/state/deckhand/run --data ~/.local/share/deckhand
 python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a temp dir: hello, get_state, a shell tab

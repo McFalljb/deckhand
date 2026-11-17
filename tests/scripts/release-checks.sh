@@ -230,6 +230,7 @@ refused "no ZIP_PREFIX in src/updatesig/updatesig.odin" "ZIP_PREFIX" --version 0
 # ---- test hooks out of release builds (src/core/test_hooks.odin) ----------------------------------
 H="$W/hooks"
 mkdir -p "$H"
+scripts/build-zstd.sh >/dev/null # the zstd decoder the core links (src/zstd)
 odin build src -out:"$H/nohooks" -define:DECKHAND_TEST_HOOKS=false -minimum-os-version:14.0 >"$H/build.log" 2>&1 || { cat "$H/build.log"; bad "src did not build without hooks"; }
 scripts/check-release-build.sh "$H/nohooks" >"$H/out.txt" 2>&1 && ok "a build without hooks passes the check" || bad "a build without hooks: $(cat "$H/out.txt")"
 for s in DECKHAND_SCRIPT DECKHAND_DATA_DIR DECKHAND_RUNTIME_DIR DECKHAND_UPDATE_URL --print-token; do

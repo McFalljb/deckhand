@@ -73,7 +73,8 @@ above the tabs with **Cancel** and **Confirm**.
 - macOS 14 or later on Apple silicon (arm64). Intel Macs are not supported.
 - At least one coding agent: pi 1.4.0 or later, Claude Code 2.1.295 or later, or Codex 0.163.0 or
   later. An older pi runs without Deckhand's integration ([pi in Deckhand](#pi-in-deckhand)); an
-  older Claude Code runs with status from Deckhand's hooks only; an older Codex does not start.
+  older Claude Code runs with status from Deckhand's hooks only; an older Codex (0.157.0 or later)
+  runs as a plain terminal tab, and one older than that does not start.
   Atlas and jobs need pi. The [first run](#the-first-run) can install them.
 - Optional: [other machines](#machines) you reach with `ssh`: Macs on Apple silicon, or Linux on
   x86_64. Deckhand installs its core there for you.
@@ -173,9 +174,10 @@ Deckhand finds more than one Claude Code account):
 4. **Your folders**: the layout as a small tree. **Done** makes the missing folders, empty, and
    closes the sheet. Nothing already there is moved or changed. The step also says whether
    Claude Code is installed (Deckhand looks for `claude`, never runs it): Claude tabs need it,
-   nothing else does; with one account it names its folder. With both pi and Claude Code it says
-   that **New session** asks which one to start; with Claude Code alone, that pi isn't installed
-   (Atlas and jobs need it); with neither, how to install one. When your pi is older than 1.4.0
+   nothing else does; with one account it names its folder. It says the same of Codex. With two or
+   more of pi, Claude Code and Codex it says that **New session** asks which one to start; with one
+   alone, that **New session** starts it (and, without pi, that Atlas and jobs need pi); with none,
+   how to install one. When your pi is older than 1.4.0
    it says so too (see [pi in Deckhand](#pi-in-deckhand)).
 
 **Skip for now** (or Esc on the first step) closes it for good: jobs stay off, and the Jobs tab
@@ -195,7 +197,7 @@ is installed into pi or written to `~/.pi`: pi outside Deckhand runs exactly as 
 
 It needs **pi 1.4.0 or newer**. When Deckhand sees (from pi's files on disk; it never runs pi to
 ask) that your pi is older, it starts pi without the integration and a bar over the tab says so,
-with **Copy update command** (`pi update`) and **Dismiss**; the setup sheet says so too, with
+with **Copy update command** (`pi update --self`) and **Dismiss**; the setup sheet says so too, with
 **Update** for the layouts it can update. Update pi,
 then restart the tab.
 
@@ -504,7 +506,10 @@ Green is not a session's colour: it means a machine is online, or a job's last r
 pi tabs report through Deckhand's pi integration ([pi in Deckhand](#pi-in-deckhand)). Any other program in a terminal tab can report too, with
 the OSC 7501 program status protocol: Claude Code (2.1.295 or newer) does by itself. When both
 could speak for a pi tab, its bridge wins. Hover a mark's tab or row to see what it is in words,
-what it said, where it came from (pi bridge or OSC 7501) and for how long.
+what it said, where it came from (pi bridge or OSC 7501) and for how long. Hovering a pi tab also
+shows its model and thinking level ("pi · model anthropic/claude-sonnet-4-5 · thinking high"), as
+a Claude tab shows its model; after a switch in pi it follows (an older Deckhand pi integration
+reports none).
 
 Waiting work is never hidden: hidden rows, folded sections and filters always leave sessions
 that wait for you visible.
@@ -718,7 +723,9 @@ is waiting for you).
 - **To pin** a project or session to the top of its section, click the pin on its row or use
   **…** → Pin. Pinned rows get Move up / Move down in the same menu.
 - **To rename a project**, use **…** → Rename…, or the palette's "Rename project". A pi session
-  is named in pi: type `/name My title` in the session. A Claude row: **…** → Rename….
+  is named in pi: type `/name My title` in the session, or, while it is open here and pi is idle,
+  **…** → Rename… on its row (type the name, Enter): Deckhand asks that pi to name it, as `/name`
+  does, so pi's own session list shows the name too. A Claude row: **…** → Rename….
 - **To hide** a project or session, use **…** → Hide. Nothing is deleted.
 - **To see hidden rows**, click the sort button on a section heading and tick **Show hidden**
   (or the palette's "Show hidden projects and sessions"). Hidden rows then show, and their menu
@@ -730,7 +737,9 @@ is waiting for you).
 - **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
-- **To pick up new sessions** started outside Deckhand, use the gear's "Rescan sessions".
+- **New sessions** started outside Deckhand (pi or Claude Code in a terminal) show when you come
+  back to the window, or a paired browser connects: Deckhand looks again then, at most once every
+  3 minutes. To look now, use the gear's "Rescan sessions".
 
 ### Chats settings
 
@@ -1078,7 +1087,8 @@ your first message (or the name you or Claude Code gave the conversation), read 
 and end of the file only; nothing else of the transcript is read or shown, and agents never get
 its path. Subagent and side-chain files are never rows. Click one to resume it in a Claude
 session under its account. Folders where only Claude Code ran (by the folder each transcript
-records) show up as projects. A row whose transcript is gone is greyed and reads **transcript
+records) show up as projects, never your home folder itself (a project you add there yourself
+stays). A row whose transcript is gone is greyed and reads **transcript
 gone**. **Rescan sessions** looks again.
 
 #### Claude accounts
@@ -1140,11 +1150,12 @@ PATH and in pi's managed install (`$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`)
 it; when neither has it, it asks your login shell (`command -v pi`, as a pi tab's shell would find
 it: nvm, fnm, mise or pnpm set up in `~/.zprofile`), and until that answers, pi counts as
 installed. Without pi, **New session** and **New chat** start the one you have at once (no
-picker when only one is installed), `deckhand DIR` starts Claude Code, Atlas's
+picker when only one is installed), `deckhand DIR` starts Claude Code (Codex when it is the
+only one installed), Atlas's
 button is not shown and ⌘J says that Atlas needs pi, and a job's run fails with "Jobs run pi,
 which was not found…" (Atlas and jobs run on pi for now). The Settings page, the palette and the gear
-show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With neither pi nor Claude Code,
-**New session** says how to install either. After installing, use **Refresh shell
+show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With no coding agent installed,
+**New session** says how to install one. After installing, use **Refresh shell
 environment** or restart Deckhand.
 
 **When Claude exits**, its tab stays with its last output and a bar: "Claude exited (code 1)" and
@@ -1182,7 +1193,8 @@ A Codex tab runs the [Codex CLI](https://github.com/openai/codex) (`codex`) in a
 the session's folder, with your login shell's environment and **your own Codex settings**
 (`~/.codex/config.toml`: model, sandbox, approvals, profiles). Deckhand adds only its hooks, for
 that run, so it knows the conversation's id and when Codex is working or waiting for you; nothing
-is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
+is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed for all of this; an
+older one from 0.157.0 runs as a plain terminal tab (below).
 
 - **Start one**: **New session** and pick **Codex** (listed once Codex is installed), **New Codex
   tab** in a project's or session's menu, or the palette's **New Codex tab** (in the session on
@@ -1193,8 +1205,15 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   message) appears then. **Resume** from the row continues it (`codex resume`); a session that was
   open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
   title only; Codex keeps its own. Codex conversations you ran outside Deckhand in the project's
-  folder are listed too (from `~/.codex/sessions/`, the last 60 days or so; read, never changed),
-  as "Untitled Codex session" with their date: a click resumes one.
+  folder are listed too (from `~/.codex/sessions/`, however old; read, never changed), titled
+  with the name Codex gave the thread (its `session_index.jsonl`), else "Untitled Codex session"
+  with their date: a click resumes one. The first look reads each conversation's first line once,
+  in the background; Deckhand remembers what it read, so later launches read only new ones. Only
+  conversations you had with Codex (in a terminal or Codex Desktop) count, never `codex exec`
+  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude Code's do (never your home
+  folder itself); **Rescan
+  sessions** looks again and drops one no conversation records any more (unless you added or
+  named it).
 - **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when
   Codex is idle and you have typed nothing), and **Send and close**; Changes' button reads **Ask
   Codex to review**.
@@ -1203,7 +1222,10 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   a `!` shell line, a `$skill` or an `@mention` into Codex: such a text is refused, with why.
 - **Bars over the tab**: *Codex is signed out* (sign in on Codex's own screen in the tab, or run
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
-  in a dialog). A Codex older than 0.163.0 does not start: the tab, and the refusal, say how to update
+  in a dialog). A Codex older than 0.163.0 (but 0.157.0 or later) starts as a plain tab: you use it
+  as in any terminal, without Deckhand's hooks and status (no status mark, no row to resume, no held
+  messages, comments or Deckhand's tools), and a bar says how to update; **Restart** the tab after
+  updating. A Codex older than 0.157.0 does not start: the tab, and the refusal, say how to update
   for how it was installed (`npm install -g @openai/codex@latest` for npm; Codex's own installer run
   again for its standalone install), as does Settings › **Coding agents**.
 - **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app
@@ -1481,14 +1503,14 @@ buttons), with a search box on top.
   editor tab of the session you opened the page from (this Mac's sessions only; otherwise a toast
   asks you to open a session on this Mac first). A missing file shows **Create**: it is made only
   when you click, then opened. Rarely used files are under **All files… (N more)**. Clicking a
-  folder (`prompts/`, `skills/`, `extensions/`…) shows its files in the search.
+  folder (`prompts/`, `skills/`, `extensions/`, `themes/`…) shows its files in the search.
 - **Search** ("Search settings and files") matches settings by their names, words and hints, and
   files by name and path, including the files inside the listed folders and in the project's
   `.pi/` (git-ignored ones too). It never finds credentials. Esc clears it.
 
 **Right-click a file or folder row** for the same menu as before: **Open**, **Open in preview**,
 **Open Markdown preview** (Markdown files), **New file…** and **New folder…** (inside `prompts/`
-and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`,
+and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`, `themes/`,
 `extensions/` and a project's `.pi/`, never pi's own config files; Trash asks first), **Reveal in
 Finder** and **Copy path**. A file still to create has only **Copy path**. New file, New folder
 and Rename open a name field at the top of the page: Enter saves, Esc cancels. A new file opens
@@ -1558,13 +1580,26 @@ then shows pi-kit's shell. Your pi tab starts either way.
 
 **Claude Code.** Once Claude Code has a config folder (`~/.claude` or your `CLAUDE_CONFIG_DIR`):
 `settings.json`, `CLAUDE.md`, `keybindings.json`, and the folders `agents`, `skills`, `commands`,
-`output-styles`, `rules`. With Claude Code installed, also **Skip permissions in new tabs** (for
+`output-styles`, `rules`. With that folder there, also **Skip permissions in new tabs** (for
 `--dangerously-skip-permissions`) with a warning line (see [Claude Code tabs](#claude-code-tabs)),
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.
 
+**Plugins** and **MCP servers (user)** list what Claude Code has, by name only (with several
+accounts, each row names its account). Plugins come from `enabledPlugins` in `settings.json`,
+each marked enabled or disabled; turn one on or off with `/plugin` in Claude Code, and running
+Claude tabs then offer **Restart** (plugins load when Claude starts). The MCP servers are your
+user-scope ones (`claude mcp add --scope user`), each with its transport (stdio, http, sse);
+Deckhand reads only their names and transport from Claude Code's account file, never their
+commands, URLs, headers or environment, and that file itself is still never shown or opened.
+These lists change only in Claude Code (`/plugin`, `claude mcp`).
+
 **Codex.** Its version and how it was installed, as the checklist has it, **Full access in
 new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tabs](#codex-tabs)).
+Once Codex is installed and has its folder (`~/.codex` or your `CODEX_HOME`): `config.toml`,
+`AGENTS.md`, `AGENTS.override.md`, and the folders `prompts`, `skills`, `rules`, each account's
+own, open and save like Claude Code's; `hooks.json` and `hooks/` show **read-only**. Its sign-in
+(`auth.json`), its sessions, history and `plugins/` are never listed, opened or saved over.
 
 ### Machines
 
@@ -1724,7 +1759,7 @@ the project's `.claude/settings.json` (**Create** when missing), `.claude/settin
   [hot-reload bar](#hot-reload) shows at once and offers **Reload** for the running pi tabs that
   read it (after saving `ATLAS.md`, only Atlas). Claude Code applies its `settings.json` files and
   `keybindings.json` by itself; after saving a Claude file it reads only at start (`CLAUDE.md`,
-  `.mcp.json`…), the Claude bar shows at once.
+  `.mcp.json`, a `settings.json` whose `enabledPlugins` changed…), the Claude bar shows at once.
 
 ## Hot reload
 
@@ -1774,14 +1809,18 @@ files (permissions, hooks, env…), `keybindings.json`, skills and subagents. De
 alone. What a running Claude reads only when it starts: the `CLAUDE.md` and `CLAUDE.local.md`
 files (yours in `~/.claude`, the project's and the folders above it), rules, output styles and
 commands (`~/.claude/rules`, `output-styles`, `commands`, and the project's `.claude/` ones), the
-project's `.mcp.json`, a new `agents` or `skills` folder, and Deckhand's own Claude plugin.
+project's `.mcp.json`, a new `agents` or `skills` folder, the plugins turned on or off
+(`enabledPlugins` in a `settings.json`), and Deckhand's own Claude plugin.
 
 When one of those changes, a bar says "Claude Code settings changed — Restart 1 idle Claude tab".
 **Restart** starts each idle Claude tab again on the same conversation (`claude --resume`, with
 your extra flags); Deckhand asks first, because anything Claude runs in the background there
 (background shells, monitors) stops. A tab that is working, waiting for you, has something typed
-or a subagent running restarts once it is idle. **Details** lists the files and each Claude
-tab; **Later** hides the bar until the next change.
+or a subagent running restarts once it is idle. A subagent that has reported nothing for 2 hours
+may have lost its end report, or may still be in one long step, so its tab still waits: the bar
+then names the tab ("a subagent silent for 2h 05m") and offers **Restart anyway**, which restarts
+that tab now after you confirm; the other tabs restart without waiting for it. **Details** lists
+the files and each Claude tab; **Later** hides the bar until the next change.
 
 **After a Claude Code update.** Deckhand notes which Claude Code each Claude tab started with, by
 looking at where `claude` points (it never runs it). When Claude Code updates itself, a bar says
@@ -2222,7 +2261,12 @@ drawer, Jobs and the job sheet, the Changes tab, the Files tab, and file tabs (M
 editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
 when you have not edited it, and asks when you have. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
-peeks at that session.
+peeks at that session. **New session** offers what the window's picker does there (the coding agents
+installed, once per account, the last used first; one starts at once). Over a Claude, Codex or
+pi tab, a strip shows the window's bars as text (held messages, hooks not running, an old
+version, Codex signed out, the hot-reload bars) with their buttons where a browser may use them
+(**Send now**, **Drop**, **Reload**, **Restart**, **Later**, copying the update command); their
+**Dismiss** and **Details** are the window's.
 
 **Not in a browser:** browser tabs and app tabs (they show a note there; open them at the Mac),
 adding or removing machines, **Continue this conversation on <machine>**, the Settings page's

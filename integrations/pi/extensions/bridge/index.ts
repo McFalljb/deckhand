@@ -8,7 +8,9 @@
  *   in memory (see deskToken) for every later hello, also after a reload or session switch.
  * - Reports `pi.session` (id, file, cwd) after each handshake; a session switch or reload starts a
  *   new extension runtime, which connects again and reports the new session.
- * - Reports `pi.status {agent, waiting, question, blockers}` when it changes (see status() in protocol.ts).
+ * - Reports `pi.status {agent, waiting, question, blockers}` when it changes (see status() in protocol.ts),
+ *   with pi's model when it knows one (`model`: its id, `provider`, `thinking`: the thinking level;
+ *   absent when unknown; never anything else of the model), also after a model or thinking switch.
  * - Tells other extensions its tab id (`deckhand:tab`, after each handshake).
  * - If the hello result's `capabilities` include `panels`, publishes the panels producers hand it
  *   on `kit:desk:panels` (extensions/panels, pi-kit's sidebar or any other; merged by panel name)
@@ -23,7 +25,9 @@
  * - Answers `pi.prompt` (a user message, with `images` if given; follow-up while a run is going),
  *   `pi.wait_idle` (when pi is idle with nothing queued and no blockers, or a timeout) and
  *   `pi.reload` (refused unless that same idle holds: a reload kills the kit's background shells;
- *   the result comes after it).
+ *   the result comes after it) and `pi.name` (the session's name, with pi's own setSessionName as
+ *   `/name` does; one line, at most NAME_MAX; refused unless that same idle holds, and by a pi
+ *   without setSessionName).
  * - Holds Deckhand's pending comments (`pi.attach` replaces them, `pi.attach_clear` drops them, and
  *   so does a dropped connection) and adds them to the next message the user types in pi (the
  *   `input` hook: text after the user's, images after theirs; not a `/` command), then tells
@@ -54,6 +58,7 @@ const IDLE_SETTLE_MS = 250; // wait_idle needs idle to hold this long (a shell's
 const PANEL_EVERY_MS = 1000; // panel updates are coalesced to one per this
 const COMMAND_TIMEOUT_MS = 60_000; // a deckhand:command without timeoutMs
 const MODE_WAIT_MS = 1000; // session_start waits this long at most for the first handshake (the mode)
+const NAME_MAX = 200; // pi.name: Deckhand sends at most 80 characters
 const arr = (v: unknown) => (Array.isArray(v) ? v : []);
 
 export default function (pi: ExtensionAPI) {
@@ -78,6 +83,8 @@ export default function (pi: ExtensionAPI) {
 	let question = false;
 	let subTimer: NodeJS.Timeout | undefined;
 	let reloadId: unknown; // a pi.reload waiting for its result
+	let selected: unknown; // the model pi's last model_select named (ctx.model may be a snapshot)
+	let thinking: unknown; // and its last thinking_level_select's level
 	const panels = new Map<string, Panel>(); // the latest of each panel, from any producer (PANELS_EVENT)
 	const panelSent = new Map<string, string>(); // panel -> the last panel.set/remove sent on this connection
 	let panelTimer: NodeJS.Timeout | undefined;
@@ -106,13 +113,29 @@ export default function (pi: ExtensionAPI) {
 	function current() {
 		return status({ idle: ctx!.isIdle(), error, dialogs, question, shells, runs });
 	}
+	/** pi's model as pi.status says it: id, provider, thinking level (each only when a non-empty string). */
+	function modelInfo(): Record<string, string> {
+		try {
+			const out: Record<string, string> = {};
+			const m = (selected ?? ctx?.model) as { id?: unknown; provider?: unknown } | undefined;
+			if (!m || typeof m.id !== "string" || !m.id) return out;
+			out.model = m.id;
+			if (typeof m.provider === "string" && m.provider) out.provider = m.provider;
+			const p = pi as unknown as { getThinkingLevel?: () => unknown };
+			const t = thinking ?? (ctx as { thinkingLevel?: unknown } | undefined)?.thinkingLevel ?? (typeof p.getThinkingLevel === "function" ? p.getThinkingLevel() : undefined);
+			if (typeof t === "string" && t) out.thinking = t;
+			return out;
+		} catch {
+			return {};
+		}
+	}
 	const notIdle = () => busyReasons(current(), ctx!.hasPendingMessages());
 
 	/** Send pi.status if it changed; answer wait_idle requests once pi is idle. */
 	function update() {
 		if (!ctx || closed) return;
 		try {
-			const s = JSON.stringify(current());
+			const s = JSON.stringify({ ...current(), ...modelInfo() });
 			if (ready && s !== sent) {
 				sent = s;
 				send({ type: "pi.status", ...JSON.parse(s) });
@@ -188,6 +211,20 @@ export default function (pi: ExtensionAPI) {
 			// Reload is a command-context operation: run it through our command.
 			pi.sendUserMessage(`/${RELOAD_COMMAND}`, { expandPromptTemplates: true });
 			return;
+		}
+		if (m.type === "pi.name") {
+			const name = typeof m.name === "string" ? m.name.trim() : "";
+			if (!name || name.length > NAME_MAX || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(name)) return answer(m.id, { ok: false, error: "the name must be one line of text" });
+			const set = (pi as unknown as { setSessionName?: (n: string) => void }).setSessionName;
+			if (typeof set !== "function") return answer(m.id, { ok: false, error: "this pi cannot be renamed from Deckhand: type /name <name> in it" });
+			const why = notIdle();
+			if (why.length) return answer(m.id, { ok: false, error: `pi is busy (${why.join("; ")}): rename it once it is idle` });
+			try {
+				set.call(pi, name);
+			} catch (e) {
+				return answer(m.id, { ok: false, error: `pi did not take the name: ${e instanceof Error ? e.message : String(e)}` });
+			}
+			return answer(m.id, { ok: true });
 		}
 		answer(m.id, { ok: false, error: `unknown type ${String(m.type)}` });
 	}
@@ -327,6 +364,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_e, c) => {
 		if (c.mode !== "tui" || !deskSocket() || !deskToken(true)) return;
 		ctx = c;
+		selected = thinking = undefined; // this runtime's model: ctx.model until a switch
 		// The extensions after us start once the first handshake says the mode (or it fails, or
 		// MODE_WAIT_MS): the repeat on resources_discover then reaches a sidebar among them.
 		const known = new Promise<void>((r) => (modeKnown = r));
@@ -385,6 +423,15 @@ export default function (pi: ExtensionAPI) {
 		update();
 	});
 	pi.on("agent_settled", () => update());
+	// a newer model or thinking level: pi.status says it (modelInfo)
+	pi.on("model_select", (e) => {
+		selected = (e as { model?: unknown }).model;
+		update();
+	});
+	pi.on("thinking_level_select", (e) => {
+		thinking = (e as { level?: unknown }).level;
+		update();
+	});
 	// Compaction outside a run (/compact) also makes pi busy; isIdle() flips around these events.
 	const compaction = (start: boolean) => (e: { reason: string }) => {
 		if (e.reason === "manual") compacting = start; // automatic compaction runs inside a run: prompts queue

@@ -117,8 +117,9 @@ inherits the login environment. Deckhand stores folders and names, never a secre
   sheet). Labels come from the folder's name (`.claude-work` → `Work`); the user renames,
   removes (not the default) and chooses the **default for new sessions**
   (`set_claude_account_default`). No alias or folder name is assumed.
-- **One account**: no account UI at all (no picker, no tags, no Settings rows but **Add
-  account…** and **Scan again**), and starts set no account.
+- **One account**: no account UI at all (no picker, no tags, no Settings rows but one quiet
+  **More accounts…**; **Add account…** and **Scan again** show once there are several), and
+  starts set no account.
 - **Starting.** A tab and a history entry keep their account's folder, written at a start (an
   entry without one uses the default as resolved then). Every start (new, resume, restore,
   restart) sets it: nothing for the default; else
@@ -328,16 +329,24 @@ is valid; it learns nothing it can use from outside the tab.
   in the tab's folder and above it and the config folder's `CLAUDE.md`; `rules/`, `output-styles/`,
   `commands/` (config folder and the cwd's `.claude/`); the cwd's `.mcp.json`; `agents/` and
   `skills/` folders appearing (Claude Code only watches those that existed at its start); Deckhand's
-  plugin. Settings files, `keybindings.json` and skills/subagents in existing folders are applied
-  live by Claude Code: never watched, no bar (`claude_file_class`: Live / Restart / Ignored). The
-  config folder is `$CLAUDE_CONFIG_DIR` (as the children get it), else `~/.claude`. A stat poll
-  every 2 s while a Claude tab runs; folders by their entries' names, times and sizes. No file is
-  read.
+  plugin; and `enabledPlugins` in the config folder's `settings.json` and the cwd's
+  `.claude/settings.json` and `settings.local.json` (`CLAUDE_RESTART_KEYS`: plugins load at start).
+  The rest of the settings files, `keybindings.json` and skills/subagents in existing folders are
+  applied live by Claude Code: no bar (`claude_file_class`: Live / Restart / Ignored). The config
+  folder is `$CLAUDE_CONFIG_DIR` (as the children get it), else `~/.claude`. A stat poll every 2 s
+  while a Claude tab runs; folders by their entries' names, times and sizes. The only file read is
+  a settings file whose stamp changed, for `enabledPlugins` alone (a file that does not parse
+  changes nothing).
 - **Restart** (`claude_restart_changed`; `all`: every running Claude tab, changed or not, as pi's
   **Reload all pi tabs**; the palette's **Restart all Claude tabs** and the gear's row): idle tabs (hooks' turn idle, OSC 7501 not working or
   blocked, nothing typed or held, no subagent running) are stopped (hung up on, as a pi restart)
   and started again once the old process exited, through the dead tab's restart wait, with
   `--resume <session id>` and a new token; busy ones queue and go from the core's tick once idle.
+  A subagent counts as running until its SubagentStop, however long it is silent (one long step
+  looks the same as a lost stop). When every running subagent of a queued tab has reported nothing
+  for `CLAUDE_AGENT_STALE` (2 h), its note says so ("a subagent silent for 2h 05m") and the bar
+  offers **Restart anyway** (`claude_restart_anyway`: the user's, always confirmed) for that tab;
+  nothing restarts it by itself, and the other queued tabs go without it.
   A tab without a Claude session id is never restarted (no `--resume`: it would lose the
   conversation). Always confirmed: Claude's background shells and monitors stop; the confirmation
   names those Claude's last turn reported (§6b; a Claude Code without them: none named). Only the
@@ -374,6 +383,18 @@ is valid; it learns nothing it can use from outside the tab.
 - **Settings page**: Claude Code's files under Coding agents › Claude Code and This project (once
   the config folder exists; ui_settings_page.odin); Claude's settings JSON is saved only when valid (strict); a save of a
   restart-class file shows the Claude bar at once.
+- **Plugins and MCP servers (user)** (`claude_lists.odin`): two read-only lists in the Claude Code
+  card, per account. Plugins: the ids of `enabledPlugins` in `<config>/settings.json` with
+  enabled/disabled (an entry that is not true or false is left out); `plugins/` stays unlisted.
+  MCP servers: the names under the top-level `mcpServers` of the account file (`~/.claude.json`
+  for `~/.claude`, else `<config>/.claude.json`) and each one's `type` when it is a short word
+  (stdio when there is none and it has a `command`). Nothing else of that file is kept: no
+  command, args, env, headers or URL, no project's servers, no account data; it stays a
+  credential file for everything else (never listed, opened, watched or given to an agent), and
+  it is read member by member (`json_members_raw`, its depth guard first), at most 64 MB. Both
+  are read on a worker, at most every 2 s while the rows are built, and only again once a file's
+  time, size or inode changed; the page is told when a list changed (`claude_lists_tick` in
+  `settings_poll`). Names are shown without control characters, at most 100 bytes, 200 per list.
 - **First run**: the notes folder may also be found in the config folder's `CLAUDE.md` (after
   pi's `AGENTS.md`; only the path is shown; the config folder itself never qualifies); step 3 says
   whether Claude Code is installed (`claude_installed`, never run).
@@ -439,11 +460,16 @@ work only from Deckhand's own record, so a found row gives them nothing).
   as Claude does: only with `CLAUDE_CONFIG_DIR` set, 1–64 of `[A-Za-z0-9_-]`). Names are lossy, so
   a file counts only when the `cwd` it records is the project's folder; a name is **never turned
   back into a path**. Projects where only Claude ran come from the same `cwd` (the newest files of
-  each folder, on the Rescan worker).
+  each folder, on the Rescan worker); never the home folder itself (`found_project`, shared with Codex's:
+  a project added at `~` by hand is left as it is).
 - **Rows.** Only `<uuid>.jsonl` files (never `agent-*` or side-chain ones); title: a
   `custom-title` or the first real prompt (meta, command and reminder lines skipped), else
-  `ai-title` or `summary`; read from the first and last 64 KB only, within a per-frame budget
-  (the rest on a worker, cached by size and date), so scanning never blocks a frame. Sorted by the
+  `ai-title` or `summary`; read from the first and last 64 KB only. A line is parsed only when it
+  can still change something: in the tail, a title line; in the head, until the cwd, the side-chain
+  flag and the first prompt are known, then only title lines. At most 256 KB a listing is read on
+  the main thread (`CLAUDE_DISK_INLINE_BUDGET`: two transcripts), the rest on a worker (cached
+  by size and date), which has the rows made again when it has drained, or every 250 ms while it
+  drains (`FOUND_PUBLISH_EVERY`), never once per transcript. Sorted by the
   file's date; created from the file. Merged by id with Deckhand's record (one row each), under
   the MAX_SESSIONS cap. A line goes to the JSON
   parser only when it is at most 64 KB and nested at most 64 deep (the parser recurses). The

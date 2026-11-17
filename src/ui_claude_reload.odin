@@ -4,7 +4,8 @@ package main
 // (ui_reload.odin) and in the same look: one for changed Claude files a running session reads
 // only at start ("Claude Code settings changed — Restart N idle Claude tabs") and one for a
 // Claude Code update ("Claude Code updated to X — Restart N idle Claude tabs"). Each has
-// Details (which files changed, what each Claude tab does), Later and Restart.
+// Details (which files changed, what each Claude tab does), Later and Restart; and Restart anyway
+// while a waiting restart is held only by a subagent silent for hours (claude_restart_anyway).
 
 import "core:fmt"
 import "core:os"
@@ -19,6 +20,8 @@ Claude_Reload_Part :: enum u8 {
 	Update_Restart,
 	Update_Details,
 	Update_Later,
+	Anyway,
+	Update_Anyway,
 }
 
 Hit_Claude_Reload :: struct {
@@ -33,75 +36,33 @@ IDS := [Claude_Reload_Part]string {
 	.Update_Restart = "cupdate_go",
 	.Update_Details = "cupdate_details",
 	.Update_Later   = "cupdate_later",
+	.Anyway         = "creload_anyway",
+	.Update_Anyway  = "cupdate_anyway",
 }
 
 // UI state: the Details lists that are open.
 @(private = "file")
 open_details: [2]bool // [0] settings, [1] update
 
-// The running Claude tabs a bar is about (update: the update bar).
-claude_reload_counts :: proc(update: bool) -> (n: Reload_Counts) {
+// The bars' model is the core's (reload_bars.odin): a browser shows the same text.
+claude_reload_counts :: core.claude_reload_counts
+claude_bar_shows :: core.claude_bar_shows
+claude_reload_message :: core.claude_reload_message
+
+// A tab of this bar whose waiting restart is held only by subagents silent for hours (the core's
+// note: claude_reload.odin busy_why), and that silence ("a subagent silent for 2h 05m").
+claude_reload_silent_tab :: proc(update: bool) -> (tab: ^core.Tab, why: string) {
 	for &s in state.open_sessions {
 		if s.home do continue
 		for &t in s.tabs {
-			if _, is := t.kind.(core.Claude_Tab); !is do continue
-			if t.status == .Exited && core.restart_waiting(t.id) && strings.has_prefix(t.reload.note, "restarting") {
-				n.reloading += 1
-				continue
-			}
-			if t.status != .Running do continue
+			if _, is := t.kind.(core.Claude_Tab); !is || t.status != .Running || t.reload.queued != .Restart do continue
 			if update ? !core.claude_reload_outdated(&t) : !t.reload.stale do continue
-			if t.reload.queued == .Restart {
-				n.queued += 1
-				continue
-			}
-			switch core.claude_restart_class(&t) {
-			case .Idle:           n.idle += 1
-			case .Busy, .Blocked: n.busy += 1
-			case .No_Bridge:      n.no_bridge += 1
-			}
+			i := strings.index(t.reload.note, core.CLAUDE_SILENT_NOTE)
+			if i < 0 do continue
+			return &t, strings.trim_right(t.reload.note[i:], ")")
 		}
 	}
-	return
-}
-
-claude_bar_shows :: proc(update: bool) -> bool {
-	info := state.reload.claude
-	if update {
-		if info.update_dismissed || info.ident == "" do return false
-	} else if info.dismissed do return false
-	n := claude_reload_counts(update)
-	return n.idle + n.busy + n.no_bridge + n.queued + n.reloading > 0 || (!update && info.from_save)
-}
-
-@(private = "file")
-tabs_word :: proc(k: int) -> string {return k == 1 ? "tab" : "tabs"}
-
-// The bar's text, and whether its Restart button shows.
-claude_reload_message :: proc(update: bool) -> (msg: string, can: bool) {
-	n := claude_reload_counts(update)
-	head := "Claude Code settings changed"
-	if update do head = fmt.tprintf("Claude Code updated to %s", core.claude_version_label(state.reload.claude.version))
-	else if plugin := core.claude_plugin_dir(); plugin != "" && len(state.reload.claude.changed) > 0 {
-		only := true
-		for p in state.reload.claude.changed do if !strings.has_prefix(p, strings.concatenate({plugin, "/"}, context.temp_allocator)) do only = false
-		if only do head = "Deckhand's Claude plugin changed"
-	}
-	switch {
-	case n.idle > 0:
-		msg = fmt.tprintf("%s — Restart %d idle Claude %s", head, n.idle, tabs_word(n.idle))
-		if n.busy > 0 do msg = fmt.tprintf("%s · %d busy when idle", msg, n.busy)
-		return msg, true
-	case n.busy > 0:
-		return fmt.tprintf("%s — %d busy Claude %s restart when idle", head, n.busy, tabs_word(n.busy)), true
-	case n.queued > 0:
-		return fmt.tprintf("Restarting Claude — %d %s wait until idle", n.queued, tabs_word(n.queued)), false
-	case n.reloading > 0:
-		return fmt.tprintf("Restarting %d Claude %s…", n.reloading, tabs_word(n.reloading)), false
-	case n.no_bridge > 0:
-		return fmt.tprintf("%s — %d Claude %s never reported its conversation: restart by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
-	}
-	return fmt.tprintf("%s — new Claude tabs use it", head), false
+	return nil, ""
 }
 
 // ~ for the home folder.
@@ -147,10 +108,13 @@ bar :: proc(update: bool) {
 	go := update ? Claude_Reload_Part.Update_Restart : .Restart
 	details := update ? Claude_Reload_Part.Update_Details : .Details
 	later := update ? Claude_Reload_Part.Update_Later : .Later
+	anyway := update ? Claude_Reload_Part.Update_Anyway : .Anyway
 	open := open_details[update ? 1 : 0]
-	labels := [3]string{open ? "Hide details" : "Details", "Later", "Restart"}
+	silent, why := claude_reload_silent_tab(update)
+	if silent != nil do msg = fmt.tprintf("%s · %s: %s", msg, silent.title, why)
+	labels := [4]string{open ? "Hide details" : "Details", "Later", "Restart", "Restart anyway"}
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2)
-	for l, i in labels do if i < 2 || can do used += text_w(l, i == 2 ? WEIGHT_BOLD : WEIGHT_REGULAR) + px(2 * SP_3 + SP_2)
+	for l, i in labels do if i < 2 || (i == 2 && can) || (i == 3 && silent != nil) do used += text_w(l, i == 2 ? WEIGHT_BOLD : WEIGHT_REGULAR) + px(2 * SP_3 + SP_2)
 	if clay.UI(clay.ID(update ? "claude_update_bar" : "claude_reload_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
@@ -161,6 +125,7 @@ bar :: proc(update: bool) {
 		spacer()
 		button(clay.ID(IDS[details]), labels[0], false, ui_hover == Hit(Hit_Claude_Reload{details}))
 		button(clay.ID(IDS[later]), labels[1], false, ui_hover == Hit(Hit_Claude_Reload{later}))
+		if silent != nil do button(clay.ID(IDS[anyway]), labels[3], false, ui_hover == Hit(Hit_Claude_Reload{anyway}))
 		if can do button(clay.ID(IDS[go]), labels[2], true, ui_hover == Hit(Hit_Claude_Reload{go}))
 	}
 	if open do details_list(update)
@@ -226,6 +191,8 @@ claude_reload_tip :: proc(h: Hit_Claude_Reload) -> (label, keys: string) {
 	case .Update_Details: return open_details[1] ? "Hide the list" : "Which Claude tabs run an older Claude Code", ""
 	case .Later:          return "Hide this until the next change (stops waiting restarts)", ""
 	case .Update_Later:   return "Hide this until the next Claude Code update (stops waiting restarts)", ""
+	case .Anyway, .Update_Anyway:
+		return "Restart that tab now: its subagent has reported nothing for hours, but may still be working (it stops)", ""
 	}
 	return "", ""
 }
@@ -243,6 +210,8 @@ claude_reload_click :: proc(h: Hit_Claude_Reload) {
 	case .Update_Later:
 		open_details[1] = false
 		ui_do(core.Claude_Reload_Later{update = true})
+	case .Anyway, .Update_Anyway:
+		if t, _ := claude_reload_silent_tab(h.part == .Update_Anyway); t != nil do ui_do(core.Claude_Restart_Anyway{tab_id = t.id})
 	}
 	app.redraw = true
 }

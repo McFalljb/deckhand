@@ -34,6 +34,8 @@ S=$B/$TOP
 mkdir -p "$S" "$OUT"
 # the browser client, embedded in the core (Node 22.18+; never the placeholder in a release)
 DECKHAND_WEB_REQUIRED=1 scripts/build-web.sh
+# the zstd decoder the core links (src/zstd, vendor/zstd): build/zstd/libzstddec.a
+scripts/build-zstd.sh
 odin build src/coremain -out:"$S/deckhand-core-serve" -o:speed -define:DECKHAND_TEST_HOOKS=false -define:DECKHAND_WEB_REQUIRED=true -define:DECKHAND_VERSION="$VERSION"
 odin build src/holder -out:"$S/deckhand-core" -o:speed
 odin build tools/deckhand-cli -out:"$S/deckhand" -o:speed

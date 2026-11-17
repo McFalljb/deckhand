@@ -263,6 +263,76 @@ settings_page_layout_audit :: proc(t: ^testing.T) {
 	testing.expectf(t, problems == 0, "%d layout problems", problems)
 }
 
+// The page's rows are built once while nothing they show changes, not on every frame
+// (sp_rows_now): again when settings_gen moves, a state message comes, the project shown is
+// another, or EDITOR_POLL passes; what it shows is a build's.
+@(test)
+settings_page_rows_cached :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sp_test_setup()
+	frames0 := core.app_frames_called
+	defer {
+		core.app_frames_called = frames0
+		sp_test_setup()
+	}
+	// what a real pi folder has: packages in settings.json, local extensions, job notes
+	home := os.get_env("HOME", context.temp_allocator)
+	_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/settings.json", home), transmute([]u8)string(`{"packages": ["npm:pi-subagents@1", "npm:@x/pi-tools@2", "git:github.com/a/b"]}`))
+	for n in ([]string{"subagent", "tools", "b", "local-one", "local-two"}) {
+		os.make_directory_all(fmt.tprintf("%s/.pi/agent/extensions/%s", home, n))
+		_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/extensions/%s/config.json", home, n), transmute([]u8)string("{}"))
+	}
+	jobs := fmt.tprintf("%s/jobs", state.settings.home_dir)
+	os.make_directory_all(jobs)
+	for i in 0 ..< 5 do _ = os.write_entire_file(fmt.tprintf("%s/job-%d.md", jobs, i), transmute([]u8)string("x"))
+	action_run("settings")
+	core.inbox_drain()
+	testing.expect(t, settings_page_shown(), "shown")
+	frame :: proc() {
+		core.app_frames_called += 1
+		_ = ui_layout(1600, 900)
+	}
+	FRAMES :: 50
+	b0 := sp_rows.builds
+	t0 := time.tick_now()
+	for _ in 0 ..< FRAMES do frame()
+	took := time.tick_since(t0)
+	t1 := time.tick_now()
+	for _ in 0 ..< FRAMES do _ = core.settings_file_rows()
+	one := time.tick_since(t1) / FRAMES
+	fmt.printfln("PERF settings page: %d frames %v, %d row builds (one build %v)", FRAMES, took, sp_rows.builds - b0, one)
+	testing.expect_value(t, sp_rows.builds - b0, 1)
+	// what it shows is a build's
+	want := core.settings_file_rows()
+	testing.expect_value(t, len(sp_rows.rows), len(want))
+	if len(sp_rows.rows) == len(want) do for r, i in want do testing.expectf(t, r == sp_rows.rows[i], "row %d: %v, not %v", i, sp_rows.rows[i], r)
+	// settings_gen moved: built again, once
+	core.settings_gen += 1
+	for _ in 0 ..< 3 do frame()
+	testing.expect_value(t, sp_rows.builds - b0, 2)
+	// a state message came
+	client.state_gen += 1
+	for _ in 0 ..< 3 do frame()
+	testing.expect_value(t, sp_rows.builds - b0, 3)
+	// another project shown
+	other := fmt.tprintf("%s/projects/another", home)
+	os.make_directory_all(other)
+	state.projects[0].cwd = strings.clone(other)
+	for _ in 0 ..< 3 do frame()
+	testing.expect_value(t, sp_rows.builds - b0, 4)
+	// EDITOR_POLL passed: a new job note shows
+	_ = os.write_entire_file(fmt.tprintf("%s/job-new.md", jobs), transmute([]u8)string("x"))
+	frame()
+	testing.expect_value(t, sp_rows.builds - b0, 4)
+	sp_rows.at = {}
+	for _ in 0 ..< 3 do frame()
+	testing.expect_value(t, sp_rows.builds - b0, 5)
+	found := false
+	for r in sp_rows.rows do if strings.has_suffix(r.path, "job-new.md") do found = true
+	testing.expect(t, found, "the new job note listed")
+}
+
 // The old Settings tab's row menu, on the page's file rows (right click): pi's own config files have
 // no Rename or Trash; a prompt has New file…, Rename… and Move to Trash…; New file… opens the page's
 // field, and Enter makes the file and opens it in the session the page was opened from.

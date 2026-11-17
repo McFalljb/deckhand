@@ -1541,3 +1541,66 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	core.control_token_clip_tick()
 	testing.expect(t, len(cleared) == 1 && cleared[0] == 41, fmt.tprint(cleared[:]))
 }
+
+// Rename a pi session (pi_rename): Deckhand never writes pi's session file; it asks the running
+// pi, through the tab's bridge (pi.name), to name it (pi's own setSessionName, as /name does). Only
+// an open session of this Mac whose pi runs and reported; the name is one line, at most 80.
+@(test)
+socket_bridge_pi_rename :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	_, pitab, env_tok := sk_pi_tab(t, dir)
+	testing.expect(t, !core.pi_rename_offered("abc-2"), "no bridge yet: not offered")
+	bridge, _ := tc_hello(env_tok)
+	tc_req(bridge, "s", `{"id":"s","v":1,"type":"pi.session","pi_session_id":"abc-2","session_file":"/x/abc-2.jsonl","cwd":"/tmp"}`)
+	tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":false,"blockers":[]}`)
+	testing.expect(t, core.pi_rename_offered("abc-2"), "offered once its bridge reported")
+	testing.expect(t, !core.pi_rename_offered("nope"), "not another session")
+	// the row's menu has the button (Rename…: its field, Enter sends pi_rename)
+	rename_item :: proc() -> bool {
+		menu.target = Menu_Session{pi_session_id = "abc-2", project_id = state.selected_project}
+		defer menu.target = nil
+		for it in menu_items() do if it.rename do return true
+		return false
+	}
+	testing.expect(t, rename_item(), "the row's menu offers Rename…")
+	ctl, _ := tc_hello(core.socket_mint_token({kind = .Control}))
+	tc_send(ctl, `{"id":"r1","v":1,"type":"command","command":{"type":"pi_rename","pi_session_id":"abc-2","name":"  Fix the build  "}}`)
+	req := tc_recv(bridge)
+	testing.expect_value(t, core.json_path(req, "type"), "pi.name")
+	testing.expect_value(t, core.json_path(req, "name"), "Fix the build")
+	reply := tc_recv(ctl)
+	testing.expect_value(t, core.json_path(reply, "result.pending"), "true")
+	tc_send(bridge, fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true}}}}`, core.json_path(req, "id")))
+	fin := tc_recv(ctl)
+	testing.expect_value(t, core.json_path(fin, "event"), "finished")
+	testing.expect_value(t, core.json_path(fin, "result.ok"), "true")
+	// pi's refusal reaches the caller
+	tc_send(ctl, `{"id":"r2","v":1,"type":"command","command":{"type":"pi_rename","pi_session_id":"abc-2","name":"x"}}`)
+	req = tc_recv(bridge)
+	tc_recv(ctl)
+	tc_send(bridge, fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":false,"error":"pi is busy"}}}}`, core.json_path(req, "id")))
+	testing.expect_value(t, core.json_path(tc_recv(ctl), "result.error"), "pi is busy")
+	// refused before anything goes to pi
+	refused :: proc(t: ^testing.T, ctl: ^Tc, cmd, want: string) {
+		testing.expect_value(t, core.json_path(tc_cmd(ctl, cmd), "result.error"), want)
+	}
+	tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"working","waiting":false,"blockers":[]}`)
+	refused(t, ctl, `{"type":"pi_rename","pi_session_id":"abc-2","name":"x"}`, "pi is busy: rename it once it is idle")
+	tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":false,"blockers":["shell sh1"]}`)
+	refused(t, ctl, `{"type":"pi_rename","pi_session_id":"abc-2","name":"x"}`, "pi is busy: rename it once it is idle")
+	tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":false,"blockers":[]}`)
+	refused(t, ctl, `{"type":"pi_rename","pi_session_id":"abc-2","name":"a\nb"}`, "the name must be one line, without control characters")
+	refused(t, ctl, fmt.tprintf(`{{"type":"pi_rename","pi_session_id":"abc-2","name":"%s"}}`, strings.repeat("n", 81, context.temp_allocator)), "the name is too long (at most 80 characters)")
+	refused(t, ctl, `{"type":"pi_rename","pi_session_id":"other","name":"x"}`, "this pi session is not open in a running pi tab here: open it, then rename it (or type /name in pi)")
+	_, pt, _ := core.find_tab(pitab)
+	testing.expect(t, pt != nil)
+	// its process gone: not offered, refused
+	core.run_command(core.Tab_Exited{tab_id = pitab})
+	testing.expect(t, !core.pi_rename_offered("abc-2"), "not while pi is not running")
+	testing.expect(t, !rename_item(), "nor its menu")
+	refused(t, ctl, `{"type":"pi_rename","pi_session_id":"abc-2","name":"x"}`, "this pi session is not open in a running pi tab here: open it, then rename it (or type /name in pi)")
+	tc_close(bridge)
+	tc_close(ctl)
+}

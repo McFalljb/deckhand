@@ -6,7 +6,7 @@ package core
 //
 //   pi (global)   the agent folder's settings files, by an allowlist
 //                 (SETTINGS_PI_FILES; the instructions file by the name pi
-//                 reads) and the folders prompts/, skills/, extensions/
+//                 reads) and the folders prompts/, skills/, extensions/, themes/
 //                 (SETTINGS_FOLDERS), which open like the Files tab's.
 //                 Nothing else of the agent folder shows: not sessions/,
 //                 npm/, git/, bin/, logs or pi's sign-ins.
@@ -16,6 +16,9 @@ package core
 //                 with a Create button (made only on that click, never over
 //                 a file: O_EXCL)
 //   Extensions    each extension's config file(s) and its folder
+//   Codex         its home's config by codex.odin's allowlist (CODEX_CONFIG_FILES,
+//                 CODEX_CONFIG_FOLDERS), once Codex is installed, and its hooks
+//                 read-only (CODEX_VIEW_*: codex_view_only); never its state
 //
 // A click opens a file in an editor tab of the session on screen (a preview,
 // as in the Files tab). Nothing here edits settings: the editor does, with
@@ -28,7 +31,7 @@ package core
 //   - a JSON settings file pi reads (settings_json_kind) is saved only when
 //     pi can read it; the error says the line and column (Save_File)
 //
-// The row menu renames and deletes only inside prompts/, skills/,
+// The row menu renames and deletes only inside prompts/, skills/, themes/,
 // extensions/ (settings_editable) and a project's .pi/, never pi's own
 // config files. The agent folder is outside every project, so it is not
 // watched (watching is recursive): settings_poll looks at the shown folders'
@@ -188,6 +191,12 @@ CLAUDE_FLAGS_HEAD_ROW :: "deckhand:claude-default-flags-head"
 CLAUDE_FLAGS_ROW :: "deckhand:claude-default-flags"
 CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 
+// The Claude Code card's read-only lists (claude_lists.odin): a plugin of enabledPlugins is
+// CLAUDE_PLUGIN_ROW + its account's folder + "|" + its id, a user MCP server CLAUDE_MCP_ROW + the
+// folder + "|" + its name. No button: Claude Code's /plugin and `claude mcp` change them.
+CLAUDE_PLUGIN_ROW :: "deckhand:claude-plugin:"
+CLAUDE_MCP_ROW :: "deckhand:claude-mcp:"
+
 // The Machines group (machines.odin; Settings › Machines over SSH on, or other
 // machines allowed in): a machine's row is MACHINE_ROW + its number (Connect / Take back, Remove);
 // then a row adds one, and the last allows other machines to connect to this one (the hub door).
@@ -254,13 +263,47 @@ PI_EXT_ROW :: "deckhand:pi-extension:"
 settings_setting_row :: proc(path: string) -> bool {return strings.has_prefix(path, "deckhand:")}
 
 // The folders of pi's agent folder the tree shows (and that open).
-SETTINGS_FOLDERS :: [?]string{"prompts", "skills", "extensions"}
+SETTINGS_FOLDERS :: [?]string{"prompts", "skills", "extensions", "themes"}
 
 // The folders of Claude Code's config folder the tree shows (and that open; never anything else
 // of that folder: claude_credential).
 CLAUDE_SETTINGS_FOLDERS :: [?]struct {
 	name, detail: string,
 }{{"agents", "subagents"}, {"skills", "skills"}, {"commands", "slash commands"}, {"output-styles", "output styles"}, {"rules", "rules"}}
+
+// What each of Codex's config files and folders is (its Settings row; the lists themselves are
+// codex.odin's: CODEX_CONFIG_*, CODEX_VIEW_*).
+codex_config_detail :: proc(name: string) -> string {
+	switch name {
+	case "config.toml":        return "model, approvals, sandbox, MCP servers… (may hold tokens)"
+	case "AGENTS.md":          return "instructions for every project"
+	case "AGENTS.override.md": return "replaces AGENTS.md"
+	case "prompts":            return "custom prompts"
+	case "skills":             return "skills"
+	case "rules":              return "rules"
+	case "hooks.json":         return "Codex's hooks (read-only here)"
+	case "hooks":              return "hook scripts (read-only here)"
+	}
+	return ""
+}
+
+// Whether path is one of Codex's hooks files (CODEX_VIEW_FILES, CODEX_VIEW_FOLDERS) in a Codex home
+// (claude_account_dirs with codex), by name or where it leads: shown, never written, so the
+// editor opens it read-only (editor_file.odin). The rest of a home is either the user's config
+// (editable, as Claude's) or Codex's state (settings_credential: never opened nor saved).
+codex_view_only :: proc(path: string) -> bool {
+	if path == "" || !filepath.is_abs(path) do return false
+	p, _ := filepath.clean(path, context.temp_allocator)
+	for q in ([2]string{p, fs_real(p)}) do if q != "" {
+		for home in claude_account_dirs(codex = true) do for c in ([2]string{home, fs_real(home)}) {
+			if c == "" || !under(q, c) do continue
+			first, _, rest := strings.partition(q[len(c) + 1:], "/")
+			for f in CODEX_VIEW_FOLDERS do if first == f do return true
+			if rest == "" do for f in CODEX_VIEW_FILES do if first == f do return true
+		}
+	}
+	return false
+}
 
 // pi's agent folder as written, cleaned (the tree's paths start here).
 settings_agent_dir :: proc() -> string {
@@ -309,6 +352,7 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		add(&out, {group = "pi", label = "prompts", detail = "prompt templates", path = j(ad, "prompts"), kind = .Folder})
 		add(&out, {group = "pi", label = "skills", detail = "skills", path = j(ad, "skills"), kind = .Folder})
 		add(&out, {group = "pi", label = "extensions", detail = "local extensions", path = j(ad, "extensions"), kind = .Folder})
+		add(&out, {group = "pi", label = "themes", detail = "custom themes", path = j(ad, "themes"), kind = .Folder})
 		// Deckhand's optional pi extensions: on or off for the pi tabs started from now on
 		for e in pi_integration_optional() {
 			add(&out, {group = "pi-ext", label = e.name, detail = fmt.tprintf("%s · %s (default %s; pi tabs, not jobs)", e.on ? "ON" : "off", e.does, e.default_on ? "on" : "off"), path = strings.concatenate({PI_EXT_ROW, e.name}, context.temp_allocator), button = e.on ? "Turn off" : "Turn on"})
@@ -336,6 +380,18 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		add(&out, {group = g, label = "keybindings.json", detail = "Claude Code's keys", path = j(cd, "keybindings.json")})
 		for f in CLAUDE_SETTINGS_FOLDERS do add(&out, {group = g, label = f.name, detail = f.detail, path = j(cd, f.name), kind = .Folder})
 	}
+	// the plugins of enabledPlugins and the user MCP servers' names, per account (claude_lists.odin:
+	// read on a worker, the rows from its cache)
+	if claude_used {
+		claude_lists_want()
+		for a in accts {
+			if !os.is_dir(a.dir) do continue
+			plugins, mcp, _ := claude_lists_of(a.dir)
+			who := len(accts) > 1 ? strings.concatenate({" · ", a.label}, context.temp_allocator) : ""
+			for p in plugins do add(&out, {group = "claude-plugin", label = p.id, detail = strings.concatenate({p.enabled ? "enabled" : "disabled", who}, context.temp_allocator), path = strings.concatenate({CLAUDE_PLUGIN_ROW, a.dir, "|", p.id}, context.temp_allocator)})
+			for m in mcp do add(&out, {group = "claude-mcp", label = m.name, detail = strings.concatenate({m.transport != "" ? m.transport : "server", who}, context.temp_allocator), path = strings.concatenate({CLAUDE_MCP_ROW, a.dir, "|", m.name}, context.temp_allocator)})
+		}
+	}
 	// the default flags for the Claude tabs the user starts (claude_with_defaults): off by default
 	if claude_used {
 		on := state.settings.claude_skip_permissions
@@ -349,6 +405,24 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		add(&out, {group = "claude-project", label = "CLAUDE.md", detail = "this project's instructions for Claude", path = j(cwd, "CLAUDE.md"), create = true, seed = ""})
 		add(&out, {group = "claude-project", label = "CLAUDE.local.md", detail = "your instructions here (not committed)", path = j(cwd, "CLAUDE.local.md")})
 		add(&out, {group = "claude-project", label = ".mcp.json", detail = "the project's MCP servers (may hold tokens)", path = j(cwd, ".mcp.json")})
+	}
+	// Codex (codex.odin), once installed and its home is there: its config by codex.odin's allowlist
+	// (CODEX_CONFIG_FILES, CODEX_CONFIG_FOLDERS: edited by the user in the editor, as Claude's), its
+	// hooks shown read-only (CODEX_VIEW_FILES, CODEX_VIEW_FOLDERS: codex_view_only), never its
+	// sign-in or state (auth.json, sessions/, history…: codex_credential refuses them, to open and
+	// to save). Never a Create: Deckhand makes nothing in a Codex home. One group per account once
+	// there are several.
+	if codex_installed() {
+		caccts := claude_accounts(codex = true)
+		for a in caccts {
+			cd := a.dir
+			if !os.is_dir(cd) do continue
+			g := len(caccts) > 1 ? strings.concatenate({"codex:", a.label}, context.temp_allocator) : "codex"
+			for f in CODEX_CONFIG_FILES do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f)})
+			for f in CODEX_CONFIG_FOLDERS do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f), kind = .Folder})
+			for f in CODEX_VIEW_FILES do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f)})
+			for f in CODEX_VIEW_FOLDERS do add(&out, {group = g, label = f, detail = codex_config_detail(f), path = j(cd, f), kind = .Folder})
+		}
 	}
 	// Atlas (agent.odin): its prompt file (made on its first start; Create
 	// writes the starter), its model
@@ -835,7 +909,7 @@ settings_after_save :: proc(tab_id: u64, path: string) {
 @(private = "file")
 under :: proc(p, dir: string) -> bool {return len(p) > len(dir) && strings.has_prefix(p, dir) && p[len(dir)] == '/'}
 
-// The root a folder of pi's prompts/, skills/ or extensions/ (or one of
+// The root a folder of pi's prompts/, skills/, extensions/ or themes/ (or one of
 // them) keeps its open state under: the agent folder as written ("" = not
 // one). Lexical: the tree's paths are as written.
 settings_tree_root :: proc(path: string) -> string {
@@ -850,11 +924,15 @@ settings_tree_root :: proc(path: string) -> string {
 		d := strings.concatenate({cd, "/", f.name}, context.temp_allocator)
 		if p == d || under(p, d) do return cd
 	}
+	for cd in claude_account_dirs(codex = true) do for f in ([2][]string{CODEX_CONFIG_FOLDERS[:], CODEX_VIEW_FOLDERS[:]}) do for sub in f {
+		d := strings.concatenate({cd, "/", sub}, context.temp_allocator)
+		if p == d || under(p, d) do return cd
+	}
 	return ""
 }
 
 // Where the user's file commands may also act outside projects (fs_check_write):
-// strictly inside pi's prompts/, skills/ or extensions/, with the real
+// strictly inside pi's prompts/, skills/, extensions/ or themes/, with the real
 // folder above it inside the same real folder (a symlink cannot lead out),
 // and never a credentials file.
 settings_editable :: proc(path: string) -> (abs: string, ok: bool) {
@@ -943,8 +1021,12 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "agents":  return "Coding agents"
 	case "machines": return "Machines"
 	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))
+	case "claude-plugin": return "Claude Code plugins"
+	case "claude-mcp": return "Claude Code MCP servers (user)"
 	}
 	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])
+	if group == "codex" do return "Codex (global)"
+	if strings.has_prefix(group, "codex:") do return fmt.tprintf("Codex · %s (global)", group[len("codex:"):])
 	return group
 }
 
@@ -1053,6 +1135,7 @@ settings_watch: bool
 // project's folder and .pi/ are looked at; one whose time changed is listed
 // again (the page's search finds its files). A few stats, no watcher on ~/.pi.
 settings_poll :: proc() {
+	claude_lists_poll()
 	if !settings_watch do return
 	if time.tick_since(sf_poll_at) < EDITOR_POLL do return
 	sf_poll_at = time.tick_now()
@@ -1060,6 +1143,16 @@ settings_poll :: proc() {
 		settings_gen += 1
 		window_state_changed()
 	}
+}
+
+// Claude Code's plugins and MCP servers, read on a worker (claude_lists.odin): new rows for the
+// window's Settings page (settings_gen) and a browser's (web_settings_stale). From the window's
+// tick (settings_poll) and a browser's (web_settings_tick, a core without a window too).
+claude_lists_poll :: proc() {
+	if !claude_lists_tick() do return
+	settings_gen += 1
+	web_settings_stale()
+	window_state_changed()
 }
 
 // The poll now (tests).

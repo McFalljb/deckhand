@@ -807,6 +807,7 @@ Command :: union {
 	Claude_Reload_Later,
 	Claude_Reload_Watch,
 	Claude_Reload_Kick,
+	Claude_Restart_Anyway,
 }
 
 // Widgets that can take keyboard focus (editor_*: the editor's find,
@@ -1395,6 +1396,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Refresh_Shell_Env_Done:
 		login_env_refresh_done(c.ok, c.env)
 		claude_recheck() // Claude Code may be on the new PATH (claude.odin)
+		codex_recheck() // and Codex (codex.odin)
 		pi_recheck() // and pi (harness.odin)
 		claude_accounts_refresh() // and CLAUDE_CONFIG_DIR may name another default (claude_accounts.odin)
 		harness_checklist_forget() // the coding agents checklist looks again when it next shows (harness_manifest.odin)
@@ -1797,8 +1799,11 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if tab_held_away(tab) == 0 do socket_forget_tab(tab.id)
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi do comments_pi_exited(ts) // pending comments wait for the next pi
 		claude_tab_gone(tab) // a Claude tab: what it held goes
-		// claude not found (the tab's command exits 127): look for it again before the next start
-		if _, is_cl := tab.kind.(Claude_Tab); is_cl && c.exit.known && c.exit.code == 127 do claude_recheck()
+		// claude (or codex) not found (the tab's command exits 127): look for it again before the next start
+		if ct, is_cl := tab.kind.(Claude_Tab); is_cl && c.exit.known && c.exit.code == 127 {
+			if ct.codex do codex_recheck()
+			else do claude_recheck()
+		}
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi && c.exit.known && c.exit.code == 127 do pi_recheck()
 		return {ok = true}, true
 	case Pi_Restart:
@@ -2020,7 +2025,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return reload_apply(cmd, caller, request_id)
 	case Set_Pi_Extension:
 		return pi_integration_apply(cmd, caller)
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		return claude_reload_apply(cmd, caller, request_id)
 	case Restore_Session:
 		if c.home {
@@ -2320,6 +2325,9 @@ same_target :: proc(a, b: Command) -> bool {
 	case Claude_Restart_Changed:
 		y, ok := b.(Claude_Restart_Changed)
 		return ok && x.update == y.update && x.all == y.all
+	case Claude_Restart_Anyway:
+		y, ok := b.(Claude_Restart_Anyway)
+		return ok && x.tab_id == y.tab_id
 	// file commands are parked with absolute paths (editor_apply resolves them first)
 	case Machine_Remove:
 		y, ok := b.(Machine_Remove)

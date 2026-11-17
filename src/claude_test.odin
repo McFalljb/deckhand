@@ -689,3 +689,29 @@ claude_ready_needs_both_signals :: proc(t: ^testing.T) {
 	testing.expect_value(t, why, "Claude is working")
 	testing.expect(t, core.tab_is_terminal(tab^), "a Claude tab is a terminal tab")
 }
+
+// Audit: a permission dialog answered: the hooks say waiting until the Stop (no hook says it
+// works again), while Claude's own OSC 7501 says working: the held-message strip says working.
+@(test)
+claude_ready_after_dialog_says_working :: proc(t: ^testing.T) {
+	context.allocator = cl_reset()
+	_, sess := cl_session(t, "dialogwork")
+	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	_, tab, ct := core.claude_tab_of(id)
+	cl_paste_mode(id)
+	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "submitted"}, CL_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "waiting"}, CL_SCRIPT)
+	core.run_command(core.Program_Status{tab_id = id, summary = {state = .Blocked, kind = .Permission, app = "claude-code", records = 1, progress = -1}})
+	_, why := core.claude_ready(tab, ct)
+	testing.expect_value(t, why, "Claude is waiting for you")
+	// answered: OSC 7501 working, the hooks still waiting
+	core.run_command(core.Program_Status{tab_id = id, summary = {state = .Working, app = "claude-code", records = 1, progress = -1}})
+	ok: bool
+	ok, why = core.claude_ready(tab, ct)
+	testing.expect(t, !ok)
+	testing.expect_value(t, why, "Claude is working")
+	// no OSC 7501 working: the hooks' waiting stands
+	core.run_command(core.Program_Status{tab_id = id, summary = {state = .Idle, app = "claude-code", records = 1, progress = -1}})
+	_, why = core.claude_ready(tab, ct)
+	testing.expect_value(t, why, "Claude is waiting for you")
+}

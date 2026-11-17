@@ -115,8 +115,9 @@ inherits the login environment. Deckhand stores folders and names, never a secre
   sheet). Labels come from the folder's name (`.claude-work` → `Work`); the user renames,
   removes (not the default) and chooses the **default for new sessions**
   (`set_claude_account_default`). No alias or folder name is assumed.
-- **One account**: no account UI at all (no picker, no tags, no Settings rows but **Add
-  account…** and **Scan again**), and starts set no account.
+- **One account**: no account UI at all (no picker, no tags, no Settings rows but one quiet
+  **More accounts…**; **Add account…** and **Scan again** show once there are several), and
+  starts set no account.
 - **Starting.** A tab and a history entry keep their account's folder, written at a start (an
   entry without one uses the default as resolved then). Every start (new, resume, restore,
   restart) sets it: nothing for the default; else
@@ -336,6 +337,11 @@ is valid; it learns nothing it can use from outside the tab.
   blocked, nothing typed or held, no subagent running) are stopped (hung up on, as a pi restart)
   and started again once the old process exited, through the dead tab's restart wait, with
   `--resume <session id>` and a new token; busy ones queue and go from the core's tick once idle.
+  A subagent counts as running until its SubagentStop, however long it is silent (one long step
+  looks the same as a lost stop). When every running subagent of a queued tab has reported nothing
+  for `CLAUDE_AGENT_STALE` (2 h), its note says so ("a subagent silent for 2h 05m") and the bar
+  offers **Restart anyway** (`claude_restart_anyway`: the user's, always confirmed) for that tab;
+  nothing restarts it by itself, and the other queued tabs go without it.
   A tab without a Claude session id is never restarted (no `--resume`: it would lose the
   conversation). Always confirmed: Claude's background shells and monitors stop; the confirmation
   names those Claude's last turn reported (§6b; a Claude Code without them: none named). Only the

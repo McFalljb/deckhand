@@ -553,5 +553,18 @@ folders_detect_claude_md :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(core.setup_claude_line(), "Claude Code is installed"), core.setup_claude_line())
 	testing.expect(t, strings.contains(core.setup_claude_line(), "pi isn't installed"), core.setup_claude_line())
 	core.claude_installed_probe = proc() -> bool {return false}
+	defer core.codex_installed_probe = nil
+	core.codex_installed_probe = proc() -> bool {return false}
 	testing.expect_value(t, core.setup_claude_line(), core.NO_HARNESS)
+	// Codex counts as a harness too (audit): alone, with pi, with Claude Code
+	core.codex_installed_probe = proc() -> bool {return true}
+	line := core.setup_claude_line()
+	testing.expect(t, strings.has_prefix(line, "Codex is installed") && strings.contains(line, "New session starts it"), line)
+	core.pi_installed_probe = proc() -> bool {return true}
+	line = core.setup_claude_line()
+	testing.expect(t, strings.contains(line, "Codex") && strings.contains(line, "New session asks which"), line)
+	core.pi_installed_probe = proc() -> bool {return false}
+	core.claude_installed_probe = proc() -> bool {return true}
+	line = core.setup_claude_line()
+	testing.expect(t, strings.has_prefix(line, "Claude Code is installed") && strings.contains(line, "Codex") && strings.contains(line, "New session asks which") && strings.contains(line, "pi isn't installed"), line)
 }

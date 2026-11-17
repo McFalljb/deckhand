@@ -256,12 +256,41 @@ work_of :: proc(tab_id: u64) -> ^Work {
 }
 
 // How many of a Claude tab's subagents run now (a restart waits for them: claude_reload.odin).
+// One silent for CLAUDE_AGENT_STALE still counts: silence never proves it ended (one long tool
+// call); claude_subagents_silent says so, and the user may restart such a tab anyway.
 claude_subagents_running :: proc(tab_id: u64) -> int {
 	w, has := claude_work[tab_id]
 	if !has do return 0
 	n := 0
 	for a in w.agents do if !a.done do n += 1
 	return n
+}
+
+// Tests: added to the clock claude_subagents_silent reads (a subagent hours old without waiting).
+when TEST_HOOKS {
+	claude_agents_clock_skew: time.Duration
+}
+
+// How long a Claude tab's running subagents have all been silent, when every one of them has
+// reported nothing for CLAUDE_AGENT_STALE (its SubagentStop lost, or one long tool call): the
+// shortest of their silences; else 0 (none runs, or one reported lately).
+claude_subagents_silent :: proc(tab_id: u64, now := time.Tick{}) -> time.Duration {
+	w, has := claude_work[tab_id]
+	if !has do return 0
+	now := now
+	if now == {} {
+		now = time.tick_now()
+		when TEST_HOOKS {
+			now = time.tick_add(now, claude_agents_clock_skew)
+		}
+	}
+	least := time.Duration(-1)
+	for a in w.agents do if !a.done {
+		d := time.tick_diff(a.last, now)
+		if d < CLAUDE_AGENT_STALE do return 0
+		if least < 0 || d < least do least = d
+	}
+	return max(least, 0)
 }
 
 // Whether a background task's status says it runs: only the ones known to (Claude Code's docs

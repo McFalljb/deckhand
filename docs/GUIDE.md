@@ -173,9 +173,10 @@ Deckhand finds more than one Claude Code account):
 4. **Your folders**: the layout as a small tree. **Done** makes the missing folders, empty, and
    closes the sheet. Nothing already there is moved or changed. The step also says whether
    Claude Code is installed (Deckhand looks for `claude`, never runs it): Claude tabs need it,
-   nothing else does; with one account it names its folder. With both pi and Claude Code it says
-   that **New session** asks which one to start; with Claude Code alone, that pi isn't installed
-   (Atlas and jobs need it); with neither, how to install one. When your pi is older than 1.4.0
+   nothing else does; with one account it names its folder. It says the same of Codex. With two or
+   more of pi, Claude Code and Codex it says that **New session** asks which one to start; with one
+   alone, that **New session** starts it (and, without pi, that Atlas and jobs need pi); with none,
+   how to install one. When your pi is older than 1.4.0
    it says so too (see [pi in Deckhand](#pi-in-deckhand)).
 
 **Skip for now** (or Esc on the first step) closes it for good: jobs stay off, and the Jobs tab
@@ -195,7 +196,7 @@ is installed into pi or written to `~/.pi`: pi outside Deckhand runs exactly as 
 
 It needs **pi 1.4.0 or newer**. When Deckhand sees (from pi's files on disk; it never runs pi to
 ask) that your pi is older, it starts pi without the integration and a bar over the tab says so,
-with **Copy update command** (`pi update`) and **Dismiss**; the setup sheet says so too, with
+with **Copy update command** (`pi update --self`) and **Dismiss**; the setup sheet says so too, with
 **Update** for the layouts it can update. Update pi,
 then restart the tab.
 
@@ -1139,11 +1140,12 @@ PATH and in pi's managed install (`$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`)
 it; when neither has it, it asks your login shell (`command -v pi`, as a pi tab's shell would find
 it: nvm, fnm, mise or pnpm set up in `~/.zprofile`), and until that answers, pi counts as
 installed. Without pi, **New session** and **New chat** start the one you have at once (no
-picker when only one is installed), `deckhand DIR` starts Claude Code, Atlas's
+picker when only one is installed), `deckhand DIR` starts Claude Code (Codex when it is the
+only one installed), Atlas's
 button is not shown and ⌘J says that Atlas needs pi, and a job's run fails with "Jobs run pi,
 which was not found…" (Atlas and jobs run on pi for now). The Settings page, the palette and the gear
-show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With neither pi nor Claude Code,
-**New session** says how to install either. After installing, use **Refresh shell
+show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With no coding agent installed,
+**New session** says how to install one. After installing, use **Refresh shell
 environment** or restart Deckhand.
 
 **When Claude exits**, its tab stays with its last output and a bar: "Claude exited (code 1)" and
@@ -1557,7 +1559,7 @@ then shows pi-kit's shell. Your pi tab starts either way.
 
 **Claude Code.** Once Claude Code has a config folder (`~/.claude` or your `CLAUDE_CONFIG_DIR`):
 `settings.json`, `CLAUDE.md`, `keybindings.json`, and the folders `agents`, `skills`, `commands`,
-`output-styles`, `rules`. With Claude Code installed, also **Skip permissions in new tabs** (for
+`output-styles`, `rules`. With that folder there, also **Skip permissions in new tabs** (for
 `--dangerously-skip-permissions`) with a warning line (see [Claude Code tabs](#claude-code-tabs)),
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.
@@ -1783,8 +1785,11 @@ When one of those changes, a bar says "Claude Code settings changed — Restart 
 **Restart** starts each idle Claude tab again on the same conversation (`claude --resume`, with
 your extra flags); Deckhand asks first, because anything Claude runs in the background there
 (background shells, monitors) stops. A tab that is working, waiting for you, has something typed
-or a subagent running restarts once it is idle. **Details** lists the files and each Claude
-tab; **Later** hides the bar until the next change.
+or a subagent running restarts once it is idle. A subagent that has reported nothing for 2 hours
+may have lost its end report, or may still be in one long step, so its tab still waits: the bar
+then names the tab ("a subagent silent for 2h 05m") and offers **Restart anyway**, which restarts
+that tab now after you confirm; the other tabs restart without waiting for it. **Details** lists
+the files and each Claude tab; **Later** hides the bar until the next change.
 
 **After a Claude Code update.** Deckhand notes which Claude Code each Claude tab started with, by
 looking at where `claude` points (it never runs it). When Claude Code updates itself, a bar says

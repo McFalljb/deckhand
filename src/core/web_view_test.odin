@@ -123,7 +123,7 @@ web_view_new_choices_section :: proc(t: ^testing.T) {
 					strings.write_string(&b, " |")
 				}
 				fmt.sbprintf(&b, " tabs %d/%d", len(o["claude_tab"].(json.Array)), len(o["codex_tab"].(json.Array)))
-				if strings.contains(o["note"].(json.String), "Codex") do strings.write_string(&b, " (codex note)")
+				if strings.contains(o["note"].(json.String), CODEX_REMOTE) do strings.write_string(&b, " (codex note)") // the remote core too old for Codex (NO_HARNESS names Codex too)
 				strings.write_byte(&b, '\n')
 			}
 			return strings.to_string(b)

@@ -148,11 +148,18 @@ export interface WebView {
 export interface WebNewChoice {
   harness: "pi" | "claude" | "codex";
   label: string;
+  account?: string; // "" = the core's pick
+}
+export interface WebNewTab {
+  account: string; // "" = the core's pick
+  name: string; // the account's label while there are several, else ""
 }
 export interface WebNewChoices {
   machine: number; // 0 = this machine
   projects: WebNewChoice[];
   chats: WebNewChoice[];
+  claude_tab?: WebNewTab[]; // New Claude tab there ([] = not installed)
+  codex_tab?: WebNewTab[];
   note: string; // why a list is empty
 }
 

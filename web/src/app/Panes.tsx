@@ -18,7 +18,7 @@ export function fileTabPath(t: Tab): string {
   if (k.editor_tab && (k.editor_tab.view ?? "file") === "file") return String(k.editor_tab.path ?? "");
   return "";
 }
-import { codexAvailable } from "./Sidebar.tsx";
+import { newTabChoices } from "./harness.ts";
 
 const KIND_WORDS: Record<string, string> = {
   editor_tab: "an editor",
@@ -230,9 +230,9 @@ export function newTabItems(app: App, s: OpenSession, paneId?: number): MenuItem
   const pane = paneId ? { pane: paneId } : {};
   const items: MenuItem[] = [
     { label: "Shell", keys: keysLabel({ k: "t", alt: true }), run: () => app.run({ type: "new_shell_tab", session: s.id, ...pane }) },
-    { label: "Claude Code", run: () => app.run({ type: "new_claude_tab", session: s.id }) },
   ];
-  if (codexAvailable(app.store, s.machine)) items.push({ label: "Codex", run: () => app.run({ type: "new_claude_tab", session: s.id, harness: "codex" }) });
+  // Claude Code and Codex while they are there, once per account while there are several (harness.ts)
+  for (const c of [...newTabChoices(app.store, s.machine, { session: s.id }, false, "Claude Code"), ...newTabChoices(app.store, s.machine, { session: s.id }, true, "Codex")]) items.push({ label: c.label, run: () => app.run(c.cmd) });
   if (!s.machine) items.push({ label: "Changes", run: () => app.run({ type: "changes_open", session: s.id }) });
   return items;
 }

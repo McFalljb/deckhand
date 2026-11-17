@@ -216,3 +216,36 @@ test("new session: the core's choices per machine and kind, Chats too; none says
   s.applyDelta({ version: 2, sections: { web: { watch: [], new: [{ machine: 0, projects: [], chats: [], note: "install one" }] } } });
   assert.deepEqual(view(7), [["install one", "null"]]);
 });
+
+import { newSessionPlan, newTabChoices } from "../src/app/harness.ts";
+
+test("new session: one row per account, one choice starts at once, none says why; tab rows only where installed", () => {
+  const s = new Store();
+  const pi = { harness: "pi", label: "pi", account: "" };
+  s.applyFull({ version: 1, state: {
+    projects: { projects: [{ id: 7, group: "projects", machine: 0 }, { id: 8, group: "chats", machine: 0 }, { id: 9, group: "projects", machine: 2 }, { id: 10, group: "projects", machine: 3 }] },
+    web: { watch: [], new: [
+      { machine: 0, projects: [{ harness: "claude", label: "Claude Code · work", account: "/h/.claude-work" }, { harness: "claude", label: "Claude Code · home", account: "/h/.claude" }, pi], chats: [pi], note: "install one",
+        claude_tab: [{ account: "/h/.claude-work", name: "work" }, { account: "/h/.claude", name: "home" }], codex_tab: [] },
+      { machine: 2, projects: [], chats: [], claude_tab: [{ account: "", name: "" }], codex_tab: [{ account: "", name: "" }], note: "nothing on m2" },
+      { machine: 3, projects: [], chats: [], claude_tab: [], codex_tab: [], note: "nothing on m3" },
+    ] },
+  } });
+  assert.deepEqual(newSessionChoices(s, 7)[0].cmd, { type: "new_claude_session", project_id: 7, account: "/h/.claude-work" });
+  assert.equal("pick" in newSessionPlan(s, 7), true);
+  assert.deepEqual(newSessionPlan(s, 8), { run: { type: "new_chat", project_id: 8 } }, "one choice: at once");
+  assert.deepEqual(newSessionPlan(s, 9), { run: { type: "new_chat", project_id: 9 }, toast: "nothing on m2", err: false }, "another machine with none: a session anyway");
+  s.applyDelta({ version: 2, sections: { web: { watch: [], new: [{ machine: 0, projects: [], chats: [], note: "install one" }] } } });
+  assert.deepEqual(newSessionPlan(s, 7), { toast: "install one", err: true }, "this machine with none: why");
+  s.applyDelta({ version: 3, sections: { web: { watch: [], new: [
+    { machine: 0, projects: [], chats: [], note: "", claude_tab: [{ account: "/h/.claude-work", name: "work" }, { account: "/h/.claude", name: "home" }], codex_tab: [] },
+    { machine: 2, projects: [], chats: [], note: "", claude_tab: [{ account: "", name: "" }], codex_tab: [{ account: "", name: "" }] },
+  ] } } });
+  assert.deepEqual(newTabChoices(s, 0, { session: 5 }, false, "New Claude tab").map((c) => [c.label, JSON.stringify(c.cmd)]), [
+    ["New Claude tab · work", '{"type":"new_claude_tab","session":5,"account":"/h/.claude-work"}'],
+    ["New Claude tab · home", '{"type":"new_claude_tab","session":5,"account":"/h/.claude"}'],
+  ]);
+  assert.deepEqual(newTabChoices(s, 0, { session: 5 }, true, "New Codex tab"), [], "no Codex here");
+  assert.deepEqual(newTabChoices(s, 2, { project_id: 9 }, true, "New Codex tab").map((c) => c.cmd), [{ type: "new_claude_tab", project_id: 9, harness: "codex" }]);
+  assert.deepEqual(newTabChoices(s, 3, { project_id: 10 }, false, "x"), [], "an unknown machine: none");
+});

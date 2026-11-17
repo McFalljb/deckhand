@@ -14,7 +14,7 @@ package core
 //   web           {fleet {waiting, errors, unseen, working}, next (open session id, 0), open [ids],
 //                 attention [{session, group, tab}], deck [same], filtered (waiting rows the
 //                 filter hides), here {name, label}, watch [project ids], new [{machine,
-//                 projects, chats, note}]: the New session picker's harnesses (web_view_new_choices)}
+//                 projects, chats, claude_tab, codex_tab, note}]: the New session picker's harnesses (web_view_new_choices)}
 //   webo:<id>     an open session's row: {title, place, chat, at (Unix ns, 0 = new)}
 //   webm          [{no, open [ids], projects [{id, depth, name}]}]: each other machine
 //   webtree       the Projects tree in order: [[key, depth, kids, forced] or key (0, 0, 0)]; key = a project's
@@ -302,22 +302,57 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 // The New session picker's harnesses per machine (0 = this one) and kind of project, as the native
 // picker offers them (new_session_choices: installed here, or on that machine by its checklist;
 // Claude Code and Codex in Chats here, never another machine's): [{machine, projects [{harness,
-// label}], chats [same], note}] in the picker's order (the last used first), one row per harness
-// (the account is the core's pick). note: why a list is empty.
+// label, account}], chats [same], claude_tab [{account, name}], codex_tab [same], note}] in the
+// picker's order (the last used first), one row per account while there are several; the tab
+// lists are New Claude tab and New Codex tab there ([] = not installed). note: why a list is empty.
 @(private = "file")
 web_view_new_choices :: proc(b: ^strings.Builder) {
+	// the picker's rows: Claude Code and Codex once per account while there are several (the
+	// default's first is the core's pick), each with its account ("" = the core's pick)
 	list :: proc(b: ^strings.Builder, no: u64, group: Sidebar_Group) {
 		p := Project{id = no << MACHINE_ID_SHIFT, machine = no, group = group}
-		seen: bit_set[Harness]
 		strings.write_byte(b, '[')
+		n := 0
 		for it in new_session_choices(&p, "") {
 			h, ok := harness_of(it.cmd)
-			if !ok || h in seen do continue
-			if card(seen) > 0 do strings.write_byte(b, ',')
-			seen += {h}
+			if !ok do continue
+			if n > 0 do strings.write_byte(b, ',')
+			n += 1
+			account := ""
+			if c, is := it.cmd.(New_Claude_Session); is do account = c.account
 			fmt.sbprintf(b, `{{"harness":"%s","label":`, HARNESS_KEYS[h])
-			json_quote(b, HARNESSES[h].name)
+			json_quote(b, it.label)
+			strings.write_string(b, `,"account":`)
+			json_quote(b, account)
 			strings.write_byte(b, '}')
+		}
+		strings.write_byte(b, ']')
+	}
+	// New Claude tab / New Codex tab there: once per account while there are several (this
+	// machine's; claude_account_items), [] while that harness is not there
+	tabs :: proc(b: ^strings.Builder, no: u64, codex: bool) {
+		strings.write_byte(b, '[')
+		on: bool
+		if no == 0 do on = codex ? codex_installed() : claude_installed()
+		else {
+			_, claude, cx := machine_harnesses(no)
+			on = codex ? cx : claude
+		}
+		if on {
+			items := make([dynamic]Menu_Item, context.temp_allocator)
+			if no == 0 do claude_account_items(&items, "", New_Claude_Tab{codex = codex})
+			else do append(&items, Menu_Item{cmd = New_Claude_Tab{codex = codex}})
+			for it, i in items {
+				c, _ := it.cmd.(New_Claude_Tab)
+				name := ""
+				if c.account != "" do for a in claude_accounts(codex) do if a.dir == c.account do name = a.label
+				if i > 0 do strings.write_byte(b, ',')
+				strings.write_string(b, `{"account":`)
+				json_quote(b, c.account)
+				strings.write_string(b, `,"name":`)
+				json_quote(b, name)
+				strings.write_byte(b, '}')
+			}
 		}
 		strings.write_byte(b, ']')
 	}
@@ -329,6 +364,10 @@ web_view_new_choices :: proc(b: ^strings.Builder) {
 		list(b, no, .Projects)
 		strings.write_string(b, `,"chats":`)
 		list(b, no, .Chats)
+		strings.write_string(b, `,"claude_tab":`)
+		tabs(b, no, false)
+		strings.write_string(b, `,"codex_tab":`)
+		tabs(b, no, true)
 		strings.write_string(b, `,"note":`)
 		json_quote(b, no == 0 ? NO_HARNESS : machine_no_harness_note(no))
 		strings.write_byte(b, '}')
@@ -444,4 +483,12 @@ web_projects_json :: proc() -> string {
 	}
 	fmt.sbprintf(&b, `],"selected_project":%d}}`, state.selected_project)
 	return strings.to_string(b)
+}
+
+// A browser's new session (its picker, web/src/app/harness.ts): that harness goes first in the
+// picker next time, as the native picker's harness_used does (a browser sends no window.command).
+// Only a browser's own (the user's): never an agent's or a hub's.
+web_note_harness :: proc(cmd: Command, caller: Caller) {
+	if !caller.web || caller.kind != .UI do return
+	if h, ok := harness_of(cmd); ok do run_command(Set_Last_Harness{harness = h}, {kind = .Internal})
 }

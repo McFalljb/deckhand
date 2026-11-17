@@ -1025,6 +1025,9 @@ link_message :: proc(text: string) -> (command: bool) {
 			link_reply_now(id, fail(err), 0)
 			return
 		}
+		// a browser's New session (its picker, web/src/app/harness.ts): that harness goes first next
+		// time, as the native picker's harness_used (a browser sends no window.command)
+		web_note_harness(cmd, caller)
 		link_run(cmd, caller, id, now, menu)
 	case "window.reply":
 		link_reply_in(obj)

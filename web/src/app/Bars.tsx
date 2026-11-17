@@ -4,7 +4,7 @@
 import { useApp, shownSession } from "./ctx.ts";
 import { keysLabel, menuAt } from "./ctx.ts";
 import { Icon, Logo } from "./icons.tsx";
-import { IconButton, newSessionItems } from "./Sidebar.tsx";
+import { IconButton, newSession } from "./Sidebar.tsx";
 import { newTabItems } from "./Panes.tsx";
 import { TermPane } from "./Term.tsx";
 import { unreadCount } from "./Bell.tsx";
@@ -33,14 +33,14 @@ export function TopBar() {
         label="New tab"
         run={(e) => {
           if (cs) menuAt(app, e, newTabItems(app, cs));
-          else if (store.selectedProject) menuAt(app, e, newSessionItems(app, store.selectedProject));
+          else if (store.selectedProject) newSession(app, store.selectedProject, e);
         }}
       />
       <IconButton
         icon="chevron-down"
         small
         label="New session"
-        run={(e) => store.selectedProject && menuAt(app, e, newSessionItems(app, store.selectedProject))}
+        run={(e) => store.selectedProject && newSession(app, store.selectedProject, e)}
       />
       <IconButton icon="deck" label="Deck" run={() => app.run({ type: "show_no_session" }).then(() => app.go({ screen: "deck" }))} />
       <span class="spacer" />

@@ -122,6 +122,7 @@ web_view_new_choices_section :: proc(t: ^testing.T) {
 					}
 					strings.write_string(&b, " |")
 				}
+				fmt.sbprintf(&b, " tabs %d/%d", len(o["claude_tab"].(json.Array)), len(o["codex_tab"].(json.Array)))
 				if strings.contains(o["note"].(json.String), "Codex") do strings.write_string(&b, " (codex note)")
 				strings.write_byte(&b, '\n')
 			}
@@ -131,10 +132,20 @@ web_view_new_choices_section :: proc(t: ^testing.T) {
 	}
 	// here: Claude Code first (the last used), in Chats too; m2: Codex while its core starts it, never
 	// Claude Code or Codex in its Chats; m3: Codex there but its core too old: none, and why
-	testing.expect_value(t, new_of(), "0: claude=Claude Code,pi=pi | claude=Claude Code,pi=pi |\n2: claude=Claude Code,pi=pi,codex=Codex | pi=pi |\n3:  |  | (codex note)\n")
+	testing.expect_value(t, new_of(), "0: claude=Claude Code,pi=pi | claude=Claude Code,pi=pi | tabs 1/0\n2: claude=Claude Code,pi=pi,codex=Codex | pi=pi | tabs 1/1\n3:  |  | tabs 0/0 (codex note)\n")
 	// Codex installed here (no other section changes): offered at once, in Chats too
 	codex_installed_probe = proc() -> bool {return true}
-	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,pi=pi,codex=Codex | claude=Claude Code,pi=pi,codex=Codex |\n"), new_of())
+	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,pi=pi,codex=Codex | claude=Claude Code,pi=pi,codex=Codex | tabs 1/1\n"), new_of())
 	pi_installed_probe = proc() -> bool {return false}
-	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,codex=Codex | claude=Claude Code,codex=Codex |\n"), new_of())
+	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,codex=Codex | claude=Claude Code,codex=Codex | tabs 1/1\n"), new_of())
+	// a browser's new session goes first next time (as the native picker's); an agent's does not
+	web_note_harness(New_Claude_Session{project_id = 1, codex = true}, {kind = .UI, web = true})
+	testing.expect_value(t, state.settings.last_harness, Harness.Codex)
+	testing.expect(t, strings.has_prefix(new_of(), "0: codex=Codex,claude=Claude Code | codex=Codex,claude=Claude Code |"), new_of())
+	web_note_harness(New_Chat{project_id = 1}, {kind = .Control, web = false})
+	web_note_harness(New_Chat{project_id = 1}, {kind = .UI})
+	web_note_harness(Close_Tab{tab_id = 1}, {kind = .UI, web = true})
+	testing.expect_value(t, state.settings.last_harness, Harness.Codex)
+	web_note_harness(New_Chat{project_id = 1}, {kind = .UI, web = true})
+	testing.expect_value(t, state.settings.last_harness, Harness.Pi)
 }

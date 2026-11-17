@@ -225,7 +225,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Files_Reveal:        return Files_Reveal{path = s(c.path, allocator)}
 	case Set_Files_Filter:    return Set_Files_Filter{text = s(c.text, allocator)}
 	case Reload_File:         return Reload_File{tab_id = c.tab_id, confirm = s(c.confirm, allocator)}
-	case List_Dir:            return List_Dir{path = s(c.path, allocator), ignored = c.ignored}
+	case List_Dir:            return List_Dir{path = s(c.path, allocator), ignored = c.ignored, since = s(c.since, allocator)}
 	case Create_File:         return Create_File{path = s(c.path, allocator), confirm = s(c.confirm, allocator)}
 	case Create_Dir:          return Create_Dir{path = s(c.path, allocator), confirm = s(c.confirm, allocator)}
 	case Rename_Path:         return Rename_Path{from = s(c.from, allocator), to = s(c.to, allocator), confirm = s(c.confirm, allocator)}
@@ -451,7 +451,9 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Files_Reveal:        delete(c.path, allocator)
 	case Set_Files_Filter:    delete(c.text, allocator)
 	case Reload_File:         delete(c.confirm, allocator)
-	case List_Dir:            delete(c.path, allocator)
+	case List_Dir:
+		delete(c.path, allocator)
+		delete(c.since, allocator)
 	case Create_File:
 		delete(c.path, allocator)
 		delete(c.confirm, allocator)

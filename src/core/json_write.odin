@@ -852,6 +852,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case List_Dir:
 		kv_str(&w, "path", c.path)
 		if c.ignored do kv_bool(&w, "ignored", true)
+		if c.since != "" do kv_str(&w, "since", c.since)
 	case Create_File:
 		kv_str(&w, "path", c.path)
 		token(&w, c.confirm, redact)

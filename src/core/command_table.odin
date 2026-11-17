@@ -151,7 +151,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "keep_buffer", args = "tab_id", does = "after the file changed on disk: keep the editor's text (saving then overwrites the file)", who = .Anyone},
 	{type = "diff_file", args = "tab_id, against", does = "open a read-only diff of an editor tab against git HEAD (against: head) or the file on disk (disk); created_id = the diff tab", who = .Anyone},
 	{type = "set_wrap", args = "tab_id, on", does = "soft-wrap long lines in an editor tab", who = .Anyone},
-	{type = "list_dir", args = "path, ignored?", does = "a folder inside a project: entries (name, kind file/dir/symlink, git status code), folders first, natural order; .git and gitignored entries left out (ignored: listed, marked ignored)", who = .Anyone},
+	{type = "list_dir", args = "path, ignored?, since?", does = "a folder inside a project: entries (name, kind file/dir/symlink, git status code), folders first, natural order; .git and gitignored entries left out (ignored: listed, marked ignored); hash: the listing's; since = that hash: same, no entries", who = .Anyone},
 	{type = "create_file", args = "path, confirm?", does = "create an empty file inside a project (and its folders); data.path. A control caller outside its own project confirms", who = .Anyone, confirm = .Fs_Write},
 	{type = "create_dir", args = "path, confirm?", does = "create a folder inside a project; data.path. A control caller outside its own project confirms", who = .Anyone, confirm = .Fs_Write},
 	{type = "rename_path", args = "from, to, confirm?", does = "rename or move a file or folder inside a project; open editor tabs follow it. A control caller outside its own project confirms", who = .Anyone, confirm = .Fs_Write},

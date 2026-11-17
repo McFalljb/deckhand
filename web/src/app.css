@@ -807,10 +807,26 @@ a { color: inherit; }
 .files { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .files-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; color: var(--text-secondary); font-weight: 600; }
 .files-root { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.file-row { height: 26px; gap: 6px; }
-.file-row .title.st-M, .file-row .title.st-R { color: var(--diff-modified); }
-.file-row .title.st-A, .file-row .title.st-q { color: var(--diff-added); }
-.file-row .title.st-D { color: var(--diff-removed); }
+.files-head .icon-btn.small { width: 22px; height: 22px; }
+.file-row { height: 26px; gap: 6px; -webkit-touch-callout: none; }
+.files .w-item > .file-row { height: 100%; }
+.file-row.sel { background: var(--selected); color: var(--text); }
+.file-row .title.active { font-weight: 600; color: var(--text); }
+.file-row .title.dot { color: var(--text-muted); }
+/* git marks: the window's letters and colours (filetree.ts gitTone; src/ui_files.odin) */
+.file-row .g-add { color: var(--done); }
+.file-row .g-mod { color: var(--waiting); }
+.file-row .g-del { color: var(--error); }
+.file-row .ch-letter { text-align: center; }
+.file-more { display: none !important; }
+.file-row:hover .file-more, .file-row.sel .file-more { display: inline-grid !important; }
+@media (hover: none) { .file-more { display: inline-grid !important; } }
+.file-edit { cursor: default; }
+.field.file-name { flex: 1; min-width: 0; min-height: 0; height: calc(100% - 4px); padding: 0 6px; font-size: inherit; border-radius: var(--radius-sm); }
+.file-err { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+.phone-files .file-row { font-size: 15px; }
+.phone-files .file-more, .phone-files .files-head .icon-btn.small { width: 36px; height: 36px; }
+.phone-files .files-head { height: 44px; }
 .chev-gap { flex: 0 0 12px; }
 .file-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-app); }
 .code-edit { flex: 1; min-height: 0; display: flex; font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; }

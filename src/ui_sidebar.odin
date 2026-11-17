@@ -971,7 +971,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 			clay.TextDynamic(clip(lead, pw), txt(elsewhere ? th.accent : th.text_muted))
 			room -= pw
 		}
-		icon(core.harness_row_icon(harness, !live), th.text_muted, HARNESS_ICON_SIZE)
+		icon(core.open_session_row_icon(s, !live), th.text_muted, HARNESS_ICON_SIZE) // a Files session's: none
 		clay.TextDynamic(clip(title, room), txt(live ? mix(th.text_secondary, th.text, em) : th.text_muted))
 		if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 		spacer()

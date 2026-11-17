@@ -1,0 +1,9 @@
+# Files-session scene, after a relaunch: the Files session is back on screen with its file.
+wait 800
+eventually
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent files
+assert_state open_sessions.0.tabs.0.title a.txt
+assert_rows open Files
+shot files-session/relaunched
+quit

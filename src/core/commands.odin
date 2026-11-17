@@ -1235,7 +1235,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Close_Tab:
 		s, tab, i := find_tab(c.tab_id)
 		if tab == nil do return fail("no such tab"), false
-		if i == 0 do return fail(s.agent == .Claude ? "a Claude session's main tab cannot be closed: close the session" : "a session's pi tab cannot be closed"), false
+		if i == 0 && s.agent != .Files do return fail(s.agent == .Claude ? "a Claude session's main tab cannot be closed: close the session" : "a session's pi tab cannot be closed"), false
 		// (an app tab in its own session: app_close, a session's agents closing what they opened)
 		_, is_app := tab.kind.(App_Tab)
 		if owns_tab(caller, c.tab_id) && !(is_app && c.tab_id != caller.tab_id) do return fail("a caller cannot close its own tab"), false
@@ -1259,6 +1259,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		shown := session_tab_shown(s, c.tab_id)
 		pane_tab_gone(s, c.tab_id) // its pane's next tab takes over (panes.odin)
 		ordered_remove(&s.tabs, i)
+		if files_session_close_if_empty(s.id, caller) do return {ok = true}, true // a Files session's last tab: the session goes (files_session.odin)
 		if shown && s.id == state.current_session do status_seen(s) // the tab that shows now is seen (agent_status.odin)
 		return {ok = true}, true
 	case Focus_Tab:
@@ -2397,6 +2398,15 @@ home_bound :: proc(caller: Caller) -> bool {
 
 PENDING_PER_CALLER :: 3 // confirmations one caller (not the user) may have waiting at once
 
+// A Files session left without tabs (its last one closed, or the file it was made for did not
+// open) closes (files_session.odin). True: it did.
+files_session_close_if_empty :: proc(id: u64, caller: Caller) -> bool {
+	s := find_session(id)
+	if s == nil || s.agent != .Files || len(s.tabs) > 0 do return false
+	close_session(id, caller)
+	return true
+}
+
 // Stops an open session's tabs and removes it (and its pending
 // confirmations); the current session moves to the last other open one.
 @(private = "file")
@@ -2701,6 +2711,7 @@ pi_readonly_too_old :: proc() -> bool {
 // argv: what runs in place of the login shell (machine_login), title its tab's.
 shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0, argv: []string = nil, title := "") -> (u64, string) {
 	if s.machine != 0 do return 0, "this session runs on another machine" // never a local shell in it (machine_mirror.odin)
+	if why := files_only_refusal(s, "a terminal"); why != "" do return 0, why // a Files session runs nothing (files_session.odin)
 	tab := Tab{id = new_id(), kind = Shell_Tab{}, title = title != "" ? strings.clone(title) : fmt.aprintf("shell %d", len(s.tabs))}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)

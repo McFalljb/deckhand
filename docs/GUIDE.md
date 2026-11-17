@@ -1436,9 +1436,11 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
   Esc clears a selection of several, else gives the keyboard back. Typing letters jumps to the next
   row whose name starts with them (a pause of a second starts over); they never reach a terminal.
-- **Opening needs a session of the project on screen** (files open as its tabs): with none, a
-  toast says "Open a session in <project> to open files"; any other reason a file does not open
-  (sign-ins, too large, binary, gone) shows as a toast too.
+- **Opening with no session on screen** opens the file in the project's **Files** session (listed
+  as "Files" under Open): file tabs only, no agent, one per project, back after a relaunch; it
+  closes with its last tab, and terminals, browser and agent tabs need a real session (New
+  session). A file of another project opens in that project's Files session. Any reason a file
+  does not open (sign-ins, too large, binary, gone) shows as a toast.
 - **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
 - **New file / New folder**: the name field opens as the first row of the folder (the selected
   folder, the selected file's, else the project's), opened and scrolled to; an error shows under

@@ -548,6 +548,7 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		s, err := browser_open_session(caller, c.session)
 		if s == nil do return fail(err), false
 		if s.home do return fail("Home has only its pi tab"), false
+		if why := files_only_refusal(s, "a browser tab"); why != "" do return fail(why), false
 		if c.url == "" {
 			if caller.kind != .UI do return fail("url is needed"), false
 		} else {
@@ -648,8 +649,12 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if !window_open_url(c.url) do return fail("the link could not be opened"), false
 		return {ok = true}, false
 	case Open_File:
-		s, p, err := file_open_target(caller, c.session, c.path)
+		s, p, files, err := file_open_target(caller, c.session, c.path)
 		if err != "" do return fail(err), false
+		if files != nil {
+			if !tab_host_up() do return no_window(), false
+			s = files_session_ensure(files) // the project's Files session (files_session.odin)
+		}
 		// the file's tab, if one is open: in front (a preview's single click keeps it a preview)
 		if tab := session_file_tab(s, p, true); tab != nil {
 			if !tab_host_up() do return no_window(), false
@@ -663,8 +668,12 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		}
 		return routed(Open_File{path = p, line = c.line, col = c.col, session = s.id, preview = c.preview}, caller, request_id, new_id())
 	case Markdown_Open:
-		s, p, err := file_open_target(caller, c.session, c.path)
+		s, p, files, err := file_open_target(caller, c.session, c.path)
 		if err != "" do return fail(err), false
+		if files != nil {
+			if !tab_host_up() do return no_window(), false
+			s = files_session_ensure(files)
+		}
 		if tab := session_file_tab(s, p, false); tab != nil {
 			if !tab_host_up() do return no_window(), false
 			session_show_tab(s, tab.id)
@@ -809,7 +818,7 @@ tab_host_after :: proc(cmd: Command, caller: Caller, tab_id: u64, r: ^Result, wi
 		r.created_id = tab_id
 		return true
 	case Open_File:
-		if !r.ok do return false
+		if !r.ok do return files_session_close_if_empty(c.session, caller) // a Files session made for it goes
 		s := find_session(c.session)
 		if s == nil do return false
 		tab := Tab{id = tab_id, kind = Editor_Tab{path = strings.clone(c.path), preview = c.preview}, title = title_for(c.path, .File), status = .Running}
@@ -842,7 +851,7 @@ tab_host_after :: proc(cmd: Command, caller: Caller, tab_id: u64, r: ^Result, wi
 		r.created_id = tab_id
 		return true
 	case Markdown_Open:
-		if !r.ok do return false
+		if !r.ok do return files_session_close_if_empty(c.session, caller)
 		s := find_session(c.session)
 		if s == nil do return false
 		pane_add_tab(s, Tab{id = tab_id, kind = Markdown_Tab{path = strings.clone(c.path)}, title = strings.clone(filepath.base(c.path)), status = .Running})
@@ -1042,6 +1051,7 @@ app_new_resolve :: proc(c: New_App_Tab, caller: Caller) -> (x: New_App_Tab, r: R
 	s, serr := app_session(caller, c.session)
 	if s == nil do return {}, fail(serr), true
 	if s.home do return {}, fail("Home has only its pi tab"), true
+	if why := files_only_refusal(s, "an app tab"); why != "" do return {}, fail(why), true
 	agent := caller.kind == .Panel
 
 	argv: []string
@@ -1161,44 +1171,49 @@ editor_command_tab :: proc(cmd: Command) -> u64 {
 // Where open_file and markdown_open open: the caller's own session (a tab-bound caller), else the
 // one on screen (Home has only its pi tab, so Home's control opens files in the one on screen),
 // and the file, absolute (a relative path: from the named session's folder, else the caller's).
+// The user's open (files_session_may_create) of a file in a project, with no session there or a
+// Files session of another project: files = that project, whose Files session it opens in (made
+// by the caller once it knows the window is there; files_session.odin). An agent session on
+// screen keeps what the user opens, as before.
 @(private = "file")
-file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Open_Session, p: string, err: string) {
+file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Open_Session, p: string, files: ^Project, err: string) {
 	s = session != 0 ? find_session(session) : caller_session(caller)
 	if s != nil && s.home && session == 0 do s = cur()
-	if s == nil && caller.kind == .UI do return nil, "", no_session_for_file(path) // the user (the Files tree, a paired browser's too)
-	if s == nil do return nil, "", "no open session to open the file in"
-	if s.home do return nil, "", "Home has only its pi tab"
-	if path == "" do return nil, "", "path is empty"
+	create := files_session_may_create(caller) && (s == nil || s.agent == .Files)
+	if s == nil && !create {
+		if caller.kind == .UI do return nil, "", nil, no_session_for_file(path) // the user's, over a hub link
+		return nil, "", nil, "no open session to open the file in"
+	}
+	if s != nil && s.home do return nil, "", nil, "Home has only its pi tab"
+	if path == "" do return nil, "", nil, "path is empty"
 	p = path
 	if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
 	if !filepath.is_abs(p) {
-		base := session != 0 ? s.cwd : fs_base_for(caller)
-		if base == "" do base = s.cwd
+		base := session != 0 && s != nil ? s.cwd : fs_base_for(caller)
+		if base == "" && s != nil do base = s.cwd
+		if base == "" do return nil, "", nil, no_session_for_file(path)
 		p, _ = filepath.join({base, p}, context.temp_allocator)
 	}
 	p, _ = filepath.clean(p, context.temp_allocator)
-	if settings_credential(p) do return nil, "", CREDENTIAL_REFUSED // agents' sign-ins and state: never shown (settings_files.odin)
+	if settings_credential(p) do return nil, "", nil, CREDENTIAL_REFUSED // agents' sign-ins and state: never shown (settings_files.odin)
 	switch path_kind(p) {
-	case .Missing: return nil, "", "no such file"
-	case .Dir:     return nil, "", "that is a folder"
+	case .Missing: return nil, "", nil, "no such file"
+	case .Dir:     return nil, "", nil, "that is a folder"
 	case .File, .Other: // other kinds open as a tab that says why
 	}
-	return s, p, ""
+	if create {
+		fp := file_project(p)
+		if fp == nil && s == nil do return nil, "", nil, no_session_for_file(p)
+		if fp != nil && (s == nil || s.project_id != fp.id) do return nil, p, fp, ""
+	}
+	return s, p, nil, ""
 }
 
-// What the user is told when a file has no session on screen to open in (the Files tree shows the
-// selected project's folder then): the project the file is in, else the selected one. The file
-// never goes to another project's session; it opens once a session of its project is on screen.
+// What the user is told when a file has no session to open in and none can be made for it: the
+// project it is in (a caller that may not make a Files session), or that it is in no project.
 no_session_for_file :: proc(path: string) -> string {
-	rp := filepath.is_abs(path) ? fs_real(path) : ""
-	best: ^Project
-	for &p in state.projects {
-		if p.group != .Projects || p.machine != 0 || rp == "" do continue
-		if within(rp, fs_real(p.cwd)) && (best == nil || len(p.cwd) > len(best.cwd)) do best = &p
-	}
-	if best == nil do if p := find_project(state.selected_project); p != nil && p.machine == 0 && p.group == .Projects do best = p
-	if best == nil do return "Open a session to open files"
-	return fmt.tprintf("Open a session in %s to open files", project_name(best^))
+	if p := file_project(path); p != nil do return fmt.tprintf("Open a session in %s to open files", project_display(p^))
+	return "Open a session to open files outside a project"
 }
 
 // The session's tab that shows file p: an editor's file view (editor) or a Markdown tab.

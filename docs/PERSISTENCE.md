@@ -95,6 +95,11 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   bad `focused`: the first pane). A pane shows its `active` tab, else the saved `active_tab` if it
   is there, else its first tab. A pane none of whose tabs came back (app tabs, diff views and the
   other tabs every restore drops) is removed and the split around it closes.
+- A project's Files session (no agent, file tabs only; `src/core/files_session.odin`) is not in
+  `open_sessions` but in its own key, `"files_sessions":[{"project","tabs":[{"kind":"editor"|"markdown","path"}],"active_tab","current"?}]`,
+  so an older Deckhand ignores it and keeps the rest. On restore a project no longer listed is
+  skipped, and each file must still pass the open rules (a regular file, not a sign-in, inside the
+  project or the checkout its Files tree shows); one with no file left does not come back.
 - A Claude-only session (docs/CLAUDE.md §1) is saved in `open_sessions` as
   `{"agent":"claude","claude_session_id","pi_session_id":"","cwd","project","tabs":[{"kind":"claude",…},…],"active_tab"}`:
   `tabs[0]` is its main Claude tab (same id; a Codex-only session's is `"kind":"codex"`), never a

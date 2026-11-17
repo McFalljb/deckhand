@@ -143,6 +143,12 @@ harness_icon :: proc(h: Harness) -> Icon {return harness_mark_icon(HARNESSES[h])
 // drawn in the muted colour: a logo keeps its own colours and is never faded.
 harness_row_icon :: proc(h: Harness, dimmed: bool) -> Icon {return dimmed ? HARNESSES[h].glyph : harness_icon(h)}
 
+// An open session's row icon after its place: its harness's, none for a Files session (no agent).
+open_session_row_icon :: proc(s: ^Open_Session, dimmed: bool) -> Icon {
+	if s.agent == .Files do return .None
+	return harness_row_icon(open_session_harness(s), dimmed)
+}
+
 session_harness :: proc(s: Session) -> Harness {return s.codex ? .Codex : s.claude ? .Claude : .Pi}
 
 // An open session's harness: a Claude-only session's main tab (its first) says Claude Code or
@@ -483,7 +489,7 @@ sessions_with_new :: proc(section: Sort_Section, list: []Session, project: u64 =
 	append(&out, ..list)
 	if pid == 0 do return out[:]
 	for &o in state.open_sessions {
-		if o.home || o.project_id != pid || o.agent == .Claude || session_listed(list, o.pi_session_id) do continue // Claude-only: below
+		if o.home || o.project_id != pid || o.agent != .Pi || session_listed(list, o.pi_session_id) do continue // Claude-only: below; a Files session is no conversation
 		title := open_session_title(&o)
 		if o.title == "" do title = "" // not named yet: the section's "Untitled …"
 		// no file yet: when it was last made current (stable from frame to frame, so the order is)
@@ -728,6 +734,7 @@ open_session_refresh :: proc(s: ^Open_Session) {
 
 // "5m" since the session file last changed; "new" before pi wrote it.
 open_session_age :: proc(s: ^Open_Session) -> string {
+	if s.agent == .Files do return ""
 	if s.agent == .Claude { 	// its history entry's last use (claude.odin)
 		if r, _ := claude_record(s.pi_session_id); r != nil do return ago(time.unix(r.used, 0))
 		return "new"
@@ -828,6 +835,7 @@ session_place :: proc(s: ^Open_Session) -> (ic: Icon, name: string) {
 open_session_title :: proc(s: ^Open_Session, refresh := true) -> string {
 	// another machine's: the title it sent (its session file and Claude history are not on this Mac)
 	if s.machine != 0 && s.title != "" do return strings.clone(s.title, context.temp_allocator)
+	if s.agent == .Files do return "Files" // a project's open files, no agent (files_session.odin)
 	// a Claude-only session: its history entry's title (claude.odin; the first prompt, or the user's)
 	if s.agent == .Claude {
 		if r, _ := claude_record(s.pi_session_id); r != nil && r.title != "" do return strings.clone(r.title, context.temp_allocator)

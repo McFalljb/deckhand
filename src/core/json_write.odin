@@ -292,6 +292,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Files_Collapse_All:  return "files_collapse_all"
 	case Files_Reveal:        return "files_reveal"
 	case Set_Files_Filter:    return "set_files_filter"
+	case Set_Files_Hide_Ignored: return "set_files_hide_ignored"
 	case File_List_Done:      return "file_list_done"
 	case List_Worktrees:      return "list_worktrees"
 	case Files_Set_Root:      return "files_set_root"
@@ -830,6 +831,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "path", c.path)
 	case Set_Files_Filter:
 		kv_str(&w, "text", c.text)
+	case Set_Files_Hide_Ignored:
+		kv_bool(&w, "hide", c.hide)
 	case Editor_State:
 		kv_u64(&w, "tab_id", c.tab_id)
 	case Save_File:
@@ -1830,6 +1833,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	{
 		f := obj_begin(b)
 		kv_str(&f, "filter", s.files.filter)
+		kv_bool(&f, "hide_ignored", s.files.hide_ignored)
 		key(&f, "expanded")
 		strings.write_byte(b, '[')
 		for fr, i in s.files.expanded {

@@ -247,6 +247,7 @@ Files_State :: struct {
 	expanded:  [dynamic]Files_Root, // at most FILES_ROOTS_MAX, least recently used dropped
 	filter:    string, // fuzzy words matched against paths (not saved)
 	checkouts: [dynamic]Files_Checkout, // at most FILES_ROOTS_MAX, most recent first
+	hide_ignored: bool, // gitignored rows left out of the tree (default: shown, dimmed); saved
 }
 FILES_ROOTS_MAX :: 32
 FILES_EXPANDED_MAX :: 256

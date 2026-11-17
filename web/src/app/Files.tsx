@@ -35,6 +35,7 @@ import { planCopy } from "./fileclip.ts";
 import { ClipBar } from "./FileClipBar.tsx";
 import { storageGet, storageSet } from "../ui/dom.ts";
 import { clickPick, dragText, dropDir, entryPaths, fileIcon, inIgnored, extendPick, folderRows, gitLetter, gitTone, isEditRow, movedPath, moveResult, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, planMove, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
+import { CheckoutButton, FilterBox, FilterList, useCheckout, useFind } from "./FilesFind.tsx";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -77,6 +78,9 @@ const HOVER_OPEN_MS = 600;
 // are not drawn, so never selected, dragged, moved or trashed.
 const HIDE_KEY = "deckhand.files.hideIgnored";
 let hideIgnored = storageGet(HIDE_KEY) === "1";
+// The page shows another checkout of the project (FilesFind.tsx useCheckout): the core reads there but
+// refuses every write, so no write is offered (new, rename, move, Trash, drag).
+let readOnly = false;
 // The poll: an open folder inside an ignored one (node_modules, build: big, rarely edited by hand)
 // every SLOW_EVERY-th time (30 s); the rest every time (5 s).
 const SLOW_EVERY = 6;
@@ -166,6 +170,7 @@ function trash(app: App, path: string) {
 // row: path, as an older core knows it. An older core reads only path (empty here) and says so:
 // never deleted one by one.
 async function trashMany(app: App, paths: string[]) {
+  if (readOnly) return;
   if (paths.length === 1) return trash(app, paths[0]);
   if (!paths.length) return;
   const r = await app.link.run({ type: "delete_path", path: "", paths });
@@ -196,6 +201,7 @@ function copyPaths(app: App, root: string, paths: string[], rel: boolean) {
 }
 
 function startNew(app: App, root: string, dir: string, kind: "file" | "dir") {
+  if (readOnly) return;
   if (dir !== root && !open.has(dir)) {
     open.add(dir);
     list(app, dir);
@@ -206,6 +212,7 @@ function startNew(app: App, root: string, dir: string, kind: "file" | "dir") {
 }
 
 function startRename(path: string) {
+  if (readOnly) return;
   edit = { kind: "rename", path, err: "" };
   focusOne(path);
   scrollWanted = { key: path, center: false };
@@ -274,6 +281,7 @@ function follow(from: string, to: string) {
 // with its ignored names: a name already there refuses the lot, nothing moved, never renamed to
 // make room. Then the folder shows open, the moved items selected in it.
 async function moveTo(app: App, root: string, sources: string[], dir: string) {
+  if (readOnly) return;
   if (moving) return void app.toast("A move is still running; try again when it is done", true);
   moving = true;
   try {
@@ -310,7 +318,7 @@ async function moveTo(app: App, root: string, sources: string[], dir: string) {
 }
 
 function openMover(sources: string[]) {
-  if (!sources.length) return;
+  if (!sources.length || readOnly) return;
   mover = { sources };
   pickerOpen.clear();
   bump();
@@ -399,10 +407,12 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
   if (many.length > 1) {
     // several rows: what acts on them all (no open, rename or new here)
     const out = outermost(order, new Set(many));
-    items.push({ label: "Move to…", run: () => openMover(out) });
-    items.push(...clipItems(treeOf(app, root), out, "", false));
-    items.push({ label: out.length > 1 ? `Move ${out.length} items to Trash` : "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trashMany(app, out) });
-    items.push({ sep: true });
+    if (!readOnly) {
+      items.push({ label: "Move to…", run: () => openMover(out) });
+      items.push(...clipItems(treeOf(app, root), out, "", false));
+      items.push({ label: out.length > 1 ? `Move ${out.length} items to Trash` : "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trashMany(app, out) });
+      items.push({ sep: true });
+    }
     items.push({ label: "Copy paths", run: () => copyPaths(app, root, many, false) });
     items.push({ label: "Copy relative paths", run: () => copyPaths(app, root, many, true) });
     return items;
@@ -415,14 +425,16 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
   }
   items.push({ sep: true });
   const into = dir ? path : parentOf(path);
-  items.push({ label: "New file…", run: () => startNew(app, root, into, "file") });
-  items.push({ label: "New folder…", run: () => startNew(app, root, into, "dir") });
-  items.push({ sep: true });
-  items.push({ label: "Rename…", keys: keys("F2"), run: () => startRename(path) });
-  items.push({ label: "Move to…", run: () => openMover([path]) });
-  items.push(...clipItems(treeOf(app, root), [path], into, dir));
-  items.push({ label: "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trash(app, path) });
-  items.push({ sep: true });
+  if (!readOnly) {
+    items.push({ label: "New file…", run: () => startNew(app, root, into, "file") });
+    items.push({ label: "New folder…", run: () => startNew(app, root, into, "dir") });
+    items.push({ sep: true });
+    items.push({ label: "Rename…", keys: keys("F2"), run: () => startRename(path) });
+    items.push({ label: "Move to…", run: () => openMover([path]) });
+    items.push(...clipItems(treeOf(app, root), [path], into, dir));
+    items.push({ label: "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trash(app, path) });
+    items.push({ sep: true });
+  }
   items.push({ label: "Copy path", run: () => copyText(app, path) });
   items.push({ label: "Copy relative path", run: () => copyText(app, relPath(root, path)) });
   return items;
@@ -430,15 +442,37 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
 
 function rootItems(app: App, root: string): MenuItem[] {
   return [
-    { label: "New file…", run: () => startNew(app, root, root, "file") },
-    { label: "New folder…", run: () => startNew(app, root, root, "dir") },
-    { sep: true },
+    ...(readOnly ? [] : [{ label: "New file…", run: () => startNew(app, root, root, "file") }, { label: "New folder…", run: () => startNew(app, root, root, "dir") }, { sep: true }]),
     { label: "Collapse all", run: () => collapseAll(root) },
     { label: "Refresh", run: () => refresh(app, root) },
     { sep: true },
-    ...rootClipItems(treeOf(app, root)),
+    ...(readOnly ? [] : rootClipItems(treeOf(app, root))),
     { label: "Copy path", run: () => copyText(app, root) },
   ];
+}
+
+// The tree again after the filter: the file opened from it shown (its folders opened, its row
+// focused and centred).
+function reveal(app: App, root: string, path: string) {
+  if (path.startsWith(root + "/")) {
+    for (const d of parentsOf(root, path)) if (!open.has(d)) {
+      open.add(d);
+      list(app, d);
+    }
+    focusOne(path);
+    focusWanted = path;
+    scrollWanted = { key: path, center: true };
+  }
+  bump();
+}
+
+// A filter result's menu: one file, nothing that changes files.
+function foundItems(app: App, root: string, path: string, clear: () => void): MenuItem[] {
+  const items: MenuItem[] = [{ label: "Open", keys: app.phone ? undefined : "↩", run: () => openFile(app, path) }];
+  if (!app.phone) items.push({ label: "Open to the side", run: () => openSide(app, path) });
+  items.push({ label: "Show in the tree", run: () => { clear(); reveal(app, root, path); } });
+  items.push({ sep: true }, { label: "Copy path", run: () => copyText(app, path) }, { label: "Copy relative path", run: () => copyText(app, relPath(root, path)) });
+  return items;
 }
 
 function collapseAll(root: string) {
@@ -461,7 +495,12 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   const nav = useRef<HTMLDivElement>(null);
   const s = store.session(shownSession(app));
   const p = store.project(store.selectedProject);
-  const root = s && !s.home && !s.machine ? s.cwd : p && !p.machine ? p.cwd : "";
+  const home = s && !s.home && !s.machine ? s.cwd : p && !p.machine ? p.cwd : "";
+  // the checkout the page shows (the switcher; read-only when it is not home), and the filter over it
+  const co = useCheckout(app, home);
+  const root = co.root;
+  readOnly = co.readOnly;
+  const find = useFind(app, root, (path) => openFile(app, path), (path) => reveal(app, root, path));
   resetFor(`${s?.id ?? ""}|${store.selectedProject}|${root}`, root); // another tree: the clip and Undo cleared
   // listed when shown, and again every few seconds while it shows and the page is seen (the files
   // change; an unchanged folder answers "same")
@@ -601,7 +640,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     }
     // ⌘/Ctrl-C, X, V, D, Z with a row focused (fileops.ts); never in the name field (above) nor
     // outside the tree (the editor's own undo stays its own)
-    if (mod && !e.shiftKey && focused && treeKey(treeOf(app, root), e.key.toLowerCase(), chosen(), newTarget(root, sel, dir))) {
+    if (mod && !e.shiftKey && focused && !readOnly && treeKey(treeOf(app, root), e.key.toLowerCase(), chosen(), newTarget(root, sel, dir))) {
       e.preventDefault();
       e.stopPropagation();
       return;
@@ -632,11 +671,11 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         else openFile(app, cur.path);
         break;
       case "F2":
-        if (!cur) return;
+        if (!cur || readOnly) return;
         startRename(cur.path); // several picked: the focused row alone
         break;
       case "Delete": case "Backspace":
-        if (!cur || e.repeat || (e.key === "Backspace" && !mod)) return;
+        if (!cur || e.repeat || readOnly || (e.key === "Backspace" && !mod)) return;
         trashMany(app, trashTargets(order, pick, sel));
         break;
       case "ContextMenu": {
@@ -732,14 +771,23 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     <div class="files">
       <div class="files-head">
         <Icon name="folder" size={14} class="muted" />
-        <span class="files-root" title={root}>{name}</span>
+        <CheckoutButton view={co} />
         <span class="spacer" />
-        <button type="button" class="icon-btn small" title="New file" aria-label="New file" onClick={() => startNew(app, root, target(), "file")}>
-          <Icon name="new-file" size={13} />
-        </button>
-        <button type="button" class="icon-btn small" title="New folder" aria-label="New folder" onClick={() => startNew(app, root, target(), "dir")}>
-          <Icon name="new-folder" size={13} />
-        </button>
+        {app.phone ? (
+          <button type="button" class="icon-btn small" title="Filter files" aria-label="Filter files" aria-pressed={find.shown || find.text ? "true" : "false"} onClick={() => find.show(!(find.shown || find.text))}>
+            <Icon name="search" size={13} />
+          </button>
+        ) : null}
+        {readOnly ? null : (
+          <>
+            <button type="button" class="icon-btn small" title="New file" aria-label="New file" onClick={() => startNew(app, root, target(), "file")}>
+              <Icon name="new-file" size={13} />
+            </button>
+            <button type="button" class="icon-btn small" title="New folder" aria-label="New folder" onClick={() => startNew(app, root, target(), "dir")}>
+              <Icon name="new-folder" size={13} />
+            </button>
+          </>
+        )}
         <button
           type="button"
           class="icon-btn small"
@@ -760,6 +808,11 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
           <Icon name="more" size={13} />
         </button>
       </div>
+      {readOnly ? <div class="files-ro-note" role="note">Read-only here: open a session in this checkout to change files</div> : null}
+      {!app.phone || find.shown || find.text ? <FilterBox find={find} phone={app.phone} listId="files-find" /> : null}
+      {find.text ? (
+        <FilterList find={find} root={root} listId="files-find" active={active} ignoredShown={!hideIgnored} menu={(path, at) => showMenu(app, baseName(path), foundItems(app, root, path, find.clear), at)} />
+      ) : (
       <div
         class={"nav files-tree" + (drag && dropAt === root ? " drop-root" : "")}
         ref={nav}
@@ -778,8 +831,9 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
       >
         <Windowed items={items} />
       </div>
+      )}
       {picking ? <PickBar app={app} root={root} /> : null}
-      {app.phone && !picking && hasClip() ? <ClipBar t={treeOf(app, root)} target={target()} /> : null}
+      {app.phone && !picking && !readOnly && hasClip() ? <ClipBar t={treeOf(app, root)} target={target()} /> : null}
       {mover ? <MovePicker key={mover.sources.join("\n")} app={app} root={root} sources={mover.sources} /> : null}
     </div>
   );
@@ -793,11 +847,15 @@ function PickBar({ app, root }: { app: App; root: string }) {
     <div class="files-pick" role="toolbar" aria-label="Selected files">
       <span class="files-pick-n">{many.length} selected</span>
       <span class="spacer" />
-      <button type="button" class="btn small" disabled={!out.length} onClick={() => openMover(out)}>Move to…</button>
-      <button type="button" class="btn small danger" disabled={!out.length} onClick={() => trashMany(app, out)}>Move to Trash</button>
-      <button type="button" class="btn small" disabled={!out.length} onClick={() => ((picking = false), take(treeOf(app, root), "copy", out))}>Copy</button>
-      <button type="button" class="btn small" disabled={!out.length} onClick={() => ((picking = false), take(treeOf(app, root), "cut", out))}>Cut</button>
-      <button type="button" class="btn small" disabled={!out.length} onClick={() => void copyInto(treeOf(app, root), out, null)}>Duplicate</button>
+      {readOnly ? null : (
+        <>
+          <button type="button" class="btn small" disabled={!out.length} onClick={() => openMover(out)}>Move to…</button>
+          <button type="button" class="btn small danger" disabled={!out.length} onClick={() => trashMany(app, out)}>Move to Trash</button>
+          <button type="button" class="btn small" disabled={!out.length} onClick={() => ((picking = false), take(treeOf(app, root), "copy", out))}>Copy</button>
+          <button type="button" class="btn small" disabled={!out.length} onClick={() => ((picking = false), take(treeOf(app, root), "cut", out))}>Cut</button>
+          <button type="button" class="btn small" disabled={!out.length} onClick={() => void copyInto(treeOf(app, root), out, null)}>Duplicate</button>
+        </>
+      )}
       <button type="button" class="btn small" disabled={!many.length} onClick={() => copyPaths(app, root, many, false)}>Copy paths</button>
       <button
         type="button"
@@ -987,7 +1045,7 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
   // root: the tree's outline)
   const inDrop = !!drag && !!dropAt && dropAt !== root && (path === dropAt || path.startsWith(dropAt + "/"));
   // a drag only from a mouse or pen press: a touch's long press is the menu (a touch laptop, an iPad)
-  const canDrag = !app.phone && !renaming && !picking;
+  const canDrag = !app.phone && !renaming && !picking && !readOnly;
   const press = longPressProps(() => !renaming && !picking, (at) => menu({ clientX: at.x, clientY: at.y }));
   const menu = (at: { clientX: number; clientY: number }) => {
     // on a picked row the picking stays (the menu acts on them all); elsewhere the row alone

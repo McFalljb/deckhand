@@ -117,7 +117,7 @@ Files_Ui :: struct {
 	count:      int, // rows in the list at the last layout (the new name's included)
 	reveal_new: bool, // scroll the new name's field into view at the next layout
 	reveal_near: bool, // the next reveal scrolls only as far as needed (a new file: no jump)
-	input_at:   time.Tick, // this window's last press or shortcut while the name field had the keyboard (files_note_event)
+	input_at:   time.Tick, // armed: this window's event moved (or may move) the keyboard off the name field (files_event_begin)
 	first:      int, // row index of slot 0
 	view_h:     f32, // the list's height at the last layout (logical px)
 	// a press on a row: acts on release unless it became a drag
@@ -906,6 +906,7 @@ files_new_target :: proc() -> string {
 
 files_begin_edit :: proc(mode: Files_Edit_Mode, target, text: string, focus := true) {
 	fu.edit = mode
+	fu.input_at = {} // a new edit starts unarmed
 	delete(fu.target)
 	fu.target = strings.clone(target)
 	delete(fu.edit_err)
@@ -995,35 +996,55 @@ files_commit_edit :: proc(blur := false) {
 
 files_cancel_edit :: proc() {
 	fu.edit = .None
+	fu.input_at = {}
 	delete(fu.edit_err)
 	fu.edit_err = ""
 	if state.focus_widget == "files_name" do ui_do(core.Set_Focus{"files"})
 }
 
-// This window's own input that may take the keyboard from the name field: a press anywhere but
-// on the field, or a shortcut key (⌘ or ⌃) or Tab. Only a move that follows one commits the edit
-// (files_edit_check); set_focus is anyone's, so a focus change from a script, an agent or a
-// browser cancels it instead of renaming to a half-typed name with the user's authority.
-files_note_event :: proc(e: ^sapp.Event) {
-	if fu.edit == .None || state.focus_widget != "files_name" do return
-	#partial switch e.type {
-	case .MOUSE_DOWN:
-		if !inside(clay.ID("files_name_box"), e.mouse_x, e.mouse_y) do fu.input_at = time.tick_now()
-	case .KEY_DOWN:
-		if e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL) != 0 || e.key_code == .TAB do fu.input_at = time.tick_now()
-	}
+// Set_Focus commands this window sent for anything but the name field (ui_do counts them).
+ui_focus_away: u64
+
+@(private = "file")
+ev_in_field: bool
+@(private = "file")
+ev_away: u64
+
+// Around each of this window's events (event(), main.odin): the edit is armed to commit on blur
+// only by an event that moved the keyboard out of the name field here: one that sent a Set_Focus
+// elsewhere (a click on a row, ⌘K, ⇧⌘E…), or a press outside the field (its command may move
+// the keyboard another way). Keys typed into the field (⌘A, ⌘V, ⌃A…) never arm it, and a press
+// that leaves the keyboard in the field is disarmed (files_edit_check). set_focus is anyone's: a
+// focus change from a script, an agent or a browser cancels instead of renaming to a half-typed
+// name with the user's authority.
+files_event_begin :: proc(e: ^sapp.Event) {
+	ev_in_field = fu.edit != .None && state.focus_widget == "files_name"
+	ev_away = ui_focus_away
+	if ev_in_field && e.type == .MOUSE_DOWN && !inside(clay.ID("files_name_box"), e.mouse_x, e.mouse_y) do fu.input_at = time.tick_now()
 }
 
-// How long after this window's own press or shortcut a focus change counts as that input's (the
-// core's answer comes back within a few frames; a separate core within its 250 ms).
+files_event_end :: proc() {
+	if ev_in_field && fu.edit != .None && ui_focus_away != ev_away do fu.input_at = time.tick_now() // not an edit this event ended (Enter, Esc)
+	ev_in_field = false
+}
+
+// A separate core answers a command within this (its 250 ms): until then a press that armed the
+// edit is not taken back just because the keyboard has not moved yet.
+FILES_FOCUS_ANSWER :: 400 * time.Millisecond
+// An armed edit commits on a focus change at most this long after its event.
 FILES_BLUR_OWN :: 2 * time.Second
 
-// The name field lost the keyboard. After this window's own press or shortcut (files_note_event):
+// The name field lost the keyboard. After this window's own event moved it (files_event_begin):
 // a changed name is renamed and a typed name is created (as Finder and VS Code do; an empty one
 // cancels). A focus change from anywhere else cancels.
 files_edit_check :: proc() {
 	if client.focus_wait != "" do return // a Set_Focus on its way (machine_edit_begin): not lost yet
-	if fu.edit == .None || state.focus_widget == "files_name" do return
+	if fu.edit == .None do return
+	if state.focus_widget == "files_name" {
+		// a frame that ends with the field still holding the keyboard: what armed it did not move it
+		if fu.input_at != {} && (!client_separate() || time.tick_since(fu.input_at) >= FILES_FOCUS_ANSWER) do fu.input_at = {}
+		return
+	}
 	own := fu.input_at != {} && time.tick_since(fu.input_at) < FILES_BLUR_OWN
 	fu.input_at = {}
 	if own && strings.trim_space(tf_text(&files_name_field)) != "" {

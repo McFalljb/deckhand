@@ -70,32 +70,38 @@ fs_rename_keeps_credential_names :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := gsetup("cred")
 	defer {os.remove_all(dir); state = State{}}
-	agent, old, had := agent_in(dir)
-	defer {if had do os.set_env("PI_CODING_AGENT_DIR", old); else do os.unset_env("PI_CODING_AGENT_DIR")}
-	auth := fmt.tprintf("%s/auth.json", agent)
-	plain := fmt.tprintf("%s/x.txt", agent)
-	gwrite(auth)
+	// a credential by its name only (Claude's account file's backup; no place around it)
+	os.make_directory_all(fmt.tprintf("%s/sub", dir))
+	bak := fmt.tprintf("%s/sub/.claude.json.backup", dir)
+	plain := fmt.tprintf("%s/sub/x.txt", dir)
+	gwrite(bak)
 	others := []Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}, {kind = .UI, hub = true}, {kind = .Panel, tab_id = 7, claude = true}}
 	for c in others {
-		e := fs_rename(auth, plain, c)
+		e := fs_rename(bak, plain, c)
 		if c.kind == .Panel do testing.expect(t, e != "", "a tab's agent: refused (outside its own folder or by name)")
 		else do testing.expect_value(t, e, CREDENTIAL_RENAME_REFUSED)
-		testing.expect(t, os.exists(auth) && !os.exists(plain), "not moved")
+		testing.expect(t, os.exists(bak) && !os.exists(plain), "not moved")
 	}
 	// a key by its name (show_secret) too
 	key := fmt.tprintf("%s/server.pem", dir)
 	gwrite(key)
 	testing.expect_value(t, fs_rename(key, fmt.tprintf("%s/k.txt", dir), Caller{kind = .Control}), CREDENTIAL_RENAME_REFUSED)
 	// to another credential's name: still hidden, so allowed
-	testing.expect_value(t, fs_rename(auth, fmt.tprintf("%s/models-store.json", agent), Caller{kind = .Control}), "")
+	old := fmt.tprintf("%s/sub/.claude.json.old", dir)
+	testing.expect_value(t, fs_rename(bak, old, Caller{kind = .Control}), "")
 	// the user at this window may
-	testing.expect_value(t, fs_rename(fmt.tprintf("%s/models-store.json", agent), plain, Caller{kind = .UI}), "")
+	testing.expect_value(t, fs_rename(old, plain, Caller{kind = .UI}), "")
 	testing.expect(t, os.exists(plain), "renamed by the user")
 	// the other way round is no secret's business; nor is a project's .env (an ordinary file)
-	testing.expect_value(t, fs_rename(plain, fmt.tprintf("%s/y.txt", agent), Caller{kind = .Control}), "")
+	testing.expect_value(t, fs_rename(plain, fmt.tprintf("%s/sub/y.txt", dir), Caller{kind = .Control}), "")
 	env := fmt.tprintf("%s/.env", dir)
 	gwrite(env)
 	testing.expect_value(t, fs_rename(env, fmt.tprintf("%s/env.txt", dir), Caller{kind = .Control}), "")
+	// pi's sign-in in its agent folder: the folder is a credential place (fs_credential_places_one_rule)
+	agent, aold, had := agent_in(dir)
+	defer {if had do os.set_env("PI_CODING_AGENT_DIR", aold); else do os.unset_env("PI_CODING_AGENT_DIR")}
+	gwrite(fmt.tprintf("%s/auth.json", agent))
+	testing.expect_value(t, fs_rename(fmt.tprintf("%s/auth.json", agent), fmt.tprintf("%s/a.txt", dir), Caller{kind = .Control}), CREDENTIAL_PLACE_REFUSED)
 }
 
 @(test)
@@ -219,15 +225,20 @@ fs_credential_names_ignore_case :: proc(t: ^testing.T) {
 	testing.expect(t, settings_credential(fmt.tprintf("%s/.CREDENTIALS.JSON", dir)), ".CREDENTIALS.JSON")
 	web := Caller{kind = .UI, web = true}
 	ctl := Caller{kind = .Control}
-	for pair in ([][2]string{{"auth.json", "AUTH.JSON"}, {"models-store.json", "Models-Store.JSON"}}) {
-		from, to := fmt.tprintf("%s/%s", agent, pair[0]), fmt.tprintf("%s/%s", agent, pair[1])
+	// pi's sign-in spelled otherwise: never read
+	gwrite(fmt.tprintf("%s/AUTH.JSON", agent))
+	r0 := run_command(File_Read{path = fmt.tprintf("%s/AUTH.JSON", agent)}, web)
+	testing.expectf(t, !r0.ok && strings.contains(r0.error, "credentials"), "file_read AUTH.JSON: %q", r0.error)
+	// a credential by name only, case-only renamed: still one, never read, never to a plain name
+	os.make_directory_all(fmt.tprintf("%s/sub", dir))
+	for pair in ([][2]string{{".claude.json.bak", ".CLAUDE.JSON.BAK"}, {".claude.json.old", ".Claude.Json.Old"}}) {
+		from, to := fmt.tprintf("%s/sub/%s", dir, pair[0]), fmt.tprintf("%s/sub/%s", dir, pair[1])
 		gwrite(from)
 		testing.expect_value(t, fs_rename(from, to, ctl), "")
-		testing.expect(t, listed(agent, pair[1]), pair[1])
+		testing.expect(t, listed(fmt.tprintf("%s/sub", dir), pair[1]), pair[1])
 		r := run_command(File_Read{path = to}, web)
 		testing.expectf(t, !r.ok && strings.contains(r.error, "credentials"), "file_read %s: %v %q", pair[1], r.ok, r.error)
-		// and from there to a plain name: refused
-		testing.expect_value(t, fs_rename(to, fmt.tprintf("%s/plain.txt", agent), ctl), CREDENTIAL_RENAME_REFUSED)
+		testing.expect_value(t, fs_rename(to, fmt.tprintf("%s/sub/plain.txt", dir), ctl), CREDENTIAL_RENAME_REFUSED)
 		os.remove(to)
 	}
 }
@@ -308,4 +319,47 @@ fs_trash_xdg_makes_parents :: proc(t: ^testing.T) {
 	testing.expect(t, os.exists(fmt.tprintf("%s/fresh/.local/share/Trash/files/a.txt", scratch)), "moved")
 	k, st := path_stat(fmt.tprintf("%s/fresh/.local/share/Trash/files", scratch))
 	testing.expect(t, k == .Dir && st.mode & 0o077 == 0, "0700")
+}
+
+// One rule for credential places (pi's agent folder, Claude's config folders and any folder
+// holding .credentials.json or .claude.json, Codex's homes, a .codex folder holding auth.json):
+// for anyone but the user here, a rename whose source or target is at, above or inside one is
+// refused, and so is a delete there. A project that is HOME itself keeps working elsewhere.
+@(test)
+fs_credential_places_one_rule :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	home := gsetup("homeproj") // the project is the (fake) home folder
+	defer {os.set_env("HOME", old_home); delete(old_home); os.remove_all(home); state = State{}}
+	os.set_env("HOME", home)
+	old, had := os.lookup_env("PI_CODING_AGENT_DIR", context.temp_allocator)
+	defer {if had do os.set_env("PI_CODING_AGENT_DIR", old); else do os.unset_env("PI_CODING_AGENT_DIR")}
+	os.unset_env("PI_CODING_AGENT_DIR")
+	for d in ([]string{".pi/agent/sessions", ".claude/projects", ".codex/sessions", "work/prof", "proj"}) do os.make_directory_all(fmt.tprintf("%s/%s", home, d))
+	gwrite(fmt.tprintf("%s/.pi/agent/sessions/s.jsonl", home))
+	gwrite(fmt.tprintf("%s/.claude/projects/p.jsonl", home))
+	gwrite(fmt.tprintf("%s/.codex/sessions/c.jsonl", home))
+	gwrite(fmt.tprintf("%s/.codex/auth.json", home))
+	gwrite(fmt.tprintf("%s/work/prof/.claude.json", home)) // another Claude profile's folder
+	gwrite(fmt.tprintf("%s/work/prof/history.jsonl", home))
+	gwrite(fmt.tprintf("%s/.claude.json", home)) // HOME holds one too: HOME is never a place
+	gwrite(fmt.tprintf("%s/proj/a.txt", home))
+	ctl := Caller{kind = .Control}
+	p :: proc(home, rel: string) -> string {return fmt.tprintf("%s/%s", home, rel)}
+	// moved out of a place
+	testing.expect_value(t, fs_rename(p(home, ".pi/agent/sessions"), p(home, "proj/s"), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_rename(p(home, ".claude/projects"), p(home, "proj/c"), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_rename(p(home, ".codex/sessions"), p(home, "proj/x"), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_rename(p(home, "work/prof/history.jsonl"), p(home, "proj/h.jsonl"), ctl), CREDENTIAL_PLACE_REFUSED)
+	// a marker renamed (the folder would stop being Claude's), or trashed
+	testing.expect_value(t, fs_rename(p(home, "work/prof/.claude.json"), p(home, "work/prof/.claude.json.bak"), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_delete(p(home, "work/prof/.claude.json"), ctl), CREDENTIAL_PLACE_REFUSED)
+	// a place's folder above it renamed; a file moved in from outside
+	testing.expect_value(t, fs_rename(p(home, ".pi"), p(home, "pi2"), ctl), CREDENTIAL_PLACE_REFUSED)
+	testing.expect_value(t, fs_rename(p(home, "proj/a.txt"), p(home, ".claude/projects/a.txt"), ctl), CREDENTIAL_PLACE_REFUSED)
+	// elsewhere in the HOME project: ordinary
+	testing.expect_value(t, fs_rename(p(home, "proj/a.txt"), p(home, "proj/b.txt"), ctl), "")
+	testing.expect_value(t, fs_rename(p(home, "proj"), p(home, "proj2"), ctl), "")
+	// the user here may
+	testing.expect_value(t, fs_rename(p(home, "work/prof/.claude.json"), p(home, "work/prof/.claude.json.bak"), Caller{kind = .UI}), "")
 }

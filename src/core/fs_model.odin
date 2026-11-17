@@ -740,9 +740,9 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 	if !os.exists(a) do return "no such file or folder"
 	if os.exists(b) && !fs_case_only_rename(a, b) do return "the new name already exists"
 	if !fs_user_here(caller) {
+		if fs_credential_place(a) || fs_credential_place(b) do return CREDENTIAL_PLACE_REFUSED
 		// the target by its name as typed: on a volume that ignores case, AUTH.JSON still leads to auth.json
 		if fs_credential_named(a) && !settings_credential_name(b) && !show_secret(b) do return CREDENTIAL_RENAME_REFUSED
-		if fs_credential_place(a) do return CREDENTIAL_PLACE_REFUSED
 	}
 	if who := fs_in_use_by(a, caller); who != "" do return who
 	if os.make_directory_all(filepath.dir(b)) != nil && path_kind(filepath.dir(b)) != .Dir do return "cannot create the target folder"
@@ -759,6 +759,7 @@ fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 	p, _, e := fs_check_write(path, caller)
 	if e != "" do return e
 	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
+	if !fs_user_here(caller) && fs_credential_place(p) do return CREDENTIAL_PLACE_REFUSED // a caller may delete without asking (confirm: auto)
 	if who := fs_in_use_by(p, caller); who != "" do return who
 	fs_trash_why = ""
 	if !fs_trash_fn(p) {
@@ -776,7 +777,7 @@ fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 fs_trash_why: string
 
 CREDENTIAL_RENAME_REFUSED :: "credentials file: only you, in Deckhand's window, may rename it to a name that is not a credential's"
-CREDENTIAL_PLACE_REFUSED :: "it holds a coding agent's sign-in (by where it is): only you, in Deckhand's window, may rename it"
+CREDENTIAL_PLACE_REFUSED :: "a coding agent's sign-in or state is there (by where it is): only you, in Deckhand's window, may move or delete it"
 FS_IN_USE :: "a running terminal tab is in it: close it first"
 
 // A name file_read and `deckhand show` refuse by itself (settings_credential: agents' sign-ins;
@@ -825,21 +826,34 @@ fs_in_git :: proc(rel: string) -> bool {
 	return strings.contains(strings.to_lower(strings.concatenate({"/", rel, "/"}, context.temp_allocator), context.temp_allocator), "/.git/")
 }
 
-// Whether path is at or above a place whose files are credentials by where they are, not by their
-// names (settings_credential): pi's agent dir, Claude's config folders, Codex's homes and its
-// sign-in's folder, a .codex folder holding auth.json. Renaming one would strip that protection.
+// Whether path is at, above or inside a place whose files are credentials by where they are, not
+// by their names: pi's agent folder, Claude's config folders (also any folder holding
+// .credentials.json or .claude.json), Codex's homes and its sign-in's folder, a .codex folder
+// holding auth.json. HOME and above are never one (~/.claude.json lives in HOME). Real paths too.
 fs_credential_place :: proc(path: string) -> bool {
-	paths := [2]string{path, fs_real(path)}
+	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
+	homes := [2]string{home, fs_real(home)}
+	home_or_above :: proc(d: string, homes: [2]string) -> bool {
+		if d == "" || d == "/" || d == "." do return true
+		for h in homes do if h != "" && within(h, d) do return true
+		return false
+	}
 	places := make([dynamic]string, context.temp_allocator)
 	append(&places, pi_agent_dir())
 	for d in claude_config_dirs() do append(&places, d)
 	for d in claude_account_dirs(harness = .Codex) do append(&places, d)
 	if a := codex_auth_file(); a != "" do append(&places, filepath.dir(a))
-	for pl in places {
-		if pl == "" do continue
-		for x in ([2]string{strings.trim_right(pl, "/"), fs_real(pl)}) do for p in paths do if x != "" && within(x, p) do return true
+	for p in ([2]string{path, fs_real(path)}) {
+		for pl in places do for x in ([2]string{strings.trim_right(pl, "/"), fs_real(pl)}) {
+			if !home_or_above(x, homes) && (within(x, p) || within(p, x)) do return true // at, above or inside
+		}
+		// inside (or at) a folder that is a place by what it holds
+		for d := p; !home_or_above(d, homes); d = filepath.dir(d) {
+			if strings.equal_fold(filepath.base(d), ".codex") && os.exists(strings.concatenate({d, "/auth.json"}, context.temp_allocator)) do return true
+			if claude_marked_folder(d) do return true
+		}
 	}
-	return strings.equal_fold(filepath.base(path), ".codex") && os.exists(strings.concatenate({path, "/auth.json"}, context.temp_allocator))
+	return false
 }
 
 fs_reveal_path :: proc(path: string, caller: Caller) -> string {

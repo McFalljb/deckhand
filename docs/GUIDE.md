@@ -1442,8 +1442,8 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
 - **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
   the tab; close it first). It knows the folder a tab started in, not one a shell `cd`'d to later.
   Only you, in the window, can rename a credential's file (a sign-in, in any case; a key) to a
-  name that is not a credential's, or a folder holding an agent's sign-in (pi's agent folder, a
-  `.codex` folder, Claude's config folders); agents and browsers cannot.
+  name that is not a credential's, or move or trash anything into, out of or above an agent's
+  sign-in folder (pi's agent folder, Claude's and Codex's folders); agents and browsers cannot.
 - **Trash on a Linux core**: the XDG Trash (`~/.local/share/Trash`, where file managers restore
   from); a file on another disk is refused, never deleted for good.
 - **Filter**: type in the field above the tree to match paths loosely.

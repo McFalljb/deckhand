@@ -72,8 +72,11 @@ eventually
 assert_state focus.id files_name
 # a focus change from outside the window (set_focus is anyone's) cancels: nothing is renamed
 type half
+# a shortcut typed into the field itself (⌃A) does not let an outside focus change commit
+key a ctrl
+wait 300
 command {"type":"set_focus","widget":"files"}
-eventually
+wait 500
 assert_state focus.id files
 assert_files   notes.md\n
 assert_not_files half.md

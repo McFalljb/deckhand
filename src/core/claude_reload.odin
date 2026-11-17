@@ -80,10 +80,12 @@ Claude_Restart_Changed :: struct {
 	update:  bool,
 	all:     bool,
 	confirm: string, // class session_restart
+	harness: Harness, // .Codex: the Codex tabs (codex_file_class; no update bar); else Claude's
 }
 // claude_reload_later: hide the bar (update: the update bar), drop waiting restarts.
 Claude_Reload_Later :: struct {
-	update: bool,
+	update:  bool,
+	harness: Harness, // .Codex: the Codex bar; else Claude's
 }
 // Internal: watched Claude files changed (after the debounce), or claude's version on disk is
 // known or changed. Scopes as Reload_Watch's ("" every Claude tab, else a folder).
@@ -94,6 +96,7 @@ Claude_Reload_Watch :: struct {
 	version:   string, // "" = unchanged
 	ident:     string,
 	from_save: bool,
+	harness:   Harness, // .Codex: Codex's files (no version); else Claude's
 }
 // Internal: a Claude tab whose restart waited for idle restarts now, if still idle.
 Claude_Reload_Kick :: struct {
@@ -265,6 +268,35 @@ claude_file_class :: proc(path: string) -> Claude_File_Class {
 	return .Ignored
 }
 
+// What a running Codex reads only when it starts, in a Codex home (each account's; docs/CODEX.md
+// §6b): its config, its instructions, its hooks (Codex loads and trusts them at start), custom
+// prompts and execution rules. Not here: skills/ (Codex watches its skill files itself: the
+// app-server's skills/changed), hooks/ (scripts run anew each time), and everything else in a
+// home, Codex's state (codex_credential: never watched).
+CODEX_RESTART_FILES := [?]string{"config.toml", "AGENTS.md", "AGENTS.override.md", "hooks.json"}
+CODEX_RESTART_FOLDERS := [?]string{"prompts", "rules"}
+// The project's instructions Codex reads at start, in the cwd and each folder up to the
+// repository's root.
+CODEX_PROJECT_FILES := [?]string{"AGENTS.md", "AGENTS.override.md"}
+
+// Whether a running Codex session picks up a change of path by itself (.Live), needs a restart,
+// or Deckhand ignores it (Codex's state and anything not Codex's). p: absolute.
+codex_file_class :: proc(path: string) -> Claude_File_Class {
+	if path == "" || !filepath.is_abs(path) do return .Ignored
+	p, _ := filepath.clean(path, context.temp_allocator)
+	if settings_credential(p) do return .Ignored // Codex's sign-in and state too (codex_credential)
+	for home in claude_account_dirs(.Codex) do for c in ([2]string{home, fs_real(home)}) {
+		if c == "" || !under(p, c) do continue
+		first, _, rest := strings.partition(p[len(c) + 1:], "/")
+		if rest == "" && slice.contains(CODEX_RESTART_FILES[:], first) do return .Restart
+		if rest != "" && slice.contains(CODEX_RESTART_FOLDERS[:], first) do return .Restart
+		if rest != "" && first == "skills" do return .Live
+		return .Ignored
+	}
+	if slice.contains(CODEX_PROJECT_FILES[:], filepath.base(p)) do return .Restart
+	return .Ignored
+}
+
 // ---- claude's version, by looking only ----
 
 // The `claude` a Claude tab would start ("" = none found, or tests replace claude): harness_path
@@ -387,35 +419,35 @@ silent_span :: proc(d: time.Duration) -> string {
 tab_cwd :: proc(s: ^Open_Session, t: ^Tab) -> string {return t.cwd != "" ? t.cwd : s.cwd}
 
 // A scope for one account's config folder: only its tabs read those files. "" (every tab) while
-// the running tabs all have one account, as before accounts.
+// the running tabs (of that harness) all have one account, as before accounts.
 @(private = "file")
 ACCOUNT_SCOPE :: "account:"
 @(private = "file")
-account_scope :: proc(cfg: string) -> string {
-	if len(accounts_now()) <= 1 do return ""
+account_scope :: proc(cfg: string, h: Harness) -> string {
+	if len(accounts_now(h)) <= 1 do return ""
 	return strings.concatenate({ACCOUNT_SCOPE, cfg}, context.temp_allocator)
 }
 
-// The account folders of the running Claude tabs, sorted (temp).
+// The account folders of the running Claude (Codex) tabs, sorted (temp).
 @(private = "file")
-accounts_now :: proc() -> []string {
+accounts_now :: proc(h: Harness) -> []string {
 	out := make([dynamic]string, context.temp_allocator)
-	for x in running_claude() {
+	for x in running_harness(h) {
 		ct := x.t.kind.(Claude_Tab)
-		d := claude_account_dir(ct.account, .Claude)
+		d := claude_account_dir(ct.account, which(h))
 		if d != "" && !slice.contains(out[:], d) do append(&out, d)
 	}
 	slice.sort(out[:])
 	return out[:]
 }
 
-// Whether a Claude tab at cwd reads files of scope ("" every tab, an account's scope: its tabs,
-// else a folder: at or below).
+// Whether a Claude (Codex) tab at cwd reads files of scope ("" every tab, an account's scope: its
+// tabs, else a folder: at or below).
 @(private = "file")
 in_scope_tab :: proc(t: ^Tab, cwd, scope: string) -> bool {
 	if strings.has_prefix(scope, ACCOUNT_SCOPE) {
 		ct, _ := t.kind.(Claude_Tab)
-		return claude_account_dir(ct.account, .Claude) == scope[len(ACCOUNT_SCOPE):]
+		return claude_account_dir(ct.account, which(ct.harness)) == scope[len(ACCOUNT_SCOPE):]
 	}
 	return in_scope(cwd, scope)
 }
@@ -451,13 +483,17 @@ Claude_Running :: struct {
 	s: ^Open_Session,
 	t: ^Tab,
 }
-running_claude :: proc() -> []Claude_Running {
+// not Codex tabs (codex.odin): Claude Code's files and version are not theirs
+running_claude :: proc() -> []Claude_Running {return running_harness(.Claude)}
+
+// The running Claude tabs of a harness: Claude Code's (.Claude, or the zero .Pi) or Codex's.
+running_harness :: proc(harness: Harness) -> []Claude_Running {
+	h := which(harness)
 	out := make([dynamic]Claude_Running, context.temp_allocator)
 	for &s in state.open_sessions {
 		if s.home do continue
 		for &t in s.tabs {
-			// not Codex tabs (codex.odin): Claude Code's files and version are not theirs
-			if ct, is := t.kind.(Claude_Tab); is && ct.harness != .Codex && t.status == .Running do append(&out, Claude_Running{&s, &t})
+			if ct, is := t.kind.(Claude_Tab); is && which(ct.harness) == h && t.status == .Running do append(&out, Claude_Running{&s, &t})
 		}
 	}
 	return out[:]
@@ -500,6 +536,12 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 	info := &state.reload.claude
 	#partial switch c in cmd {
 	case Claude_Restart_Changed:
+		codex := which(c.harness) == .Codex
+		if codex {
+			info = &state.reload.codex
+			if c.update do return fail("Codex tabs have no update bar"), false
+		}
+		name := codex ? "Codex" : "Claude"
 		now := make([dynamic]^Tab, context.temp_allocator)
 		later := make([dynamic]^Tab, context.temp_allocator)
 		cut := make([dynamic]^Tab, context.temp_allocator)
@@ -508,7 +550,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		if c.confirm != "" do for p in state.pending_confirmations {
 			if _, is := p.command.(Claude_Restart_Changed); is && p.token == c.confirm do asker = p.caller
 		}
-		for x in running_claude() {
+		for x in running_harness(c.harness) {
 			t := x.t
 			if owns_tab(asker, t.id) || restart_waiting(t.id) do continue
 			if !c.all && (c.update ? !claude_reload_outdated(t) : !t.reload.stale) do continue
@@ -519,12 +561,13 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 			}
 		}
 		if len(now) + len(later) == 0 {
-			if len(cut) > 0 do return fail("no Claude tab here has reported its conversation (its plugin's hooks did not run): restart it by hand"), false
-			if c.all do return fail("no Claude tab is running"), false
-			return fail(c.update ? "no Claude tab runs an older Claude Code" : "no Claude tab needs a restart"), false
+			if len(cut) > 0 do return fail(codex ? "no Codex tab here has reported its conversation (Deckhand's hooks did not run there): restart it by hand" : "no Claude tab here has reported its conversation (its plugin's hooks did not run): restart it by hand"), false
+			if c.all do return fail(fmt.tprintf("no %s tab is running", name)), false
+			return fail(c.update ? "no Claude tab runs an older Claude Code" : fmt.tprintf("no %s tab needs a restart", name)), false
 		}
 		n := len(now) + len(later)
 		what := fmt.tprintf("restart %d Claude tab%s%s? Each resumes its conversation; background work Claude started there (background shells, monitors) stops.", n, n == 1 ? "" : "s", c.update && !c.all ? fmt.tprintf(" on Claude Code %s", claude_version_label(info.version)) : "")
+		if codex do what = fmt.tprintf("restart %d Codex tab%s? Each resumes its conversation; what Codex runs there now (its commands, background terminals) stops.", n, n == 1 ? "" : "s")
 		if len(later) > 0 do what = fmt.tprintf("%s %d busy tab%s wait%s until idle.", what, len(later), len(later) == 1 ? "" : "s", len(later) == 1 ? "s" : "")
 		// what runs there now, as Claude's last turn reported it (claude_panels.odin)
 		for x in ([][dynamic]^Tab{now, later}) do for t in x do if bg := claude_background_names(t.id); bg != "" do what = fmt.tprintf("%s Running in %s: %s.", what, cut_utf8(one_line(t.title, context.temp_allocator), 40), bg)
@@ -552,21 +595,23 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		strings.write_byte(&b, '}')
 		return {ok = true, data = strings.to_string(b)}, true
 	case Claude_Reload_Later:
-		if c.update do info.update_dismissed = true
+		info = claude_reload_info(c.harness)
+		if c.update && which(c.harness) == .Claude do info.update_dismissed = true
 		else {
 			info.dismissed = true
 			info.from_save = false
 		}
-		for x in running_claude() do if x.t.reload.queued == .Restart {
+		for x in running_harness(c.harness) do if x.t.reload.queued == .Restart {
 			x.t.reload.queued, x.t.reload.flags, x.t.reload.all = .None, false, false
 			set_note(x.t, "")
 		}
 		return {ok = true}, true
 	case Claude_Reload_Watch:
+		info = claude_reload_info(c.harness)
 		if len(c.paths) > 0 || c.more > 0 {
 			// a new round: Details lists only what changed since nothing was pending
 			pending := false
-			for x in running_claude() do if x.t.reload.stale || x.t.reload.queued != .None do pending = true
+			for x in running_harness(c.harness) do if x.t.reload.stale || x.t.reload.queued != .None do pending = true
 			if !pending {
 				for p in info.changed do delete(p)
 				clear(&info.changed)
@@ -579,7 +624,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 				else do info.changed_more += 1
 			}
 			info.changed_more += c.more
-			for x in running_claude() {
+			for x in running_harness(c.harness) {
 				cwd := tab_cwd(x.s, x.t)
 				for scope in c.scopes do if in_scope_tab(x.t, cwd, scope) {
 					x.t.reload.stale = true
@@ -590,7 +635,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 			info.dismissed = false
 			if c.from_save do info.from_save = true
 		}
-		if c.ident != "" && c.ident != info.ident {
+		if which(c.harness) == .Claude && c.ident != "" && c.ident != info.ident {
 			first := info.ident == ""
 			delete(info.ident)
 			delete(info.version)
@@ -652,11 +697,14 @@ claude_reload_write :: proc(b: ^strings.Builder, cmd: Command) {
 	case Claude_Restart_Changed:
 		if c.update do strings.write_string(b, `,"update":true`)
 		if c.all do strings.write_string(b, `,"all":true`)
+		if which(c.harness) == .Codex do strings.write_string(b, `,"harness":"codex"`)
 		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
 	case Claude_Reload_Later:
 		if c.update do strings.write_string(b, `,"update":true`)
+		if which(c.harness) == .Codex do strings.write_string(b, `,"harness":"codex"`)
 	case Claude_Reload_Watch:
 		fmt.sbprintf(b, `,"files":%d`, len(c.paths) + c.more)
+		if which(c.harness) == .Codex do strings.write_string(b, `,"harness":"codex"`)
 		if c.version != "" {
 			strings.write_string(b, `,"version":`)
 			json_quote(b, c.version)
@@ -671,14 +719,14 @@ claude_reload_write :: proc(b: ^strings.Builder, cmd: Command) {
 
 claude_reload_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
 	#partial switch c in cmd {
-	case Claude_Restart_Changed: return Claude_Restart_Changed{update = c.update, all = c.all, confirm = strings.clone(c.confirm, a)}
+	case Claude_Restart_Changed: return Claude_Restart_Changed{update = c.update, all = c.all, confirm = strings.clone(c.confirm, a), harness = c.harness}
 	case Claude_Restart_Anyway:  return Claude_Restart_Anyway{tab_id = c.tab_id, confirm = strings.clone(c.confirm, a)}
 	case Claude_Reload_Watch:
 		paths := make([]string, len(c.paths), a)
 		scopes := make([]string, len(c.scopes), a)
 		for x, i in c.paths do paths[i] = strings.clone(x, a)
 		for x, i in c.scopes do scopes[i] = strings.clone(x, a)
-		return Claude_Reload_Watch{paths = paths, more = c.more, scopes = scopes, version = strings.clone(c.version, a), ident = strings.clone(c.ident, a), from_save = c.from_save}
+		return Claude_Reload_Watch{paths = paths, more = c.more, scopes = scopes, version = strings.clone(c.version, a), ident = strings.clone(c.ident, a), from_save = c.from_save, harness = c.harness}
 	}
 	return cmd
 }
@@ -728,9 +776,9 @@ Src :: struct {
 }
 
 @(private = "file")
-cw: struct {
+Watcher :: struct {
 	srcs:      [dynamic]Src,
-	key:       string, // the running Claude tabs' folders the sources were built for (owned)
+	key:       string, // the running tabs' folders the sources were built for (owned)
 	last_poll: time.Tick,
 	pending:   [dynamic]string, // owned, at most RELOAD_CHANGED_MAX
 	more:      int,
@@ -738,73 +786,92 @@ cw: struct {
 	due:       time.Tick,
 	has_due:   bool,
 	from_save: bool,
-	version:   string, // to report (owned)
-	ident:     string, // to report (owned)
-	bin:       string, // claude's path (owned; "" = none)
+	version:   string, // to report (owned; Claude's only)
+	ident:     string, // to report (owned; Claude's only)
+	bin:       string, // claude's path (owned; "" = none; Claude's only)
 	last_find: time.Tick,
 }
 
-// Forgets the watcher's state (tests).
+// One watcher per harness: .Claude (Claude Code's files and version), .Codex (Codex's files:
+// codex_file_class; no version). .Pi is reload.odin's, never here.
+@(private = "file")
+cws: [Harness]Watcher
+
+// The harness a watcher or command is about: .Codex, else Claude (a zero value, .Pi, is Claude's:
+// the commands' harness field came later).
+@(private = "file")
+which :: proc(h: Harness) -> Harness {return h == .Codex ? .Codex : .Claude}
+
+// The bars' model of a harness (State.reload.claude, State.reload.codex).
+claude_reload_info :: proc(h: Harness) -> ^Claude_Reload_Info {return which(h) == .Codex ? &state.reload.codex : &state.reload.claude}
+
+// Forgets the watchers' state (tests).
 claude_reload_watch_reset :: proc() {
-	for s in cw.srcs {
-		delete(s.path)
-		delete(s.scope)
+	for &w in cws {
+		for s in w.srcs {
+			delete(s.path)
+			delete(s.scope)
+		}
+		for p in w.pending do delete(p)
+		for p in w.scopes do delete(p)
+		delete(w.srcs)
+		delete(w.pending)
+		delete(w.scopes)
+		delete(w.key)
+		delete(w.version)
+		delete(w.ident)
+		delete(w.bin)
+		w = {}
 	}
-	for p in cw.pending do delete(p)
-	for p in cw.scopes do delete(p)
-	delete(cw.srcs)
-	delete(cw.pending)
-	delete(cw.scopes)
-	delete(cw.key)
-	delete(cw.version)
-	delete(cw.ident)
-	delete(cw.bin)
-	cw = {}
 }
 
 // Notes a changed path; reported once nothing changed for RELOAD_DEBOUNCE.
 @(private = "file")
-pending_add :: proc(path, scope: string, at := time.Tick{}) {
+pending_add :: proc(w: ^Watcher, path, scope: string, at := time.Tick{}) {
 	now := at == {} ? time.tick_now() : at
-	if !slice.contains(cw.scopes[:], scope) do append(&cw.scopes, strings.clone(scope))
-	if len(cw.pending) >= RELOAD_CHANGED_MAX do cw.more += 1
-	else if !slice.contains(cw.pending[:], path) do append(&cw.pending, strings.clone(path))
-	cw.due = time.tick_add(now, RELOAD_DEBOUNCE)
-	cw.has_due = true
+	if !slice.contains(w.scopes[:], scope) do append(&w.scopes, strings.clone(scope))
+	if len(w.pending) >= RELOAD_CHANGED_MAX do w.more += 1
+	else if !slice.contains(w.pending[:], path) do append(&w.pending, strings.clone(path))
+	w.due = time.tick_add(now, RELOAD_DEBOUNCE)
+	w.has_due = true
 }
 
 // Reports what changed if the debounce passed (true when it did).
-claude_reload_flush :: proc(at := time.Tick{}) -> bool {
+claude_reload_flush :: proc(at := time.Tick{}, harness := Harness.Claude) -> bool {
+	h := which(harness)
+	w := &cws[h]
 	now := at == {} ? time.tick_now() : at
-	if !cw.has_due || time.tick_diff(cw.due, now) < 0 do return false
-	cw.has_due = false
-	run_command(Claude_Reload_Watch{paths = cw.pending[:], more = cw.more, scopes = cw.scopes[:], version = cw.version, ident = cw.ident, from_save = cw.from_save})
-	for p in cw.pending do delete(p)
-	for p in cw.scopes do delete(p)
-	clear(&cw.pending)
-	clear(&cw.scopes)
-	cw.more = 0
-	delete(cw.version)
-	delete(cw.ident)
-	cw.version, cw.ident = "", ""
-	cw.from_save = false
+	if !w.has_due || time.tick_diff(w.due, now) < 0 do return false
+	w.has_due = false
+	run_command(Claude_Reload_Watch{paths = w.pending[:], more = w.more, scopes = w.scopes[:], version = w.version, ident = w.ident, from_save = w.from_save, harness = h})
+	for p in w.pending do delete(p)
+	for p in w.scopes do delete(p)
+	clear(&w.pending)
+	clear(&w.scopes)
+	w.more = 0
+	delete(w.version)
+	delete(w.ident)
+	w.version, w.ident = "", ""
+	w.from_save = false
 	return true
 }
 
 // Paths waiting for the debounce (tests).
-claude_reload_pending_count :: proc() -> int {return len(cw.pending)}
+claude_reload_pending_count :: proc(harness := Harness.Claude) -> int {return len(cws[which(harness)].pending)}
 
 // The editor saved a file (settings_after_save): one a running Claude session reads only at
-// start shows the bar at once; one it applies live, nothing.
+// start shows the bar at once; one it applies live, nothing. Codex's: codex_reload_note_save.
 claude_reload_note_save :: proc(path: string) {
+	codex_reload_note_save(path)
+	w := &cws[.Claude]
 	if claude_file_class(path) != .Restart {
 		// a live settings file: only a change of its CLAUDE_RESTART_KEYS (a watched one)
 		p, _ := filepath.clean(path, context.temp_allocator)
-		for &s in cw.srcs do if s.kind == .Keys && s.path == p {
+		for &s in w.srcs do if s.kind == .Keys && s.path == p {
 			if !keys_changed(&s) do return
-			pending_add(s.path, s.scope)
-			cw.due = time.tick_now()
-			cw.from_save = true
+			pending_add(w, s.path, s.scope)
+			w.due = time.tick_now()
+			w.from_save = true
 			window_state_changed()
 			return
 		}
@@ -816,29 +883,57 @@ claude_reload_note_save :: proc(path: string) {
 	in_config := false
 	for cfg in claude_account_dirs(.Claude) do if under(p, cfg) {
 		// only a running account's tabs read it (none running: the default's, for new tabs)
-		running := accounts_now()
+		running := accounts_now(.Claude)
 		if len(running) > 0 ? !slice.contains(running, cfg) : cfg != claude_config_dir() do return
 		in_config = true
-		scope = account_scope(cfg) // only that account's tabs read it ("" while one account runs)
+		scope = account_scope(cfg, .Claude) // only that account's tabs read it ("" while one account runs)
 	}
 	if !in_config && (plugin == "" || !under(p, plugin)) {
 		// a project's file: the folder that holds its .claude/ (at any depth in it), else its own
 		if i := strings.last_index(p, "/.claude/"); i > 0 do scope = p[:i]
 		else do scope = filepath.dir(p)
 	}
-	pending_add(p, scope)
-	cw.due = time.tick_now()
-	cw.from_save = true
+	pending_add(w, p, scope)
+	w.due = time.tick_now()
+	w.from_save = true
+	window_state_changed()
+}
+
+// A save of a file a running Codex reads only at start (codex_file_class), while a Codex tab
+// runs: its account's tabs (a home's file) or the tabs at or below its folder (AGENTS.md).
+@(private = "file")
+codex_reload_note_save :: proc(path: string) {
+	if codex_file_class(path) != .Restart || len(running_harness(.Codex)) == 0 do return
+	w := &cws[.Codex]
+	p, _ := filepath.clean(path, context.temp_allocator)
+	scope := ""
+	in_home := false
+	for home in claude_account_dirs(.Codex) do for c in ([2]string{home, fs_real(home)}) do if under(p, c) {
+		if !slice.contains(accounts_now(.Codex), home) do return // no running tab of that home reads it
+		in_home = true
+		scope = account_scope(home, .Codex)
+	}
+	if !in_home do scope = filepath.dir(p) // a project's AGENTS.md: the tabs at or below its folder
+	pending_add(w, p, scope)
+	w.due = time.tick_now()
+	w.from_save = true
 	window_state_changed()
 }
 
 // Every frame (editor_tick): records each Claude tab's version when it starts, restarts the
-// queued ones that are idle now, polls while a Claude tab runs, reports after the debounce.
+// queued ones that are idle now, polls while a Claude (Codex) tab runs, reports after the
+// debounce. Claude's and Codex's watchers each.
 claude_reload_tick :: proc() {
-	tabs := running_claude()
+	for h in ([2]Harness{.Claude, .Codex}) do reload_tick_of(h)
+}
+
+@(private = "file")
+reload_tick_of :: proc(h: Harness) {
+	w := &cws[h]
+	tabs := running_harness(h)
 	kicks := make([dynamic]u64, context.temp_allocator)
 	for &s in state.open_sessions do for &t in s.tabs {
-		if _, is := t.kind.(Claude_Tab); is && t.status != .Running && t.reload.started {
+		if ct, is := t.kind.(Claude_Tab); is && which(ct.harness) == h && t.status != .Running && t.reload.started {
 			t.reload.started = false
 			window_state_changed() // a tick, not a command: the window's replica follows
 		}
@@ -850,7 +945,7 @@ claude_reload_tick :: proc() {
 			t.reload.started = true
 			t.reload.stale = false
 			window_state_changed()
-			set_version(t, state.reload.claude.ident)
+			if h == .Claude do set_version(t, state.reload.claude.ident)
 			if strings.has_prefix(t.reload.note, "restarting") do set_note(t, "restarted")
 		}
 		if t.reload.queued == .Restart {
@@ -863,32 +958,32 @@ claude_reload_tick :: proc() {
 	}
 	for id in kicks do run_command(Claude_Reload_Kick{tab_id = id})
 	if len(tabs) == 0 {
-		if len(cw.srcs) > 0 { 	// stop watching
-			claude_reload_build({})
-			delete(cw.key)
-			cw.key = ""
+		if len(w.srcs) > 0 { 	// stop watching
+			claude_reload_build({}, h)
+			delete(w.key)
+			w.key = ""
 		}
-		claude_reload_flush()
+		claude_reload_flush(harness = h)
 		return
 	}
-	if cw.last_poll == {} || time.tick_since(cw.last_poll) > RELOAD_POLL {
-		cw.last_poll = time.tick_now()
-		claude_reload_poll()
+	if w.last_poll == {} || time.tick_since(w.last_poll) > RELOAD_POLL {
+		w.last_poll = time.tick_now()
+		claude_reload_poll(h)
 	}
-	if claude_reload_flush() do window_state_changed()
+	if claude_reload_flush(harness = h) do window_state_changed()
 }
 
 // Tests: a poll now, and its report as if the debounce passed.
-claude_reload_poll_now :: proc() {
-	claude_reload_poll()
-	claude_reload_flush(time.tick_add(time.tick_now(), 2 * RELOAD_DEBOUNCE))
+claude_reload_poll_now :: proc(harness := Harness.Claude) {
+	claude_reload_poll(which(harness))
+	claude_reload_flush(time.tick_add(time.tick_now(), 2 * RELOAD_DEBOUNCE), harness)
 }
 
-// The running Claude tabs' folders, sorted.
+// The running tabs' folders (Claude's, or Codex's), sorted.
 @(private = "file")
-cwds_now :: proc() -> []string {
+cwds_now :: proc(h: Harness) -> []string {
 	out := make([dynamic]string, context.temp_allocator)
-	for x in running_claude() {
+	for x in running_harness(h) {
 		c := tab_cwd(x.s, x.t)
 		if c != "" && !slice.contains(out[:], c) do append(&out, c)
 	}
@@ -974,54 +1069,56 @@ keys_changed :: proc(s: ^Src) -> bool {
 
 // One poll: the sources again if the tabs' folders changed, every source, claude's version.
 @(private = "file")
-claude_reload_poll :: proc() {
+claude_reload_poll :: proc(h: Harness) {
+	w := &cws[h]
 	now := time.tick_now()
-	cwds := cwds_now()
-	key := strings.concatenate({strings.join(cwds, "\x00", context.temp_allocator), "\x01", strings.join(accounts_now(), "\x00", context.temp_allocator)}, context.temp_allocator)
-	if key != cw.key {
-		delete(cw.key)
-		cw.key = strings.clone(key)
-		claude_reload_build(cwds)
+	cwds := cwds_now(h)
+	key := strings.concatenate({strings.join(cwds, "\x00", context.temp_allocator), "\x01", strings.join(accounts_now(h), "\x00", context.temp_allocator)}, context.temp_allocator)
+	if key != w.key {
+		delete(w.key)
+		w.key = strings.clone(key)
+		claude_reload_build(cwds, h)
 	}
-	for &s in cw.srcs {
+	for &s in w.srcs {
 		switch s.kind {
 		case .File:
 			k, st := path_stat(s.path)
 			if k == s.pk && (k == .Missing || (st.mtime == s.stamp.mtime && st.size == s.stamp.size && st.inode == s.stamp.inode)) do continue
 			s.pk, s.stamp = k, st
-			pending_add(s.path, s.scope, now)
+			pending_add(w, s.path, s.scope, now)
 		case .Exists:
 			k := path_kind(s.path)
 			if (k == .Dir) == (s.pk == .Dir) do continue
 			s.pk = k
-			pending_add(s.path, s.scope, now)
+			pending_add(w, s.path, s.scope, now)
 		case .Folder:
 			k := path_kind(s.path)
 			d := k == .Dir ? folder_digest(s.path) : 0
 			if k == s.pk && d == s.digest do continue
 			s.pk, s.digest = k, d
-			pending_add(s.path, s.scope, now)
+			pending_add(w, s.path, s.scope, now)
 		case .Keys:
-			if keys_changed(&s) do pending_add(s.path, s.scope, now)
+			if keys_changed(&s) do pending_add(w, s.path, s.scope, now)
 		}
 	}
+	if h == .Codex do return // Codex's version: no bar (codex.odin checks it at each start)
 	// claude's version on disk: found again now and then (PATH may change), looked at each poll
-	if cw.last_find == {} || time.tick_since(cw.last_find) > CLAUDE_FIND_EVERY || hook_env(.Claude_Bin) != "" {
-		cw.last_find = now
+	if w.last_find == {} || time.tick_since(w.last_find) > CLAUDE_FIND_EVERY || hook_env(.Claude_Bin) != "" {
+		w.last_find = now
 		b := claude_binary_path()
-		if b != cw.bin {
-			delete(cw.bin)
-			cw.bin = strings.clone(b)
+		if b != w.bin {
+			delete(w.bin)
+			w.bin = strings.clone(b)
 		}
 	}
-	if cw.bin != "" {
-		label, ident := claude_version_of(cw.bin)
-		if ident != "" && ident != state.reload.claude.ident && ident != cw.ident {
-			delete(cw.version)
-			delete(cw.ident)
-			cw.version, cw.ident = strings.clone(label), strings.clone(ident)
-			cw.due = state.reload.claude.ident == "" ? now : time.tick_add(now, RELOAD_DEBOUNCE)
-			cw.has_due = true
+	if w.bin != "" {
+		label, ident := claude_version_of(w.bin)
+		if ident != "" && ident != state.reload.claude.ident && ident != w.ident {
+			delete(w.version)
+			delete(w.ident)
+			w.version, w.ident = strings.clone(label), strings.clone(ident)
+			w.due = state.reload.claude.ident == "" ? now : time.tick_add(now, RELOAD_DEBOUNCE)
+			w.has_due = true
 		}
 	}
 }
@@ -1036,40 +1133,43 @@ NEW_FOLDERS :: [?]string{"agents", "skills"} // watched only for appearing (Clau
 
 // The sources for these folders (cwds_now; none = stop). What was known of sources still
 // watched is kept, so a change between polls still shows.
-claude_reload_build :: proc(cwds: []string) {
-	old := cw.srcs
-	cw.srcs = {}
-	if len(cwds) > 0 {
+claude_reload_build :: proc(cwds: []string, harness := Harness.Claude) {
+	h := which(harness)
+	w := &cws[h]
+	old := w.srcs
+	w.srcs = {}
+	if len(cwds) > 0 && h == .Codex do codex_sources(w, cwds)
+	else if len(cwds) > 0 {
 		ids := credential_ids() // the sign-in files' ids, once for every source
 		// each running tab's account's config folder (claude_accounts.odin), for its tabs only
-		accts := accounts_now()
+		accts := accounts_now(.Claude)
 		if len(accts) == 0 do accts = []string{claude_config_dir()} // none running: the default's
 		for cfg in accts {
-			sc := account_scope(cfg)
-			add(fmt.tprintf("%s/CLAUDE.md", cfg), sc, .File, ids)
-			for d in RESTART_FOLDERS do add(fmt.tprintf("%s/%s", cfg, d), sc, .Folder, ids)
-			for d in NEW_FOLDERS do add(fmt.tprintf("%s/%s", cfg, d), sc, .Exists, ids)
-			add(fmt.tprintf("%s/settings.json", cfg), sc, .Keys, ids)
+			sc := account_scope(cfg, .Claude)
+			add(w, fmt.tprintf("%s/CLAUDE.md", cfg), sc, .File, ids)
+			for d in RESTART_FOLDERS do add(w, fmt.tprintf("%s/%s", cfg, d), sc, .Folder, ids)
+			for d in NEW_FOLDERS do add(w, fmt.tprintf("%s/%s", cfg, d), sc, .Exists, ids)
+			add(w, fmt.tprintf("%s/settings.json", cfg), sc, .Keys, ids)
 		}
-		if plugin := claude_plugin_dir(); plugin != "" do for f in PLUGIN_FILES do add(fmt.tprintf("%s/%s", plugin, f), "", .File, ids)
+		if plugin := claude_plugin_dir(); plugin != "" do for f in PLUGIN_FILES do add(w, fmt.tprintf("%s/%s", plugin, f), "", .File, ids)
 		for c in cwds {
 			// instructions: the cwd (watched for being made) and every folder above it
 			d, _ := filepath.clean(c, context.temp_allocator)
 			for i := 0; i < 32; i += 1 {
 				for name in ([]string{"CLAUDE.md", "CLAUDE.local.md", ".claude/CLAUDE.md"}) {
 					p := fmt.tprintf("%s/%s", d == "/" ? "" : d, name)
-					if d == c || path_kind(p) == .File do add(p, d, .File, ids)
+					if d == c || path_kind(p) == .File do add(w, p, d, .File, ids)
 				}
 				if d == "/" || d == "" || d == "." do break
 				d = filepath.dir(d)
 			}
-			add(fmt.tprintf("%s/.mcp.json", c), c, .File, ids)
-			for f in RESTART_FOLDERS do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Folder, ids)
-			for f in NEW_FOLDERS do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Exists, ids)
-			for f in ([]string{"settings.json", "settings.local.json"}) do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Keys, ids)
+			add(w, fmt.tprintf("%s/.mcp.json", c), c, .File, ids)
+			for f in RESTART_FOLDERS do add(w, fmt.tprintf("%s/.claude/%s", c, f), c, .Folder, ids)
+			for f in NEW_FOLDERS do add(w, fmt.tprintf("%s/.claude/%s", c, f), c, .Exists, ids)
+			for f in ([]string{"settings.json", "settings.local.json"}) do add(w, fmt.tprintf("%s/.claude/%s", c, f), c, .Keys, ids)
 		}
 	}
-	for &s in cw.srcs {
+	for &s in w.srcs {
 		for &o in old do if o.path == s.path && o.kind == s.kind {
 			s.pk, s.stamp, s.digest, s.keys_ok = o.pk, o.stamp, o.digest, o.keys_ok
 			break
@@ -1082,12 +1182,50 @@ claude_reload_build :: proc(cwds: []string) {
 	delete(old)
 }
 
+// What a running Codex reads only when it starts (codex_file_class), as sources: each running
+// tab's home's CODEX_RESTART_FILES and CODEX_RESTART_FOLDERS (stamps and folder digests only,
+// never contents; nothing else in a home, which add refuses anyway: codex_credential), and the
+// project's instructions, AGENTS.md and AGENTS.override.md from the cwd up to the repository's
+// root (the first folder above it with a .git; none: the cwd only), as Codex finds them.
+@(private = "file")
+codex_sources :: proc(w: ^Watcher, cwds: []string) {
+	ids := credential_ids()
+	accts := accounts_now(.Codex)
+	if len(accts) == 0 do accts = []string{codex_home()}
+	for home in accts {
+		if home == "" do continue
+		sc := account_scope(home, .Codex)
+		for f in CODEX_RESTART_FILES do add(w, fmt.tprintf("%s/%s", home, f), sc, .File, ids)
+		for d in CODEX_RESTART_FOLDERS do add(w, fmt.tprintf("%s/%s", home, d), sc, .Folder, ids)
+	}
+	for c in cwds {
+		top, _ := filepath.clean(c, context.temp_allocator)
+		root := top
+		for d, i := top, 0; i < 32; i += 1 {
+			if path_kind(fmt.tprintf("%s/.git", d == "/" ? "" : d)) != .Missing {
+				root = d
+				break
+			}
+			if d == "/" || d == "" || d == "." do break
+			d = filepath.dir(d)
+		}
+		for d, i := top, 0; i < 32; i += 1 {
+			for name in CODEX_PROJECT_FILES {
+				p := fmt.tprintf("%s/%s", d == "/" ? "" : d, name)
+				if d == top || path_kind(p) == .File do add(w, p, d, .File, ids)
+			}
+			if d == root || d == "/" || d == "" || d == "." do break
+			d = filepath.dir(d)
+		}
+	}
+}
+
 // A source; one per path (a scope of every tab wins); never a credential or state file.
 @(private = "file")
-add :: proc(path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
+add :: proc(w: ^Watcher, path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 	p, _ := filepath.clean(path, context.temp_allocator)
 	if settings_credential(p, ids) do return
-	for &s in cw.srcs {
+	for &s in w.srcs {
 		if s.path != p do continue
 		if scope == "" && s.scope != "" {
 			delete(s.scope)
@@ -1095,7 +1233,7 @@ add :: proc(path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 		}
 		return
 	}
-	if len(cw.srcs) >= RELOAD_FILES_MAX do return
+	if len(w.srcs) >= RELOAD_FILES_MAX do return
 	src := Src{path = strings.clone(p), scope = strings.clone(scope), kind = kind}
 	switch kind {
 	case .File:   src.pk, src.stamp = path_stat(p)
@@ -1107,13 +1245,13 @@ add :: proc(path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 		src.pk, src.stamp = path_stat(p)
 		src.digest, src.keys_ok = restart_keys_digest(p)
 	}
-	append(&cw.srcs, src)
+	append(&w.srcs, src)
 }
 
 // For tests: the sources now (path → scope; folders end in "/").
-claude_reload_sources_for_test :: proc() -> map[string]string {
+claude_reload_sources_for_test :: proc(harness := Harness.Claude) -> map[string]string {
 	m := make(map[string]string, context.temp_allocator)
-	for s in cw.srcs {
+	for s in cws[which(harness)].srcs {
 		k := s.kind == .File ? s.path : s.kind == .Keys ? strings.concatenate({s.path, "#keys"}, context.temp_allocator) : strings.concatenate({s.path, "/"}, context.temp_allocator)
 		m[k] = s.scope
 	}

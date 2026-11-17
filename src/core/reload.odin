@@ -128,6 +128,7 @@ Reload_Info :: struct {
 	pi_version:        string, // pi's version on disk now ("" = unknown)
 	restart_dismissed: bool, // Later on the restart bar: until the next version
 	claude:            Claude_Reload_Info, // Claude Code's bars (claude_reload.odin)
+	codex:             Claude_Reload_Info, // Codex's settings bar (claude_reload.odin; no version, no update bar)
 }
 
 // pi_reload_all: reload every running pi tab (only_changed: those a watched
@@ -560,6 +561,8 @@ write_reload :: proc(b: ^strings.Builder, r: Reload_Info) {
 	json_quote(b, r.pi_version)
 	fmt.sbprintf(b, `,"restart_dismissed":%v,"claude":`, r.restart_dismissed)
 	write_claude_reload(b, r.claude) // claude_reload.odin
+	strings.write_string(b, `,"codex":`)
+	write_claude_reload(b, r.codex)
 	strings.write_byte(b, '}')
 }
 

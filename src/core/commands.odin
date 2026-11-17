@@ -2342,7 +2342,7 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok
 	case Claude_Restart_Changed:
 		y, ok := b.(Claude_Restart_Changed)
-		return ok && x.update == y.update && x.all == y.all
+		return ok && x.update == y.update && x.all == y.all && (x.harness == .Codex) == (y.harness == .Codex)
 	case Claude_Restart_Anyway:
 		y, ok := b.(Claude_Restart_Anyway)
 		return ok && x.tab_id == y.tab_id

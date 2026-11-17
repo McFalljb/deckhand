@@ -134,6 +134,14 @@ web_bars_json :: proc() -> string {
 		if can do act(&b, false, "Restart", "command", update ? `{"type":"claude_restart_changed","update":true}` : `{"type":"claude_restart_changed"}`)
 		strings.write_string(&b, "]}")
 	}
+	// Codex's settings bar (every Codex tab's): Later and Restart, as Claude's
+	if claude_bar_shows(false, .Codex) {
+		msg, can := claude_reload_message(false, .Codex)
+		bar(&b, &n, 0, "codex", "codex_reload", "info", msg)
+		act(&b, true, "Later", "command", `{"type":"claude_reload_later","harness":"codex"}`)
+		if can do act(&b, false, "Restart", "command", `{"type":"claude_restart_changed","harness":"codex"}`)
+		strings.write_string(&b, "]}")
+	}
 	strings.write_byte(&b, ']')
 	return strings.to_string(b)
 }

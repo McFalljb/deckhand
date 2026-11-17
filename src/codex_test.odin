@@ -1914,3 +1914,158 @@ codex_app_chat_history_refiled :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n--no-daemon\n-C\n%s\n", cx_id(3), open)), "%q", got)
 	if rs, _, _ := core.find_tab(r3.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
 }
+
+// ---- hot reload (claude_reload.odin, docs/CODEX.md "Hot reload") ----
+
+// A temp Codex home (CODEX_HOME) with config, instructions, hooks, prompts, skills and Codex's
+// state (sign-in, sessions): never the user's ~/.codex.
+@(private = "file")
+cx_reload_home :: proc(tag: string) -> string {
+	home := cx_dir(tag)
+	for d in ([]string{"prompts", "rules", "skills/s1", "sessions/2026/11/17", "hooks"}) do os.make_directory_all(fmt.tprintf("%s/%s", home, d))
+	for f in ([]string{"config.toml", "AGENTS.md", "hooks.json", "auth.json", "session_index.jsonl", "history.jsonl", "skills/s1/SKILL.md", "prompts/p.md"}) {
+		_ = os.write_entire_file(fmt.tprintf("%s/%s", home, f), transmute([]u8)string("x\n"))
+	}
+	os.set_env("CODEX_HOME", home)
+	core.claude_reload_watch_reset()
+	core.dead_tab_reset()
+	return home
+}
+
+@(private = "file")
+cx_reload_done :: proc() {
+	core.claude_reload_watch_reset()
+	core.dead_tab_reset()
+	os.unset_env("CODEX_HOME")
+}
+
+// Which Codex files a running Codex reads only at start (a Restart bar), which it applies itself
+// (skills: no bar), and that its sign-in and state are never looked at.
+@(test)
+codex_reload_classify :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rclass")
+	defer cx_reload_done()
+	proj := cx_dir("rclass-proj")
+	C :: core.Claude_File_Class
+	Case :: struct {
+		p:    string,
+		want: C,
+	}
+	cases := []Case {
+		{fmt.tprintf("%s/config.toml", home), .Restart},
+		{fmt.tprintf("%s/AGENTS.md", home), .Restart},
+		{fmt.tprintf("%s/AGENTS.override.md", home), .Restart},
+		{fmt.tprintf("%s/hooks.json", home), .Restart},
+		{fmt.tprintf("%s/prompts/p.md", home), .Restart},
+		{fmt.tprintf("%s/rules/default.rules", home), .Restart},
+		{fmt.tprintf("%s/AGENTS.md", proj), .Restart},
+		{fmt.tprintf("%s/AGENTS.override.md", proj), .Restart},
+		{fmt.tprintf("%s/skills/s1/SKILL.md", home), .Live},
+		{fmt.tprintf("%s/hooks/run.sh", home), .Ignored},
+		{fmt.tprintf("%s/auth.json", home), .Ignored},
+		{fmt.tprintf("%s/session_index.jsonl", home), .Ignored},
+		{fmt.tprintf("%s/history.jsonl", home), .Ignored},
+		{fmt.tprintf("%s/sessions/2026/11/17/rollout-x.jsonl", home), .Ignored},
+		{fmt.tprintf("%s/config.toml", proj), .Ignored},
+		{"AGENTS.md", .Ignored},
+	}
+	for c in cases do testing.expectf(t, core.codex_file_class(c.p) == c.want, "%s: %v, want %v", c.p, core.codex_file_class(c.p), c.want)
+	// Claude's classes never take Codex's files
+	testing.expect_value(t, core.claude_file_class(fmt.tprintf("%s/config.toml", home)), C.Ignored)
+}
+
+// A changed Codex file a running Codex reads only at start: the Codex bar (native and a browser's
+// strip), Restart resumes the conversation (`codex resume <id>`), after the user confirms; Claude's
+// bar and watcher never take a Codex tab, nor the reverse.
+@(test)
+codex_reload_bar_and_restart :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rflow")
+	defer cx_reload_done()
+	argd := cx_dir("rflow-argv")
+	argf := fmt.tprintf("%s/argv", argd)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, argf))
+	dir, _, tab := cx_codex_session(t, "rflow")
+	testing.expect(t, tab != 0)
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad531"
+	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid, source = "startup"}, CX_SCRIPT).ok)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 0)
+	// what is watched: the home's config, instructions, hooks, prompts and rules; the project's
+	// AGENTS.md; never Codex's sign-in, state or skills
+	src := core.claude_reload_sources_for_test(.Codex)
+	for f in ([]string{"config.toml", "AGENTS.md", "AGENTS.override.md", "hooks.json"}) do testing.expectf(t, fmt.tprintf("%s/%s", home, f) in src, "watched: %s", f)
+	for f in ([]string{"prompts/", "rules/"}) do testing.expectf(t, fmt.tprintf("%s/%s", home, f) in src, "watched: %s", f)
+	testing.expectf(t, src[fmt.tprintf("%s/AGENTS.md", dir)] == dir, "the project's AGENTS.md, for its tabs")
+	for k, _ in src {
+		for never in ([]string{"auth.json", "sessions", "session_index", "history", "skills", "/hooks/"}) do testing.expectf(t, !strings.contains(k, never), "never watched: %s", k)
+	}
+	testing.expect_value(t, len(core.claude_reload_sources_for_test()), 0) // Claude's watcher: no Claude tab
+	// a skill (Codex watches those itself): no bar; config.toml: the bar
+	_ = os.write_entire_file(fmt.tprintf("%s/skills/s1/SKILL.md", home), transmute([]u8)string("changed\n"))
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 0)
+	_ = os.write_entire_file(fmt.tprintf("%s/config.toml", home), transmute([]u8)string("model = \"o3\"\n"))
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 1)
+	_, tb, _ := core.claude_tab_of(tab)
+	testing.expect(t, tb.reload.stale, "the Codex tab is stale")
+	testing.expect(t, core.claude_bar_shows(false, .Codex))
+	testing.expect(t, !core.claude_bar_shows(false), "Claude's bar is Claude's")
+	msg, can := core.claude_reload_message(false, .Codex)
+	testing.expect_value(t, msg, "Codex settings changed — Restart 1 idle Codex tab")
+	testing.expect(t, can)
+	bars := core.web_bars_json()
+	testing.expectf(t, strings.contains(bars, `"harness":"codex","kind":"codex_reload"`) && strings.contains(bars, `{"type":"claude_restart_changed","harness":"codex"}`) && strings.contains(bars, `{"type":"claude_reload_later","harness":"codex"}`), "the browser's strip: %s", bars)
+	testing.expect_value(t, core.json_path(core.state_json(), "reload.codex.changed.0"), fmt.tprintf("%s/config.toml", home))
+	// the wire: harness codex, both ways
+	c, err := core.parse_command(`{"type":"claude_restart_changed","harness":"codex"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, c.(core.Claude_Restart_Changed).harness, core.Harness.Codex)
+	testing.expect(t, strings.contains(core.command_wire_json(core.Claude_Restart_Changed{harness = .Codex}), `"harness":"codex"`))
+	testing.expect(t, strings.contains(core.command_wire_json(core.Claude_Reload_Later{harness = .Codex}), `"harness":"codex"`))
+	// Claude's Restart never restarts a Codex tab
+	testing.expect_value(t, core.run_command(core.Claude_Restart_Changed{}, CX_UI).error, "no Claude tab needs a restart")
+	testing.expect_value(t, core.run_command(core.Claude_Restart_Changed{harness = .Codex, update = true}, CX_UI).error, "Codex tabs have no update bar")
+	// Restart: the user confirms, then `codex resume <id>` in the same tab
+	r := core.run_command(core.Claude_Restart_Changed{harness = .Codex}, CX_UI)
+	testing.expect_value(t, r.error, "needs_confirmation")
+	testing.expectf(t, strings.contains(r.confirm_summary, "Codex tab"), "%s", r.confirm_summary)
+	testing.expect(t, !strings.has_prefix(cx_wait_file(argf), "resume"), "the first run wrote its argv")
+	os.remove(argf)
+	r = core.run_command(core.Claude_Restart_Changed{harness = .Codex, confirm = r.confirm_token}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, core.json_path(r.data, "restarting.0"), fmt.tprint(tab))
+	again := false
+	deadline := time.tick_add(time.tick_now(), 20 * time.Second)
+	for time.tick_diff(time.tick_now(), deadline) > 0 {
+		core.pump_all()
+		core.pty_reap()
+		core.dead_tab_tick()
+		if _, x, _ := core.find_tab(tab); x != nil && x.status == .Running && !core.restart_waiting(tab) {
+			again = true
+			break
+		}
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(t, again, "the Codex tab runs again")
+	got := cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n", sid)), "%q", got)
+	core.claude_reload_tick()
+	_, tb, _ = core.claude_tab_of(tab)
+	testing.expect(t, !tb.reload.stale, "fresh")
+	// an editor save of the project's AGENTS.md shows the bar at once; Later hides it
+	core.run_command(core.Claude_Reload_Later{harness = .Codex}, CX_UI)
+	testing.expect(t, !core.claude_bar_shows(false, .Codex), "Later hides it")
+	core.claude_reload_note_save(fmt.tprintf("%s/AGENTS.md", dir))
+	testing.expect_value(t, core.claude_reload_pending_count(.Codex), 1)
+	testing.expect_value(t, core.claude_reload_pending_count(), 0)
+	core.claude_reload_flush(harness = .Codex)
+	testing.expect(t, tb.reload.stale, "the save's change")
+	testing.expect(t, core.claude_bar_shows(false, .Codex))
+}

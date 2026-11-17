@@ -1429,7 +1429,7 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   keeps the selection), then opens its menu; drag a row onto a terminal to paste its path.
 - **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
   (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
-  shown, ⌘⌫ moves the selection to the Trash (one confirmation names how many and the first five),
+  shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
   Esc clears a selection of several, else gives the keyboard back. Typing letters jumps to the next
   row whose name starts with them (a pause of a second starts over); they never reach a terminal.
 - **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.

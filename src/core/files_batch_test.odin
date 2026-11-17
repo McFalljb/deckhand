@@ -219,7 +219,7 @@ delete_batch_one_confirmation :: proc(t: ^testing.T) {
 	paths := []string{fmt.tprintf("%s/a.txt", dir), fmt.tprintf("%s/b.txt", dir), fmt.tprintf("%s/src", dir), fmt.tprintf("%s/src/x.txt", dir)}
 	r := run_command(Delete_Path{paths = paths}, UI)
 	testing.expect_value(t, r.error, "needs_confirmation")
-	testing.expect_value(t, r.confirm_summary, fmt.tprintf("Move 3 items to the Trash? a.txt, b.txt, src/ (in %s)", dir))
+	testing.expectf(t, strings.has_prefix(r.confirm_summary, "Move 3 items to the Trash (1 folder, 2 files)? src/, a.txt, b.txt (in "), "%q", r.confirm_summary)
 	testing.expect_value(t, len(state.pending_confirmations), 1)
 	// asked again: the same one
 	r = run_command(Delete_Path{paths = paths}, UI)
@@ -238,7 +238,7 @@ delete_batch_one_confirmation :: proc(t: ^testing.T) {
 	seven := make([]string, 7, context.temp_allocator)
 	for &p, i in seven do p = fmt.tprintf("%s/f%d.txt", dir, i)
 	r = run_command(Delete_Path{paths = seven}, UI)
-	testing.expect_value(t, r.confirm_summary, fmt.tprintf("Move 7 items to the Trash? f0.txt, f1.txt, f2.txt, f3.txt, f4.txt, and 2 more (in %s)", dir))
+	testing.expectf(t, strings.has_prefix(r.confirm_summary, "Move 7 items to the Trash (7 files)? f0.txt, f1.txt, f2.txt, f3.txt, f4.txt, and 2 more (in "), "%q", r.confirm_summary)
 	// the Trash fails midway: what went stays gone, the error says so and where it stopped
 	batch_fail = "f3.txt"
 	r = run_command(Delete_Path{paths = seven, confirm = r.confirm_token}, UI)
@@ -266,4 +266,130 @@ delete_batch_wire :: proc(t: ^testing.T) {
 	cd := c.(Delete_Path)
 	testing.expect(t, len(cd.paths) == 2 && cd.paths[0] == "/p/a" && raw_data(cd.paths[0]) != raw_data(string("/p/a")), "a copy")
 	command_free(c, context.allocator)
+}
+
+// The batch's confirmation shows what matters whatever the caller sent: folders first, how many
+// of each in the lead, every name on one line, cut to a budget, so the count, "and N more" and
+// the project always fit the bar.
+@(test)
+delete_batch_summary_folders_first_and_bounded :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	saved := fs_trash_fn
+	defer fs_trash_fn = saved
+	dir := bsetup("batchsum")
+	defer {os.remove_all(dir); state = State{}}
+	UI :: Caller{kind = .UI}
+	names := []string{"a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "src/k", "docs/k", ".github/k"}
+	for f in names do bwrite(dir, f)
+	paths := make([]string, 8, context.temp_allocator)
+	for f, i in names do paths[i] = fmt.tprintf("%s/%s", dir, f[:strings.index_byte(f, '/') if strings.contains(f, "/") else len(f)])
+	r := run_command(Delete_Path{paths = paths}, UI)
+	// the project folder: cut from the front past FS_DELETE_ROOT_SHOWN (a long temp folder here)
+	s0 := r.confirm_summary
+	testing.expectf(t, strings.has_prefix(s0, "Move 8 items to the Trash (3 folders, 5 files)? src/, docs/, .github/, a.txt, b.txt, and 3 more (in "), "%q", s0)
+	testing.expectf(t, strings.has_suffix(s0, fmt.tprintf("%s)", dir[len(dir) - 30:])), "the project's tail: %q", s0)
+	// hostile names: the longest a name may be, a line break, a direction override, a name that
+	// reads like the tail
+	long := strings.concatenate({strings.repeat("x", 251, context.temp_allocator), ".txt"}, context.temp_allocator)
+	odd := []string{long, "line\nbreak.txt", "abc‮txt.exe", "and 3 more"}
+	op := make([dynamic]string, context.temp_allocator)
+	for n in odd {
+		p := fmt.tprintf("%s/%s", dir, n)
+		_ = os.write_entire_file(p, transmute([]u8)string("x"))
+		testing.expectf(t, os.exists(p), "made %q", n)
+		append(&op, p)
+	}
+	append(&op, fmt.tprintf("%s/a.txt", dir), fmt.tprintf("%s/b.txt", dir), fmt.tprintf("%s/c.txt", dir))
+	s := run_command(Delete_Path{paths = op[:]}, UI).confirm_summary
+	testing.expectf(t, strings.has_prefix(s, "Move 7 items to the Trash (7 files)? "), "lead: %q", s)
+	testing.expectf(t, strings.contains(s, ", and 2 more (in ") && strings.has_suffix(s, fmt.tprintf("%s)", dir[len(dir) - 30:])), "tail: %q", s)
+	testing.expectf(t, !strings.contains(s, "\n") && !strings.contains(s, "‮"), "one line, no reordering: %q", s)
+	testing.expectf(t, !strings.contains(s, long) && strings.contains(s, "xxxxxxxx…"), "a long name is cut: %q", s)
+	testing.expectf(t, strings.contains(s, `"and 3 more"`), "a name that reads like the tail is quoted: %q", s)
+	testing.expectf(t, len(s) <= FS_DELETE_SUMMARY_MAX, "bounded: %d bytes", len(s))
+	// the longest a summary can be: 500 paths, long names, folders and files, a long project folder
+	deep := fmt.tprintf("%s/%s", dir, strings.repeat("p", 200, context.temp_allocator))
+	os.make_directory_all(deep)
+	append(&state.projects, Project{id = new_id(), cwd = strings.clone(deep), label = "deep"})
+	many := make([dynamic]string, context.temp_allocator)
+	for i in 0 ..< FS_DELETE_MAX {
+		p := fmt.tprintf("%s/%03d %s", deep, i, strings.repeat("é", 60, context.temp_allocator))
+		if i % 2 == 0 do os.make_directory_all(p)
+		else do _ = os.write_entire_file(p, transmute([]u8)string("x"))
+		append(&many, p)
+	}
+	s = run_command(Delete_Path{paths = many[:]}, UI).confirm_summary
+	testing.expectf(t, strings.has_prefix(s, "Move 500 items to the Trash (250 folders, 250 files)? ") && strings.contains(s, ", and 495 more (in …"), "%q", s)
+	testing.expectf(t, len(s) <= FS_DELETE_SUMMARY_MAX, "the longest: %d bytes", len(s))
+}
+
+// Each path is checked again right before it moves: a running tab that started in a later one
+// (here: while the first moved) stops the batch there.
+@(test)
+delete_batch_rechecks_before_each_move :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	saved := fs_trash_fn
+	defer fs_trash_fn = saved
+	dir := bsetup("batchre")
+	defer {os.remove_all(dir); state = State{}}
+	bwrite(dir, "a.txt")
+	bwrite(dir, "src/x.txt")
+	batch_dir = dir
+	fs_trash_fn = proc(path: string) -> bool {
+		if strings.has_suffix(path, "/a.txt") {
+			s := Open_Session{id = new_id(), project_id = state.projects[0].id, cwd = strings.clone(batch_dir)}
+			append(&s.tabs, Tab{id = new_id(), kind = Shell_Tab{}, title = "late shell", status = .Running, cwd = strings.clone(fmt.tprintf("%s/src", batch_dir))})
+			append(&state.open_sessions, s)
+		}
+		return os.rename(path, fmt.tprintf("%s.trashed", path)) == nil
+	}
+	UI :: Caller{kind = .UI}
+	paths := []string{fmt.tprintf("%s/a.txt", dir), fmt.tprintf("%s/src", dir)}
+	r := run_command(Delete_Path{paths = paths}, UI)
+	r = run_command(Delete_Path{paths = paths, confirm = r.confirm_token}, UI)
+	testing.expectf(t, !r.ok && strings.has_prefix(r.error, "moved 1 of 2 to the Trash, then ") && strings.contains(r.error, "late shell"), "%q", r.error)
+	testing.expect(t, os.is_dir(fmt.tprintf("%s/src", dir)), "src stays")
+}
+
+@(private = "file")
+batch_dir: string
+
+// On a volume that ignores case, Src and src/x are one folder and what is in it; a.txt and A.TXT
+// one file.
+@(test)
+delete_batch_merges_by_the_real_file :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	saved := fs_trash_fn
+	defer fs_trash_fn = saved
+	dir := bsetup("batchcase")
+	defer {os.remove_all(dir); state = State{}}
+	bwrite(dir, "src/x.txt")
+	bwrite(dir, "a.txt")
+	if !os.exists(fmt.tprintf("%s/SRC", dir)) do return // a volume that keeps case: nothing to merge
+	plan, err := fs_delete_plan({fmt.tprintf("%s/Src", dir), fmt.tprintf("%s/src/x.txt", dir), fmt.tprintf("%s/a.txt", dir), fmt.tprintf("%s/A.TXT", dir)}, Caller{kind = .UI})
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, len(plan), 2)
+	testing.expect_value(t, len(fs_delete_merge({fmt.tprintf("%s/src", dir), fmt.tprintf("%s/SRC/x.txt", dir)})), 1)
+}
+
+// A project folder inside another project is a project folder itself: never trashed or renamed
+// through the outer one.
+@(test)
+fs_check_refuses_a_nested_project_root :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	saved := fs_trash_fn
+	defer fs_trash_fn = saved
+	dir := bsetup("nestroot")
+	defer {os.remove_all(dir); state = State{}}
+	inner := fmt.tprintf("%s/inner", dir)
+	bwrite(dir, "inner/x.txt")
+	append(&state.projects, Project{id = new_id(), cwd = strings.clone(inner), label = "inner"})
+	UI :: Caller{kind = .UI}
+	testing.expect_value(t, fs_delete(inner, UI), "not on a project folder itself")
+	testing.expect_value(t, fs_rename(inner, fmt.tprintf("%s/moved", dir), UI), "not on a project folder itself")
+	r := run_command(Delete_Path{paths = {fmt.tprintf("%s/inner/x.txt", dir), inner}}, UI)
+	testing.expectf(t, !r.ok && strings.contains(r.error, "not on a project folder itself"), "%q", r.error)
+	testing.expect(t, os.is_dir(inner), "still there")
+	// what is inside it is fine
+	testing.expect_value(t, fs_delete(fmt.tprintf("%s/inner/x.txt", dir), UI), "")
 }

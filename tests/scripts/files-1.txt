@@ -132,7 +132,7 @@ key escape
 key backspace cmd
 wait 200
 assert_state pending_confirmations.# 1
-assert_state pending_confirmations.0.summary Move 2 items to the Trash? src/app.c, src/util.c (in $homedir/proj)
+assert_state pending_confirmations.0.summary Move 2 items to the Trash (2 files)? src/app.c, src/util.c (in $homedir/proj)
 shot files/delete-several
 clickid confirm_no
 eventually

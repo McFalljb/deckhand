@@ -707,3 +707,26 @@ files_menu_for_several_rows :: proc(t: ^testing.T) {
 	delete(copied_text)
 	copied_text = ""
 }
+
+// The menu's count is the batch's after nesting (a folder and what is in it: one item), as the
+// confirmation and the browser say.
+@(test)
+files_menu_counts_the_merged_batch :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "d/x.txt", "x")
+	fwrite(dir, "z.txt", "x")
+	testing.expect(t, core.run_command(core.Files_Expand{path = "d", expanded = true}, {kind = .UI}).ok)
+	rows := core.tree_rows()
+	v := core.tree_view()
+	core.files_select_in(v, rows[0].path) // d
+	core.files_sel_click(v, rows, 1, true, false) // to d/x.txt
+	labels :: proc(path: string) -> string {
+		items := make([dynamic]core.Menu_Item, context.temp_allocator)
+		files_menu_items(path, &items)
+		return items[0].label
+	}
+	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move to Trash…")
+	core.files_sel_click(v, rows, 2, true, false) // to z.txt
+	testing.expect_value(t, labels(fmt.tprintf("%s/d", dir)), "Move 2 items to Trash…")
+}

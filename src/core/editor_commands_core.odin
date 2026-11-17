@@ -202,7 +202,10 @@ delete_batch_apply :: proc(c: Delete_Path, caller: Caller) -> (r: Result, change
 	gr, go_on, ch := confirm_gate(parked, .Delete, caller, c.confirm, fs_delete_summary(plan))
 	if !go_on do return gr, ch
 	for p, i in plan {
-		if derr := fs_trash_checked(p); derr != "" {
+		// checked again right before it moves (a tab may have started in it since)
+		_, derr := fs_delete_check(p, caller)
+		if derr == "" do derr = fs_trash_checked(p)
+		if derr != "" {
 			r = fail(fmt.tprintf("moved %d of %d to the Trash, then %s: %s (the %d moved stay in the Trash)", i, len(plan), p, derr, i))
 			b := strings.builder_make(context.temp_allocator)
 			json_quote(&b, p)

@@ -927,7 +927,9 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 	sep :: proc(items: ^[dynamic]core.Menu_Item) {append(items, core.Menu_Item{sep = true})}
 	if multi := files_menu_multi(path); multi != nil {
 		// several rows: only what acts on them all (no open, new, rename, reveal)
-		append(items, core.Menu_Item{label = fmt.tprintf("Move %d items to Trash…", len(multi)), keys = "⌘⌫", cmd = core.Delete_Path{paths = multi}})
+		// the count after nesting (a folder and what is in it: one), as the confirmation says
+		n := len(core.fs_delete_merge(multi))
+		append(items, core.Menu_Item{label = n == 1 ? "Move to Trash…" : fmt.tprintf("Move %d items to Trash…", n), keys = "⌘⌫", cmd = core.Delete_Path{paths = multi}})
 		sep(items)
 		append(items, core.Menu_Item{label = "Copy paths", files = .Copy_Path})
 		append(items, core.Menu_Item{label = "Copy relative paths", files = .Copy_Relative})

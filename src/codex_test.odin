@@ -1295,3 +1295,21 @@ codex_accounts_found_session :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
 	testing.expect(t, strings.has_prefix(cx_wait_file(a.argf), fmt.tprintf("resume\n%s\n", id)))
 }
+
+// Audit: codex not found (a Codex tab's command exits 127) and Refresh shell environment drop
+// Codex's cached answer, not Claude Code's.
+@(test)
+codex_recheck_on_127_and_refresh :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	_, _, tab := cx_codex_session(t, "recheck")
+	testing.expect(t, tab != 0)
+	core.claude_found = .Yes
+	core.codex_found = .Yes
+	core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 127}}, {kind = .Internal})
+	testing.expect_value(t, core.codex_found, core.Claude_Found.Unknown)
+	testing.expect_value(t, core.claude_found, core.Claude_Found.Yes) // a Codex tab says nothing about claude
+	core.codex_found = .No
+	core.run_command(core.Refresh_Shell_Env_Done{ok = false}, {kind = .Internal})
+	testing.expect_value(t, core.codex_found, core.Claude_Found.Unknown)
+}

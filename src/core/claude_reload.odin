@@ -35,11 +35,12 @@ package core
 // size). Each Claude tab records it when first seen running (Tab.reload.version); another one
 // on disk shows "Claude Code updated to X — Restart N idle Claude tabs".
 //
-// Never read, watched or listed: credentials, account state, transcripts, caches
+// Never read, watched or listed here: credentials, account state, transcripts, caches
 // (claude_credential: .credentials.json, .claude.json, everything in the config folder but its
 // config files). Only file times and sizes are looked at, never contents (an npm install's
 // package.json excepted, for its version; and a settings file's CLAUDE_RESTART_KEYS, only once
-// its stamp changed).
+// its stamp changed). Transcripts are read elsewhere, for rows only: claude_disk.odin (sessions
+// found on disk; never credentials).
 
 import "base:runtime"
 import "core:encoding/json"
@@ -98,6 +99,17 @@ Claude_Reload_Watch :: struct {
 Claude_Reload_Kick :: struct {
 	tab_id: u64,
 }
+// claude_restart_anyway: a Claude tab whose restart waits only for subagents silent for
+// CLAUDE_AGENT_STALE (claude_subagents_silent; they may still work) restarts now; the user's, who
+// confirms. Nothing restarts such a tab automatically.
+Claude_Restart_Anyway :: struct {
+	tab_id:  u64,
+	confirm: string, // class session_restart
+}
+
+// What a waiting restart's note says of a tab whose subagents are all silent (busy_why): the
+// window's bar finds the tab by it and offers Restart anyway.
+CLAUDE_SILENT_NOTE :: "a subagent silent for "
 
 // ---- where Claude Code keeps things ----
 
@@ -366,9 +378,19 @@ busy_why :: proc(t: ^Tab) -> string {
 	case ct.turn == .Unknown:                      return "starting"
 	case claude_typed(t.id):                       return "you are typing"
 	case len(ct.held) > 0:                         return "a message waits for it"
-	case claude_subagents_running(t.id) > 0:       return "a subagent runs"
+	case claude_subagents_running(t.id) > 0:
+		if d := claude_subagents_silent(t.id); d > 0 do return strings.concatenate({CLAUDE_SILENT_NOTE, silent_span(d)}, context.temp_allocator)
+		return "a subagent runs"
 	}
 	return "working"
+}
+
+// "2h 05m", "45m" (whole minutes: the note changes at most once a minute).
+@(private = "file")
+silent_span :: proc(d: time.Duration) -> string {
+	m := int(d / time.Minute)
+	if m < 60 do return fmt.tprintf("%dm", m)
+	return fmt.tprintf("%dh %02dm", m / 60, m % 60)
 }
 
 @(private = "file")
@@ -605,6 +627,20 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		if claude_restart_class(t) != .Idle do return {ok = true}, false // again when idle
 		restart_now(t, t.reload.flags)
 		return {ok = true}, true
+	case Claude_Restart_Anyway:
+		_, t, ct := claude_tab_of(c.tab_id)
+		if ct == nil || ct.codex do return fail("no such Claude tab"), false
+		if t.status != .Running do return fail("Claude is not running in this tab"), false
+		if t.reload.queued != .Restart do return fail("no restart waits in this tab"), false
+		class := claude_restart_class(t)
+		silent := claude_subagents_silent(t.id)
+		if class != .Idle && (class != .Blocked || silent == 0) do return fail(fmt.tprintf("this tab's restart waits until it is idle (%s)", busy_why(t))), false
+		what := fmt.tprintf("restart %s anyway? It resumes its conversation; background work Claude started there stops.", cut_utf8(one_line(t.title, context.temp_allocator), 40))
+		if silent > 0 do what = fmt.tprintf("restart %s anyway? Its subagent has reported nothing for %s, but may still be working (one long step): it stops, with the background work Claude started there.", cut_utf8(one_line(t.title, context.temp_allocator), 40), silent_span(silent))
+		gr, go_on, ch := confirm_gate(cmd, .Session_Restart, caller, c.confirm, what, force_ask = true)
+		if !go_on do return gr, ch
+		restart_now(t, t.reload.flags)
+		return {ok = true}, true
 	}
 	return fail("not a Claude reload command"), false
 }
@@ -616,6 +652,7 @@ claude_reload_type :: proc(cmd: Command) -> string {
 	case Claude_Reload_Later:    return "claude_reload_later"
 	case Claude_Reload_Watch:    return "claude_reload_watch"
 	case Claude_Reload_Kick:     return "claude_reload_kick"
+	case Claude_Restart_Anyway:  return "claude_restart_anyway"
 	}
 	return ""
 }
@@ -636,12 +673,16 @@ claude_reload_write :: proc(b: ^strings.Builder, cmd: Command) {
 		}
 	case Claude_Reload_Kick:
 		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
+	case Claude_Restart_Anyway:
+		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
+		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
 	}
 }
 
 claude_reload_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
 	#partial switch c in cmd {
 	case Claude_Restart_Changed: return Claude_Restart_Changed{update = c.update, all = c.all, confirm = strings.clone(c.confirm, a)}
+	case Claude_Restart_Anyway:  return Claude_Restart_Anyway{tab_id = c.tab_id, confirm = strings.clone(c.confirm, a)}
 	case Claude_Reload_Watch:
 		paths := make([]string, len(c.paths), a)
 		scopes := make([]string, len(c.scopes), a)
@@ -655,6 +696,7 @@ claude_reload_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
 claude_reload_free :: proc(cmd: Command, a: runtime.Allocator) {
 	#partial switch c in cmd {
 	case Claude_Restart_Changed: delete(c.confirm, a)
+	case Claude_Restart_Anyway:  delete(c.confirm, a)
 	case Claude_Reload_Watch:
 		for x in c.paths do delete(x, a)
 		for x in c.scopes do delete(x, a)
@@ -821,7 +863,13 @@ claude_reload_tick :: proc() {
 			set_version(t, state.reload.claude.ident)
 			if strings.has_prefix(t.reload.note, "restarting") do set_note(t, "restarted")
 		}
-		if t.reload.queued == .Restart && claude_restart_class(t) == .Idle do append(&kicks, t.id)
+		if t.reload.queued == .Restart {
+			switch claude_restart_class(t) {
+			case .Idle:    append(&kicks, t.id)
+			case .Blocked: set_note(t, fmt.tprintf("restarts when idle (%s)", busy_why(t))) // a subagent's silence, as it grows (the bar's Restart anyway)
+			case .Busy, .No_Bridge:
+			}
+		}
 	}
 	for id in kicks do run_command(Claude_Reload_Kick{tab_id = id})
 	if len(tabs) == 0 {

@@ -876,6 +876,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "claude.attached":     cmd = Claude_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
 	case "claude_restart":      cmd = Claude_Restart{tab_id = get_u64(&r, "tab_id"), pick_model = opt_bool(&r, "pick_model").? or_else false}
 	case "claude_restart_changed": cmd = Claude_Restart_Changed{update = opt_bool(&r, "update").? or_else false, all = opt_bool(&r, "all").? or_else false, confirm = get_str(&r, "confirm", optional = true)}
+	case "claude_restart_anyway": cmd = Claude_Restart_Anyway{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true)}
 	case "claude_reload_later": cmd = Claude_Reload_Later{update = opt_bool(&r, "update").? or_else false}
 	case "claude.todos":        cmd = Claude_Todos{tab_id = opt_u64(&r, "tab_id"), todos = get_todos(&r, "todos"), agent_id = get_str(&r, "agent_id", optional = true), seq = opt_u64(&r, "seq")}
 	case "claude.task":         cmd = Claude_Task{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), task_id = get_str(&r, "task_id"), subject = get_str(&r, "subject", optional = true), active_form = get_str(&r, "active_form", optional = true), status = get_str(&r, "status", optional = true), seq = opt_u64(&r, "seq")}

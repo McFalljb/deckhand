@@ -347,7 +347,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Pi_Reload_Later:     return "pi_reload_later"
 	case Reload_Watch:        return "reload_watch"
 	case Reload_Kick:      return "reload_kick"
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		return claude_reload_type(cmd)
 	case Comment_Add:         return "comment_add"
 	case Comment_Edit:        return "comment_edit"
@@ -589,7 +589,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		update_write(w.b, cmd) // update.odin: never the release body
 	case Pi_Reload_All, Pi_Restart_Updated, Pi_Reload_Later, Reload_Watch, Reload_Kick:
 		reload_write(w.b, cmd) // reload.odin; confirmation tokens never
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		claude_reload_write(w.b, cmd) // claude_reload.odin; confirmation tokens never
 	case New_Shell_Tab:
 		kv_u64(&w, "session", c.session)
@@ -1224,6 +1224,13 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		kv_str(&w, "type", command_type(cmd))
 		if c.update do kv_bool(&w, "update", true)
 		if c.all do kv_bool(&w, "all", true)
+		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+		obj_end(&w)
+		return
+	case Claude_Restart_Anyway:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		kv_u64(&w, "tab_id", c.tab_id)
 		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
 		obj_end(&w)
 		return

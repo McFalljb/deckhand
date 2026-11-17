@@ -4,7 +4,8 @@ package main
 // (ui_reload.odin) and in the same look: one for changed Claude files a running session reads
 // only at start ("Claude Code settings changed — Restart N idle Claude tabs") and one for a
 // Claude Code update ("Claude Code updated to X — Restart N idle Claude tabs"). Each has
-// Details (which files changed, what each Claude tab does), Later and Restart.
+// Details (which files changed, what each Claude tab does), Later and Restart; and Restart anyway
+// while a waiting restart is held only by a subagent silent for hours (claude_restart_anyway).
 
 import "core:fmt"
 import "core:os"
@@ -19,6 +20,8 @@ Claude_Reload_Part :: enum u8 {
 	Update_Restart,
 	Update_Details,
 	Update_Later,
+	Anyway,
+	Update_Anyway,
 }
 
 Hit_Claude_Reload :: struct {
@@ -33,6 +36,8 @@ IDS := [Claude_Reload_Part]string {
 	.Update_Restart = "cupdate_go",
 	.Update_Details = "cupdate_details",
 	.Update_Later   = "cupdate_later",
+	.Anyway         = "creload_anyway",
+	.Update_Anyway  = "cupdate_anyway",
 }
 
 // UI state: the Details lists that are open.
@@ -43,6 +48,22 @@ open_details: [2]bool // [0] settings, [1] update
 claude_reload_counts :: core.claude_reload_counts
 claude_bar_shows :: core.claude_bar_shows
 claude_reload_message :: core.claude_reload_message
+
+// A tab of this bar whose waiting restart is held only by subagents silent for hours (the core's
+// note: claude_reload.odin busy_why), and that silence ("a subagent silent for 2h 05m").
+claude_reload_silent_tab :: proc(update: bool) -> (tab: ^core.Tab, why: string) {
+	for &s in state.open_sessions {
+		if s.home do continue
+		for &t in s.tabs {
+			if _, is := t.kind.(core.Claude_Tab); !is || t.status != .Running || t.reload.queued != .Restart do continue
+			if update ? !core.claude_reload_outdated(&t) : !t.reload.stale do continue
+			i := strings.index(t.reload.note, core.CLAUDE_SILENT_NOTE)
+			if i < 0 do continue
+			return &t, strings.trim_right(t.reload.note[i:], ")")
+		}
+	}
+	return nil, ""
+}
 
 // ~ for the home folder.
 @(private = "file")
@@ -87,10 +108,13 @@ bar :: proc(update: bool) {
 	go := update ? Claude_Reload_Part.Update_Restart : .Restart
 	details := update ? Claude_Reload_Part.Update_Details : .Details
 	later := update ? Claude_Reload_Part.Update_Later : .Later
+	anyway := update ? Claude_Reload_Part.Update_Anyway : .Anyway
 	open := open_details[update ? 1 : 0]
-	labels := [3]string{open ? "Hide details" : "Details", "Later", "Restart"}
+	silent, why := claude_reload_silent_tab(update)
+	if silent != nil do msg = fmt.tprintf("%s · %s: %s", msg, silent.title, why)
+	labels := [4]string{open ? "Hide details" : "Details", "Later", "Restart", "Restart anyway"}
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2)
-	for l, i in labels do if i < 2 || can do used += text_w(l, i == 2 ? WEIGHT_BOLD : WEIGHT_REGULAR) + px(2 * SP_3 + SP_2)
+	for l, i in labels do if i < 2 || (i == 2 && can) || (i == 3 && silent != nil) do used += text_w(l, i == 2 ? WEIGHT_BOLD : WEIGHT_REGULAR) + px(2 * SP_3 + SP_2)
 	if clay.UI(clay.ID(update ? "claude_update_bar" : "claude_reload_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
@@ -101,6 +125,7 @@ bar :: proc(update: bool) {
 		spacer()
 		button(clay.ID(IDS[details]), labels[0], false, ui_hover == Hit(Hit_Claude_Reload{details}))
 		button(clay.ID(IDS[later]), labels[1], false, ui_hover == Hit(Hit_Claude_Reload{later}))
+		if silent != nil do button(clay.ID(IDS[anyway]), labels[3], false, ui_hover == Hit(Hit_Claude_Reload{anyway}))
 		if can do button(clay.ID(IDS[go]), labels[2], true, ui_hover == Hit(Hit_Claude_Reload{go}))
 	}
 	if open do details_list(update)
@@ -166,6 +191,8 @@ claude_reload_tip :: proc(h: Hit_Claude_Reload) -> (label, keys: string) {
 	case .Update_Details: return open_details[1] ? "Hide the list" : "Which Claude tabs run an older Claude Code", ""
 	case .Later:          return "Hide this until the next change (stops waiting restarts)", ""
 	case .Update_Later:   return "Hide this until the next Claude Code update (stops waiting restarts)", ""
+	case .Anyway, .Update_Anyway:
+		return "Restart that tab now: its subagent has reported nothing for hours, but may still be working (it stops)", ""
 	}
 	return "", ""
 }
@@ -183,6 +210,8 @@ claude_reload_click :: proc(h: Hit_Claude_Reload) {
 	case .Update_Later:
 		open_details[1] = false
 		ui_do(core.Claude_Reload_Later{update = true})
+	case .Anyway, .Update_Anyway:
+		if t, _ := claude_reload_silent_tab(h.part == .Update_Anyway); t != nil do ui_do(core.Claude_Restart_Anyway{tab_id = t.id})
 	}
 	app.redraw = true
 }

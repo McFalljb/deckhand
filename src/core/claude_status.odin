@@ -265,7 +265,7 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if ct := tab.kind.(Claude_Tab); ct.codex {
 		if rt_of(tab.id).dismissed do return ""
 		if codex_signed_out_due(tab) do return CODEX_SIGNED_OUT
-		if v := codex_plain_version(tab.id); v != "" do return codex_plain_text(v, codex_update_hint(codex_binary())) // started without its hooks (codex.odin)
+		if v := codex_plain_version(tab.id); v != "" do return codex_plain_text(v, codex_update_hint(harness_path(.Codex))) // started without its hooks (codex.odin)
 		if claude_hooks_silent(tab, now) do return CODEX_HOOKS_SILENT
 		return "" // a Codex too old to start at all never starts (codex_start)
 	}

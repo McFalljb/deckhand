@@ -54,8 +54,8 @@ hf_reset :: proc() -> (runtime.Allocator, string) {
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/deckhand-hf-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
-	core.claude_found = .Yes
-	core.codex_found = .No
+	core.harness_found[.Claude] = .Yes
+	core.harness_found[.Codex] = .No
 	core.claude_cli_override = "/tmp/deckhand-hf-cli"
 	return runtime.heap_allocator(), argf
 }
@@ -63,7 +63,7 @@ hf_reset :: proc() -> (runtime.Allocator, string) {
 @(private = "file")
 hf_done :: proc() {
 	core.claude_cli_override = ""
-	core.codex_found = .Unknown
+	core.harness_found[.Codex] = .Unknown
 	for &f in flags_last {
 		delete(f)
 		f = ""

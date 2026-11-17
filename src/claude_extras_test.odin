@@ -36,7 +36,7 @@ x_reset :: proc() -> runtime.Allocator {
 	}
 	core.persist = {}
 	core.dead_tab_reset()
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	core.platform = {quit = proc() {}}
 	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
@@ -51,7 +51,7 @@ x_reset :: proc() -> runtime.Allocator {
 x_done :: proc() {
 	core.inbox_drain()
 	for _, t in core.terms do core.reader_stop_and_close(t)
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Claude] = nil
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 }
 
@@ -211,7 +211,7 @@ claude_restart_not_installed :: proc(t: ^testing.T) {
 	_, tab, _ := core.find_tab(id)
 	testing.expect_value(t, tab.exit, core.Exit_Info{known = true, code = 127})
 	old := core.term_of(id)
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	toast_clear()
 	r := core.run_command(core.Claude_Restart{tab_id = id}, X_UI)
 	testing.expect(t, !r.ok)
@@ -229,7 +229,7 @@ claude_restart_not_installed :: proc(t: ^testing.T) {
 	testing.expect_value(t, tab.status, core.Tab_Status.Exited)
 	testing.expect_value(t, toast.text, "")
 	// installed since: Restart starts it
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	testing.expect(t, core.run_command(core.Claude_Restart{tab_id = id}, X_UI).ok)
 	_, tab, _ = core.find_tab(id)
@@ -713,7 +713,7 @@ claude_restart_refused_unchanged :: proc(t: ^testing.T) {
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 127")
 	id := core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id))
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	v := state.version
 	testing.expect(t, !core.run_command(core.Claude_Restart{tab_id = id}, X_UI).ok)
 	testing.expect_value(t, state.version, v)

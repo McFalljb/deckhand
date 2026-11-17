@@ -219,7 +219,8 @@ run_bounded :: proc(dir: string, cmd: []string, timeout: time.Duration, input :=
 }
 
 // run_bounded with the exit code: ran = it started, ended within timeout and its output was read
-// (code: its exit status, or the signal that ended it); out is read whatever the code.
+// (code: its exit status, or 128 + the signal that ended it, as a shell reports it); out is read
+// whatever the code.
 // posix_spawn, never a plain fork: a fork child runs the atfork handlers (CEF's, in the window)
 // and one that hangs there keeps our flocks (core.lock, instance.lock) after we quit (#78).
 run_bounded_exit :: proc(dir: string, cmd: []string, timeout: time.Duration, input := "") -> (out: string, code: int, ran: bool) {
@@ -284,7 +285,7 @@ run_bounded_exit :: proc(dir: string, cmd: []string, timeout: time.Duration, inp
 	if rerr != nil do return "", 0, false
 	switch {
 	case posix.WIFEXITED(wstatus): code = int(posix.WEXITSTATUS(wstatus))
-	case posix.WIFSIGNALED(wstatus): code = int(posix.WTERMSIG(wstatus))
+	case posix.WIFSIGNALED(wstatus): code = 128 + int(posix.WTERMSIG(wstatus)) // as a shell says it: never mistaken for an exit code (SIGHUP is 1)
 	}
 	return string(data), code, true
 }

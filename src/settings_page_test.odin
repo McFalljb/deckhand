@@ -44,8 +44,8 @@ sp_test_setup :: proc() {
 	os.unset_env("PI_KIT_NOTES_DIR")
 	os.unset_env("CLAUDE_CONFIG_DIR")
 	core.home_root = fmt.aprintf("%s/data", base)
-	core.pi_installed_probe = stand_in_installed
-	core.claude_installed_probe = stand_in_installed
+	core.harness_installed_probe[.Pi] = stand_in_installed
+	core.harness_installed_probe[.Claude] = stand_in_installed
 	core.harness_checklist_forget()
 	_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/settings.json", home), transmute([]u8)string(`{"packages": []}`))
 	_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/prompts/fix.md", home), transmute([]u8)string("fix"))

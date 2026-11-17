@@ -537,7 +537,7 @@ remote_project_claude_tab_by_its_checklist :: proc(t: ^testing.T) {
 	f: Fixture
 	setup(&f)
 	defer teardown(&f)
-	defer core.claude_installed_probe = nil
+	defer core.harness_installed_probe[.Claude] = nil
 	has :: proc(project: u64) -> bool {
 		menu_open(Menu_Project(project), {})
 		defer menu_close()
@@ -545,10 +545,10 @@ remote_project_claude_tab_by_its_checklist :: proc(t: ^testing.T) {
 		return false
 	}
 	// nuc has Claude Code; this Mac does not: offered there
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	testing.expect(t, has(pid(3, 7)), "nuc's project: its Claude Code")
 	// box has none (no checklist yet); this Mac does: not offered there
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	testing.expect(t, !has(pid(4, 7)), "box's project: not this Mac's Claude Code")
 	testing.expect(t, has(1), "this Mac's project")
 }

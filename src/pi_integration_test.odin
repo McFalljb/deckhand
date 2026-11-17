@@ -219,10 +219,10 @@ pi_too_old_says_so :: proc(t: ^testing.T) {
 	tab.status = .Exited
 	testing.expect_value(t, core.pi_status_message(&tab), "")
 	// the setup sheet's harness line
-	defer core.claude_installed_probe = nil
-	defer core.pi_installed_probe = nil
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Claude] = nil
+	defer core.harness_installed_probe[.Pi] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	state.reload.pi_version = "1.3.2"
 	line := core.setup_claude_line()
 	testing.expect(t, strings.contains(line, "pi 1.3.2 is older than 1.4.0"), line)
@@ -320,15 +320,15 @@ pi_extensions_are_the_users :: proc(t: ^testing.T) {
 	testing.expect(t, core.run_command(core.Set_Pi_Extension{name = "extra", on = true}, {kind = .UI}).ok)
 	testing.expect_value(t, strings.join(core.pi_integration_args(), " ", context.temp_allocator), fmt.tprintf("-e %s/extensions/bridge -e %s/extensions/desk -e %s/extensions/extra", pin, pin, pin))
 	// the Settings tab's rows (pi installed only) and get_state
-	defer core.pi_installed_probe = nil
-	core.pi_installed_probe = proc() -> bool {return true}
+	defer core.harness_installed_probe[.Pi] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
 	rows := make([dynamic]string, context.temp_allocator)
 	for x in core.settings_file_rows() do if x.group == "pi-ext" do append(&rows, fmt.tprintf("%s|%s|%s", x.label, x.detail, x.button))
 	testing.expect_value(t, strings.join(rows[:], "\n", context.temp_allocator), "extra|ON · an optional one (default off; pi tabs, not jobs)|Turn off\nguard|off · on by default (default on; pi tabs, not jobs)|Turn on")
 	// jobs never load them (pi --mode json gets no -e)
 	for a in core.job_argv("/bin/pi", "/s", "uuid", "", "", "/pre.md", "x", .Full) do testing.expect(t, a != "-e", "a job loads no pi extensions")
 	testing.expect_value(t, core.settings_group_label("pi-ext", ""), "pi extensions (Deckhand's)")
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	for x in core.settings_file_rows() do testing.expect(t, x.group != "pi-ext", "no pi: no pi extensions group")
 	st := core.state_json()
 	testing.expect_value(t, core.json_path(st, "settings.pi_extensions.guard"), "false")

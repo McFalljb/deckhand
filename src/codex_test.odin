@@ -73,8 +73,8 @@ cx_reset :: proc(version := "0.167.2") -> runtime.Allocator {
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/deckhand-cx-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
-	core.claude_found = .Yes
-	core.codex_found = .Yes
+	core.harness_found[.Claude] = .Yes
+	core.harness_found[.Codex] = .Yes
 	core.codex_login_set(.Signed_In) // never asks (a stand-in would only sleep)
 	core.claude_cli_override = CX_CLI
 	core.claude_status_reset()
@@ -802,8 +802,8 @@ codex_too_old_and_missing :: proc(t: ^testing.T) {
 	// #135: the reason, not only "could not start Codex" (a hub forwarding the start sees only this)
 	testing.expect_value(t, r.error, fmt.tprintf("Codex 0.156.0 is older than %s: update it with `npm install -g @openai/codex@latest`", core.CODEX_PLAIN_MIN_VERSION))
 	testing.expect_value(t, len(state.open_sessions), 0)
-	core.codex_installed_probe = proc() -> bool {return false}
-	defer core.codex_installed_probe = nil
+	core.harness_installed_probe[.Codex] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Codex] = nil
 	r = core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_SCRIPT)
 	testing.expect_value(t, r.error, core.CODEX_MISSING)
 	testing.expect_value(t, core.codex_label("New Codex tab"), "New Codex tab — Codex not installed")
@@ -943,7 +943,7 @@ codex_version_detection :: proc(t: ^testing.T) {
 	// checklists stay as they were): only DECKHAND_CODEX_BIN's
 	os.unset_env("DECKHAND_CODEX_BIN")
 	core.codex_recheck()
-	testing.expect_value(t, core.codex_binary(), "")
+	testing.expect_value(t, core.harness_binary(.Codex), "")
 	testing.expect(t, !core.codex_installed(), "no codex in a unit test without DECKHAND_CODEX_BIN")
 	os.set_env("DECKHAND_CODEX_BIN", link)
 	core.codex_recheck()
@@ -1033,14 +1033,14 @@ codex_wire_and_persist :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, found, "restored")
 	// shown, it starts with Codex installed and Claude Code not (its harness's check, not Claude's)
-	core.claude_installed_probe = proc() -> bool {return false}
-	defer core.claude_installed_probe = nil
-	core.claude_found = .No
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Claude] = nil
+	core.harness_found[.Claude] = .No
 	for &o in state.open_sessions do if o.project_id == pid && o.pi_session_id == sid {
 		core.focus_session(o.id, core.Caller{kind = .UI})
 		testing.expect(t, o.tabs[0].status != .Not_Started && o.tabs[0].status != .Exited, "started")
 	}
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	// a saved Codex tab with flags or a non-UUID id is not restored
 	r := core.run_command(core.Restore_Session{project_id = pid, pi_session_id = "abc-1", agent = .Claude, tabs = {{kind = .Claude, claude_id = "abc-1", codex = true}}}, core.Caller{kind = .Internal})
 	testing.expect(t, !r.ok, "not a Codex session id")
@@ -1698,12 +1698,12 @@ codex_recheck_on_127_and_refresh :: proc(t: ^testing.T) {
 	defer cx_done()
 	_, _, tab := cx_codex_session(t, "recheck")
 	testing.expect(t, tab != 0)
-	core.claude_found = .Yes
-	core.codex_found = .Yes
+	core.harness_found[.Claude] = .Yes
+	core.harness_found[.Codex] = .Yes
 	core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 127}}, {kind = .Internal})
-	testing.expect_value(t, core.codex_found, core.Claude_Found.Unknown)
-	testing.expect_value(t, core.claude_found, core.Claude_Found.Yes) // a Codex tab says nothing about claude
-	core.codex_found = .No
+	testing.expect_value(t, core.harness_found[.Codex], core.Claude_Found.Unknown)
+	testing.expect_value(t, core.harness_found[.Claude], core.Claude_Found.Yes) // a Codex tab says nothing about claude
+	core.harness_found[.Codex] = .No
 	core.run_command(core.Refresh_Shell_Env_Done{ok = false}, {kind = .Internal})
-	testing.expect_value(t, core.codex_found, core.Claude_Found.Unknown)
+	testing.expect_value(t, core.harness_found[.Codex], core.Claude_Found.Unknown)
 }

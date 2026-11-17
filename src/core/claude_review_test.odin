@@ -38,7 +38,7 @@ rv_reset :: proc() -> runtime.Allocator {
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	claude_found = .Yes
+	harness_found[.Claude] = .Yes
 	return runtime.heap_allocator()
 }
 
@@ -181,7 +181,7 @@ rv_restore_then_install :: proc(t: ^testing.T) {
 	text := strings.clone(workspace_json())
 	context.allocator = rv_reset()
 	os.set_env("PATH", "/usr/bin:/bin")
-	claude_found = .Unknown
+	harness_found[.Claude] = .Unknown
 	rescan_now()
 	testing.expect_value(t, workspace_restore(text), "")
 	persist_after_layout(skip = false)
@@ -197,7 +197,7 @@ rv_restore_then_install :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.open_sessions[0].tabs[0].status, Tab_Status.Running)
 	// and a restored tab not started yet looks again too, when its session is focused
 	context.allocator = rv_reset()
-	claude_found = .No
+	harness_found[.Claude] = .No
 	rescan_now()
 	workspace_restore(text)
 	state.current_session = 0

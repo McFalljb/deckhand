@@ -47,7 +47,7 @@ d_reset :: proc() -> runtime.Allocator {
 d_done :: proc() {
 	core.inbox_drain()
 	for _, t in core.terms do core.reader_stop_and_close(t)
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Claude] = nil
 	os.set_env("DECKHAND_CMD", "sleep 30")
 }
 
@@ -450,7 +450,7 @@ claude_restart_with_model :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	defer os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	dir := fmt.aprintf("%s/deckhand-dead-model-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	wd, _ := os.get_working_directory(context.temp_allocator)
@@ -532,7 +532,7 @@ claude_restart_pick_model_user :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	defer os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	dir := fmt.aprintf("%s/deckhand-dead-pick-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	os.set_env("HOME", dir)

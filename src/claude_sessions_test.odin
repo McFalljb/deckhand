@@ -40,7 +40,7 @@ cs_reset :: proc() -> runtime.Allocator {
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes // the tests' stand-in for claude is installed (detection: claude_detection)
+	core.harness_found[.Claude] = .Yes // the tests' stand-in for claude is installed (detection: claude_detection)
 	return runtime.heap_allocator()
 }
 
@@ -412,24 +412,24 @@ claude_detection :: proc(t: ^testing.T) {
 	os.make_directory_all(bin)
 	os.make_directory_all(fmt.tprintf("%s/.local/bin", home))
 	os.make_directory_all(fmt.tprintf("%s/.claude/local", home))
-	testing.expect(t, !core.claude_detect(fmt.tprintf("/nonexistent:%s", bin), home), "nothing there")
+	testing.expect(t, core.harness_find(.Claude, fmt.tprintf("/nonexistent:%s", bin), home, "") == "", "nothing there")
 	write :: proc(path: string, mode: u16) {
 		_ = os.write_entire_file(path, transmute([]u8)string("#!/bin/sh\nexit 1\n"))
 		posix.chmod(strings.clone_to_cstring(path, context.temp_allocator), transmute(posix.mode_t)mode)
 	}
 	write(fmt.tprintf("%s/claude", bin), 0o644)
-	testing.expect(t, !core.claude_detect(bin, home), "not executable")
+	testing.expect(t, core.harness_find(.Claude, bin, home, "") == "", "not executable")
 	write(fmt.tprintf("%s/claude", bin), 0o755)
-	testing.expect(t, core.claude_detect(fmt.tprintf("/nonexistent:%s", bin), home), "on PATH")
-	testing.expect(t, !core.claude_detect("relative/bin", home), "relative PATH entries are skipped")
+	testing.expect(t, core.harness_find(.Claude, fmt.tprintf("/nonexistent:%s", bin), home, "") != "", "on PATH")
+	testing.expect(t, core.harness_find(.Claude, "relative/bin", home, "") == "", "relative PATH entries are skipped")
 	os.make_directory_all(fmt.tprintf("%s/dir/claude", root))
-	testing.expect(t, !core.claude_detect(fmt.tprintf("%s/dir", root), home), "a folder named claude is not claude")
+	testing.expect(t, core.harness_find(.Claude, fmt.tprintf("%s/dir", root), home, "") == "", "a folder named claude is not claude")
 	write(fmt.tprintf("%s/.local/bin/claude", home), 0o755)
-	testing.expect(t, core.claude_detect("/usr/bin:/bin", home), "the native installer's ~/.local/bin")
+	testing.expect(t, core.harness_find(.Claude, "/usr/bin:/bin", home, "") != "", "the native installer's ~/.local/bin")
 	os.remove(fmt.tprintf("%s/.local/bin/claude", home))
 	write(fmt.tprintf("%s/.claude/local/claude", home), 0o755)
-	testing.expect(t, core.claude_detect("", home), "the old ~/.claude/local")
-	testing.expect(t, !core.claude_detect("", "relative"), "a relative HOME is not searched")
+	testing.expect(t, core.harness_find(.Claude, "", home, "") != "", "the old ~/.claude/local")
+	testing.expect(t, core.harness_find(.Claude, "", "relative", "") == "", "a relative HOME is not searched")
 }
 
 // Without Claude Code: the buttons stay, say so and explain instead of opening dead tabs; agents
@@ -453,7 +453,7 @@ claude_not_installed :: proc(t: ^testing.T) {
 	}
 	os.set_env("PATH", "/usr/bin:/bin")
 	os.set_env("HOME", cs_dir("missing-home"))
-	core.claude_found = .Unknown
+	core.harness_found[.Claude] = .Unknown
 	n_open := len(state.open_sessions)
 	for cmd in ([]core.Command{core.New_Claude_Session{project_id = pid}, core.New_Claude_Tab{session = pisess}, core.New_Claude_Tab{project_id = pid}, core.Claude_Resume{claude_session_id = sid}, core.Open_Session_Cmd{project_id = pid, pi_session_id = sid}}) {
 		for caller in ([]core.Caller{CS_UI, CS_CONTROL}) {
@@ -479,20 +479,20 @@ claude_not_installed :: proc(t: ^testing.T) {
 	testing.expect(t, core.run_command(core.New_Chat{project_id = pid}, CS_UI).ok)
 	testing.expect(t, core.run_command(core.New_Shell_Tab{session = pisess}, CS_UI).ok)
 	// a recheck: the cache is dropped and looked up again
-	core.claude_found = .No
+	core.harness_found[.Claude] = .No
 	core.run_command(core.Refresh_Shell_Env_Done{ok = false}, {kind = .Internal})
-	testing.expect_value(t, core.claude_found, core.Claude_Found.Unknown)
-	core.claude_found = .Yes
+	testing.expect_value(t, core.harness_found[.Claude], core.Claude_Found.Unknown)
+	core.harness_found[.Claude] = .Yes
 	tab := core.run_command(core.New_Claude_Tab{session = pisess}, CS_SCRIPT).created_id
 	testing.expect(t, tab != 0)
 	core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 127}}, {kind = .Internal})
-	testing.expect_value(t, core.claude_found, core.Claude_Found.Unknown)
+	testing.expect_value(t, core.harness_found[.Claude], core.Claude_Found.Unknown)
 	// installed meanwhile (the native installer's ~/.local/bin): the user's next click finds it
 	home := os.get_env("HOME", context.temp_allocator)
 	os.make_directory_all(fmt.tprintf("%s/.local/bin", home))
 	_ = os.write_entire_file(fmt.tprintf("%s/.local/bin/claude", home), transmute([]u8)string("#!/bin/sh\nexit 1\n"))
 	posix.chmod(strings.clone_to_cstring(fmt.tprintf("%s/.local/bin/claude", home), context.temp_allocator), transmute(posix.mode_t)u16(0o755))
-	core.claude_found = .No
+	core.harness_found[.Claude] = .No
 	testing.expect(t, core.run_command(core.New_Claude_Session{project_id = pid}, CS_UI).ok, "found again at the click")
 }
 
@@ -507,10 +507,10 @@ claude_restore_not_installed :: proc(t: ^testing.T) {
 	cs_claude_session(t, pid, sid, "will be gone")
 	text := strings.clone(core.workspace_json())
 	context.allocator = cs_reset()
-	core.claude_found = .No
+	core.harness_found[.Claude] = .No
 	// still missing when looked up again (the real lookup would find this machine's claude)
-	core.claude_installed_probe = proc() -> bool {return false}
-	defer core.claude_installed_probe = nil
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Claude] = nil
 	marker := fmt.tprintf("%s/ran", cs_dir("rs-missing-ran"))
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`touch %s; exec sleep 30`, marker))
 	core.rescan_now()

@@ -235,16 +235,16 @@ or `Third_Party`); `need` (`Required` or `Recommended`); `min_version`; `detect`
 
 | id | Harness | Kind | Need | Min | Detected by | Install | Source |
 |---|---|---|---|---|---|---|---|
-| `pi` | pi | harness | required | 1.4.0 (`PI_MIN_VERSION`) | `pi` on the tabs' PATH or in `$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`; version from its `package.json` | `curl --proto '=https' --proto-redir '=https' -fsSL https://pi.dev/install.sh \| sh` | pi README "Getting started", `docs/quickstart.md` |
+| `pi` | pi | harness | required | 1.4.0 (`PI_MIN_VERSION`) | `pi` on the tabs' PATH or in `$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`, else the login shell's `command -v pi` (`harness_installed`); version from its `package.json` | `curl --proto '=https' --proto-redir '=https' -fsSL https://pi.dev/install.sh \| sh` | pi README "Getting started", `docs/quickstart.md` |
 | `pi-integration` | pi | built in | required | (pi 1.4.0) | `integrations/pi` in the build | — | §3 |
 | `pi-subagents` | pi | third-party | recommended | 0.84.0 (GHSA-6v8j-6w28-2w8r) | `npm:pi-subagents…` in `~/.pi/agent/settings.json` `packages`; version from `~/.pi/agent/npm/node_modules/pi-subagents`, else the spec | `pi install npm:pi-subagents@0.84.0` | npmjs.com/package/pi-subagents; pin: the first version with the GHSA-6v8j-6w28-2w8r fix (nicobailon/pi-subagents advisory); `pi install`: pi `docs/cli.md` |
 | `rpiv-todo` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-todo…` in `packages` | `pi install npm:@juicesharp/rpiv-todo@2.15.0` | npmjs.com/package/@juicesharp/rpiv-todo; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
 | `pi-ask-user` | pi | third-party | recommended | — | `npm:pi-ask-user…` in `packages` | `pi install npm:pi-ask-user@0.17.0` | npmjs.com/package/pi-ask-user; pin: a version in daily use; no advisories (edlsh/pi-ask-user) |
 | `pi-web-access` | pi | third-party | recommended | 0.24.1 (GHSA-8phw-6qw6-xhq6) | `npm:pi-web-access…` in `packages` | `pi install npm:pi-web-access@0.47.0` | npmjs.com/package/pi-web-access; pin: npm's latest on 2026-11-09; minimum: the GHSA-8phw-6qw6-xhq6 fix (nicobailon/pi-web-access advisory, ≤ 0.24.0) |
 | `rpiv-btw` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-btw…` in `packages` | `pi install npm:@juicesharp/rpiv-btw@2.15.0` | npmjs.com/package/@juicesharp/rpiv-btw; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
-| `claude` | Claude Code | harness | required | 2.1.295 (`CLAUDE_MIN_VERSION`) | `claude` on the tabs' PATH or in `~/.local/bin`, `~/.claude/local`; version from where it links (`claude_version_of`) | `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh \| bash` | code.claude.com/docs/en/setup, "Native Install (Recommended)" |
+| `claude` | Claude Code | harness | required | 2.1.295 (`CLAUDE_MIN_VERSION`) | `claude` on the tabs' PATH or in `~/.local/bin`, `~/.claude/local`, else the login shell's `command -v claude`; version from where it links (`claude_version_of`) | `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh \| bash` | code.claude.com/docs/en/setup, "Native Install (Recommended)" |
 | `claude-plugin` | Claude Code | built in | required | (Claude 2.1.295) | `integrations/claude-code` in the build | — | §5 |
-| `codex` | Codex | harness | required | 0.163.0 (`CODEX_MIN_VERSION`) | `codex` on the tabs' PATH; version from where it links (the npm package's `package.json`, Homebrew's `Caskroom/codex/<v>/`, Codex's installer's `releases/<v>-<target>/`), else `codex --version` under a throwaway `CODEX_HOME` (`codex_version_of`); signed in: `codex login status` per Codex home (exit 1 = signed out, a note), run on a worker | `npm install -g @openai/codex@latest` | github.com/openai/codex README |
+| `codex` | Codex | harness | required | 0.163.0 (`CODEX_MIN_VERSION`) | `codex` on the tabs' PATH, else the login shell's `command -v codex`; version from where it links (the npm package's `package.json`, Homebrew's `Caskroom/codex/<v>/`, Codex's installer's `releases/<v>-<target>/`), else `codex --version` under a throwaway `CODEX_HOME` (`codex_version_of`); signed in: `codex login status` per Codex home (exit 1 = signed out, a note), run on a worker | `npm install -g @openai/codex@latest` | github.com/openai/codex README |
 
 Why these: pi-subagents and rpiv-todo feed the bundled `panels` extension's Subagents and Todos
 panels (§3); without them those panels stay empty. pi-ask-user (an `ask_user` tool), pi-web-access
@@ -263,17 +263,52 @@ either: its hooks are Deckhand's own CLI, passed per run (§5a).
 | `too_old` | a known version below `min_version`, pi's own or a project's `.pi/settings.json` npm pin (that one: a note to change it there, nothing run) | the version, the update command, **Update** (runnable layouts) or **Copy** |
 | `ok` | found, new enough, or its version unknown (never "too old" on a guess) | ✓, the version and layout |
 | `unchecked` | a pi package from a `git:` or local-path source in pi's own settings: its version cannot be checked | ? Found, version not checked; no Install (another copy would be a second one) |
-| `unchecked` (pi's row) | pi not found by stat while the login shell is still being asked (`command -v pi`): New session still offers pi; the row is made again when the shell answers | ? Looking for pi in the login shell… |
+| `unchecked` (a harness's row) | the harness not found by stat while the login shell is still being asked (`command -v pi`, `claude` or `codex`): New session still offers it; the row is made again when the shell answers | ? Looking for pi (Claude Code, Codex) in the login shell… |
 | `built_in` | Deckhand's own integration, in the build | ✓ Built in |
 | `not_loaded` | in the build but pi is older than 1.4.0, or not in the build | why |
 | `needs_harness` | a third-party item whose harness is missing or too old | Needs pi first |
 
 The checklist is looked at again when the sheet opens, on Settings' **Refresh**, after Refresh
 shell environment, and when a run ends; after Refresh shell environment and a run's end the cached
-`pi_installed`, `claude_installed` and `codex_installed` answers are dropped too (after a run's
-end, pi's version is probed again as well), and a Claude or Codex tab whose command exits 127
-(not found) drops its own. Test mode never looks at PATH
-(`detect_path`), only the fake HOME's install folders.
+`harness_installed` answers are dropped too, the login shell's included (after a run's end, pi's
+version is probed again as well), and a tab whose command exits 127 (not found) drops its own.
+
+**Whether a harness is installed** (`harness_installed`, `src/core/harness.odin`) is one lookup for
+all three, in the order a tab's own command finds it: the PATH new tabs get, then the folders its
+own installer uses (`harness_folders`: pi's `$PI_CODING_AGENT_DIR/bin` and `~/.pi/agent/bin`,
+Claude Code's `~/.local/bin` and `~/.claude/local`, none for Codex; the same ones `PI_TAB_CMD` and
+`CLAUDE_TAB_CMD` fall back to), then the Node version managers' folders read from disk
+(`src/core/harness_node.odin`: nvm's under `$NVM_DIR` or `~/.nvm`, its default alias's version
+first, so nvm loaded lazily from `.zshrc` is found; fnm's default alias and versions), then the
+login shell's `command -v <name>` on a worker (at most 10 s), so one that only a `.zprofile` puts
+on PATH (asdf, mise, pnpm) is found. The shell's answer is the last line of its output that is an
+absolute path (rc and logout noise around it); a shell function or alias does not count. Stat,
+`access(X_OK)`, reading alias files and `command -v` only: a harness, nvm, fnm or node is never run
+to find it. Until the shell answers, the harness counts as there. Only a clean "no" says it is
+missing (`command -v`'s exit 1, or a path that is not a runnable binary); a timeout, a signal, any
+other exit or exit 0 naming no path is unknown: never cached, the harness counts as there, and the
+shell is asked again later (after 15 s, doubling to 5 min; a recheck resets it). What is cached has
+its folder's links resolved, so fnm's per-shell folder (`fnm_multishells/<id>`), which goes away
+with its shell, becomes the install it points to.
+
+**Which binary a tab starts.** Each start decides its binary once (`harness_path`: by stat, else
+what the login shell named) and uses it for both its version checks (Codex's minimum, pi's `-e`
+rule) and what the tab runs: the command gets that folder (`_dh_found=<dir>`, `harness_found_sh`)
+and puts it first on PATH (the node next to it comes too). A Codex start with no binary to check
+(the login shell still asked, or no clear answer) does not start: the tab says why.
+
+**Versions** are read from where the binary links, per harness (`harness_version_of`). A Volta shim
+(`~/.volta/bin/<name>` -> `volta-shim`) is read through the package Volta installed
+(`tools/image/packages/<package>/lib/node_modules/<package>`), and with none there it has no
+version. That is Volta's default copy: in a project whose `package.json` depends on the same
+package, Volta's shim runs the project's own copy instead, which Deckhand does not read, so the
+version shown can differ from the one that tab runs. Nothing is run for a version, with one
+exception: a Codex install whose layout Deckhand does not recognise (a plain `~/.local/bin/codex`
+from Codex's older installer) gets `codex --version` run once per binary, with a throwaway
+`CODEX_HOME` (`codex_version_run`, [CODEX.md §5](CODEX.md#5-installed-version-signed-in)); never
+for a Volta shim, and never to find Codex. Test mode never looks at PATH (`detect_path`) or asks
+the login shell (unless `DECKHAND_REAL_PI=1`), only the fake HOME's install folders; unit tests ask
+the login shell only when a test turns `harness_lookup_in_unit_tests` on.
 
 **Other machines** (Machines over SSH, [GUIDE.md](GUIDE.md)). Each machine's core checks its own
 harnesses with this manifest. This Mac shows that machine's checklist read-only under Settings ›

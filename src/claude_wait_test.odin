@@ -34,7 +34,7 @@ w_reset :: proc() -> runtime.Allocator {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
 	core.persist = {}
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	core.platform = {quit = proc() {}}
 	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")

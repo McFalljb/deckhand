@@ -584,7 +584,7 @@ cr_env :: proc(tag: string) -> (base, cfg, proj: string) {
 	os.unset_env("DECKHAND_CLAUDE_BIN")
 	core.claude_reload_watch_reset()
 	core.dead_tab_reset()
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	return
 }
 
@@ -593,7 +593,7 @@ cr_done :: proc() {
 	r_done()
 	core.claude_reload_watch_reset()
 	core.dead_tab_reset()
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Claude] = nil
 	os.unset_env("CLAUDE_CONFIG_DIR")
 	os.unset_env("DECKHAND_CLAUDE_BIN")
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")

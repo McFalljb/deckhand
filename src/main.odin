@@ -1545,14 +1545,15 @@ launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 	return core.New_Chat{project_id = pid}
 }
 
-// Whether `deckhand DIR` may choose its harness now: always with --claude; else once pi's detection
-// settled. On a cold launch pi counts as there while the login shell is asked (pi_installed,
-// harness.odin), and a user without pi would get a pi chat that exits 127; the lookup always
-// answers (pi_lookup_timeout) and wakes the window.
+// Whether `deckhand DIR` may choose its harness now: always with --claude; else once detection
+// settled. On a cold launch a harness counts as there while the login shell is asked
+// (harness_installed, harness.odin), and a user without pi would get a pi chat that exits 127 (or
+// without Claude Code, a Claude tab that does); the lookups always answer (harness_lookup_timeout)
+// and wake the window.
 launch_settled :: proc(claude: bool) -> bool {
 	if claude do return true
-	_ = core.pi_installed() // starts the lookup when nothing found pi by stat
-	return core.pi_lookup_state() != .Asking
+	for h in core.Harness do _, _ = core.harness_installed(h) // starts a lookup where nothing found it by stat
+	return !core.harness_lookup_asking()
 }
 
 // Test mode's backing scale from DECKHAND_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty

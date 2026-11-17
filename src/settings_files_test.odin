@@ -49,8 +49,8 @@ setup :: proc() -> (home, proj: string) {
 	os.unset_env("XDG_CONFIG_HOME")
 	os.unset_env("PI_KIT_NOTES_DIR") // the Folders group shows the user's own as a row
 	// pi's files and the Coding agents rows are listed as on a machine with pi and Claude Code
-	core.pi_installed_probe = stand_in_installed
-	core.claude_installed_probe = stand_in_installed
+	core.harness_installed_probe[.Pi] = stand_in_installed
+	core.harness_installed_probe[.Claude] = stand_in_installed
 	ad = fmt.tprintf("%s/.pi/agent", home)
 	write_mode(fmt.tprintf("%s/settings.json", ad), `{"defaultModel": "x", "packages": ["npm:pi-subagents@1.2.3", {"source": "../../pkgs/pi-kit"}]}`, 0o644)
 	write_mode(fmt.tprintf("%s/models.json", ad), `{"providers": {}}`, 0o600) // pi may make it private: still a config file
@@ -837,10 +837,10 @@ settings_files_codex_rows :: proc(t: ^testing.T) {
 		return strings.to_string(b)
 	}
 	// not installed: none
-	core.codex_installed_probe = proc() -> bool {return false}
-	defer core.codex_installed_probe = nil
+	core.harness_installed_probe[.Codex] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Codex] = nil
 	testing.expect_value(t, text(), "")
-	core.codex_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Codex] = proc() -> bool {return true}
 	testing.expect_value(t, text(), "codex|config.toml|~/.codex/config.toml|true|false\ncodex|AGENTS.md|~/.codex/AGENTS.md|true|false\ncodex|prompts|~/.codex/prompts|true|false\ncodex|skills|~/.codex/skills|true|false\ncodex|hooks.json|~/.codex/hooks.json|true|false\n")
 	got := text()
 	for never in ([]string{"auth.json", "history", "sessions", "plugins", "AGENTS.override.md", "rules"}) do testing.expectf(t, !strings.contains(got, never), "%s listed:\n%s", never, got)

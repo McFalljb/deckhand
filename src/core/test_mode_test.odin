@@ -43,7 +43,7 @@ test_mode_refuses_real_binaries :: proc(t: ^testing.T) {
 	os.unset_env("DECKHAND_REAL_PI")
 	// not test mode: the real commands
 	os.unset_env("DECKHAND_SCRIPT")
-	testing.expect_value(t, pi_tab_cmd(), PI_TAB_CMD)
+	testing.expect_value(t, pi_tab_cmd(), PI_TAB_CMD) // no binary decided: no folder (harness_found_sh)
 	testing.expect_value(t, claude_tab_cmd(), CLAUDE_TAB_CMD)
 	// test mode without a stand-in: a refusal that exits 127, never `exec pi` / `exec claude`
 	os.set_env("DECKHAND_SCRIPT", "tests/scripts/x.txt")
@@ -55,7 +55,7 @@ test_mode_refuses_real_binaries :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(claude_tab_cmd(), "exec claude"))
 	// DECKHAND_REAL_PI=1: the real pi (real-pi scenes); claude has no such opt-in
 	os.set_env("DECKHAND_REAL_PI", "1")
-	testing.expect_value(t, pi_tab_cmd(), PI_TAB_CMD)
+	testing.expect_value(t, pi_tab_cmd(), PI_TAB_CMD) // no binary decided: no folder (harness_found_sh)
 	testing.expect(t, strings.contains(claude_tab_cmd(), "refusing"))
 	os.unset_env("DECKHAND_REAL_PI")
 	// the stand-ins win

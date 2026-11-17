@@ -96,10 +96,10 @@ web_view_new_choices_section :: proc(t: ^testing.T) {
 	defer os.remove_all(home)
 	os.set_env("HOME", home)
 	os.unset_env("CLAUDE_CONFIG_DIR")
-	pi_installed_probe = proc() -> bool {return true}
-	claude_installed_probe = proc() -> bool {return true}
-	codex_installed_probe = proc() -> bool {return false}
-	defer pi_installed_probe, claude_installed_probe, codex_installed_probe = nil, nil, nil
+	harness_installed_probe[.Pi] = proc() -> bool {return true}
+	harness_installed_probe[.Claude] = proc() -> bool {return true}
+	harness_installed_probe[.Codex] = proc() -> bool {return false}
+	defer harness_installed_probe[.Pi], harness_installed_probe[.Claude], harness_installed_probe[.Codex] = nil, nil, nil
 	state.settings.last_harness = .Claude
 	checks := []Machine_Check{{id = "pi", state = .Ok}, {id = "claude", state = .Too_Old}, {id = "codex", state = .Ok}}
 	machines := []Machine_View{{no = 2, name = "m2", checklist = checks, codex = true}, {no = 3, name = "m3", checklist = checks[2:]}}
@@ -134,9 +134,9 @@ web_view_new_choices_section :: proc(t: ^testing.T) {
 	// Claude Code or Codex in its Chats; m3: Codex there but its core too old: none, and why
 	testing.expect_value(t, new_of(), "0: claude=Claude Code,pi=pi | claude=Claude Code,pi=pi | tabs 1/0\n2: claude=Claude Code,pi=pi,codex=Codex | pi=pi | tabs 1/1\n3:  |  | tabs 0/0 (codex note)\n")
 	// Codex installed here (no other section changes): offered at once, in Chats too
-	codex_installed_probe = proc() -> bool {return true}
+	harness_installed_probe[.Codex] = proc() -> bool {return true}
 	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,pi=pi,codex=Codex | claude=Claude Code,pi=pi,codex=Codex | tabs 1/1\n"), new_of())
-	pi_installed_probe = proc() -> bool {return false}
+	harness_installed_probe[.Pi] = proc() -> bool {return false}
 	testing.expect(t, strings.has_prefix(new_of(), "0: claude=Claude Code,codex=Codex | claude=Claude Code,codex=Codex | tabs 1/1\n"), new_of())
 	// a browser's new session goes first next time (as the native picker's); an agent's does not
 	web_note_harness(New_Claude_Session{project_id = 1, codex = true}, {kind = .UI, web = true})

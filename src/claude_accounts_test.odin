@@ -92,7 +92,7 @@ ca_reset :: proc(env: ^Ca_Env) -> runtime.Allocator {
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	env.home = ca_dir("home")
 	env.root = ca_dir("data")
 	d := ca_dir("out")
@@ -549,7 +549,7 @@ claude_disk_nothing :: proc(t: ^testing.T) {
 	env: Ca_Env
 	context.allocator = ca_reset(&env)
 	defer ca_done()
-	core.claude_found = .No
+	core.harness_found[.Claude] = .No
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
 	core.run_command(core.Select_Project{project_id = pid}, CA_UI)
@@ -792,10 +792,10 @@ claude_accounts_picker :: proc(t: ^testing.T) {
 		testing.expect_value(t, c.account, work)
 		testing.expect(t, items[0].check, "the default is checked first")
 	}
-	core.claude_installed_probe = proc() -> bool {return true}
-	defer core.claude_installed_probe = nil
-	core.pi_installed_probe = proc() -> bool {return false} // Claude Code alone: its accounts are the choices
-	defer core.pi_installed_probe = nil
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
+	defer core.harness_installed_probe[.Claude] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false} // Claude Code alone: its accounts are the choices
+	defer core.harness_installed_probe[.Pi] = nil
 	menu_open(core.Menu_New_Session{project_id = pid}, {0, 0})
 	rows := menu_items()
 	testing.expect_value(t, len(rows), 3) // the note, then each account
@@ -846,10 +846,10 @@ claude_accounts_default_choice :: proc(t: ^testing.T) {
 	// a browser's New session picker (web.new) offers the same first as the native one: in this
 	// project its last used, elsewhere the chosen default
 	{
-		core.claude_installed_probe = proc() -> bool {return true}
-		defer core.claude_installed_probe = nil
-		core.pi_installed_probe = proc() -> bool {return false}
-		defer core.pi_installed_probe = nil
+		core.harness_installed_probe[.Claude] = proc() -> bool {return true}
+		defer core.harness_installed_probe[.Claude] = nil
+		core.harness_installed_probe[.Pi] = proc() -> bool {return false}
+		defer core.harness_installed_probe[.Pi] = nil
 		native := core.new_session_choices(core.find_project(pid), "")
 		testing.expect(t, len(native) == 2 && native[0].label == "Claude Code · Claude", "the native picker: the project's pick first")
 		web := ""

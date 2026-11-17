@@ -318,7 +318,10 @@ commands either.
 
 ## 5. Installed, version, signed in
 
-- **Installed**: `codex` on the PATH new tabs get, by stat (never run). The checklist (Settings →
+- **Installed**: `codex` on the PATH new tabs get, by stat, else the login shell's
+  `command -v codex` (on a worker; there meanwhile), never run: the lookup pi and Claude Code use
+  too (`harness_installed`, [HARNESSES.md §6](HARNESSES.md#6-the-harness-manifest)). Its version
+  is read from the path either one found. The checklist (Settings →
   Coding agents) has a Codex row: Install runs `npm install -g @openai/codex@latest` after the
   user's click, as for the other harnesses.
 - **Version**: read from the install's own files, without running `codex`: the npm package's

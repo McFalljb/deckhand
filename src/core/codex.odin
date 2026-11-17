@@ -71,11 +71,11 @@ CODEX_HOOKS := [?]Codex_Hook {
 }
 
 // codex, or why there is none: it is not on the login shell's PATH (npm's global bin).
-CODEX_TAB_CMD :: `command -v codex >/dev/null 2>&1 || { printf '%s\n' "Codex (codex) was not found on your login shell's PATH:" "  $PATH" "Install it with: npm install -g @openai/codex@latest (or add its folder to PATH in your shell's login profile, ~/.zprofile for zsh), then open a Codex tab again."; exit 127; }; exec codex "$@"`
+CODEX_TAB_CMD :: HARNESS_FOUND_CODEX_SH + `command -v codex >/dev/null 2>&1 || { printf '%s\n' "Codex (codex) was not found on your login shell's PATH:" "  $PATH" "Install it with: npm install -g @openai/codex@latest (or add its folder to PATH in your shell's login profile, ~/.zprofile for zsh), then open a Codex tab again."; exit 127; }; exec codex "$@"`
 
 // What a Codex tab runs: DECKHAND_CODEX_CMD (tests: a fake codex), else codex (CODEX_TAB_CMD); in
 // test mode never the real codex.
-codex_tab_cmd :: proc() -> string {
+codex_tab_cmd :: proc(bin := "") -> string {
 	if c := hook_env(.Codex_Cmd); c != "" do return c
 	when TEST_HOOKS {
 		if test_mode() {
@@ -83,7 +83,7 @@ codex_tab_cmd :: proc() -> string {
 			return TEST_NO_CODEX_CMD
 		}
 	}
-	return CODEX_TAB_CMD
+	return strings.concatenate({harness_found_sh(bin), CODEX_TAB_CMD}, context.temp_allocator)
 }
 
 when TEST_HOOKS {
@@ -448,8 +448,25 @@ codex_with_defaults :: proc(args_in: []string) -> []string {
 // flags: the tab's own flags (an agent's restart starts without them); defaults: a start the user
 // makes, with the default flags as set now (codex_with_defaults). Its account: CODEX_HOME for a
 // home the user added (none for the default), set again after the login profile.
+// Why a Codex start can't go yet ("" = it can): no binary to read its version from (codex counts as
+// installed only because the login shell has not answered, or gave no clear answer), so the
+// minimum version could not be checked. The user tries again; a recheck asks the shell again.
+codex_start_path_why :: proc(bin: string) -> string {
+	if bin != "" do return ""
+	if harness_lookup_state(.Codex) == .Asking do return "Deckhand is still looking for Codex in your login shell: open the tab again in a moment."
+	return "Deckhand can't find the Codex your login shell starts, so it can't check its version: install it, or add its folder to PATH in your shell's login profile, then Restart."
+}
+
 codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
-	bin := codex_binary()
+	// the codex this start runs, decided once: its version is checked and the tab is told its
+	// folder (codex_tab_cmd), so the tab never starts another copy than the one checked
+	bin := harness_path(.Codex) // by stat, else what the login shell named
+	if hook_env(.Codex_Cmd) == "" {
+		if why = codex_start_path_why(bin); why != "" {
+			term_note(t, why)
+			return false, why
+		}
+	}
 	codex_plain_forget(tab_id)
 	plain := ""
 	if v := codex_version_of(bin); claude_version_below(v, CODEX_MIN_VERSION) {
@@ -483,7 +500,7 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 		term_note(t, why)
 		return false, why
 	}
-	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator) // the account again after the login profile
+	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd(bin)}, context.temp_allocator) // the account again after the login profile
 	argv := shell_script_argv(login_shell(), cmd, "codex")
 	append(&argv, ..args)
 	env := make([dynamic]string, context.temp_allocator)
@@ -591,49 +608,29 @@ claude_tab_command_text :: proc(ct: ^Claude_Tab, text: string) -> string {
 
 // ---- is Codex installed, which version, signed in? ----
 
-codex_found: Claude_Found
-
-// Tests: stands in for the lookup; nil = look.
-codex_installed_probe: proc() -> bool
-
-// The codex Deckhand would start, by stat: DECKHAND_CODEX_BIN (tests), else the PATH new tabs get
-// (never in test mode or a unit test: a codex the developer installed must not change what they
-// see). "" = not found this way.
-codex_binary :: proc() -> string {
-	if b := hook_env(.Codex_Bin); filepath.is_abs(b) do return b
-	when TEST_HOOKS {
-		if ODIN_TEST || test_mode() do return ""
-	}
-	for d in strings.split(detect_path(), ":", context.temp_allocator) do if exe_in(d, "codex") do return fmt.tprintf("%s/codex", strings.trim_right(d, "/"))
-	return ""
-}
-
-// Whether Codex is installed, as new tabs would find it (stat only, never run). Cached;
-// codex_recheck drops it (Refresh shell environment, a Codex tab that exited 127, the user's click).
+// Whether Codex is installed, as new tabs would find it (harness_installed, harness.odin).
 codex_installed :: proc() -> bool {
-	if codex_installed_probe != nil do return codex_installed_probe()
-	if codex_found == .Unknown do codex_found = codex_binary() != "" ? .Yes : .No
-	return codex_found == .Yes
+	_, found := harness_installed(.Codex)
+	return found
 }
 
+// Looked up again (Refresh shell environment, a Codex tab that exited 127), its sign-in too.
 codex_recheck :: proc() {
-	codex_found = .Unknown
+	harness_recheck(.Codex)
 	for &x in codex_login {
 		sync.atomic_add(&x.gen, 1)
 		sync.atomic_store(&x.state, .Unknown)
 	}
 }
 
-codex_installed_now :: proc() -> bool {
-	if codex_found == .No do codex_recheck()
-	return codex_installed()
-}
+codex_installed_now :: proc() -> bool {return harness_installed_now(.Codex)}
 
 // codex's version from where its binary links to: npm's package
 // (<…>/node_modules/@openai/codex/bin/codex.js -> its package.json), Homebrew's cask
 // (Caskroom/codex/<v>/); else, only then, from `codex --version` (codex_version_run). "" = unknown.
 codex_version_of :: proc(bin: string) -> string {
 	if bin == "" do return ""
+	bin := volta_target(.Codex, bin) // a Volta shim: the package it runs (harness_node.odin)
 	real := fs_real(bin)
 	if real == "" do real = bin
 	if i := strings.index(real, "/Caskroom/codex/"); i >= 0 {
@@ -653,6 +650,7 @@ codex_version_of :: proc(bin: string) -> string {
 		}
 	}
 	if v := codex_standalone_version(real); v != "" do return v
+	if filepath.base(real) == "volta-shim" do return "" // a Volta shim whose package is not on disk: never run (it would run codex)
 	return codex_version_run(real)
 }
 
@@ -743,7 +741,7 @@ codex_version_word :: proc(v: string) -> bool {
 }
 
 // The version of the codex new tabs start ("" = unknown or none).
-codex_version :: proc() -> string {return codex_version_of(codex_binary())}
+codex_version :: proc() -> string {return codex_version_of(harness_path(.Codex))}
 
 // What a Codex too old for Deckhand says in the tab. hint: codex_update_hint's.
 codex_old_text :: proc(v, hint: string) -> string {
@@ -852,7 +850,7 @@ codex_login_check :: proc(account := "") {
 	for e in claude_account_env(account, codex = true) do if strings.has_prefix(e, "DECKHAND_CODEX_ACCOUNT=") {
 		set = strings.concatenate({"DECKHAND_CODEX_ACCOUNT=", sh_quote(e[len("DECKHAND_CODEX_ACCOUNT="):]), "; "}, context.temp_allocator)
 	}
-	script := strings.clone(strings.concatenate({"set -- login status; ", set, CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator))
+	script := strings.clone(strings.concatenate({"set -- login status; ", set, CODEX_ACCOUNT_SH, codex_tab_cmd(harness_path(.Codex))}, context.temp_allocator))
 	Job :: struct {
 		slot:   int,
 		gen:    i32,

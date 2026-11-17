@@ -187,27 +187,29 @@ claude_hooks_silent :: proc(tab: ^Tab, now := time.Tick{}) -> bool {
 	return time.tick_diff(r.up, now) >= CLAUDE_HOOKS_GRACE
 }
 
+// A dotted version's three numbers (a suffix such as -beta.1 is ignored; each at most 6 digits).
+version_triple :: proc(s: string) -> (n: [3]u32, ok: bool) {
+	core := s
+	if i := strings.index_any(core, "-+"); i >= 0 do core = core[:i]
+	parts := strings.split(core, ".", context.temp_allocator)
+	if len(parts) != 3 do return {}, false
+	for p, i in parts {
+		if p == "" || len(p) > 6 do return {}, false
+		x: u32
+		for c in transmute([]u8)p {
+			if c < '0' || c > '9' do return {}, false
+			x = x * 10 + u32(c - '0')
+		}
+		n[i] = x
+	}
+	return n, true
+}
+
 // Whether version v is a known version below min (dotted numbers; a suffix such as -beta.1 is
 // ignored). Anything else ("", "build:…", another scheme): false, no hint.
 claude_version_below :: proc(v, min: string) -> bool {
-	parse :: proc(s: string) -> (n: [3]int, ok: bool) {
-		core := s
-		if i := strings.index_any(core, "-+"); i >= 0 do core = core[:i]
-		parts := strings.split(core, ".", context.temp_allocator)
-		if len(parts) != 3 do return {}, false
-		for p, i in parts {
-			if p == "" || len(p) > 6 do return {}, false
-			x := 0
-			for c in transmute([]u8)p {
-				if c < '0' || c > '9' do return {}, false
-				x = x * 10 + int(c - '0')
-			}
-			n[i] = x
-		}
-		return n, true
-	}
-	a, ok_a := parse(v)
-	b, ok_b := parse(min)
+	a, ok_a := version_triple(v)
+	b, ok_b := version_triple(min)
 	if !ok_a || !ok_b do return false
 	for i in 0 ..< 3 do if a[i] != b[i] do return a[i] < b[i]
 	return false

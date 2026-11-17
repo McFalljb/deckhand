@@ -475,7 +475,9 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 		append(&env, ..pi_extra_env({}))
 	}
 	append(&env, ..claude_account_env(ct.account, codex = true)) // its account: CODEX_HOME (none for the default)
-	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Codex}) { // tokens.json: never adopted as a Claude tab
+	start := Held_Start{kind = .Codex} // tokens.json: never adopted as a Claude tab
+	if plain != "" do start.plain, _ = version_triple(plain) // and adopted plain again (holder_adopt)
+	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), start) {
 		socket_forget_tab(tab_id)
 		return false, ""
 	}
@@ -518,13 +520,11 @@ codex_plain_forget :: proc(tab_id: u64) {
 	}
 }
 
-// A Codex tab adopted from the session holder with no token (holder_adopt): started plain, if the
-// codex on disk is still one a plain tab is for (its mark is runtime only); true when marked.
-codex_plain_adopted :: proc(tab_id: u64) -> bool {
-	v := codex_version_of(codex_binary())
-	if !claude_version_below(v, CODEX_MIN_VERSION) || claude_version_below(v, CODEX_PLAIN_MIN_VERSION) do return false
-	codex_plain_set(tab_id, v)
-	return true
+// A Codex tab adopted from the session holder (holder_adopt) that tokens.json says was started
+// plain (Held_Start.plain, its Codex's version): marked again, whatever its token trust and
+// whatever codex is on disk now.
+codex_plain_adopted :: proc(tab_id: u64, v: [3]u32) {
+	codex_plain_set(tab_id, fmt.tprintf("%d.%d.%d", v[0], v[1], v[2]))
 }
 
 // The version of a running plain Codex tab's Codex ("" = not one).

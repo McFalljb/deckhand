@@ -274,9 +274,10 @@ commands either.
   Update it with …, then Restart the tab`; Dismiss hides it for that run). Deckhand types nothing
   into it: `claude_prompt` and every paste but the user's own are refused (`codex_paste_refusal`;
   held prompts would wait forever for an OSC 7501 that never comes), and the "hooks silent" bar
-  never shows. The plain mark is the core's, per run (`codex_plain_version`; the snapshot's
-  `codex_version_old`); a plain tab adopted from the session holder after a relaunch (it has no
-  token) is marked again while the codex on disk is still in that range. Below **0.157.0** a
+  never shows. The plain mark is the core's (`codex_plain_version`; the snapshot's
+  `codex_version_old`), and is kept with the tab's start record in the MAC'd `tokens.json`
+  (`"codex_plain":"0.160.0"`): a plain tab adopted from the session holder after a relaunch is
+  marked again from that record, whatever its token trust and whatever codex is on disk now. Below **0.157.0** a
   Codex tab does not start: the tab says how to update for its install (npm, Homebrew, bun or
   pnpm: that command; Codex's own installer: run it again,
   `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the command's refusal says

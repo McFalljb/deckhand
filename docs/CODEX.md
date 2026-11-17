@@ -45,14 +45,21 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   rows, the palette in one of its sessions; Codex runs there, on that machine's own core.
 - **Accounts** (§6a): Codex homes (`CODEX_HOME`) the user adds; a tab of one runs with
   `CODEX_HOME=<home>`, set again after the login profile.
+- **Settings bar** (§9): a Codex file a running Codex reads only at start changed: "Codex settings
+  changed — Restart N idle Codex tabs", over the centre and in a browser's strip.
 
 ## What does not yet
 
-- **Rename** changes Deckhand's title only, not Codex's own.
+- **Rename** changes Deckhand's title only: Codex's own name lives in its `session_index.jsonl`,
+  which Deckhand never writes, and Codex 0.167.2 has no command-line way or hook output to set it
+  (only its TUI's own commands and the app-server's `thread/name/set`, a separate Codex process).
 - Conversation ids are one space across harnesses: when a Codex record and Claude Code's own
   transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
-- No hot-reload bars (Claude Code's file watching does not apply), no todos, subagents or
-  background panels.
+- No todos, subagents or background panels: Deckhand's four hooks carry none of it, the plan
+  reaches only app-server clients (`turn/plan/updated`) or the rollout, and Codex 0.167.2's
+  `SubagentStart`/`SubagentStop` and tool hooks have no input shape or trust key checked against a
+  real Codex (a wrong guess would make every Codex tab ask "Hooks need review").
+- No update bar for a newer `codex` on disk (each start checks the version, §5).
 - **Continue this conversation on <machine>** is pi only: a Codex conversation cannot be moved to
   another machine yet ([#115](https://github.com/McFalljb/deckhand/issues/115)).
 - A Codex-only session whose codex exits before its first prompt (no session id yet) is not saved
@@ -415,8 +422,9 @@ Claude's accounts code with harness `.Codex` (`src/core/claude_accounts.odin`; d
   `"harness":"codex"`; all `user` only, as Claude's. Saved as `codex_accounts`,
   `codex_account_last`, `codex_account_default`; the snapshot lists `codex_accounts` as
   `claude_accounts` (labels and folders, no secret).
-- Not done: the setup sheet's accounts step (Claude's lists found folders; Codex finds none),
-  per-account hot-reload, and a copy button for the sign-in command.
+- Not done: the setup sheet's accounts step (Claude's lists found folders; Codex finds none)
+  and a copy button for the sign-in command. The settings bar (§9) is per account: a home's
+  file marks only its tabs.
 - **Settings files** (Coding agents › Codex › Advanced): each home's `CODEX_CONFIG_FILES` and
   `CODEX_CONFIG_FOLDERS` (one group per account once there are several), edited by the user as
   Claude's; `CODEX_VIEW_FILES`/`CODEX_VIEW_FOLDERS` (`hooks.json`, `hooks/`) read-only in the editor
@@ -503,3 +511,40 @@ tab, which that core checks under its own flag rule (§1a), as it would its own 
 - Not checked without a real second machine: a Linux core's `codex` (npm's global bin on its login
   PATH) and Codex's own hook trust there. The `remote-codex` scene runs both cores on one Mac with
   a stand-in codex.
+
+## 9. The settings bar (hot reload)
+
+Claude's bars' model and watcher (`src/core/claude_reload.odin`, [CLAUDE.md](CLAUDE.md)), a
+second watcher for Codex tabs (`codex_file_class`, `codex_sources`). Codex has no in-place reload
+of a file a user edits (the app-server's `reloadUserConfig` applies only to its own config writes),
+so the bar offers **Restart**: `codex resume <id>` in the same tab, idle tabs now, busy ones once
+idle, always confirmed (what Codex runs there stops). A tab with no conversation yet (its first
+prompt not sent, or hooks not running) is left alone: the bar says new settings apply when you
+restart it. Idle is known only once Codex's first hook reports (SessionStart comes with the first
+prompt), so a just-resumed tab's queued restart may wait for its next prompt.
+
+- **Watched** (a poll every 2 s while a Codex tab of this Mac runs; another machine's tabs are its
+  core's): each running tab's home's `AGENTS.md`, `AGENTS.override.md`, `hooks.json` and
+  `prompts/` by stamps and folder digests; its `config.toml` by its content less what Codex writes
+  there itself (`codex_config_digest`); and the project's `AGENTS.md`, `AGENTS.override.md` in the
+  cwd and each folder up to the first with a `.git` (none: the cwd only), there or not yet. An
+  editor save of one of those, or of a file in the home's `rules/`, shows the bar at once (a
+  project's `AGENTS.md` only when a running tab reads it).
+- **config.toml**: what Codex writes itself in normal use does not count: tables `[projects.…]`
+  (trust), `[notice…]`, `[hooks.state…]`, `[tui.model_availability_nux]`, `[tui]`'s
+  `screen_reader_detection_done`, and `model` / `model_reasoning_effort` at the top or in a
+  profile (seen in a 0.167.2 home: `projects` trust, the two `tui` entries). The file is read in
+  memory only (at most 1 MiB; a larger one: any change counts) and only its hash is kept. A line
+  filter, not a TOML parser: an inline table or a dotted key holding those (`projects = {…}`,
+  `notice.x = …`) or a quoted header is not taken apart and counts as a change.
+- **Not watched**: `rules/` (Codex appends to `rules/default.rules` itself on "always allow"),
+  `skills/` (Codex watches its skill files itself: the app-server's `skills/changed`), `hooks/`
+  (its scripts run anew each time), a project's `.codex/`, and everything else in a home (its
+  sign-in and state: `codex_credential`, refused by `add`).
+- **Wire**: `claude_restart_changed` and `claude_reload_later` with `"harness":"codex"` (no
+  `update`); the snapshot's `reload.codex` (Claude's `reload.claude` fields; `version` unused);
+  `webbars` kind `codex_reload`, harness `codex`.
+- Not checked against a real Codex: which of these files a running Codex 0.167.2 really re-reads
+  (taken from its docs and its app-server schema: config and instructions at start, skills
+  watched), and the full list of keys it writes into `config.toml`; a Restart of a Codex tab is
+  tested with the stand-in only.

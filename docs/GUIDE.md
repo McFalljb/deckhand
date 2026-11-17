@@ -1557,7 +1557,7 @@ then shows pi-kit's shell. Your pi tab starts either way.
 
 **Claude Code.** Once Claude Code has a config folder (`~/.claude` or your `CLAUDE_CONFIG_DIR`):
 `settings.json`, `CLAUDE.md`, `keybindings.json`, and the folders `agents`, `skills`, `commands`,
-`output-styles`, `rules`. With Claude Code installed, also **Skip permissions in new tabs** (for
+`output-styles`, `rules`. With that folder there, also **Skip permissions in new tabs** (for
 `--dangerously-skip-permissions`) with a warning line (see [Claude Code tabs](#claude-code-tabs)),
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.

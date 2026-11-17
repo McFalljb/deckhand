@@ -1,10 +1,11 @@
 package core
 
-// The coding agents ("harnesses") Deckhand can start in a session: pi and Claude Code (sidebar.odin:
-// Harness). Either may be missing: a Claude-only user has no pi, a pi user may have no Claude Code.
+// The coding agents ("harnesses") Deckhand can start in a session: pi, Claude Code and Codex
+// (sidebar.odin: Harness). Any may be missing: a Claude-only or Codex-only user has no pi, a pi
+// user may have neither of the others.
 //
-//   - Whether each is installed is looked for, never run: claude_installed (claude.odin) and
-//     pi_installed here, by stat on the PATH new tabs get (child_base_env) and in each one's own
+//   - Whether each is installed is looked for, never run: claude_installed (claude.odin),
+//     codex_installed (codex.odin) and pi_installed here, by stat on the PATH new tabs get (child_base_env) and in each one's own
 //     install folders. DECKHAND_CMD stands in for pi (tests, benchmarks): pi counts as installed.
 //   - The user's one "New session" (⌘N in Chats, ⇧⌘N, "+ New session", Chats' "+ New chat", a
 //     project's "+" and menu, a checkout's "New session here", the palette and the menu bar) goes

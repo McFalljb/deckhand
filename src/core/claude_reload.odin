@@ -32,10 +32,11 @@ package core
 // size). Each Claude tab records it when first seen running (Tab.reload.version); another one
 // on disk shows "Claude Code updated to X — Restart N idle Claude tabs".
 //
-// Never read, watched or listed: credentials, account state, transcripts, caches
+// Never read, watched or listed here: credentials, account state, transcripts, caches
 // (claude_credential: .credentials.json, .claude.json, everything in the config folder but its
 // config files). Only file times and sizes are looked at, never contents (an npm install's
-// package.json excepted, for its version).
+// package.json excepted, for its version). Transcripts are read elsewhere, for rows only:
+// claude_disk.odin (sessions found on disk; never credentials).
 
 import "base:runtime"
 import "core:fmt"

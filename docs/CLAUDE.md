@@ -115,8 +115,9 @@ inherits the login environment. Deckhand stores folders and names, never a secre
   sheet). Labels come from the folder's name (`.claude-work` → `Work`); the user renames,
   removes (not the default) and chooses the **default for new sessions**
   (`set_claude_account_default`). No alias or folder name is assumed.
-- **One account**: no account UI at all (no picker, no tags, no Settings rows but **Add
-  account…** and **Scan again**), and starts set no account.
+- **One account**: no account UI at all (no picker, no tags, no Settings rows but one quiet
+  **More accounts…**; **Add account…** and **Scan again** show once there are several), and
+  starts set no account.
 - **Starting.** A tab and a history entry keep their account's folder, written at a start (an
   entry without one uses the default as resolved then). Every start (new, resume, restore,
   restart) sets it: nothing for the default; else

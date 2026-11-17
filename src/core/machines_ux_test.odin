@@ -246,7 +246,7 @@ machines_ux_remote_new_session :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(items), 1)
 	if len(items) == 1 {
 		c, is := items[0].cmd.(New_Claude_Session)
-		testing.expect(t, is && c.codex && c.project_id == p.id && c.cwd == "", "Codex there")
+		testing.expect(t, is && c.harness == .Codex && c.project_id == p.id && c.cwd == "", "Codex there")
 	}
 	testing.expect(t, codex_offered(p.id), "New Codex tab there")
 	views[0].checklist = []Machine_Check{{id = "codex", state = .Missing}}

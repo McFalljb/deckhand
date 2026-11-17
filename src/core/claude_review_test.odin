@@ -105,7 +105,7 @@ rv_collision :: proc(t: ^testing.T) {
 	r := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = P}, RV_UI)
 	testing.expect(t, r.ok, r.error)
 	sid := r.created_id
-	ct := run_command(New_Claude_Tab{session = sid}, RV_UI).created_id
+	ct := run_command(New_Claude_Tab{session = sid, harness = .Claude}, RV_UI).created_id
 	rep := run_command(Claude_Session_Report{tab_id = ct, session_id = P}, RV_SCRIPT)
 	testing.expect(t, !rep.ok, "a pi session's id is not a Claude session's")
 	testing.expect(t, claude_open_tab(P) == 0)
@@ -114,7 +114,7 @@ rv_collision :: proc(t: ^testing.T) {
 	// older data: a history entry holding the pi id; the pi row still opens pi, listed once
 	run_command(Claude_Turn_Report{tab_id = ct, state = "idle"}, RV_SCRIPT)
 	run_command(Close_Session{session = sid}, {kind = .Internal})
-	run_command(Claude_Restore_History{records = {{id = P, cwd = "", project = find_project(pid).cwd, title = "poisoned", used = 1}}}, {kind = .Internal})
+	run_command(Claude_Restore_History{records = {{id = P, cwd = "", project = find_project(pid).cwd, title = "poisoned", used = 1, harness = .Claude}}}, {kind = .Internal})
 	n := 0
 	for row in sidebar_sessions(.Sessions) do if row.session.id == P do n += 1
 	testing.expect_value(t, n, 1)
@@ -122,10 +122,10 @@ rv_collision :: proc(t: ^testing.T) {
 	s := find_session(o.created_id)
 	testing.expect(t, o.ok && s != nil && s.agent == .Pi, "the pi session opens")
 	// another open session's key (a pi one, or a Claude-only one) is refused too
-	a := run_command(New_Claude_Session{project_id = pid}, RV_UI).created_id
+	a := run_command(New_Claude_Session{project_id = pid, harness = .Claude}, RV_UI).created_id
 	ka := "a1a1a1a1-0000-4000-8000-000000000001"
 	run_command(Claude_Session_Report{tab_id = find_session(a).tabs[0].id, session_id = ka}, RV_SCRIPT)
-	b := run_command(New_Claude_Session{project_id = pid}, RV_UI).created_id
+	b := run_command(New_Claude_Session{project_id = pid, harness = .Claude}, RV_UI).created_id
 	bt := find_session(b).tabs[0].id
 	testing.expect(t, !run_command(Claude_Session_Report{tab_id = bt, session_id = ka}, RV_SCRIPT).ok, "a /resume to a conversation another session runs")
 	testing.expect_value(t, rv_keyed(ka), 1)
@@ -139,7 +139,7 @@ rv_dead_dup :: proc(t: ^testing.T) {
 	context.allocator = rv_reset()
 	dir, pid := rv_project("dead")
 	sidc := "d1d1d1d1-0000-4000-8000-000000000001"
-	r := run_command(New_Claude_Session{project_id = pid, args = {"--verbose"}}, RV_UI)
+	r := run_command(New_Claude_Session{project_id = pid, args = {"--verbose"}, harness = .Claude}, RV_UI)
 	main := find_session(r.created_id).tabs[0].id
 	run_command(Claude_Session_Report{tab_id = main, session_id = sidc}, RV_SCRIPT)
 	argf := fmt.tprintf("%s/argv", dir)
@@ -176,7 +176,7 @@ rv_restore_then_install :: proc(t: ^testing.T) {
 	os.set_env("HOME", home)
 	_, pid := rv_project("inst")
 	sidc := "e1e1e1e1-0000-4000-8000-000000000001"
-	r := run_command(New_Claude_Session{project_id = pid}, RV_UI)
+	r := run_command(New_Claude_Session{project_id = pid, harness = .Claude}, RV_UI)
 	run_command(Claude_Session_Report{tab_id = find_session(r.created_id).tabs[0].id, session_id = sidc}, RV_SCRIPT)
 	text := strings.clone(workspace_json())
 	context.allocator = rv_reset()
@@ -212,10 +212,10 @@ rv_agents_do_not_start_restored :: proc(t: ^testing.T) {
 	context.allocator = rv_reset()
 	dir, pid := rv_project("agents")
 	sidc := "f1f1f1f1-0000-4000-8000-000000000001"
-	r := run_command(New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}}, RV_UI)
+	r := run_command(New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}, harness = .Claude}, RV_UI)
 	run_command(Claude_Session_Report{tab_id = find_session(r.created_id).tabs[0].id, session_id = sidc}, RV_SCRIPT)
 	sidp := "f1f1f1f1-0000-4000-8000-000000000002"
-	r2 := run_command(New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}}, RV_UI)
+	r2 := run_command(New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}, harness = .Claude}, RV_UI)
 	run_command(Claude_Session_Report{tab_id = find_session(r2.created_id).tabs[0].id, session_id = sidp}, RV_SCRIPT)
 	text := strings.clone(workspace_json())
 	context.allocator = rv_reset()
@@ -244,10 +244,10 @@ rv_agents_do_not_start_restored :: proc(t: ^testing.T) {
 rv_history_checked_on_load :: proc(t: ^testing.T) {
 	context.allocator = rv_reset()
 	run_command(Claude_Restore_History{records = {
-		{id = "aaaa1111-0000-4000-8000-000000000001", project = "/p", title = "line one\nline two", used = 1},
-		{id = "aaaa1111-0000-4000-8000-000000000002", project = "/p", title = "flags", used = 1, args = {"--resume", "x"}},
-		{id = "aaaa1111-0000-4000-8000-000000000003", project = "/p", title = strings.repeat("x", 200, context.temp_allocator), used = 1},
-		{id = "aaaa1111-0000-4000-8000-000000000004", project = "relative", title = "r", used = 1},
+		{id = "aaaa1111-0000-4000-8000-000000000001", project = "/p", title = "line one\nline two", used = 1, harness = .Claude},
+		{id = "aaaa1111-0000-4000-8000-000000000002", project = "/p", title = "flags", used = 1, args = {"--resume", "x"}, harness = .Claude},
+		{id = "aaaa1111-0000-4000-8000-000000000003", project = "/p", title = strings.repeat("x", 200, context.temp_allocator), used = 1, harness = .Claude},
+		{id = "aaaa1111-0000-4000-8000-000000000004", project = "relative", title = "r", used = 1, harness = .Claude},
 	}}, {kind = .Internal})
 	testing.expect_value(t, len(state.claude_history), 2)
 	r1, _ := claude_record("aaaa1111-0000-4000-8000-000000000001")

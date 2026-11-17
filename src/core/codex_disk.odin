@@ -78,7 +78,7 @@ disk_homes :: proc(h: Harness) -> []Disk_Home {
 	out := make([dynamic]Disk_Home, context.temp_allocator)
 	switch h {
 	case .Codex:
-		for a in claude_accounts(codex = true) do if root := codex_sessions_dir(a.dir); root != "" do append(&out, Disk_Home{account = a.dir, root = root})
+		for a in claude_accounts(harness = .Codex) do if root := codex_sessions_dir(a.dir); root != "" do append(&out, Disk_Home{account = a.dir, root = root})
 	case .Pi, .Claude:
 	}
 	return out[:]

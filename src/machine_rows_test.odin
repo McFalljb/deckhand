@@ -259,7 +259,7 @@ machine_rows_review :: proc(t: ^testing.T) {
 	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/me/garden"), label = strings.clone("garden")})
 	append(&r.projects, core.Project{id = 6, group = .Projects, cwd = strings.clone("/home/me/orchard"), label = strings.clone("orchard")})
 	s := core.Open_Session{id = 9, project_id = 5, agent = .Claude, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me/garden"), title = strings.clone("Prune the roses")}
-	append(&s.tabs, core.Tab{id = 10, kind = core.Claude_Tab{}, title = strings.clone("claude"), status = .Running})
+	append(&s.tabs, core.Tab{id = 10, kind = core.Claude_Tab{harness = .Claude}, title = strings.clone("claude"), status = .Running})
 	s.active_tab = 10
 	append(&r.open_sessions, s)
 	r.selected_project = 5
@@ -281,7 +281,7 @@ machine_rows_review :: proc(t: ^testing.T) {
 
 	// several accounts here: a remote Claude row (open, or its project's) has no tag (its account is
 	// that machine's, unknown here), never this Mac's default's
-	testing.expect(t, core.claude_accounts_many(), "two accounts here")
+	testing.expect(t, core.claude_accounts_many(.Claude), "two accounts here")
 	state.selected_project = pid
 	core.mirror_sessions_show(3, &m)
 	got := drawn_text()
@@ -318,7 +318,7 @@ machine_rows_bare_id :: proc(t: ^testing.T) {
 	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/jb/garden"), label = strings.clone("garden")})
 	for i in u64(0) ..< 2 {
 		s := core.Open_Session{id = 20 + i, project_id = 5, pi_session_id = strings.clone(""), cwd = strings.clone("/home/jb/garden"), title = strings.clone("new")}
-		append(&s.tabs, core.Tab{id = 30 + i, kind = core.Claude_Tab{}, title = strings.clone("claude"), status = .Running, has_term = true})
+		append(&s.tabs, core.Tab{id = 30 + i, kind = core.Claude_Tab{harness = .Claude}, title = strings.clone("claude"), status = .Running, has_term = true})
 		s.active_tab = 30 + i
 		append(&r.open_sessions, s)
 	}

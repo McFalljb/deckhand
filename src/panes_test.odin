@@ -586,7 +586,7 @@ panes_agent_opens_land_in_its_pane :: proc(t: ^testing.T) {
 	testing.expect_value(t, browser_popup_pane(x.s, x.browser), u64(0)) // no agent: the focused pane
 	// a Claude tab in B, the user focused on A: its opens go to B
 	cl := core.new_id()
-	append(&x.s.tabs, core.Tab{id = cl, kind = core.Claude_Tab{}, title = "claude", status = .Running, pane = x.b})
+	append(&x.s.tabs, core.Tab{id = cl, kind = core.Claude_Tab{harness = .Claude}, title = "claude", status = .Running, pane = x.b})
 	claude := core.Caller{kind = .Panel, tab_id = cl, claude = true}
 	testing.expect(t, core.run_command(core.Focus_Pane{pane = x.a}, PT_UI).ok, "focus A")
 	lands(t, x, &opened, core.run_command(core.Browser_Open{url = "https://b.example"}, claude), x.b, "claude browser_open")

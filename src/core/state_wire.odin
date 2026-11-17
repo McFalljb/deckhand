@@ -254,6 +254,22 @@ wire_skip :: proc(type_name, field: string) -> ^Wire_Skip {
 	return nil
 }
 
+// Harness fields the stream carries as the `codex` bool they replaced (grow-only: a mirror on
+// another version reads and writes "codex"): `"codex":true` for .Codex, `"codex":false` for
+// anything else; read back true -> .Codex, false or absent -> .Claude (state_read.odin).
+STATE_WIRE_CODEX_BOOLS := [?][2]string {
+	{"Claude_Tab", "harness"},
+	{"Claude_Record", "harness"},
+}
+STATE_WIRE_CODEX_KEY :: "codex"
+
+// Whether type_name's field is one of STATE_WIRE_CODEX_BOOLS.
+wire_codex_bool :: proc(type_name, field: string) -> bool {
+	if type_name == "" do return false
+	for x in STATE_WIRE_CODEX_BOOLS do if x[0] == type_name && x[1] == field do return true
+	return false
+}
+
 // A field's key on the wire: its `json:"name"` tag, else its name.
 wire_key :: proc(name: string, tag: string) -> string {
 	if v, ok := reflect.struct_tag_lookup(reflect.Struct_Tag(tag), "json"); ok && v != "" {
@@ -431,6 +447,11 @@ wire_write_struct :: proc(b: ^strings.Builder, data: rawptr, name: string, st: r
 		if wire_skip(name, st.names[k]) != nil do continue
 		if n > 0 do strings.write_byte(b, ',')
 		n += 1
+		if wire_codex_bool(name, st.names[k]) {
+			json_quote(b, STATE_WIRE_CODEX_KEY)
+			strings.write_string(b, (^Harness)(rawptr(uintptr(data) + st.offsets[k]))^ == .Codex ? ":true" : ":false")
+			continue
+		}
 		json_quote(b, wire_key(st.names[k], st.tags[k]))
 		strings.write_byte(b, ':')
 		wire_write(b, rawptr(uintptr(data) + st.offsets[k]), st.types[k])

@@ -36,7 +36,7 @@ sf_reset :: proc(t: ^testing.T) -> (a, b, home: u64, dir, outside: string) {
 		append(&state.projects, core.Project{id = core.new_id(), cwd = core.fs_real(cwd)})
 		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = core.fs_real(cwd), project_id = state.projects[len(state.projects) - 1].id}
 		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
-		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{}, title = "claude", status = .Running})
+		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{harness = .Claude}, title = "claude", status = .Running})
 		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Shell_Tab{}, title = "zsh", status = .Running})
 		s.active_tab = s.tabs[0].id
 		append(&state.open_sessions, s)
@@ -218,7 +218,7 @@ show_file_callers_and_no_agent_edits :: proc(t: ^testing.T) {
 	defer sf_done(dir)
 	sa := core.find_session(a)
 	ro_id := core.new_id()
-	append(&sa.tabs, core.Tab{id = ro_id, kind = core.Claude_Tab{}, title = "claude", status = .Running})
+	append(&sa.tabs, core.Tab{id = ro_id, kind = core.Claude_Tab{harness = .Claude}, title = "claude", status = .Running})
 	ro := core.Caller{kind = .Panel, tab_id = ro_id, claude = true}
 	pi := core.Caller{kind = .Panel, tab_id = sf_tab(a, 0)}
 	for c in ([]core.Caller{pi, ro, {kind = .Panel, tab_id = sf_tab(a, 1), claude = true}, {kind = .UI}, {kind = .Script}, {kind = .Control}, {kind = .Internal}}) {

@@ -136,7 +136,7 @@ ch_chats_full :: proc(t: ^testing.T) {
 	testing.expect(t, c != nil)
 	if c == nil do return
 	ch_clear(env)
-	r := core.run_command(core.New_Claude_Session{project_id = c.id, args = {"--dangerously-skip-permissions"}}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id, args = {"--dangerously-skip-permissions"}, harness = .Claude}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	argv := ch_argv(env)
 	ch_full(t, argv)
@@ -152,11 +152,11 @@ ch_chats_full :: proc(t: ^testing.T) {
 	// a Claude tab in a pi chat: the user's, and an agent's
 	chat := core.run_command(core.New_Chat{project_id = c.id}, CH_UI).created_id
 	ch_clear(env)
-	rt := core.run_command(core.New_Claude_Tab{session = chat}, CH_UI)
+	rt := core.run_command(core.New_Claude_Tab{session = chat, harness = .Claude}, CH_UI)
 	testing.expect(t, rt.ok, rt.error)
 	ch_full(t, ch_argv(env))
 	ch_clear(env)
-	ra := core.run_command(core.New_Claude_Tab{session = chat}, CH_CONTROL)
+	ra := core.run_command(core.New_Claude_Tab{session = chat, harness = .Claude}, CH_CONTROL)
 	testing.expect(t, ra.ok, ra.error)
 	ch_full(t, ch_argv(env))
 }
@@ -190,7 +190,7 @@ ch_chats_offered :: proc(t: ^testing.T) {
 	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	defer core.harness_installed_probe[.Claude] = nil
 	for it in core.new_session_choices(c, "") do testing.expect(t, !strings.contains(it.label, "Claude"), it.label)
-	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI).ok)
+	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = c.id, harness = .Claude}, CH_UI).ok)
 }
 
 // The user's default flags (Settings: "Default Claude Code flags for new tabs"; off by default).
@@ -226,15 +226,15 @@ ch_default_flags :: proc(t: ^testing.T) {
 		return ch_argv(env)
 	}
 	on :: proc(t: ^testing.T) {
-		r := core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true}, CH_UI)
+		r := core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, harness = .Claude}, CH_UI)
 		testing.expect_value(t, r.error, "needs_confirmation") // the user confirms, with the warning
 		testing.expect(t, strings.contains(r.confirm_summary, "without asking"), r.confirm_summary)
 		testing.expect(t, !state.settings.claude_skip_permissions, "not before the confirmation")
-		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, confirm = r.confirm_token}, CH_UI).ok)
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, confirm = r.confirm_token, harness = .Claude}, CH_UI).ok)
 		testing.expect(t, state.settings.claude_skip_permissions)
 	}
 	off :: proc(t: ^testing.T) {
-		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = false}, CH_UI).ok, "off: no confirmation")
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = false, harness = .Claude}, CH_UI).ok, "off: no confirmation")
 		testing.expect(t, !state.settings.claude_skip_permissions)
 	}
 	pdir := ch_dir("defaults")
@@ -242,44 +242,44 @@ ch_default_flags :: proc(t: ^testing.T) {
 	sess := core.run_command(core.New_Chat{project_id = pid}, CH_UI).created_id
 	// off (the default): nothing changes
 	testing.expect(t, !state.settings.claude_skip_permissions, "off by default")
-	r, argv := start(env, core.New_Claude_Tab{session = sess}, CH_UI)
+	r, argv := start(env, core.New_Claude_Tab{session = sess, harness = .Claude}, CH_UI)
 	testing.expect(t, r.ok && !ch_has(argv, SKIP))
 	// only the user turns it on (an agent's, a Claude tab's: refused)
-	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true}, CH_CONTROL).ok, "an agent may not")
-	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true}, core.Caller{kind = .Panel, tab_id = r.created_id, claude = true}).ok, "a Claude tab may not")
+	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, harness = .Claude}, CH_CONTROL).ok, "an agent may not")
+	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, harness = .Claude}, core.Caller{kind = .Panel, tab_id = r.created_id, claude = true}).ok, "a Claude tab may not")
 	testing.expect(t, !state.settings.claude_skip_permissions)
 	on(t)
 	// the user's new tab: in argv, never in the tab's saved flags
-	r, argv = start(env, core.New_Claude_Tab{session = sess}, CH_UI)
+	r, argv = start(env, core.New_Claude_Tab{session = sess, harness = .Claude}, CH_UI)
 	testing.expect(t, ch_has(argv, SKIP), "in claude's argv")
 	testing.expect_value(t, args_of(r.created_id), "")
 	// the user's own flags: kept (saved), the default after them; never twice; a permission mode wins
-	r, argv = start(env, core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, CH_UI)
+	r, argv = start(env, core.New_Claude_Tab{session = sess, args = {"--model", "opus"}, harness = .Claude}, CH_UI)
 	testing.expect_value(t, args_of(r.created_id), "--model opus")
 	testing.expect_value(t, ch_after(argv, "opus"), SKIP)
-	_, argv = start(env, core.New_Claude_Tab{session = sess, args = {SKIP}}, CH_UI)
+	_, argv = start(env, core.New_Claude_Tab{session = sess, args = {SKIP}, harness = .Claude}, CH_UI)
 	n := 0
 	for a in argv do if a == SKIP do n += 1
 	testing.expect_value(t, n, 1)
-	_, argv = start(env, core.New_Claude_Tab{session = sess, args = {"--permission-mode", "plan"}}, CH_UI)
+	_, argv = start(env, core.New_Claude_Tab{session = sess, args = {"--permission-mode", "plan"}, harness = .Claude}, CH_UI)
 	testing.expect(t, !ch_has(argv, SKIP), "an explicit permission mode wins")
 	// at the flag cap: left out, silently (the tab starts)
 	full := make([]string, core.CLAUDE_ARGS_MAX, context.temp_allocator)
 	for &a in full do a = "--verbose"
-	r, argv = start(env, core.New_Claude_Tab{session = sess, args = full}, CH_UI)
+	r, argv = start(env, core.New_Claude_Tab{session = sess, args = full, harness = .Claude}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, !ch_has(argv, SKIP), "not past the cap")
-	r, argv = start(env, core.New_Claude_Session{project_id = pid, args = full}, CH_UI)
+	r, argv = start(env, core.New_Claude_Session{project_id = pid, args = full, harness = .Claude}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	// the user's new Claude session
-	r, argv = start(env, core.New_Claude_Session{project_id = pid}, CH_UI)
+	r, argv = start(env, core.New_Claude_Session{project_id = pid, harness = .Claude}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, ch_has(argv, SKIP), "the session's claude has it")
 	// an agent's tab and session: never
-	ra, aargv := start(env, core.New_Claude_Tab{session = sess}, CH_CONTROL)
+	ra, aargv := start(env, core.New_Claude_Tab{session = sess, harness = .Claude}, CH_CONTROL)
 	aid := ra.created_id
 	testing.expect(t, aid != 0 && !ch_has(aargv, SKIP), "an agent's tab")
-	rs, sargv := start(env, core.New_Claude_Session{project_id = pid}, CH_CONTROL)
+	rs, sargv := start(env, core.New_Claude_Session{project_id = pid, harness = .Claude}, CH_CONTROL)
 	testing.expect(t, rs.ok && !ch_has(sargv, SKIP), "an agent's session")
 	// a conversation an agent started: an agent's resume never, the user's with the setting now
 	sid := "0d0d0d0d-1111-4222-8333-444455556666"
@@ -317,7 +317,7 @@ ch_default_flags :: proc(t: ^testing.T) {
 	if c == nil {testing.fail(t);return}
 	testing.expect(t, strings.contains(core.state_json(), `"claude_skip_permissions":true`), "in the snapshot")
 	// a chat, and its restore: a saved Claude chat shown by the user gets the setting as it is then
-	r, argv = start(env, core.New_Claude_Session{project_id = c.id}, CH_UI)
+	r, argv = start(env, core.New_Claude_Session{project_id = c.id, harness = .Claude}, CH_UI)
 	testing.expect(t, r.ok && ch_has(argv, SKIP), r.error)
 	rsid := "0e0e0e0e-1111-4222-8333-444455556666"
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = rsid}, CH_SCRIPT)
@@ -352,7 +352,7 @@ ch_saved_readonly_ignored :: proc(t: ^testing.T) {
 	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
 	sid := "0f0f0f0f-1111-4222-8333-444455556666"
-	r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id, harness = .Claude}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	ch_argv(env)
 	tab := core.find_session(r.created_id).tabs[0].id

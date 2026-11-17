@@ -157,7 +157,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Panel:           return Set_Panel{panel = s(c.panel, allocator), open = c.open}
 	case Cancel_Confirmation: return Cancel_Confirmation{token = s(c.token, allocator)}
 	case Quit:                return Quit{confirm = s(c.confirm, allocator), stop_sessions = c.stop_sessions}
-	case Set_Claude_Default_Flags: return Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, codex = c.codex, confirm = s(c.confirm, allocator)}
+	case Set_Claude_Default_Flags: return Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, harness = c.harness, confirm = s(c.confirm, allocator)}
 	case Set_Harness_Flags:   return Set_Harness_Flags{harness = c.harness, flags = s(c.flags, allocator)}
 	case New_Chat:
 		args := make([]string, len(c.args), allocator)
@@ -209,7 +209,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		for t, i in c.tabs {
 			args := make([]string, len(t.args), allocator)
 			for x, j in t.args do args[j] = s(x, allocator)
-			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, account = s(t.account, allocator), pane = t.pane, pane_active = t.pane_active, held = t.held}
+			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, account = s(t.account, allocator), pane = t.pane, pane_active = t.pane_active, held = t.held, harness = t.harness}
 		}
 		layout := c.layout
 		layout.nodes = make([]Restore_Node, len(c.layout.nodes), allocator)

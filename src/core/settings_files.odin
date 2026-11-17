@@ -176,7 +176,7 @@ CLAUDE_ACCOUNT_ROW :: "deckhand:claude-account:"
 CLAUDE_ACCOUNT_ADD_ROW :: "deckhand:claude-account-add"
 CLAUDE_ACCOUNT_SCAN_ROW :: "deckhand:claude-account-scan"
 CLAUDE_ACCOUNT_MORE_ROW :: "deckhand:claude-account-more"
-// The Codex accounts group's (claude_accounts.odin with codex): an account's row, Add account….
+// The Codex accounts group's (claude_accounts.odin with harness .Codex): an account's row, Add account….
 CODEX_ACCOUNT_ROW :: "deckhand:codex-account:"
 CODEX_ACCOUNT_ADD_ROW :: "deckhand:codex-account-add"
 
@@ -288,14 +288,14 @@ codex_config_detail :: proc(name: string) -> string {
 }
 
 // Whether path is one of Codex's hooks files (CODEX_VIEW_FILES, CODEX_VIEW_FOLDERS) in a Codex home
-// (claude_account_dirs with codex), by name or where it leads: shown, never written, so the
+// (claude_account_dirs with harness .Codex), by name or where it leads: shown, never written, so the
 // editor opens it read-only (editor_file.odin). The rest of a home is either the user's config
 // (editable, as Claude's) or Codex's state (settings_credential: never opened nor saved).
 codex_view_only :: proc(path: string) -> bool {
 	if path == "" || !filepath.is_abs(path) do return false
 	p, _ := filepath.clean(path, context.temp_allocator)
 	for q in ([2]string{p, fs_real(p)}) do if q != "" {
-		for home in claude_account_dirs(codex = true) do for c in ([2]string{home, fs_real(home)}) {
+		for home in claude_account_dirs(harness = .Codex) do for c in ([2]string{home, fs_real(home)}) {
 			if c == "" || !under(q, c) do continue
 			first, _, rest := strings.partition(q[len(c) + 1:], "/")
 			for f in CODEX_VIEW_FOLDERS do if first == f do return true
@@ -369,7 +369,7 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 	// sessions…: claude_credential refuses them)
 	// one group per account (claude_accounts.odin) once there are several
 	claude_used := false
-	accts := claude_accounts()
+	accts := claude_accounts(.Claude)
 	for a in accts {
 		cd := a.dir
 		if !os.is_dir(cd) do continue
@@ -413,7 +413,7 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 	// to save). Never a Create: Deckhand makes nothing in a Codex home. One group per account once
 	// there are several.
 	if codex_installed() {
-		caccts := claude_accounts(codex = true)
+		caccts := claude_accounts(harness = .Codex)
 		for a in caccts {
 			cd := a.dir
 			if !os.is_dir(cd) do continue
@@ -478,11 +478,11 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 			add(&out, {group = "claude-accounts", label = "More accounts…", detail = "another Claude Code config folder", path = CLAUDE_ACCOUNT_MORE_ROW, button = "Add…"})
 		}
 	}
-	// Codex's accounts (claude_accounts.odin with codex), once Codex is installed: each one's row
+	// Codex's accounts (claude_accounts.odin with harness .Codex), once Codex is installed: each one's row
 	// once there are several, and Add account… (a Codex home the user made; Deckhand never makes or
 	// writes one: the user signs in on Codex's screen in its first tab)
 	if codex_installed() {
-		caccts := claude_accounts(codex = true)
+		caccts := claude_accounts(harness = .Codex)
 		if len(caccts) > 1 do for a in caccts {
 			what := a.chosen ? "default" : a.default ? "your shell's" : CLAUDE_ACCOUNT_SOURCE_NAMES[a.source]
 			add(&out, {group = "codex-accounts", label = a.label, detail = fmt.tprintf("%s · %s", fs_display(a.dir), what), path = strings.concatenate({CODEX_ACCOUNT_ROW, a.dir}, context.temp_allocator), button = "Rename…", remove = !a.default, make_default = !a.chosen})
@@ -672,7 +672,7 @@ settings_json_kind :: proc(path: string) -> Json_Kind {
 	if strings.has_suffix(rp, "/.pi/settings.json") do return .Strict
 	// Claude Code's settings files are strict JSON (its docs: a comment or a trailing comma is a
 	// Settings Error at the next start)
-	for d in claude_account_dirs() do if cd := fs_real(d); cd != "" {
+	for d in claude_account_dirs(.Claude) do if cd := fs_real(d); cd != "" {
 		for name in ([]string{"settings.json", "keybindings.json"}) do if rp == strings.concatenate({cd, "/", name}, context.temp_allocator) do return .Strict
 	}
 	if strings.has_suffix(rp, "/.claude/settings.json") || strings.has_suffix(rp, "/.claude/settings.local.json") do return .Strict
@@ -920,11 +920,11 @@ settings_tree_root :: proc(path: string) -> string {
 		d := strings.concatenate({ad, "/", sub}, context.temp_allocator)
 		if p == d || under(p, d) do return ad
 	}
-	for cd in claude_account_dirs() do for f in CLAUDE_SETTINGS_FOLDERS {
+	for cd in claude_account_dirs(.Claude) do for f in CLAUDE_SETTINGS_FOLDERS {
 		d := strings.concatenate({cd, "/", f.name}, context.temp_allocator)
 		if p == d || under(p, d) do return cd
 	}
-	for cd in claude_account_dirs(codex = true) do for f in ([2][]string{CODEX_CONFIG_FOLDERS[:], CODEX_VIEW_FOLDERS[:]}) do for sub in f {
+	for cd in claude_account_dirs(harness = .Codex) do for f in ([2][]string{CODEX_CONFIG_FOLDERS[:], CODEX_VIEW_FOLDERS[:]}) do for sub in f {
 		d := strings.concatenate({cd, "/", sub}, context.temp_allocator)
 		if p == d || under(p, d) do return cd
 	}

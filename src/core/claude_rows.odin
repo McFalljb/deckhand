@@ -42,7 +42,7 @@ claude_transcript_ok :: proc(path: string) -> string {
 	if !strings.has_suffix(path, ".jsonl") do return ""
 	// under any account's projects/ (claude_accounts.odin): each one is Claude's config folder
 	real := fs_real(path)
-	for cfg in claude_account_dirs() {
+	for cfg in claude_account_dirs(.Claude) {
 		root := fs_real(strings.concatenate({cfg, "/projects"}, context.temp_allocator))
 		if root == "" || real == root || !within(real, root) || !strings.has_suffix(real, ".jsonl") do continue
 		return real
@@ -157,7 +157,7 @@ claude_tab_tip :: proc(tab: Tab) -> string {
 	}
 	ct, is := tab.kind.(Claude_Tab)
 	if !is || ct.model == "" do return ""
-	return fmt.tprintf("%s · model %s", ct.codex ? "Codex" : "Claude Code", ct.model)
+	return fmt.tprintf("%s · model %s", ct.harness == .Codex ? "Codex" : "Claude Code", ct.model)
 }
 
 // A pi tab's model from its bridge's pi.status: "provider/id" and the thinking level, each a short

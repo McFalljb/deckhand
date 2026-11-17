@@ -85,7 +85,7 @@ ACTIONS := [?]Action {
 		return core.Focus_Session{session = state.current_session}, true
 	}, ui = pi_handoff_action_ui},
 	{id = "claude_skip_permissions", make = proc() -> (core.Command, bool) {
-		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
+		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions, harness = .Claude}, true
 	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "Claude Code · on: --dangerously-skip-permissions in the tabs you start" : "Claude Code · off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
 	// Default flags… per harness (Settings › Coding agents; ui_flags.odin): the page's field
 	{id = "claude_default_flags", title = proc() -> string {return "Default Claude Code flags…"}, make = proc() -> (core.Command, bool) {
@@ -98,7 +98,7 @@ ACTIONS := [?]Action {
 		return core.Set_Harness_Flags{harness = .Pi, flags = state.settings.harness_flags[.Pi]}, true
 	}, ui = proc() {settings_page_flags_edit(.Pi)}, detail = proc() -> string {return flags_default_hint(.Pi)}},
 	{id = "codex_full_access", make = proc() -> (core.Command, bool) {
-		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.codex_full_access, codex = true}, true
+		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.codex_full_access, harness = .Codex}, true
 	}, detail = proc() -> string {return state.settings.codex_full_access ? "Codex · on: --dangerously-bypass-approvals-and-sandbox in the tabs you start" : "Codex · off"}, done = proc() -> string {return turns("Codex full access", state.settings.codex_full_access)}},
 	{id = "chats_dir", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return core.Set_Folder{kind = .Chats, path = state.settings.folders[.Chats]}, true // listing
@@ -136,26 +136,26 @@ ACTIONS := [?]Action {
 		cs := core.cur()
 		if cs == nil || cs.home || cs.missing do return nil, false // in chats too
 		if cs.machine != 0 && !core.claude_offered(cs.id) do return nil, false // another machine's: its Claude Code (harness.odin)
-		return core.New_Claude_Tab{session = cs.id}, true
+		return core.New_Claude_Tab{session = cs.id, harness = .Claude}, true
 	}},
 	// Codex (codex.odin): codex in the session on screen's folder
 	{id = "new_codex_tab", label = "New Codex tab", title = proc() -> string {return core.codex_label("New Codex tab")}, make = proc() -> (core.Command, bool) {
 		cs := core.cur()
 		if cs == nil || cs.home || cs.missing do return nil, false
 		if cs.machine != 0 && !core.codex_offered(cs.id) do return nil, false // another machine's: its Codex (harness.odin)
-		return core.New_Claude_Tab{session = cs.id, codex = true}, true
+		return core.New_Claude_Tab{session = cs.id, harness = .Codex}, true
 	}},
 	// the same starts with the user's flags first (ui_flags.odin): the palette asks for them
 	{id = "new_claude_tab_flags", label = "New Claude tab with flags…", make = proc() -> (core.Command, bool) {
 		cs := core.cur()
 		if cs == nil || cs.home || cs.missing || cs.machine != 0 || !core.claude_installed() do return nil, false
-		return core.New_Claude_Tab{session = cs.id}, true
-	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id})}},
+		return core.New_Claude_Tab{session = cs.id, harness = .Claude}, true
+	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id, harness = .Claude})}},
 	{id = "new_codex_tab_flags", label = "New Codex tab with flags…", make = proc() -> (core.Command, bool) {
 		cs := core.cur()
 		if cs == nil || cs.home || cs.missing || cs.machine != 0 || !core.codex_installed() do return nil, false
-		return core.New_Claude_Tab{session = cs.id, codex = true}, true
-	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id, codex = true})}},
+		return core.New_Claude_Tab{session = cs.id, harness = .Codex}, true
+	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id, harness = .Codex})}},
 	{id = "new_session_flags", label = "New session with flags…", make = proc() -> (core.Command, bool) {
 		if core.find_project(state.selected_project) == nil || !flags_picker_any(state.selected_project) do return nil, false
 		return core.New_Chat{project_id = state.selected_project}, true
@@ -312,12 +312,12 @@ ACTIONS := [?]Action {
 	// Settings → Claude accounts → Add account…: a Claude Code config folder (claude_accounts.odin)
 	{id = "claude_account_add", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return nil, false
-		return core.Add_Claude_Account{dir = action_folder}, true
+		return core.Add_Claude_Account{dir = action_folder, harness = .Claude}, true
 	}},
-	// Settings → Codex accounts → Add account…: a Codex home (claude_accounts.odin with codex)
+	// Settings → Codex accounts → Add account…: a Codex home (claude_accounts.odin with harness .Codex)
 	{id = "codex_account_add", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return nil, false
-		return core.Add_Claude_Account{dir = action_folder, codex = true}, true
+		return core.Add_Claude_Account{dir = action_folder, harness = .Codex}, true
 	}},
 	// the setup sheet's "Choose…" buttons: the picked folder goes into the sheet
 	{id = "setup_pick_main", label = "Choose another folder…", no_palette = true, pick_folder = true, make = proc() -> (core.Command, bool) {

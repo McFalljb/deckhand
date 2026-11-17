@@ -165,14 +165,14 @@ setup_accounts_begin :: proc() {
 	u.edit = SETUP_EDIT_NONE
 	tf_set(&u.field, "")
 	core.claude_accounts_refresh()
-	for a in core.claude_accounts() {
+	for a in core.claude_accounts(.Claude) {
 		append(&u.accounts, core.Setup_Account{dir = strings.clone(a.dir), label = strings.clone(a.label), orig_label = strings.clone(a.label), keep = true, was_kept = true, fixed = a.default, marked = core.claude_account_marked(a.dir)})
 		if a.chosen do u.acct_default = len(u.accounts) - 1
 	}
 	if len(u.accounts) == 0 do u.acct_default = 0
 	for st in state.settings.claude_accounts {
 		if !st.removed || core.path_kind(st.dir) != .Dir do continue
-		label := st.label != "" ? st.label : core.claude_account_label_of(st.dir)
+		label := st.label != "" ? st.label : core.claude_account_label_of(st.dir, .Claude)
 		append(&u.accounts, core.Setup_Account{dir = strings.clone(st.dir), label = strings.clone(label), orig_label = strings.clone(label), marked = core.claude_account_marked(st.dir)})
 	}
 	u.acct_show = len(u.accounts) >= 2
@@ -185,7 +185,7 @@ setup_account_add :: proc(path: string) -> (ok: bool, msg: string) {
 	d, err := core.folder_arg(path)
 	if err != "" || d == "" do return false, d == "" && err == "" ? "Type a folder's path" : "Type a full path (/… or ~/…)"
 	if core.path_kind(d) != .Dir do return false, fmt.tprintf("%s: no such folder", core.fs_display(d))
-	if why := core.claude_account_dir_refused(d); why != "" {
+	if why := core.claude_account_dir_refused(d, .Claude); why != "" {
 		if strings.has_prefix(why, "a Claude Code config folder is not your home") do return false, "Not your home folder or above it: pick the Claude Code config folder itself"
 		return false, fmt.tprintf("%s%s", strings.to_upper(why[:1], context.temp_allocator), why[1:])
 	}
@@ -194,7 +194,7 @@ setup_account_add :: proc(path: string) -> (ok: bool, msg: string) {
 		return false, fmt.tprintf("%s is already listed (%s)", core.fs_display(d), a.label)
 	}
 	marked := core.claude_account_marked(d)
-	append(&u.accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(core.claude_account_label_of(d)), orig_label = strings.clone(""), keep = true, hand = true, marked = marked})
+	append(&u.accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(core.claude_account_label_of(d, .Claude)), orig_label = strings.clone(""), keep = true, hand = true, marked = marked})
 	if !marked do return true, "It has no Claude Code files yet (.claude.json, .credentials.json): added anyway; Claude Code makes them when you sign in there."
 	return true, ""
 }
@@ -242,7 +242,7 @@ setup_account_set_label :: proc(i: int, label: string) {
 	u := &setup_ui
 	if i < 0 || i >= len(u.accounts) do return
 	l := core.cut_utf8(strings.trim_space(core.one_line(label, context.temp_allocator)), core.CLAUDE_ACCOUNT_LABEL_MAX)
-	if l == "" do l = u.accounts[i].fixed ? "Claude" : core.claude_account_label_of(u.accounts[i].dir)
+	if l == "" do l = u.accounts[i].fixed ? "Claude" : core.claude_account_label_of(u.accounts[i].dir, .Claude)
 	set_str(&u.accounts[i].label, l)
 	u.touched = true
 }
@@ -253,21 +253,21 @@ setup_accounts_done :: proc() {
 	if !u.acct_show do return
 	// renames in two steps (to the folder's name, then the new one): labels swapped between two
 	// accounts would clash one at a time
-	for a, i in u.accounts do if a.keep && !a.hand && a.was_kept && a.label != a.orig_label do ui_do(core.Rename_Claude_Account{account = a.dir, label = fmt.tprintf("(renaming %d)", i)})
+	for a, i in u.accounts do if a.keep && !a.hand && a.was_kept && a.label != a.orig_label do ui_do(core.Rename_Claude_Account{account = a.dir, label = fmt.tprintf("(renaming %d)", i), harness = .Claude})
 	for a in u.accounts {
 		if a.hand {
-			if a.keep do ui_do(core.Add_Claude_Account{dir = a.dir, label = a.label != core.claude_account_label_of(a.dir) ? a.label : ""})
+			if a.keep do ui_do(core.Add_Claude_Account{dir = a.dir, label = a.label != core.claude_account_label_of(a.dir, .Claude) ? a.label : "", harness = .Claude})
 			continue
 		}
 		if !a.keep {
-			if a.was_kept && !a.fixed do ui_do(core.Remove_Claude_Account{account = a.dir})
+			if a.was_kept && !a.fixed do ui_do(core.Remove_Claude_Account{account = a.dir, harness = .Claude})
 			continue
 		}
-		if !a.was_kept do ui_do(core.Add_Claude_Account{dir = a.dir})
-		if a.label != a.orig_label do ui_do(core.Rename_Claude_Account{account = a.dir, label = a.label != core.claude_account_label_of(a.dir) ? a.label : ""})
+		if !a.was_kept do ui_do(core.Add_Claude_Account{dir = a.dir, harness = .Claude})
+		if a.label != a.orig_label do ui_do(core.Rename_Claude_Account{account = a.dir, label = a.label != core.claude_account_label_of(a.dir, .Claude) ? a.label : "", harness = .Claude})
 	}
 	if u.acct_default >= 0 && u.acct_default < len(u.accounts) && u.accounts[u.acct_default].keep {
-		ui_do(core.Set_Claude_Account_Default{account = u.accounts[u.acct_default].dir})
+		ui_do(core.Set_Claude_Account_Default{account = u.accounts[u.acct_default].dir, harness = .Claude})
 	}
 }
 

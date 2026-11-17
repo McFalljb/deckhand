@@ -69,9 +69,9 @@ r2_restored :: proc(t: ^testing.T, tag: string) -> (a, b: ^core.Open_Session, di
 	context.allocator = r2_reset()
 	dir = r2_dir(tag)
 	pid := core.run_command(core.Add_Project{cwd = dir}, R2_UI).created_id
-	sa := core.run_command(core.New_Claude_Session{project_id = pid}, R2_UI).created_id
+	sa := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R2_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(sa).tabs[0].id, session_id = R2_A}, R2_SCRIPT)
-	sb := core.run_command(core.New_Claude_Session{project_id = pid}, R2_UI).created_id
+	sb := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R2_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(sb).tabs[0].id, session_id = "b2b2b2b2-0000-4000-8000-000000000002"}, R2_SCRIPT)
 	text := strings.clone(core.workspace_json())
 	context.allocator = r2_reset()
@@ -220,11 +220,11 @@ r2_new_tab_resume_checked :: proc(t: ^testing.T) {
 	testing.expect(t, pid != 0)
 	X := "d2d2d2d2-0000-4000-8000-000000000001"
 	a := core.run_command(core.New_Chat{project_id = pid}, R2_UI).created_id
-	xt := core.run_command(core.New_Claude_Tab{session = a}, R2_UI).created_id
+	xt := core.run_command(core.New_Claude_Tab{session = a, harness = .Claude}, R2_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = xt, session_id = X}, R2_SCRIPT)
 	core.run_command(core.Tab_Exited{tab_id = xt, exit = {known = true, code = 0}}, {kind = .Internal})
 	b := core.run_command(core.New_Chat{project_id = pid}, R2_UI).created_id
-	r := core.run_command(core.New_Claude_Tab{session = b, resume = X}, R2_UI)
+	r := core.run_command(core.New_Claude_Tab{session = b, resume = X, harness = .Claude}, R2_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, r.created_id, xt)
 	testing.expect_value(t, r2_claude_tabs(X), 1)
@@ -232,14 +232,14 @@ r2_new_tab_resume_checked :: proc(t: ^testing.T) {
 	testing.expect(t, tab != nil && tab.status == .Running, "started again in place")
 	// a pi session's id: refused, from anyone
 	for caller in ([]core.Caller{R2_UI, R2_SCRIPT, R2_CONTROL}) {
-		rp := core.run_command(core.New_Claude_Tab{session = b, resume = P}, caller)
+		rp := core.run_command(core.New_Claude_Tab{session = b, resume = P, harness = .Claude}, caller)
 		testing.expectf(t, !rp.ok, "%v: a pi session's id", caller.kind)
 	}
 	// another open Claude-only session's key
-	k := core.run_command(core.New_Claude_Session{project_id = pid}, R2_UI).created_id
+	k := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R2_UI).created_id
 	K := "d2d2d2d2-0000-4000-8000-000000000002"
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(k).tabs[0].id, session_id = K}, R2_SCRIPT)
-	rk := core.run_command(core.New_Claude_Tab{session = b, resume = K}, R2_UI)
+	rk := core.run_command(core.New_Claude_Tab{session = b, resume = K, harness = .Claude}, R2_UI)
 	testing.expect(t, rk.ok && rk.created_id == core.find_session(k).tabs[0].id, "its own tab, focused")
 	testing.expect_value(t, r2_claude_tabs(K), 1)
 }

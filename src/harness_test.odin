@@ -888,7 +888,7 @@ launch_waits_for_the_pi_lookup :: proc(t: ^testing.T) {
 	testing.expect(t, launch_start(false, pid) == nil, "while the login shell is asked: nothing chosen yet")
 	testing.expect(t, h_wait_lookup(), "the login shell answered")
 	c, is := launch_start(false, pid).(core.New_Claude_Session)
-	testing.expect(t, is && c.codex, "Codex, once pi is known to be missing")
+	testing.expect(t, is && c.harness == .Codex, "Codex, once pi is known to be missing")
 	// --claude never waits for pi
 	core.pi_recheck()
 	_, is = launch_start(true, pid).(core.New_Claude_Session)

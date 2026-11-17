@@ -457,18 +457,19 @@ harness_key :: proc(r: ^Rd) -> Harness {
 	return .Pi
 }
 
-// new_claude_tab's and new_claude_session's harness: "claude" (or none) or "codex" (codex.odin).
+// A Claude tab's (or Claude command's) harness: "claude" (or none) is .Claude, "codex" .Codex
+// (codex.odin); never .Pi.
 @(private = "file")
-harness_codex :: proc(r: ^Rd) -> bool {
+harness_claude_tab :: proc(r: ^Rd) -> Harness {
 	v, has := r.obj["harness"]
-	if !has do return false
+	if !has do return .Claude
 	s, _ := v.(json.String)
 	switch string(s) {
-	case "claude": return false
-	case "codex":  return true
+	case "claude": return .Claude
+	case "codex":  return .Codex
 	}
 	if r.err == "" do r.err = "harness must be claude or codex"
-	return false
+	return .Claude
 }
 
 // An enum from its wire name (json_write.odin tables).
@@ -701,7 +702,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "setup_sheet":         cmd = Setup_Sheet{open = get_bool(&r, "open")}
 	case "set_chats_readonly":  cmd = Set_Chats_Readonly{on = get_bool(&r, "on")}
 	case "set_pi_extension":    cmd = Set_Pi_Extension{name = get_str(&r, "name"), on = get_bool(&r, "on")}
-	case "set_claude_default_flags": cmd = Set_Claude_Default_Flags{skip_permissions = get_bool(&r, "skip_permissions"), codex = harness_codex(&r), confirm = get_str(&r, "confirm", optional = true)}
+	case "set_claude_default_flags": cmd = Set_Claude_Default_Flags{skip_permissions = get_bool(&r, "skip_permissions"), harness = harness_claude_tab(&r), confirm = get_str(&r, "confirm", optional = true)}
 	case "set_pinned":          cmd = Set_Pinned{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), pinned = get_bool(&r, "pinned"), index = opt_index(&r, "index")}
 	case "set_hidden":          cmd = Set_Hidden{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), hidden = get_bool(&r, "hidden")}
 	case "set_sort":            cmd = Set_Sort{section = get_enum(&r, "section", SORT_SECTION_NAMES), by = get_enum(&r, "by", SORT_BY_NAMES)}
@@ -867,13 +868,13 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "comments_ask_cancel": cmd = Comments_Ask_Cancel{}
 	case "pi.attached":         cmd = Pi_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
 	// Claude Code tabs (claude.odin)
-	case "new_claude_tab":      cmd = New_Claude_Tab{session = opt_u64(&r, "session"), project_id = opt_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), resume = get_str(&r, "resume", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
-	case "add_claude_account":  cmd = Add_Claude_Account{dir = get_str(&r, "dir"), label = get_str(&r, "label", optional = true), codex = harness_codex(&r)}
-	case "rename_claude_account": cmd = Rename_Claude_Account{account = get_str(&r, "account"), label = get_str(&r, "label", optional = true), codex = harness_codex(&r)}
-	case "remove_claude_account": cmd = Remove_Claude_Account{account = get_str(&r, "account"), codex = harness_codex(&r)}
-	case "set_claude_account_default": cmd = Set_Claude_Account_Default{account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
+	case "new_claude_tab":      cmd = New_Claude_Tab{session = opt_u64(&r, "session"), project_id = opt_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), resume = get_str(&r, "resume", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), harness = harness_claude_tab(&r)}
+	case "add_claude_account":  cmd = Add_Claude_Account{dir = get_str(&r, "dir"), label = get_str(&r, "label", optional = true), harness = harness_claude_tab(&r)}
+	case "rename_claude_account": cmd = Rename_Claude_Account{account = get_str(&r, "account"), label = get_str(&r, "label", optional = true), harness = harness_claude_tab(&r)}
+	case "remove_claude_account": cmd = Remove_Claude_Account{account = get_str(&r, "account"), harness = harness_claude_tab(&r)}
+	case "set_claude_account_default": cmd = Set_Claude_Account_Default{account = get_str(&r, "account", optional = true), harness = harness_claude_tab(&r)}
 	case "claude_resume":       cmd = Claude_Resume{claude_session_id = get_str(&r, "claude_session_id")}
-	case "new_claude_session":  cmd = New_Claude_Session{project_id = get_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
+	case "new_claude_session":  cmd = New_Claude_Session{project_id = get_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), harness = harness_claude_tab(&r)}
 	case "claude_rename":       cmd = Claude_Rename{claude_session_id = get_str(&r, "claude_session_id"), title = get_str(&r, "title")}
 	case "claude_wait_idle":    cmd = Claude_Wait_Idle{tab_id = get_u64(&r, "tab_id"), timeout_ms = opt_u64(&r, "timeout_ms"), prompt_id = opt_u64(&r, "prompt_id")}
 	case "claude_prompt":       cmd = Claude_Prompt{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text")}
@@ -1078,7 +1079,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 				bt.can_forward = opt_bool(&t, "can_forward").? or_else false
 				tab.kind = bt
 			case "claude":
-				tab.kind = Claude_Tab{session_id = get_str(&t, "claude_session_id", optional = true), codex = harness_codex(&t)}
+				tab.kind = Claude_Tab{session_id = get_str(&t, "claude_session_id", optional = true), harness = harness_claude_tab(&t)}
 			case "app":
 				at := App_Tab{argv = get_strings(&t, "argv"), cwd = get_str(&t, "app_cwd", optional = true), exit_code = -1}
 				if s, has := t.obj["app_status"].(json.String); has do for name, k in APP_STATUS_NAMES do if name == s do at.app_status = k

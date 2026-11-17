@@ -72,7 +72,7 @@ app_open_own_session_by_name :: proc(t: ^testing.T) {
 	// a Claude tab in a (its CLI's token: panel + claude)
 	sa := core.find_session(a)
 	cl_id := core.new_id()
-	append(&sa.tabs, core.Tab{id = cl_id, kind = core.Claude_Tab{}, title = "claude", status = .Running})
+	append(&sa.tabs, core.Tab{id = cl_id, kind = core.Claude_Tab{harness = .Claude}, title = "claude", status = .Running})
 	claude := core.Caller{kind = .Panel, tab_id = cl_id, claude = true}
 	for caller in ([]core.Caller{pi, claude}) {
 		testing.expectf(t, core.caller_may(caller, core.New_App_Tab{}), "%v may send new_app_tab", caller)
@@ -359,7 +359,7 @@ app_open_never_asks :: proc(t: ^testing.T) {
 	ao_write_apps(a, fmt.tprintf(`{{"apps":[{{"name":"fresh","argv":[%q,"--new"]}}]}}`, AO_MISSING))
 	sa := core.find_session(a)
 	cl_id := core.new_id()
-	append(&sa.tabs, core.Tab{id = cl_id, kind = core.Claude_Tab{}, title = "claude", status = .Running})
+	append(&sa.tabs, core.Tab{id = cl_id, kind = core.Claude_Tab{harness = .Claude}, title = "claude", status = .Running})
 	for caller in ([]core.Caller{{kind = .Panel, tab_id = ao_first(a)}, {kind = .Panel, tab_id = cl_id, claude = true}}) {
 		r := core.run_command(core.New_App_Tab{name = "fresh"}, caller)
 		testing.expectf(t, r.ok && r.created_id != 0 && r.error != "needs_confirmation", "opened at once: %v", r)

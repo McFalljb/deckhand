@@ -381,7 +381,7 @@ workspace_json :: proc() -> string {
 			if tab.id == s.active_tab do active = j
 			open_obj(&w)
 			// a Codex tab (codex.odin) is "codex": an older Deckhand drops it rather than start claude on its id
-			if ct, is_cl := tab.kind.(Claude_Tab); is_cl && ct.codex do ks(&w, "kind", "codex")
+			if ct, is_cl := tab.kind.(Claude_Tab); is_cl && ct.harness == .Codex do ks(&w, "kind", "codex")
 			else do ks(&w, "kind", TAB_KIND_NAMES[tab_kind_id(tab.kind)])
 			if held := tab_held(tab.id); held != 0 {
 				ki(&w, "held", int(held)) // its process runs on in the session holder
@@ -513,7 +513,7 @@ workspace_json :: proc() -> string {
 			if r.transcript != "" do ks(&w, "transcript", r.transcript)
 			if r.model != "" do ks(&w, "model", r.model)
 			if r.account != "" do ks(&w, "account", r.account)
-			if r.codex do kb(&w, "codex", true) // a Codex conversation (codex.odin)
+			if r.harness == .Codex do kb(&w, "codex", true) // a Codex conversation (codex.odin)
 			if len(r.args) > 0 {
 				k(&w, "args")
 				write_strings(&w.b, r.args)
@@ -774,8 +774,8 @@ workspace_restore :: proc(text: string) -> string {
 		if ap, aok := enum_of(st, "appearance", APPEARANCE_NAMES); aok do run(Set_Appearance{mode = ap})
 		if ts, tok := enum_of(st, "text_size", TEXT_SIZE_NAMES); tok do run(Set_Text_Size{size = ts})
 		// chats_readonly (the removed Start chats read-only) in an older file: ignored
-		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp)})
-		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), codex = true})
+		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp), harness = .Claude})
+		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), harness = .Codex})
 		for h in Harness do if hf, hok := st[strings.concatenate({HARNESS_KEYS[h], "_flags"}, context.temp_allocator)].(json.String); hok do run(Set_Harness_Flags{harness = h, flags = hf}) // checked as the user's would be
 		if pe, pok := st["pi_extensions"].(json.Object); pok {
 			names := make([dynamic]string, context.temp_allocator)
@@ -931,7 +931,7 @@ workspace_restore :: proc(text: string) -> string {
 				args := make([dynamic]string, context.temp_allocator)
 				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
 				acct, _ := to["account"].(json.String) // an older file's "readonly" is ignored: a full agent from its next start
-				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], account = string(acct), codex = kind == "codex", active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], account = string(acct), harness = kind == "codex" ? .Codex : .Claude, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 				continue
 			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
@@ -1026,7 +1026,7 @@ workspace_restore :: proc(text: string) -> string {
 			args := make([dynamic]string, context.temp_allocator)
 			if a, aok := o["args"].(json.Array); aok do for x in a do if xs, xok := x.(json.String); xok do append(&args, string(xs))
 			if id == "" || !strings.has_prefix(project, "/") || (codex ? codex_args_check(args[:]) : claude_args_check(args[:])) != "" do continue // its harness's rule
-			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), account = string(acct), codex = bool(codex)})
+			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), account = string(acct), harness = codex ? .Codex : .Claude})
 		}
 	}
 	if len(recs) > 0 do run(Claude_Restore_History{records = recs[:]})

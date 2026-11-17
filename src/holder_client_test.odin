@@ -478,7 +478,7 @@ holder_adopt_codex_kind :: proc(t: ^testing.T) {
 	if s == nil || len(s.tabs) != 4 do return
 	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Running)
 	testing.expect(t, core.term_of(s.tabs[1].id) == nil, "a codex never adopted as a Claude tab")
-	testing.expect(t, core.claude_tab_is_codex(s.tabs[2]) && core.term_of(s.tabs[2].id) != nil, "a Codex tab adopts its codex")
+	testing.expect(t, core.tab_harness(s.tabs[2]) == .Codex && core.term_of(s.tabs[2].id) != nil, "a Codex tab adopts its codex")
 	testing.expect(t, core.term_of(s.tabs[3].id) == nil, "a claude never adopted as a Codex tab")
 	st, _ := core.socket_tokens_start_of(5)
 	testing.expect_value(t, st.kind, core.Held_Kind.Codex)

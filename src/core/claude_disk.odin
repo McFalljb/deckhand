@@ -78,8 +78,8 @@ claude_disk_inline_budget := i64(CLAUDE_DISK_INLINE_BUDGET)
 // after the saved accounts are back (main.odin).
 claude_startup_rescan_due :: proc() -> bool {
 	for p in state.projects do if p.claude do return true // saved: confirmed or dropped
-	for a in claude_accounts() do if path_kind(strings.concatenate({a.dir, "/projects"}, context.temp_allocator)) == .Dir do return true
-	for a in claude_accounts(codex = true) do if s := codex_sessions_dir(a.dir); s != "" && path_kind(s) == .Dir do return true
+	for a in claude_accounts(.Claude) do if path_kind(strings.concatenate({a.dir, "/projects"}, context.temp_allocator)) == .Dir do return true
+	for a in claude_accounts(harness = .Codex) do if s := codex_sessions_dir(a.dir); s != "" && path_kind(s) == .Dir do return true
 	return false
 }
 
@@ -497,7 +497,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	}
 	cands := make([dynamic]Cand, context.temp_allocator)
 	scanned := make([dynamic]string, context.temp_allocator) // accounts whose projects/ was looked at
-	for a in claude_accounts() {
+	for a in claude_accounts(.Claude) {
 		root := strings.concatenate({a.dir, "/projects"}, context.temp_allocator)
 		if path_kind(root) != .Dir do continue
 		append(&scanned, a.dir)
@@ -520,7 +520,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	n := 0
 	for c in cands {
 		rec, _ := claude_record(c.id)
-		if rec != nil && !rec.codex { // a Codex claim on Claude Code's own transcript never hides it (codex_claim_drop)
+		if rec != nil && rec.harness != .Codex { // a Codex claim on Claude Code's own transcript never hides it (codex_claim_drop)
 			// Deckhand's own: its row is the history's; only what the file tells
 			append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), modified = c.modified, created = c.created, harness = .Claude})
 			continue
@@ -557,7 +557,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
-		if r.project != p.cwd || r.codex do continue // a Codex conversation has no Claude transcript (codex.odin)
+		if r.project != p.cwd || r.harness == .Codex do continue // a Codex conversation has no Claude transcript (codex.odin)
 		have := false
 		for f in out do if f.id == r.id do have = true
 		if have do continue
@@ -568,7 +568,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 			// it had a prompt, so Claude wrote a transcript: in its account's folder for the folder
 			// it ran in (or the project's), if that account was looked at; a name that is not
 			// certain (non-ASCII, long) never decides
-			acc := claude_account_dir(r.account)
+			acc := claude_account_dir(r.account, .Claude)
 			if slice.contains(scanned[:], acc) {
 				gone = true
 				for c in ([3]string{r.cwd, fs_real(r.cwd), p.cwd}) {
@@ -593,7 +593,7 @@ claude_disk_of :: proc(id: string) -> ^Claude_Disk {
 // A found transcript of project p's with this id: the listed rows first, else by stat in each
 // account's folders for p (an agent's open_session of a project not selected). Temp.
 claude_disk_lookup :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) {
-	if r, _ := claude_record(id); r != nil && !r.codex do return {}, false
+	if r, _ := claude_record(id); r != nil && r.harness != .Codex do return {}, false
 	if f, ok = claude_disk_find(p, id); ok do return
 	// a Codex conversation listed for p (its scan's rows only: the selected project and Chats)
 	if p == nil do return {}, false
@@ -607,7 +607,7 @@ claude_disk_find :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) 
 	if p == nil || !claude_id_ok(id) do return {}, false
 	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
 	for x in list do if x.listed && x.harness != .Codex && x.id == id do return x, true
-	for a in claude_accounts() {
+	for a in claude_accounts(.Claude) {
 		root := strings.concatenate({a.dir, "/projects"}, context.temp_allocator)
 		if path_kind(root) != .Dir do continue
 		for sf in slug_folders(root, p.cwd, a.dir) {
@@ -649,7 +649,7 @@ claude_disk_json :: proc(b: ^strings.Builder, p: ^Project, list: []Claude_Disk, 
 		strings.write_i64(b, time.to_unix_seconds(f.modified))
 		strings.write_string(b, `,"created":`)
 		strings.write_i64(b, time.to_unix_seconds(f.created))
-		if tag := claude_account_tag(f.account, f.harness == .Codex); tag != "" {
+		if tag := claude_account_tag(f.account, f.harness); tag != "" {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, tag)
 		}
@@ -668,7 +668,7 @@ claude_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Resu
 		return r, ch
 	}
 	if mr, missing := claude_missing(caller); missing do return mr, false
-	if !claude_account_known(f.account) do return fail("its Claude account is no longer in Settings → Claude accounts"), false
+	if !claude_account_known(f.account, .Claude) do return fail("its Claude account is no longer in Settings → Claude accounts"), false
 	if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
 	codex_claim_drop(p, f.id) // Claude Code's transcript: a Codex claim on its id goes (claude.odin)
 	r, ch := claude_open_disk(p, f, caller)
@@ -838,8 +838,8 @@ claude_scan_prepare :: proc() {
 	}
 	clear(&claude_scan_dirs)
 	if claude_scan_dirs.allocator.procedure == nil do claude_scan_dirs = make([dynamic]Claude_Scan_Dir, heap)
-	for a in claude_accounts() do append(&claude_scan_dirs, Claude_Scan_Dir{dir = strings.clone(a.dir, heap), override = strings.clone(claude_project_dir_override(a.dir), heap)})
-	for a in claude_accounts(codex = true) {
+	for a in claude_accounts(.Claude) do append(&claude_scan_dirs, Claude_Scan_Dir{dir = strings.clone(a.dir, heap), override = strings.clone(claude_project_dir_override(a.dir), heap)})
+	for a in claude_accounts(harness = .Codex) {
 		if s := codex_sessions_dir(a.dir); s != "" do append(&claude_scan_dirs, Claude_Scan_Dir{dir = strings.clone(a.dir, heap), override = strings.clone(s, heap), harness = .Codex})
 	}
 	for h in claude_scan_home do delete(h, heap)

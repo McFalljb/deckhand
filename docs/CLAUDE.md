@@ -7,7 +7,7 @@ is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PR
 (§2 tokens, §3 "Claude Code tabs"). Code: `src/core/claude.odin`, `src/ui_claude.odin`, `src/core/claude_panels.odin`, `src/core/claude_status.odin`, `src/core/dead_tab.odin`,
 `src/core/claude_reload.odin`, `src/ui_claude_reload.odin`, `src/core/claude_accounts.odin`, `src/core/claude_disk.odin`,
 `integrations/claude-code/`, `tools/deckhand-cli/`. Codex tabs reuse this machinery (a Claude tab
-record with `codex` set); what differs is in [CODEX.md](CODEX.md).
+record with harness `.Codex`); what differs is in [CODEX.md](CODEX.md).
 
 **Where it runs.** A Claude tab's process is a child of the session holder, like every terminal
 tab. The core runs everything else: tokens and the socket, the hooks' reports, held prompts and

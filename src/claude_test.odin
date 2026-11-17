@@ -114,13 +114,13 @@ claude_callers :: proc(t: ^testing.T) {
 	for cmd in ([]core.Command{core.Get_State{}, core.List_Commands{}, core.Browser_Read{tab_id = 3}, core.Browser_Click{tab_id = 3}, core.App_Call{tab_id = 3}, core.App_Screenshot{tab_id = 3}, core.New_App_Tab{}, core.App_Restart{tab_id = 3}, core.App_Close{tab_id = 3}, core.App_Declared{}, core.Show_File{}}) {
 		testing.expectf(t, core.caller_may(claude, cmd) == core.caller_may(pi, cmd) && core.caller_may(claude, cmd), "as a pi tab: %v", core.command_type(cmd))
 	}
-	for cmd in ([]core.Command{core.Send_Text{tab_id = 3}, core.Pi_Prompt{tab_id = 3}, core.Close_Tab{tab_id = 3}, core.New_Claude_Tab{session = 1}, core.New_Claude_Session{project_id = 1}, core.Claude_Rename{}, core.Claude_Prompt{tab_id = 3}, core.Claude_Resume{}, core.Set_Home{open = true}, core.Set_Theme{}, core.Browser_Agent_Stop{tab_id = 3}, core.Browser_Agent_Take_Over{tab_id = 3}, core.Browser_Upload_Answer{tab_id = 3}, core.Claude_Held_Op{tab_id = 3}, core.Claude_Deliver{tab_id = 3}, core.Set_Confirm_Policy{}, core.Job_Run_Now{}}) {
+	for cmd in ([]core.Command{core.Send_Text{tab_id = 3}, core.Pi_Prompt{tab_id = 3}, core.Close_Tab{tab_id = 3}, core.New_Claude_Tab{session = 1, harness = .Claude}, core.New_Claude_Session{project_id = 1, harness = .Claude}, core.Claude_Rename{}, core.Claude_Prompt{tab_id = 3}, core.Claude_Resume{}, core.Set_Home{open = true}, core.Set_Theme{}, core.Browser_Agent_Stop{tab_id = 3}, core.Browser_Agent_Take_Over{tab_id = 3}, core.Browser_Upload_Answer{tab_id = 3}, core.Claude_Held_Op{tab_id = 3}, core.Claude_Deliver{tab_id = 3}, core.Set_Confirm_Policy{}, core.Job_Run_Now{}}) {
 		testing.expectf(t, !core.caller_may(claude, cmd), "not for a Claude tab: %v", core.command_type(cmd))
 		testing.expectf(t, core.caller_may(claude, cmd) == core.caller_may(pi, cmd), "the same refusal as a pi tab: %v", core.command_type(cmd))
 	}
 	// Atlas and the user start and prompt Claude tabs; only the user answers the held bar
-	testing.expect(t, core.caller_may(control, core.New_Claude_Tab{}) && core.caller_may(control, core.Claude_Prompt{}) && core.caller_may(control, core.Claude_Resume{}))
-	testing.expect(t, core.caller_may(control, core.New_Claude_Session{}) && core.caller_may(control, core.Claude_Rename{}) && core.caller_may(CL_UI, core.New_Claude_Session{}))
+	testing.expect(t, core.caller_may(control, core.New_Claude_Tab{harness = .Claude}) && core.caller_may(control, core.Claude_Prompt{}) && core.caller_may(control, core.Claude_Resume{}))
+	testing.expect(t, core.caller_may(control, core.New_Claude_Session{harness = .Claude}) && core.caller_may(control, core.Claude_Rename{}) && core.caller_may(CL_UI, core.New_Claude_Session{harness = .Claude}))
 	testing.expect(t, !core.caller_may(control, core.Claude_Held_Op{}) && core.caller_may(CL_UI, core.Claude_Held_Op{}))
 	// confirmations follow the panel caller's policy: a Claude tab can never raise it
 	testing.expect_value(t, core.confirm_mode(claude, .Tab_Close), core.confirm_mode(pi, .Tab_Close))
@@ -133,7 +133,7 @@ claude_new_tab :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	_, sess := cl_session(t, "new")
 	pitab := core.find_session(sess).tabs[0].id
-	r := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, CL_UI)
+	r := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}, harness = .Claude}, CL_UI)
 	testing.expect(t, r.ok, r.error)
 	s := core.find_session(sess)
 	testing.expect_value(t, len(s.tabs), 2)
@@ -146,14 +146,14 @@ claude_new_tab :: proc(t: ^testing.T) {
 	// an agent's: behind the user's view, and without flags
 	control := core.Caller{kind = .Control}
 	core.run_command(core.Focus_Tab{tab_id = pitab}, CL_UI)
-	r2 := core.run_command(core.New_Claude_Tab{session = sess}, control)
+	r2 := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, control)
 	testing.expect(t, r2.ok, r2.error)
 	testing.expect_value(t, core.find_session(sess).active_tab, pitab)
-	r3 := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}}, control)
+	r3 := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}, harness = .Claude}, control)
 	testing.expect_value(t, r3.error, "only the user sets Claude Code's flags")
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, args = {"--plugin-dir", "/x"}}, CL_UI).error, "--plugin-dir is Deckhand's to set")
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, resume = "--x"}, CL_UI).error, "resume must be a Claude session id")
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, cwd = "/etc"}, CL_UI).ok, false)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, args = {"--plugin-dir", "/x"}, harness = .Claude}, CL_UI).error, "--plugin-dir is Deckhand's to set")
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, resume = "--x", harness = .Claude}, CL_UI).error, "resume must be a Claude session id")
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, cwd = "/etc", harness = .Claude}, CL_UI).ok, false)
 	// the turn is unknown until its hooks report: closing asks; idle closes without asking
 	testing.expect(t, core.close_needs_confirm(core.find_session(sess).tabs[1]), "unknown: ask")
 	core.run_command(core.Claude_Turn_Report{tab_id = r.created_id, state = "idle"}, CL_SCRIPT)
@@ -175,7 +175,7 @@ claude_new_tab :: proc(t: ^testing.T) {
 claude_session_history_and_resume :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	dir, sess := cl_session(t, "hist")
-	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}, harness = .Claude}, CL_UI).created_id
 	sid := "11111111-2222-3333-4444-555555555555"
 	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = id, session_id = sid, source = "startup"}, CL_SCRIPT).ok)
 	testing.expect_value(t, core.run_command(core.Claude_Session_Report{tab_id = id, session_id = "--evil"}, CL_SCRIPT).error, "session_id must be a Claude session id")
@@ -219,7 +219,7 @@ claude_session_history_and_resume :: proc(t: ^testing.T) {
 claude_held_prompts :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	_, sess := cl_session(t, "held")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	_, tab, ct := core.claude_tab_of(id)
 	cl_paste_mode(id)
 	control := core.Caller{kind = .Control}
@@ -281,7 +281,7 @@ claude_comments_once :: proc(t: ^testing.T) {
 	s := core.find_session(sess)
 	br := core.Tab{id = core.new_id(), kind = core.Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
 	core.pane_add_tab(s, br) // in its pane (panes.odin)
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	// a crop as a source writes one
 	crop := core.comments_crop_path()
 	png := []u8{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3}
@@ -358,7 +358,7 @@ claude_restore :: proc(t: ^testing.T) {
 	r := core.run_command(core.Open_Session_Cmd{project_id = pid, pi_session_id = "rs-1"}, CL_UI)
 	testing.expect(t, r.ok, r.error)
 	sess := r.created_id
-	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}, harness = .Claude}, CL_UI).created_id
 	sid := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	core.run_command(core.Claude_Session_Report{tab_id = id, session_id = sid}, CL_SCRIPT)
 	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "submitted", title = "restore me"}, CL_SCRIPT)
@@ -430,7 +430,7 @@ claude_deliver_needs_bracketed_paste :: proc(t: ^testing.T) {
 	dir, sess := cl_session(t, "paste")
 	got := fmt.tprintf("%s/claude-stdin", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	_, tab, ct := core.claude_tab_of(id)
 	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "idle"}, CL_SCRIPT)
 	r := core.run_command(core.Claude_Prompt{tab_id = id, text = "line one\nline two"}, core.Caller{kind = .Control})
@@ -457,7 +457,7 @@ claude_send_now_waits_for_dialogs :: proc(t: ^testing.T) {
 	dir, sess := cl_session(t, "dialog")
 	got := fmt.tprintf("%s/claude-stdin", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	_, tab, ct := core.claude_tab_of(id)
 	cl_paste_mode(id)
 	core.run_command(core.Claude_Prompt{tab_id = id, text = strings.concatenate({"deploy\tit now\nplease ", strings.repeat("z", 200)})}, core.Caller{kind = .Control})
@@ -482,7 +482,7 @@ claude_send_now_waits_for_dialogs :: proc(t: ^testing.T) {
 claude_prompt_no_commands :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	_, sess := cl_session(t, "cmds")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	control := core.Caller{kind = .Control}
 	for bad in ([]string{"!rm -rf ~", "/login", "#remember this", "  !ls", "\n/clear"}) {
 		r := core.run_command(core.Claude_Prompt{tab_id = id, text = bad}, control)
@@ -498,8 +498,8 @@ claude_session_report_own_project :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	dir_a, sa := cl_session(t, "pa")
 	_, sb := cl_session(t, "pb")
-	a := core.run_command(core.New_Claude_Tab{session = sa}, CL_UI).created_id
-	b := core.run_command(core.New_Claude_Tab{session = sb}, CL_UI).created_id
+	a := core.run_command(core.New_Claude_Tab{session = sa, harness = .Claude}, CL_UI).created_id
+	b := core.run_command(core.New_Claude_Tab{session = sb, harness = .Claude}, CL_UI).created_id
 	sid := "22222222-2222-3333-4444-555555555555"
 	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = a, session_id = sid}, CL_SCRIPT).ok)
 	r := core.run_command(core.Claude_Session_Report{tab_id = b, session_id = sid}, CL_SCRIPT)
@@ -517,9 +517,9 @@ claude_cwd_inside_project :: proc(t: ^testing.T) {
 	dir_a, sa := cl_session(t, "ca")
 	dir_b, _ := cl_session(t, "cb")
 	os.make_directory_all(fmt.tprintf("%s/sub", dir_a))
-	r := core.run_command(core.New_Claude_Tab{session = sa, cwd = dir_b}, CL_UI)
+	r := core.run_command(core.New_Claude_Tab{session = sa, cwd = dir_b, harness = .Claude}, CL_UI)
 	testing.expect_value(t, r.error, "cwd must be inside the session's project")
-	r = core.run_command(core.New_Claude_Tab{session = sa, cwd = fmt.tprintf("%s/sub", dir_a)}, CL_UI)
+	r = core.run_command(core.New_Claude_Tab{session = sa, cwd = fmt.tprintf("%s/sub", dir_a), harness = .Claude}, CL_UI)
 	testing.expect(t, r.ok, r.error)
 }
 
@@ -530,7 +530,7 @@ claude_resume_flags_user_only :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	dir, sess := cl_session(t, "byp")
 	saved := []string{"--settings", "x", "--allowedTools", "Bash", "--model", "m", "--dangerously-skip-permissions=1"}
-	id := core.run_command(core.New_Claude_Tab{session = sess, args = saved}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, args = saved, harness = .Claude}, CL_UI).created_id
 	sid := "33333333-2222-3333-4444-555555555555"
 	core.run_command(core.Claude_Session_Report{tab_id = id, session_id = sid}, CL_SCRIPT)
 	argv_of :: proc(t: ^testing.T, sid, path: string, caller: core.Caller) -> string {
@@ -572,7 +572,7 @@ claude_comment_images_numbered :: proc(t: ^testing.T) {
 	s := core.find_session(sess)
 	br := core.Tab{id = core.new_id(), kind = core.Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
 	core.pane_add_tab(s, br) // in its pane (panes.odin)
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	png := []u8{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 1}
 	crop1 := core.comments_crop_path()
 	_ = os.write_entire_file(crop1, png)
@@ -611,7 +611,7 @@ claude_send_now_only_idle :: proc(t: ^testing.T) {
 	dir, sess := cl_session(t, "idle")
 	got := fmt.tprintf("%s/claude-stdin", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	_, tab, ct := core.claude_tab_of(id)
 	cl_paste_mode(id)
 	core.run_command(core.Claude_Prompt{tab_id = id, text = "later"}, core.Caller{kind = .Control})
@@ -639,7 +639,7 @@ claude_send_now_only_idle :: proc(t: ^testing.T) {
 claude_prompt_controls_and_preview :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	_, sess := cl_session(t, "ctl")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	control := core.Caller{kind = .Control}
 	for bad in ([]string{"a\x1b[201~b", "a\rb", "a\x00b", "a\x7fb", "a\x03", "& background", "  &x"}) {
 		r := core.run_command(core.Claude_Prompt{tab_id = id, text = bad}, control)
@@ -661,7 +661,7 @@ claude_prompt_controls_and_preview :: proc(t: ^testing.T) {
 claude_ready_needs_both_signals :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	_, sess := cl_session(t, "both")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	s, tab, ct := core.claude_tab_of(id)
 	cl_paste_mode(id)
 	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "idle"}, CL_SCRIPT)
@@ -696,7 +696,7 @@ claude_ready_needs_both_signals :: proc(t: ^testing.T) {
 claude_ready_after_dialog_says_working :: proc(t: ^testing.T) {
 	context.allocator = cl_reset()
 	_, sess := cl_session(t, "dialogwork")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, CL_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CL_UI).created_id
 	_, tab, ct := core.claude_tab_of(id)
 	cl_paste_mode(id)
 	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "submitted"}, CL_SCRIPT)

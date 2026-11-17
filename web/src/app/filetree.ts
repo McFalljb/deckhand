@@ -254,16 +254,19 @@ export function dropDir(root: string, row: { path: string; dir: boolean } | null
 
 // A move into dir: the renames to make, or why not (why: one line naming the item). Sources inside
 // another source go with it; a source already in dir is left where it is (all of them: not a
-// target). listing: dir's entries when known (a name already there refuses the lot, before
+// target, noop: a drop there is a slipped click). Every source inside root (the tree shown now),
+// or none moves. listing: dir's entries when known (a name already there refuses the lot, before
 // anything moves; not known: the core refuses it when it gets there).
 export interface MovePlan {
   moves: { from: string; to: string }[];
   why: string;
+  noop?: boolean;
 }
 
 export function planMove(root: string, sources: string[], dir: string, listing?: Listing): MovePlan {
-  const no = (why: string): MovePlan => ({ moves: [], why });
+  const no = (why: string, noop = false): MovePlan => ({ moves: [], why, noop });
   if (!sources.length) return no("Nothing to move");
+  if (sources.some((x) => !x.startsWith(root + "/"))) return no("That item is outside the project");
   if (dir !== root && !dir.startsWith(root + "/")) return no("That folder is outside the project");
   const outer = [...new Set(sources)].sort((a, b) => a.length - b.length).filter((s, i, all) => !all.slice(0, i).some((o) => s.startsWith(o + "/")));
   const have = listing && !listing.err ? new Set(listing.entries.map((e) => e.name)) : null;
@@ -278,8 +281,8 @@ export function planMove(root: string, sources: string[], dir: string, listing?:
     if (have?.has(n)) return no(`${n} already exists in ${folderLabel(root, dir)}`);
     moves.push({ from: s, to: dir + "/" + n });
   }
-  if (!moves.length) return no(sources.length > 1 ? "They are already there" : `${baseName(sources[0])} is already there`);
-  return { moves, why: "" };
+  if (!moves.length) return no(sources.length > 1 ? "They are already there" : `${baseName(sources[0])} is already there`, true);
+  return { moves, why: "", noop: false };
 }
 
 // A folder as a move names it: "src/deep/", the root by its name ("proj/").
@@ -288,14 +291,28 @@ export function folderLabel(root: string, dir: string): string {
 }
 
 // What a move says when it is done: "Moved a.txt to src/", "Moved 3 items to src/"; stopped at a
-// refusal: what moved, then the item refused and the core's words.
-export function moveResult(root: string, dir: string, done: string[], failed?: { from: string; error: string }): string {
+// refusal: what moved, then the item refused and the core's words; stopped at a confirmation the
+// bar asks (waiting: how many after it were not moved), so it says.
+export function moveResult(root: string, dir: string, done: string[], failed?: { from: string; error: string }, waiting?: number): string {
   const to = folderLabel(root, dir);
   const moved = done.length === 1 ? `Moved ${baseName(done[0])} to ${to}` : `Moved ${done.length} items to ${to}`;
-  if (!failed) return moved;
-  const why = `Could not move ${baseName(failed.from)}: ${failed.error}`;
+  if (!failed && waiting === undefined) return moved;
+  const why = failed ? `Could not move ${baseName(failed.from)}: ${failed.error}` : "Waiting for confirmation" + (waiting ? `; ${waiting} not moved` : "");
   return done.length ? `${moved}. ${why}` : why;
 }
+
+// A path for a shell, as the window's tree pastes it (shell_quote, src/ui_sidebar.odin): 'path',
+// a ' inside as '\''; a name with a control character (a newline) ANSI-C quoted with it escaped,
+// so a drop on a terminal never types a line break; a leading - made ./- (never an option).
+export function shellQuote(path: string): string {
+  const p = path.startsWith("-") ? "./" + path : path;
+  if (!/[\x00-\x1f\x7f]/.test(p)) return "'" + p.replaceAll("'", "'\\''") + "'";
+  const esc: Record<string, string> = { "\n": "\\n", "\t": "\\t", "\r": "\\r", "'": "\\'", "\\": "\\\\" };
+  return "$'" + p.replace(/[\x00-\x1f\x7f'\\]/g, (c) => esc[c] ?? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")) + "'";
+}
+
+// A drag's text/plain: its paths shell-quoted, a space apart (no newline).
+export const dragText = (paths: string[]): string => paths.map(shellQuote).join(" ");
 
 // A path after from moved to to (at or under from: follows it; else unchanged).
 export function movedPath(path: string, from: string, to: string): string {

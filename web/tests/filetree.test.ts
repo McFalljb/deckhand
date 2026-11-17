@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dropDir, folderLabel, folderRows, gitLetter, gitTone, isEditRow, moveResult, movedPath, moveSel, newTarget, parentsOf, planMove, relPath, rowKey, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
+import { dragText, dropDir, folderLabel, shellQuote, folderRows, gitLetter, gitTone, isEditRow, moveResult, movedPath, moveSel, newTarget, parentsOf, planMove, relPath, rowKey, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
 
 const R = "/p";
 const listed = new Map<string, Listing>([
@@ -212,7 +212,7 @@ test("move: where a drop goes (a folder row, a file row's folder, empty space th
 test("move: not into itself, nor where it already is, nor onto a name already there", () => {
   const src = listed.get(R + "/src");
   // into a folder
-  assert.deepEqual(planMove(R, [R + "/a.txt"], R + "/src", src), { moves: [{ from: R + "/a.txt", to: R + "/src/a.txt" }], why: "" });
+  assert.deepEqual(planMove(R, [R + "/a.txt"], R + "/src", src), { moves: [{ from: R + "/a.txt", to: R + "/src/a.txt" }], why: "", noop: false });
   // a folder into itself or anything inside it
   assert.equal(planMove(R, [R + "/src"], R + "/src").why, "Can't move src into itself");
   assert.equal(planMove(R, [R + "/src"], R + "/src/deep/er").why, "Can't move src into itself");
@@ -268,4 +268,34 @@ test("move: the picker's folders (root first, folders only, open ones' folders u
     ["deep", 2, true, "wait", true],
     ["docs", 1, false, "listed", false],
   ]);
+});
+
+test("drag text: shell-quoted paths, one space apart, never a newline", () => {
+  assert.equal(shellQuote("/p/a b.txt"), "'/p/a b.txt'");
+  assert.equal(shellQuote("/p/it's"), "'/p/it'\\''s'");
+  assert.equal(shellQuote("/p/$HOME `id` \"x\""), "'/p/$HOME `id` \"x\"'");
+  // control characters: ANSI-C quoting, escaped (a newline never reaches a terminal)
+  assert.equal(shellQuote("/p/a\nrm -rf ~"), "$'/p/a\\nrm -rf ~'");
+  assert.equal(shellQuote("/p/t\tq'\\\r\x1b"), "$'/p/t\\tq\\'\\\\\\r\\x1b'");
+  // a leading -: never read as an option
+  assert.equal(shellQuote("-rf"), "'./-rf'");
+  const t = dragText(["/p/a b", "/p/x\ny", "/p/c"]);
+  assert.equal(t, "'/p/a b' $'/p/x\\ny' '/p/c'");
+  assert.ok(!/[\n\r]/.test(t));
+});
+
+test("move: sources outside the tree's root refuse the lot; already there is a no-op (a slipped click)", () => {
+  assert.equal(planMove(R, ["/q/a.txt"], R + "/src").why, "That item is outside the project");
+  assert.equal(planMove(R, [R + "/a.txt", "/elsewhere/b"], R + "/src").why, "That item is outside the project");
+  assert.equal(planMove(R, [R], R + "/src").why, "That item is outside the project");
+  assert.equal(planMove(R, [R + "/a.txt"], R).noop, true);
+  assert.equal(planMove(R, [R + "/a.txt", R + "/b.txt"], R).noop, true);
+  assert.equal(planMove(R, [R + "/a.txt"], R + "/src").noop, false);
+  assert.equal(planMove(R, [R + "/src"], R + "/src").noop, false);
+});
+
+test("move: waiting for a confirmation says how many are not moved", () => {
+  assert.equal(moveResult(R, R + "/src", [R + "/a"], undefined, 2), "Moved a to src/. Waiting for confirmation; 2 not moved");
+  assert.equal(moveResult(R, R + "/src", [], undefined, 0), "Waiting for confirmation");
+  assert.equal(moveResult(R, R + "/src", [], undefined, 1), "Waiting for confirmation; 1 not moved");
 });

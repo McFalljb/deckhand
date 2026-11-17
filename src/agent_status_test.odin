@@ -248,6 +248,27 @@ status_bridge_pi_model :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.claude_tab_tip(pt^), "")
 }
 
+// pi.status's model, provider and thinking level are cleaned where they enter (parse_command): a
+// value that is not a model word is dropped there, so the state, the events and the log all see
+// the same cleaned value, never the raw one.
+@(test)
+status_bridge_pi_model_entry :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	c, err := core.parse_command(`{"type":"pi.status","agent":"idle","waiting":false,"model":"evil\u202e\u001b[31m","provider":"p\u2028q","thinking":"high\nlow"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	st := c.(core.Pi_Status_Update)
+	testing.expect(t, st.model == "" && st.provider == "" && st.thinking == "", fmt.tprint("dropped at entry:", st.model, st.provider, st.thinking))
+	for redact in ([]bool{false, true}) {
+		j := core.command_json(c, redact)
+		testing.expect(t, !strings.contains(j, "evil") && !strings.contains(j, "u202e") && !strings.contains(j, "\u2028") && !strings.contains(j, "high"), j)
+	}
+	ok, _ := core.parse_command(`{"type":"pi.status","agent":"idle","waiting":false,"model":"claude-sonnet-9","provider":"anthropic","thinking":"high"}`, context.temp_allocator)
+	j := core.command_json(ok, true)
+	testing.expect(t, strings.contains(j, `"model":"claude-sonnet-9"`) && strings.contains(j, `"provider":"anthropic"`) && strings.contains(j, `"thinking":"high"`), j)
+	long, _ := core.parse_command(fmt.tprintf(`{{"type":"pi.status","agent":"idle","waiting":false,"model":"%s"}}`, strings.repeat("m", 4096, context.temp_allocator)), context.temp_allocator)
+	testing.expect_value(t, long.(core.Pi_Status_Update).model, "")
+}
+
 @(test)
 status_bridge_precedence :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // State and `terms` outlive the test

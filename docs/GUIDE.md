@@ -2295,7 +2295,11 @@ The browser has the window's layout: the left column (Sessions, Files, Jobs), th
 and terminals, split panes, the Deck, the palette, the bell, the right column's panels, Atlas's
 drawer, Jobs and the job sheet, the Changes tab, the Files tab, and file tabs (Markdown rendered,
 editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
-when you have not edited it, and asks when you have. The Settings page shows every setting; the
+when you have not edited it, and asks when you have. In the Files tab the arrows, Home and End move
+the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
+right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
+Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
+shown; git letters and colours are the window's. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
 installed, once per account with the project's own first, the last used agent first; one starts
@@ -2329,7 +2333,8 @@ Below 760 pixels wide the page is the phone's: the left column full width (or th
 session one tab at a time. Under a terminal: a key bar (Esc, Tab, Ctrl and Alt that stay down
 for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you) and a
 text field that takes dictation and autocorrect, sent with Enter. The keyboard button switches
-to raw keys, sent to the terminal as you type. A long press on a Deck card peeks at that session.
+to raw keys, sent to the terminal as you type. A long press on a Deck card peeks at that session;
+on a row of the Files view (the folder button) it opens that row's menu as a sheet.
 
 ### From a terminal (Linux)
 

@@ -64,6 +64,38 @@ function leavePeek(app: App) {
   closeTimer = window.setTimeout(() => app.setOverlay({ peek: null }), HOVER_CLOSE_MS);
 }
 
+// A touch held still for LONG_PRESS_MS (a phone's long press): fire, and the tap that ends it goes
+// nowhere (no click, no mouse events). The Files tab's rows use it for their sheet.
+export function longPressProps(can: () => boolean, fire: (at: { x: number; y: number }) => void) {
+  return {
+    onPointerDown: (e: PointerEvent) => {
+      if (e.pointerType !== "touch" || !can()) return;
+      pressAt = { x: e.clientX, y: e.clientY };
+      window.clearTimeout(pressTimer);
+      pressTimer = window.setTimeout(() => {
+        swallowClick = true;
+        navigator.vibrate?.(10);
+        fire(pressAt ?? { x: 0, y: 0 });
+      }, LONG_PRESS_MS);
+    },
+    onPointerMove: (e: PointerEvent) => {
+      if (pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 8) window.clearTimeout(pressTimer);
+    },
+    onPointerUp: () => window.clearTimeout(pressTimer),
+    onPointerCancel: () => window.clearTimeout(pressTimer),
+    // the long press fired: the touch's own mouse events and click go nowhere
+    onTouchEnd: (e: TouchEvent) => {
+      if (swallowClick) e.preventDefault();
+    },
+    onClickCapture: (e: MouseEvent) => {
+      if (!swallowClick) return;
+      swallowClick = false;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+    },
+  };
+}
+
 // The handlers a peekable row or card spreads: hover (desktop) and long-press (phone). A long press
 // also stops the tap that ends it from opening the session.
 export function peekProps(app: App, session: number, tab?: number) {
@@ -81,32 +113,13 @@ export function peekProps(app: App, session: number, tab?: number) {
     onMouseLeave: () => {
       if (!app.phone) leavePeek(app);
     },
-    onPointerDown: (e: PointerEvent) => {
-      if (e.pointerType !== "touch" || !canPeek(app, session, tab)) return;
-      pressAt = { x: e.clientX, y: e.clientY };
-      window.clearTimeout(pressTimer);
-      pressTimer = window.setTimeout(() => {
-        swallowClick = true;
+    ...longPressProps(
+      () => canPeek(app, session, tab),
+      (at) => {
         openedAt = performance.now();
-        navigator.vibrate?.(10);
-        openPeek(app, session, tab, pressAt ?? { x: 0, y: 0 });
-      }, LONG_PRESS_MS);
-    },
-    onPointerMove: (e: PointerEvent) => {
-      if (pressAt && Math.hypot(e.clientX - pressAt.x, e.clientY - pressAt.y) > 8) window.clearTimeout(pressTimer);
-    },
-    onPointerUp: () => window.clearTimeout(pressTimer),
-    onPointerCancel: () => window.clearTimeout(pressTimer),
-    // the long press opened a peek: the touch's own mouse events and click go nowhere
-    onTouchEnd: (e: TouchEvent) => {
-      if (swallowClick) e.preventDefault();
-    },
-    onClickCapture: (e: MouseEvent) => {
-      if (!swallowClick) return;
-      swallowClick = false;
-      e.stopImmediatePropagation();
-      e.preventDefault();
-    },
+        openPeek(app, session, tab, at);
+      },
+    ),
   };
 }
 

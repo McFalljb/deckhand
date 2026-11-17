@@ -1,6 +1,7 @@
 package core
 
 import "core:fmt"
+import "core:hash"
 import "core:os"
 import "core:strings"
 
@@ -65,6 +66,7 @@ Set_Wrap :: struct {
 List_Dir :: struct {
 	path:    string,
 	ignored: bool, // also list gitignored entries (marked "ignored")
+	since:   string, // the hash of the listing the caller has: unchanged, it answers same (no entries)
 }
 
 // create_file, create_dir and rename_path confirm (class fs_write) for a
@@ -100,6 +102,19 @@ File_List_Done :: struct {
 
 // ---- the project's files (rows in command_table.odin): the core's own, no window needed ----
 
+// list_dir's answer with its hash first ({"hash":…,"path":…,…}); since = that hash: only
+// {"hash","path","same":true} (a browser's poll of an unchanged folder sends no entries).
+// Temp allocator.
+list_dir_since :: proc(data, since: string) -> string {
+	h := fmt.tprintf("%016x", hash.fnv64a(transmute([]u8)data))
+	if since != "" && since == h {
+		p := strings.index(data, `,"`) // after {"path":"…" (a quote inside the path is escaped)
+		if p < 0 do p = len(data) - 1
+		return fmt.tprintf(`{{"hash":"%s",%s,"same":true}}`, h, data[1:p])
+	}
+	return fmt.tprintf(`{{"hash":"%s",%s`, h, data[1:])
+}
+
 // File commands: the path is resolved (for this caller) before any confirmation, and the
 // confirmation parks and shows that absolute path, so confirming later acts on the same file
 // whatever is on screen.
@@ -113,7 +128,7 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bo
 	case List_Dir:
 		data, err := fs_list_json(c.path, caller, c.ignored)
 		if err != "" do return fail(err), false
-		return {ok = true, data = strings.clone(data)}, false
+		return {ok = true, data = strings.clone(list_dir_since(data, c.since))}, false
 	case Create_File, Create_Dir:
 		path, confirm := "", ""
 		dir := false

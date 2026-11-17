@@ -415,6 +415,63 @@ settings_tree_menu_restrictions :: proc(t: ^testing.T) {
 	testing.expect(t, !core.run_command(core.Reveal_In_Finder{path = fmt.tprintf("%s/settings.json", ad)}, {kind = .Control}).ok, "not for the agent")
 }
 
+// Claude Code's plugins (enabledPlugins of the account's settings.json) and user MCP servers (the
+// account file's top-level mcpServers) listed by name: never a value, never another key of the
+// account file, which itself stays unlisted and unopenable.
+@(test)
+settings_files_claude_lists :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, proj := setup()
+	cfg := claude_setup(home, proj)
+	defer os.unset_env("CLAUDE_CONFIG_DIR")
+	core.claude_lists_reset()
+	defer core.claude_lists_reset()
+	write_mode(fmt.tprintf("%s/settings.json", cfg), fmt.tprintf(`{{"env": {{"API_KEY": "%s"}}, "enabledPlugins": {{"zed@mk": true, "able@mk": false, "odd@mk": "x"}}, "extraKnownMarketplaces": {{"mk": {{"source": {{"source": "github", "repo": "o/mk"}}}}}}}}`, SECRET), 0o644)
+	account := fmt.tprintf(`{{"oauthAccount": {{"emailAddress": "who@example.com"}}, "mcpServers": {{"github": {{"type": "http", "url": "https://mcp.example.com/?token=%s", "headers": {{"Authorization": "Bearer %s"}}}}, "local": {{"command": "npx", "args": ["srv"], "env": {{"KEY": "%s"}}}}, "odd": {{"type": "stdio; rm -rf"}}, "notone": 3}}, "projects": {{"/p": {{"mcpServers": {{"projsrv": {{"command": "x"}}}}}}}}}}`, SECRET, SECRET, SECRET)
+	write_mode(fmt.tprintf("%s/.claude.json", cfg), account, 0o600)
+	testing.expect_value(t, core.claude_account_file(cfg), fmt.tprintf("%s/.claude.json", cfg))
+	testing.expect_value(t, core.claude_account_file(fmt.tprintf("%s/.claude", home)), fmt.tprintf("%s/.claude.json", home))
+	core.claude_lists_refresh_now()
+	testing.expect(t, core.claude_lists_tick(), "the page is told")
+	b := strings.builder_make(context.temp_allocator)
+	for r in core.settings_file_rows() do fmt.sbprintf(&b, "%s|%s|%s|%v\n", r.group, r.label, r.detail, r.button)
+	got := strings.to_string(b)
+	for w in ([]string{"claude-plugin|able@mk|disabled|", "claude-plugin|zed@mk|enabled|", "claude-mcp|github|http|", "claude-mcp|local|stdio|", "claude-mcp|odd|server|"}) {
+		testing.expectf(t, strings.contains(got, w), "missing %q in\n%s", w, got)
+	}
+	testing.expectf(t, strings.index(got, "able@mk") < strings.index(got, "zed@mk"), "sorted:\n%s", got)
+	for never in ([]string{SECRET, "odd@mk", "projsrv", "notone", "who@example", "token", "Bearer", "npx", "mcp.example", "rm -rf", ".claude.json", "API_KEY"}) {
+		testing.expectf(t, !strings.contains(got, never), "%s shown:\n%s", never, got)
+	}
+	// each row stands for its read-only list, which sends nothing
+	for r in core.settings_file_rows() do if r.group == "claude-plugin" || r.group == "claude-mcp" {
+		s := core.setting_for_row(r.path)
+		testing.expectf(t, s != nil && s.read_only && s.command == "" && r.button == "", "%s: a read-only row", r.label)
+		sec, card, ok := core.settings_group_section(r.group)
+		testing.expect(t, ok && sec == .Agents && card == "Claude Code", "under Claude Code")
+	}
+	// the account file is still never opened nor shown
+	testing.expect(t, core.settings_credential(fmt.tprintf("%s/.claude.json", cfg)), "a credential file")
+	testing.expect(t, !core.run_command(core.Open_File{path = fmt.tprintf("%s/.claude.json", cfg), session = state.open_sessions[0].id}, ui).ok, "not opened")
+	// read again only once a file changed
+	testing.expect(t, !core.claude_lists_tick(), "nothing new")
+	core.claude_lists_refresh_now()
+	testing.expect(t, !core.claude_lists_tick(), "the same stamps: not read again")
+	write_mode(fmt.tprintf("%s/settings.json", cfg), `{"enabledPlugins": {"zed@mk": false}}`, 0o644)
+	core.claude_lists_refresh_now()
+	testing.expect(t, core.claude_lists_tick(), "a changed settings.json")
+	plugins, mcp, ok := core.claude_lists_of(cfg)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(plugins), 1)
+	if len(plugins) == 1 do testing.expect(t, plugins[0].id == "zed@mk" && !plugins[0].enabled, "zed@mk off")
+	testing.expect_value(t, len(mcp), 3) // the account file was not read again: the same three
+	// a broken account file lists nothing (and never crashes: json_guard_test's hostile inputs)
+	write_mode(fmt.tprintf("%s/.claude.json", cfg), strings.repeat("[", 100_000, context.temp_allocator), 0o600)
+	core.claude_lists_refresh_now()
+	_, mcp, _ = core.claude_lists_of(cfg)
+	testing.expect_value(t, len(mcp), 0)
+}
+
 // pi's themes/ folder (custom themes, ~/.pi/agent/themes/*.json) shows beside prompts/, skills/
 // and extensions/, opens in the tree, and takes the same file commands.
 @(test)

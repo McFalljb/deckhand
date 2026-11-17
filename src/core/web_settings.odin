@@ -347,6 +347,8 @@ web_setting_items :: proc(b: ^strings.Builder, s: ^Setting, rows: []Settings_Fil
 		}
 	case "web_devices":
 		for r in rows do if strings.has_prefix(r.path, WEB_DEVICE_ROW) do item(b, &n, r, nil, "")
+	case "claude_plugins", "claude_mcp": // read-only: names only (claude_lists.odin)
+		for r in rows do if strings.has_prefix(r.path, s.row) do item(b, &n, r, nil, "")
 	case "claude_accounts", "codex_accounts":
 		codex := s.id == "codex_accounts"
 		group := codex ? "codex-accounts" : "claude-accounts"

@@ -375,6 +375,18 @@ is valid; it learns nothing it can use from outside the tab.
 - **Settings page**: Claude Code's files under Coding agents › Claude Code and This project (once
   the config folder exists; ui_settings_page.odin); Claude's settings JSON is saved only when valid (strict); a save of a
   restart-class file shows the Claude bar at once.
+- **Plugins and MCP servers (user)** (`claude_lists.odin`): two read-only lists in the Claude Code
+  card, per account. Plugins: the ids of `enabledPlugins` in `<config>/settings.json` with
+  enabled/disabled (an entry that is not true or false is left out); `plugins/` stays unlisted.
+  MCP servers: the names under the top-level `mcpServers` of the account file (`~/.claude.json`
+  for `~/.claude`, else `<config>/.claude.json`) and each one's `type` when it is a short word
+  (stdio when there is none and it has a `command`). Nothing else of that file is kept: no
+  command, args, env, headers or URL, no project's servers, no account data; it stays a
+  credential file for everything else (never listed, opened, watched or given to an agent), and
+  it is read member by member (`json_members_raw`, its depth guard first), at most 64 MB. Both
+  are read on a worker, at most every 2 s while the rows are built, and only again once a file's
+  time, size or inode changed; the page is told when a list changed (`claude_lists_tick` in
+  `settings_poll`). Names are shown without control characters, at most 100 bytes, 200 per list.
 - **First run**: the notes folder may also be found in the config folder's `CLAUDE.md` (after
   pi's `AGENTS.md`; only the path is shown; the config folder itself never qualifies); step 3 says
   whether Claude Code is installed (`claude_installed`, stat only).

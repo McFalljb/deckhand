@@ -188,6 +188,12 @@ CLAUDE_FLAGS_HEAD_ROW :: "deckhand:claude-default-flags-head"
 CLAUDE_FLAGS_ROW :: "deckhand:claude-default-flags"
 CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 
+// The Claude Code card's read-only lists (claude_lists.odin): a plugin of enabledPlugins is
+// CLAUDE_PLUGIN_ROW + its account's folder + "|" + its id, a user MCP server CLAUDE_MCP_ROW + the
+// folder + "|" + its name. No button: Claude Code's /plugin and `claude mcp` change them.
+CLAUDE_PLUGIN_ROW :: "deckhand:claude-plugin:"
+CLAUDE_MCP_ROW :: "deckhand:claude-mcp:"
+
 // The Machines group (machines.odin; Settings › Machines over SSH on, or other
 // machines allowed in): a machine's row is MACHINE_ROW + its number (Connect / Take back, Remove);
 // then a row adds one, and the last allows other machines to connect to this one (the hub door).
@@ -336,6 +342,18 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		add(&out, {group = g, label = "CLAUDE.md", detail = "instructions for every project", path = j(cd, "CLAUDE.md"), create = true, seed = ""})
 		add(&out, {group = g, label = "keybindings.json", detail = "Claude Code's keys", path = j(cd, "keybindings.json")})
 		for f in CLAUDE_SETTINGS_FOLDERS do add(&out, {group = g, label = f.name, detail = f.detail, path = j(cd, f.name), kind = .Folder})
+	}
+	// the plugins of enabledPlugins and the user MCP servers' names, per account (claude_lists.odin:
+	// read on a worker, the rows from its cache)
+	if claude_used {
+		claude_lists_want()
+		for a in accts {
+			if !os.is_dir(a.dir) do continue
+			plugins, mcp, _ := claude_lists_of(a.dir)
+			who := len(accts) > 1 ? strings.concatenate({" · ", a.label}, context.temp_allocator) : ""
+			for p in plugins do add(&out, {group = "claude-plugin", label = p.id, detail = strings.concatenate({p.enabled ? "enabled" : "disabled", who}, context.temp_allocator), path = strings.concatenate({CLAUDE_PLUGIN_ROW, a.dir, "|", p.id}, context.temp_allocator)})
+			for m in mcp do add(&out, {group = "claude-mcp", label = m.name, detail = strings.concatenate({m.transport != "" ? m.transport : "server", who}, context.temp_allocator), path = strings.concatenate({CLAUDE_MCP_ROW, a.dir, "|", m.name}, context.temp_allocator)})
+		}
 	}
 	// the default flags for the Claude tabs the user starts (claude_with_defaults): off by default
 	if claude_used {
@@ -944,6 +962,8 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "agents":  return "Coding agents"
 	case "machines": return "Machines"
 	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))
+	case "claude-plugin": return "Claude Code plugins"
+	case "claude-mcp": return "Claude Code MCP servers (user)"
 	}
 	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])
 	return group
@@ -1054,6 +1074,11 @@ settings_watch: bool
 // project's folder and .pi/ are looked at; one whose time changed is listed
 // again (the page's search finds its files). A few stats, no watcher on ~/.pi.
 settings_poll :: proc() {
+	// Claude Code's plugins and MCP servers, read on a worker (claude_lists.odin): new rows
+	if claude_lists_tick() {
+		settings_gen += 1
+		window_state_changed()
+	}
 	if !settings_watch do return
 	if time.tick_since(sf_poll_at) < EDITOR_POLL do return
 	sf_poll_at = time.tick_now()

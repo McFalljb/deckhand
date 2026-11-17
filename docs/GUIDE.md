@@ -1560,6 +1560,15 @@ then shows pi-kit's shell. Your pi tab starts either way.
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.
 
+**Plugins** and **MCP servers (user)** list what Claude Code has, by name only (with several
+accounts, each row names its account). Plugins come from `enabledPlugins` in `settings.json`,
+each marked enabled or disabled; turn one on or off with `/plugin` in Claude Code, and running
+Claude tabs then offer **Restart** (plugins load when Claude starts). The MCP servers are your
+user-scope ones (`claude mcp add --scope user`), each with its transport (stdio, http, sse);
+Deckhand reads only their names and transport from Claude Code's account file, never their
+commands, URLs, headers or environment, and that file itself is still never shown or opened.
+These lists change only in Claude Code (`/plugin`, `claude mcp`).
+
 **Codex.** Its version and how it was installed, as the checklist has it, **Full access in
 new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tabs](#codex-tabs)).
 

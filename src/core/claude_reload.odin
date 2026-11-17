@@ -139,6 +139,8 @@ under :: proc(p, dir: string) -> bool {return dir != "" && len(p) > len(dir) && 
 // claude_config_dirs (~/.claude and CLAUDE_CONFIG_DIR, each also where it links to), and any
 // folder that directly holds a .credentials.json or .claude.json (another profile's). A folder
 // that is HOME or above it (by any name) is never one: the names only (never all of HOME).
+// One reader looks into the account file on purpose: claude_lists.odin keeps the names (and
+// transport) of its top-level mcpServers for Settings, nothing else of it.
 // p: clean and absolute (settings_credential also checks where it links to, and hard links by
 // inode).
 claude_credential :: proc(p: string) -> bool {

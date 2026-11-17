@@ -264,7 +264,7 @@ fs_check :: proc(path: string, caller: Caller, allow_root := false) -> (abs, roo
 		if caller.kind == .Panel && fs_outside_own(full, caller) do return "", "", "only inside this session's project folder"
 		return full, r, ""
 	}
-	return "", "", "only inside a project folder"
+	return "", "", FS_NOT_IN_PROJECT
 }
 
 // fs_check for a command that creates, renames or deletes: the user's own
@@ -1030,7 +1030,7 @@ fs_reveal_path :: proc(path: string, caller: Caller) -> string {
 
 // list_dir's data: {"path", "entries": [{name, kind, git?, ignored?}]}.
 fs_list_json :: proc(path: string, caller: Caller, with_ignored := false) -> (data: string, err: string) {
-	p, _, e := fs_check(path, caller, allow_root = true)
+	p, _, e := fs_check_read(path, caller, allow_root = true)
 	if e != "" do return "", e
 	if path_kind(p) != .Dir do return "", "not a folder"
 	entries, lerr, pending := fs_list_dir(p, with_ignored)
@@ -1244,9 +1244,9 @@ fs_find_files :: proc(root, query: string, limit: int, caller: Caller) -> (data:
 	if strings.trim_space(query) == "" do return "", "query is empty"
 	base := root != "" ? root : fs_base_for(caller)
 	if base == "" do return "", "no project here: give root"
-	p, _, e := fs_check(base, caller, allow_root = true)
+	p, top, e := fs_check_read(base, caller, allow_root = true) // a listed checkout of a known project too (fs_read.odin)
 	if e != "" do return "", e
-	if list_index(fs_roots(), p) < 0 do return "", "root must be a project folder"
+	if list_index(fs_roots(), p) < 0 && p != top do return "", "root must be a project folder"
 	n := limit <= 0 ? FIND_FILES_DEFAULT : min(limit, FIND_FILES_MAX)
 	user := fs_user_here(caller)
 	b := strings.builder_make(context.temp_allocator)

@@ -46,7 +46,7 @@ PERM :: posix.mode_t{.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IWGRP, .IXGRP, .IROTH, .IW
 // The checks both share, on the path as given: a browser's, absolute, not a device or slow
 // volume, not a secret by name; then where it really is (rp) inside a project folder.
 @(private = "file")
-web_file_where :: proc(path: string, caller: Caller) -> (p, dir, name: string, err: string) {
+web_file_where :: proc(path: string, caller: Caller, read := false) -> (p, dir, name: string, err: string) {
 	if !caller_from_web(caller) do return "", "", "", "only a browser reads and saves files this way (the window has its editor)"
 	if path == "" || !filepath.is_abs(path) do return "", "", "", "give the file's absolute path"
 	p, _ = filepath.clean(path, context.temp_allocator)
@@ -58,7 +58,7 @@ web_file_where :: proc(path: string, caller: Caller) -> (p, dir, name: string, e
 	if show_device(rp) || show_slow_path(rp) do return "", "", "", "not on a device, network or removable volume"
 	if settings_credential(p) || settings_credential(rp) do return "", "", "", CREDENTIAL_REFUSED
 	if show_secret(p) || show_secret(rp) do return "", "", "", "it looks like a secret (keys, tokens, sign-ins): not opened in a browser"
-	if _, _, ferr := fs_check(rp, caller); ferr != "" do return "", "", "", ferr
+	if ferr := fs_check_err(rp, caller, read); ferr != "" do return "", "", "", ferr // a read: a listed checkout of a known project too (fs_read.odin)
 	// .git in any case, at any component (a case-insensitive volume opens .GIT as .git; a
 	// worktree's .git is a file naming its gitdir)
 	for q in ([]string{p, rp}) do for part in strings.split(q, "/", context.temp_allocator) {
@@ -78,12 +78,12 @@ web_file_text_err :: proc(data: []u8) -> string {
 // The folder, opened without following a link, and its real path checked again: the file is then
 // reached only through it (openat).
 @(private = "file")
-web_file_dir :: proc(dir, name: string, caller: Caller) -> (fd: posix.FD, err: string) {
+web_file_dir :: proc(dir, name: string, caller: Caller, read := false) -> (fd: posix.FD, err: string) {
 	fd = posix.open(strings.clone_to_cstring(dir, context.temp_allocator), {.DIRECTORY, .NOFOLLOW, .CLOEXEC})
 	if fd < 0 do return -1, "cannot open its folder"
 	at := fd_real_path(fd)
 	full := strings.concatenate({strings.trim_right(at, "/"), "/", name}, context.temp_allocator)
-	if _, _, ferr := fs_check(full, caller); at == "" || ferr != "" {
+	if ferr := fs_check_err(full, caller, read); at == "" || ferr != "" {
 		posix.close(fd)
 		return -1, ferr != "" ? ferr : "cannot tell where its folder is"
 	}
@@ -179,9 +179,9 @@ web_file_json :: proc(path: string, st: posix.stat_t, h: string, text: Maybe(str
 }
 
 file_read_apply :: proc(c: File_Read, caller: Caller) -> Result {
-	p, dir, name, err := web_file_where(c.path, caller)
+	p, dir, name, err := web_file_where(c.path, caller, read = true)
 	if err != "" do return fail(err)
-	dirfd, derr := web_file_dir(dir, name, caller)
+	dirfd, derr := web_file_dir(dir, name, caller, read = true)
 	if derr != "" do return fail(derr)
 	defer posix.close(dirfd)
 	key := strings.concatenate({strings.trim_right(fd_real_path(dirfd), "/"), "/", name}, context.temp_allocator)

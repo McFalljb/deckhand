@@ -162,8 +162,8 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller, request_id: u64 = 0) -> (r
 		case Create_File: path, confirm = x.path, x.confirm
 		case Create_Dir:  path, confirm, dir = x.path, x.confirm, true
 		}
-		// the path as this caller names it: what a confirmation is bound to
-		p, _, err := fs_check_write(path, caller)
+		// the path as this caller names it: what a confirmation is bound to (every rule before asking)
+		p, err := fs_create_check(path, caller)
 		if err != "" do return fail(err), false
 		parked: Command = dir ? Command(Create_Dir{path = p}) : Command(Create_File{path = p})
 		ch := false

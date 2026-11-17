@@ -142,7 +142,8 @@ Drops_Queue :: struct {
 	retry_at: time.Tick, // another copy was running: try again from then
 	label:    string, // owned: the target folder, as the toast names it
 	done:     [dynamic]string, // owned: the names copied (as they were made)
-	notes:    [dynamic]string, // owned: "name: why" for what was not copied or left out
+	notes:    [dynamic]string, // owned: "name: why" for what was not copied
+	left:     [dynamic]string, // owned: "name/inside (why)" for what a copy left out (.git, credentials)
 	finished: [dynamic]Drops_Finished, // finished events that came before their request id was known
 }
 
@@ -193,7 +194,7 @@ files_drops_busy :: proc() -> bool {return dq.next < len(dq.copies) || dq.waitin
 files_drops_reset :: proc() {
 	heap := runtime.heap_allocator()
 	if dq.copies.allocator.procedure == nil {
-		dq.copies.allocator, dq.done.allocator, dq.notes.allocator, dq.finished.allocator = heap, heap, heap, heap
+		dq.copies.allocator, dq.done.allocator, dq.notes.allocator, dq.left.allocator, dq.finished.allocator = heap, heap, heap, heap, heap
 	}
 	for c in dq.copies {
 		delete(c.from, heap)
@@ -201,6 +202,7 @@ files_drops_reset :: proc() {
 	}
 	for s in dq.done do delete(s, heap)
 	for s in dq.notes do delete(s, heap)
+	for s in dq.left do delete(s, heap)
 	for f in dq.finished {
 		delete(f.error, heap)
 		delete(f.data, heap)
@@ -208,6 +210,7 @@ files_drops_reset :: proc() {
 	clear(&dq.copies)
 	clear(&dq.done)
 	clear(&dq.notes)
+	clear(&dq.left)
 	clear(&dq.finished)
 	delete(dq.name, heap)
 	delete(dq.label, heap)
@@ -244,12 +247,13 @@ files_drops_tick :: proc() -> bool {
 	if !files_drops_busy() do return fh.dir != ""
 	if dq.waiting != 0 {
 		for f, i in dq.finished do if f.request_id == dq.waiting {
+			ordered_remove(&dq.finished, i) // first: the last copy's done resets the queue
 			files_drops_done(f.ok, f.error, f.data)
 			delete(f.error, runtime.heap_allocator())
 			delete(f.data, runtime.heap_allocator())
-			ordered_remove(&dq.finished, i)
 			break
 		}
+		if !files_drops_busy() do return false
 		if dq.waiting != 0 do return false // its finished event ends it (files_drops_on_event)
 	}
 	if dq.retry_at != {} && time.tick_since(dq.retry_at) < 0 do return true
@@ -309,9 +313,10 @@ files_drops_done :: proc(ok: bool, error, data: string) {
 		append(&dq.done, strings.clone(made != "" && made[0] == '/' ? filepath.base(made) : name, heap))
 		count, _ := strconv.parse_int(core.json_path(data, "skipped.#")) // "<missing>": none
 		for i in 0 ..< min(count, 3) {
-			append(&dq.notes, fmt.aprintf("%s/%s: %s", name, core.json_path(data, fmt.tprintf("skipped.%d.path", i)), core.json_path(data, fmt.tprintf("skipped.%d.why", i)), allocator = heap))
+			why := strings.trim_suffix(core.json_path(data, fmt.tprintf("skipped.%d.why", i)), ": not copied")
+			append(&dq.left, fmt.aprintf("%s/%s (%s)", name, core.json_path(data, fmt.tprintf("skipped.%d.path", i)), why, allocator = heap))
 		}
-		if count > 3 do append(&dq.notes, fmt.aprintf("%d more left out of %s", count - 3, name, allocator = heap))
+		if count > 3 do append(&dq.left, fmt.aprintf("%d more in %s", count - 3, name, allocator = heap))
 	} else do append(&dq.notes, fmt.aprintf("%s: %s", name, error, allocator = heap))
 	dq.waiting = 0
 	files_drops_toast()
@@ -328,12 +333,11 @@ files_drops_toast :: proc() {
 	case 2, 3: what = strings.join(dq.done[:], ", ", context.temp_allocator)
 	case: what = fmt.tprintf("%s, %s and %d more", dq.done[0], dq.done[1], len(dq.done) - 2)
 	}
-	notes := strings.join(dq.notes[:], "; ", context.temp_allocator)
-	switch {
-	case len(dq.done) == 0: toast_show(fmt.tprintf("Not copied: %s", notes), err = true)
-	case len(dq.notes) > 0: toast_show(fmt.tprintf("Copied %s to %s; not copied: %s", what, dq.label, notes), err = true)
-	case:                   toast_show(fmt.tprintf("Copied %s to %s", what, dq.label))
-	}
+	b := strings.builder_make(context.temp_allocator)
+	if len(dq.done) > 0 do fmt.sbprintf(&b, "Copied %s to %s", what, dq.label)
+	if len(dq.left) > 0 do fmt.sbprintf(&b, "; left out: %s", strings.join(dq.left[:], ", ", context.temp_allocator))
+	if len(dq.notes) > 0 do fmt.sbprintf(&b, "%s%s", len(dq.done) > 0 ? "; not copied: " : "Not copied: ", strings.join(dq.notes[:], "; ", context.temp_allocator))
+	toast_show(strings.to_string(b), err = len(dq.notes) > 0)
 	files_drops_reset()
 }
 

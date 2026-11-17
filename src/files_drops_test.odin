@@ -246,7 +246,7 @@ files_finder_drop_copies_into_the_tree :: proc(t: ^testing.T) {
 	testing.expect(t, os.exists(strings.concatenate({dir, "/src/notes/one.md"}, context.temp_allocator)), "notes copied into src/")
 	testing.expect(t, !os.exists(strings.concatenate({dir, "/src/notes/.git"}, context.temp_allocator)), ".git left out")
 	testing.expect(t, strings.has_prefix(toast.text, "Copied photo.png, notes to src/"), toast.text)
-	testing.expect(t, strings.contains(toast.text, ".git"), toast.text)
+	testing.expect(t, strings.contains(toast.text, "; left out: notes/.git (a git repository's folder)") && !toast.err, toast.text)
 	testing.expect(t, os.exists(fa), "the source stays")
 	testing.expect_value(t, len(state.projects), projects) // no project made
 
@@ -263,6 +263,16 @@ files_finder_drop_copies_into_the_tree :: proc(t: ^testing.T) {
 	sidebar_drop({fd}, lb.x + lb.width / 2, lb.y + lb.height - 8)
 	wait()
 	testing.expect(t, os.exists(strings.concatenate({dir, "/notes/one.md"}, context.temp_allocator)), "notes at the root")
+
+	// a credential refused (the rest copied); the toast names both
+	cred := fx_write(outside, ".credentials.json")
+	fx_write(outside, "keep.txt")
+	sidebar_drop({cred, strings.concatenate({outside, "/keep.txt"}, context.temp_allocator)}, lb.x + lb.width / 2, lb.y + lb.height - 8)
+	wait()
+	testing.expect(t, !os.exists(strings.concatenate({dir, "/.credentials.json"}, context.temp_allocator)), "the credential is not copied")
+	testing.expect(t, os.exists(strings.concatenate({dir, "/keep.txt"}, context.temp_allocator)), "keep.txt copied")
+	testing.expect_value(t, toast.text, fmt.tprintf("Copied keep.txt to %s/; not copied: .credentials.json: it is a credential: not copied", filepath.base(dir)))
+	testing.expect(t, toast.err, "an error toast")
 
 	// the hover: a Finder drag over a folder row bands it (and only while it hovers)
 	x, y, _ = fx_row("/src")

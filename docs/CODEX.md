@@ -247,6 +247,14 @@ the selected project and Chats. **Codex's files are read only, never written.**
   project running `codex resume <id>` in the project's folder, under the account whose home it was
   found in (refused once that account is removed); the history keeps it from then on.
   An agent's `open_session` finds only the rows listed for the selected project and Chats.
+- **Codex Desktop's chats**: a listed rollout whose `cwd` is a folder below `~/Documents/Codex`
+  (`HOME`'s spelling, its real path or the folder resolved; `codex_chat_roots`; Chat mode makes
+  `<date>/<slug>` there) is a row in Chats, never a found project, unless that folder is a listed
+  project by its text (one you added stays yours); its click, a resume from the history, a Restart
+  and a relaunch run `codex resume` in that folder only (`Claude_Disk.cwd`, `codex_chat_cwd`): once
+  it is gone they refuse ("the chat's folder is gone"), never the chats folder. A history
+  entry 0.7.0 filed under such a folder's project is re-filed to Chats (saved) once that folder is
+  no listed project (`codex_chats_refile`).
 - **Projects where only Codex ran** (`claude_scan_projects`, Claude's own path, on the Rescan
   worker): the `cwd` of each listed rollout (source `"cli"` or `"vscode"`), from the found rows'
   saved cache after a pass on the Rescan worker (`codex_disk_pass_now`, `codex_disk_folders`: a

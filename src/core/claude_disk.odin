@@ -66,6 +66,7 @@ Claude_Disk :: struct {
 	listed:   bool, // a row of its own: Deckhand's history does not have it
 	gone:     bool, // a history entry whose transcript is gone (no file)
 	harness:  Harness, // .Claude, or .Codex (codex_disk.odin): no path kept, resumed by id
+	cwd:      string, // a Codex Desktop chat in Chats: the folder it ran in, where it resumes ("" = the project's)
 }
 
 // The title cache's size (tests lower it).
@@ -542,18 +543,22 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	// Claude's transcript has is Claude's (one id, one harness: codex.odin)
 	// (codex_disk.odin: its cache, filled on its worker; nothing read here)
 	codex_disk_refresh()
+	if chats do codex_chats_refile(p)
 	m := 0
 	// the cwd as Codex wrote it, byte for byte: the project's path or its real path (never a
-	// path from the file resolved: a planted one would cost a walk per file per rescan)
-	for c in codex_disk_found(p.cwd, fs_real(p.cwd)) {
+	// path from the file resolved: a planted one would cost a walk per file per rescan). Chats also
+	// lists Codex Desktop's chats (their own folders under ~/Documents/Codex: codex_chat_roots)
+	// unless the folder is a listed project (the user's: its rows are there)
+	for c in codex_disk_found(p.cwd, fs_real(p.cwd), chats ? codex_chat_roots_here() : {}) {
 		if m >= MAX_SESSIONS do break
 		if rec, _ := claude_record(c.id); rec != nil do continue
 		if session_listed(state.sessions[:], c.id) || session_listed(state.chats[:], c.id) do continue
+		if c.cwd != "" && project_by_cwd(c.cwd) != nil do continue // by text, as the project's own scan matches
 		dup := false
 		for f in out do if f.id == c.id do dup = true
 		if dup do continue
 		m += 1
-		append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), title = strings.clone(c.title), modified = c.modified, created = c.created, listed = true, harness = .Codex})
+		append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), title = strings.clone(c.title), modified = c.modified, created = c.created, listed = true, harness = .Codex, cwd = strings.clone(c.cwd)})
 	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
@@ -580,6 +585,21 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 			}
 		}
 		if gone do append(out, Claude_Disk{id = strings.clone(r.id), account = strings.clone(r.account), gone = true, harness = .Claude})
+	}
+}
+
+// A Codex history entry filed under a Codex Desktop chat's folder (0.7.0 made that folder a project
+// and resumed it there) whose folder is no listed project (any more) is Chats' from now on (saved),
+// so it never drops out of the sidebar; its cwd stays, where it resumes (claude_resume_cwd).
+@(private = "file")
+codex_chats_refile :: proc(chats: ^Project) {
+	roots := codex_chat_roots_here()
+	for &r in state.claude_history {
+		if r.harness != .Codex || r.project == chats.cwd || !codex_chat_folder(r.project, roots) do continue
+		if project_by_cwd(r.project) != nil do continue // by text: an entry's project is its project's cwd
+		delete(r.project, runtime.heap_allocator())
+		r.project = strings.clone(chats.cwd, runtime.heap_allocator())
+		persist.gen += 1
 	}
 }
 
@@ -902,7 +922,9 @@ codex_scan_projects :: proc(projects: ^[dynamic]Project, homes: []Disk_Home) {
 	// and a pass on the worker for the next Rescan
 	if claude_scan_on_worker do codex_disk_pass_now(homes)
 	else do codex_disk_start(homes, force = true)
-	for f in codex_disk_folders(homes) do found_project(projects, f.cwd, f.newest, f.oldest)
+	// a Codex Desktop chat's folder is no project: Chats lists its conversation (claude_disk_scan)
+	roots := codex_chat_roots(claude_scan_home[0], claude_scan_home[1])
+	for f in codex_disk_folders(homes) do if !codex_chat_folder(f.cwd, roots) do found_project(projects, f.cwd, f.newest, f.oldest)
 }
 
 // A folder a harness ran in (cwd, clean and absolute; its newest and oldest file's dates) into

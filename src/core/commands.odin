@@ -2572,6 +2572,12 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 				tab.status, tab.exit = .Exited, {known = true, code = 127}
 				continue
 			}
+			// a Codex Desktop chat whose folder is gone: nothing starts (never in the chats folder)
+			if codex_chat_cwd(find_project(s.project_id), tab.kind.(Claude_Tab).harness, tab.cwd) && !os.is_dir(tab.cwd) {
+				term_note(t, "Not restarted: the chat's folder is gone.")
+				tab.status, tab.exit = .Exited, {known = true, code = 1}
+				continue
+			}
 			// Claude Code again, resuming its session (--resume) when its plugin reported one
 			cwd := tab.cwd != "" && os.is_dir(tab.cwd) ? tab.cwd : s.cwd
 			ok, _ = claude_start(s, t, tab.id, &tab.kind.(Claude_Tab), cwd, defaults = true) // shown by the user (an agent's focus leaves it not started): the default flags as set now

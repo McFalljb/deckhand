@@ -278,6 +278,11 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		window_toast(hint, err = true)
 		return fail(hint)
 	}
+	// a Codex Desktop chat runs in its own folder only: gone, nothing starts (never the chats folder)
+	if codex_chat_cwd(find_project(s.project_id), ct.harness, tab.cwd) && !os.is_dir(tab.cwd) {
+		window_toast(fmt.tprintf("Restart %s: %s", session_where(s), CODEX_CHAT_GONE), err = true)
+		return fail(CODEX_CHAT_GONE)
+	}
 	pick_model := pick_model && ct.harness != .Codex // Claude's /model only
 	forget_confirmations_for(tab.id)
 	socket_forget_tab(tab.id)

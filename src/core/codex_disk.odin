@@ -408,19 +408,56 @@ codex_source_listed :: proc(source: string) -> bool {
 Codex_Found :: struct {
 	id, account, title: string,
 	modified, created:  time.Time,
+	cwd:                string, // with chat_roots: a Codex Desktop chat's own folder ("" = the folder asked for)
+}
+
+// Codex Desktop's Chat mode runs each conversation in a folder it makes under ~/Documents/Codex
+// (<date>/<slug>): those conversations are chats (Chats lists them, resumed in that folder; never a
+// found project). That folder as home spells it, as real spells it, and resolved ("" = none). Temp.
+codex_chat_roots :: proc(home, real: string) -> (roots: [3]string) {
+	if home == "" || !filepath.is_abs(home) do return
+	h, _ := filepath.clean(home, context.temp_allocator)
+	roots[0] = strings.concatenate({h, "/Documents/Codex"}, context.temp_allocator)
+	if real != "" && real != h do roots[1] = strings.concatenate({real, "/Documents/Codex"}, context.temp_allocator)
+	if r := fs_real(roots[0]); r != roots[0] && r != roots[1] do roots[2] = r
+	return
+}
+
+// codex_chat_roots of $HOME (main thread).
+codex_chat_roots_here :: proc() -> [3]string {
+	h := os.get_env("HOME", context.temp_allocator)
+	if h == "" || !filepath.is_abs(h) do return {}
+	return codex_chat_roots(h, fs_real(h))
+}
+
+// Whether cwd (clean, absolute, as Codex wrote it) is a folder below one of roots (codex_chat_roots).
+codex_chat_folder :: proc(cwd: string, roots: [3]string) -> bool {
+	for r in roots do if r != "" && cwd != r && within(cwd, r) do return true
+	return false
+}
+
+CODEX_CHAT_GONE :: "the chat's folder is gone"
+
+// Whether a Codex conversation of project p's runs in cwd as a Codex Desktop chat in Chats: there
+// and nowhere else (never the chats folder, even once that folder is gone). Main thread.
+codex_chat_cwd :: proc(p: ^Project, harness: Harness, cwd: string) -> bool {
+	return p != nil && p.group == .Chats && harness == .Codex && codex_chat_folder(cwd, codex_chat_roots_here())
 }
 
 // The listed rollouts (codex_source_listed) whose cwd is cwd or real, byte for byte, newest first,
-// with their titles (session_index.jsonl; "" = none). Only the cache: no file is read. Main
+// with their titles (session_index.jsonl; "" = none); with chat_roots also every one whose cwd is a
+// chat's folder below them (codex_chat_folder; its cwd kept). Only the cache: no file is read. Main
 // thread. Temp.
-codex_disk_found :: proc(cwd, real: string) -> []Codex_Found {
+codex_disk_found :: proc(cwd, real: string, chat_roots: [3]string = {}) -> []Codex_Found {
 	out := make([dynamic]Codex_Found, context.temp_allocator)
 	sync.lock(&codex_cache.mu)
 	for _, e in codex_cache.entries {
-		if !codex_source_listed(e.source) || e.cwd == "" || (e.cwd != cwd && e.cwd != real) do continue
+		if !codex_source_listed(e.source) || e.cwd == "" do continue
+		chat := e.cwd != cwd && e.cwd != real
+		if chat && !codex_chat_folder(e.cwd, chat_roots) do continue
 		title := ""
 		if ix, ok := codex_cache.index[e.account]; ok do title = ix.titles[e.id]
-		append(&out, Codex_Found{id = strings.clone(e.id, context.temp_allocator), account = strings.clone(e.account, context.temp_allocator), title = strings.clone(title, context.temp_allocator), modified = {_nsec = e.mtime}, created = {_nsec = e.created}})
+		append(&out, Codex_Found{id = strings.clone(e.id, context.temp_allocator), account = strings.clone(e.account, context.temp_allocator), title = strings.clone(title, context.temp_allocator), modified = {_nsec = e.mtime}, created = {_nsec = e.created}, cwd = chat ? strings.clone(e.cwd, context.temp_allocator) : ""})
 	}
 	sync.unlock(&codex_cache.mu)
 	slice.sort_by(out[:], proc(a, b: Codex_Found) -> bool {return a.modified._nsec > b.modified._nsec})

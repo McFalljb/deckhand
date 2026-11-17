@@ -788,10 +788,10 @@ claude_open_tab :: proc(id: string) -> u64 {
 // project's, else the project's most recently shown open session; nil = none open.
 @(private = "file")
 claude_host :: proc(p: ^Project) -> ^Open_Session {
-	if cs := cur(); cs != nil && !cs.home && cs.project_id == p.id do return cs
+	if cs := cur(); cs != nil && !cs.home && cs.agent != .Files && cs.project_id == p.id do return cs
 	best: ^Open_Session
 	for &s in state.open_sessions {
-		if s.home || s.missing || s.project_id != p.id do continue
+		if s.home || s.missing || s.agent == .Files || s.project_id != p.id do continue // a Files session runs nothing
 		if best == nil || s.shown_at > best.shown_at do best = &s
 	}
 	return best
@@ -801,6 +801,7 @@ claude_host :: proc(p: ^Project) -> ^Open_Session {
 // open behind (an agent never changes what the user sees).
 @(private = "file")
 claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "", harness: Harness) -> (Result, bool) {
+	if why := files_only_refusal(s, harness == .Codex ? "Codex" : "Claude Code"); why != "" do return fail(why), false // a Files session runs nothing
 	focus := caller.kind == .UI || caller.kind == .Script
 	tab := Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(resume), args = clone_strings(args), account = strings.clone(account), resume_path = strings.clone(resume_path), harness = harness}, title = strings.clone(harness_is_codex(harness) ? "Codex" : "Claude"), status = .Running}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
@@ -977,6 +978,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 	#partial switch c in cmd {
 	case New_Claude_Tab:
 		claude_harness_check(c.harness)
+		if c.session != 0 do if why := files_only_refusal(find_session(c.session), c.harness == .Codex ? "Codex" : "Claude Code"); why != "" do return fail(why), false
 		if mr, missing := claude_harness_missing(c.harness, caller); missing do return mr, false
 		s: ^Open_Session
 		if c.session != 0 {

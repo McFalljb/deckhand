@@ -1438,8 +1438,10 @@ guide).
 
 ## The Files tab
 
-**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of the session on
-screen, else of the selected project. Press ⇧⌘E again to go back to Sessions.
+**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of what you picked
+last: the session you showed, or a project you selected in the Sessions tab (even while a session
+of another project stays on screen). The header names the project. Press ⇧⌘E again to go back to
+Sessions.
 
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
@@ -1490,26 +1492,61 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   moves either if the target has an item with the same name; a toast says so. If a move is
   refused part-way (a terminal working in that folder, for example), the toast names the item;
   what already moved stays moved.
+  **Hold ⌥ when you let go** to copy instead (the dragged label
+  reads "+ Copy …"): a name the folder already has gets " copy" ("a copy.txt"), and dropping on
+  the items' own folder duplicates them.
+- **To copy, cut and paste**: ⌘C copies the selection, ⌘X cuts it (its rows dim until you paste or
+  press Esc), ⌘V pastes into the selected folder (or the selected file's folder, else the top of
+  the project). A copy whose name is taken there becomes "name copy" ("a copy.txt", then
+  "a copy 2.txt"); a cut never renames: if the name is taken, nothing moves and a toast says so.
+  A cut stays in its project: showing another project or checkout drops it. A copy can be pasted
+  into another project. Items hidden since (ignored files hidden) are not pasted.
+  ⌘D duplicates the selection next to itself. ⌘C also puts the paths on the clipboard as text,
+  quoted for a shell, so ⌘V in a terminal pastes them; text on the clipboard never pastes into the
+  tree. One copy runs at a time: a toast says "Copying 3 items…", then what was copied, what was
+  left out (a `.git` folder and sign-in files are never copied; the toast counts them and names each `.git`, a sign-in only as "a credential"),
+  or where it stopped; the copies are then selected. Pasting while a copy runs says "A copy is
+  still running".
+- **Undo** (⌘Z while the tree has the keyboard, or the **Undo** button on the toast): undoes the
+  tree's last operation done in this window: a new file or folder goes to the Trash (only while it
+  is unchanged: a file with the same size and modification time, an empty folder), a rename or
+  move goes back (not if something now has the old name), a copy goes to the Trash (only while
+  unchanged; a copied folder: nothing in it changed, and the confirmation bar asks first), a Move
+  to Trash comes back from the Trash (all of a batch; if part of it cannot, the toast says how many
+  came back and ⌘Z tries the rest again). The last 20 operations
+  are kept until the tree shows another project or checkout; there is no redo. Anything changed
+  since is not undone ("Not undone: a.txt changed since"). In an editor tab ⌘Z is the editor's.
 - **To copy files to another app** (macOS), drag rows out of the window: Finder copies them (never
   moves them), a terminal gets their paths, other apps get the files. Credential files, and folders
   holding one (or too large to check), stay behind.
 - **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
   (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
-  shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
-  Esc clears a selection of several, else gives the keyboard back. Typing letters jumps to the next
+  shown, ⌘⌫ moves the selection to the Trash, ⌘C ⌘X ⌘V ⌘D copy, cut, paste and duplicate, ⌘Z
+  undoes, Esc clears a selection of several (then a cut), else gives the keyboard back. Typing letters jumps to the next
   row whose name starts with them (a pause of a second starts over); they never reach a terminal.
+- **Opening goes by the file's project**: in the session on screen when it is that project's,
+  else in the project's **Files** session, which comes on screen (listed as "Files" under Open):
+  file tabs only, no agent, one per project, back after a relaunch (one pane); it closes with its
+  last tab, and terminals, browser and agent tabs need a real session (New session). Any reason a
+  file does not open (sign-ins, too large, binary, gone) shows as a toast.
 - **Header buttons**: New file, New folder, Collapse all, Hide/Show ignored files, Refresh, Reveal
   in Finder.
 - **New file / New folder**: the name field opens as the first row of the folder (the selected
   folder, the selected file's, else the project's), opened and scrolled to; an error shows under
   it. Enter (or a click elsewhere) creates and selects it; Esc, or no name, cancels.
+- **Move to Trash** (⌘⌫ or the menu): nothing asks first, as in Finder; the toast says what went
+  and has **Undo**. It asks first (the confirmation bar: how many folders and files, the first five
+  names) when Deckhand cannot promise to put it back: an item on another disk than your home
+  folder's (a USB disk, a network share), or more than 200 items. Agents, scripts, browsers and
+  other machines always ask, as before.
 - **Rename**: Enter or a click elsewhere renames, Esc cancels. Changing only the case
   (`readme.md` → `README.md`) works. Only your own click or shortcut commits; a focus change
   from an agent or script cancels.
 - **Row menu** (**…** or right-click): Open, Open in preview, Open to the side (in a new pane on
-  the right), New file…, New folder…, Rename…, Move to Trash…, Reveal in Finder, Copy path, Copy
-  relative path, Open terminal here, and for `.md` files Open Markdown preview. On a selection of
-  several: Move N items to Trash…, Copy paths and Copy relative paths (one per line).
+  the right), New file…, New folder…, Cut, Copy, Paste (muted while nothing is cut or copied),
+  Duplicate, Rename…, Move to Trash, Reveal in Finder, Copy path, Copy relative path, Open
+  terminal here, and for `.md` files Open Markdown preview. On a selection of several: Move N
+  items to Trash, Cut, Copy, Duplicate, Copy paths and Copy relative paths (one per line).
 - **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
   the tab; close it first). It knows the folder a tab started in, not one a shell `cd`'d to later.
   Only you, in the window, can rename a credential's file (a sign-in, in any case; a key) to a
@@ -2386,8 +2423,8 @@ when you have not edited it, and asks when you have. In the Files tab the arrows
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
 Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
-shown; git letters and colours are the window's. ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it.
-Drag rows (or the selection) onto a folder, a file (its folder) or the empty space below (the top folder) to move them there, without asking; a closed folder opens when you hover over it, and a name already there is refused, never renamed. On a phone, or from the keyboard, **Move to…** in the row's menu or the selection bar picks the folder. The Settings page shows every setting; the
+shown; git letters and colours are the window's; an icon shows each file's kind; gitignored files show dimmed, and the eye in the tree's header hides them (remembered per browser). ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it.
+Drag rows (or the selection) onto a folder, a file (its folder) or the empty space below (the top folder) to move them there, without asking; a closed folder opens when you hover over it, and a name already there is refused, never renamed. On a phone, or from the keyboard, **Move to…** in the row's menu or the selection bar picks the folder. With a row focused, ⌘C / ⌘X / ⌘V / ⌘D (Ctrl off a Mac; also **Copy**, **Cut**, **Paste here**, **Duplicate** in the menu, sheet and selection bar) copy, cut, paste into the selected folder (else the selected file's folder, else the top) and duplicate in place; a copy's clash becomes `name copy`, a cut's clash is refused, and Option-dragging copies; this clipboard is the page's own (a Copy also puts the quoted paths on the system clipboard). ⌘Z in the tree, or a toast's **Undo**, undoes the page's last 20 tree operations (new item, rename, move, copy, a confirmed delete put back from the Trash), refused when the item changed since; it is cleared when the folder or session changes or the page reloads. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
 installed, once per account with the project's own first, the last used agent first; one starts
@@ -2887,8 +2924,12 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Enter | Open |
 | Space | Open in preview |
 | F2 | Files: rename |
-| ⌘⌫ | Files: move the selection to Trash (asks first, once) |
-| Esc | Clear a selection of several, else give the keyboard back (while dragging: cancel the move) |
+| ⌘⌫ | Files: move the selection to Trash (no confirmation on your home folder's disk; Undo) |
+| ⌘C ⌘X ⌘V | Files: copy, cut, paste into the selected folder |
+| ⌘D | Files: duplicate the selection |
+| ⌘Z | Files: undo the tree's last operation (new, rename, move, copy, Move to Trash) |
+| ⌥ while dragging | Files: copy instead of move |
+| Esc | Clear a selection of several, then a cut, else give the keyboard back (while dragging: cancel the move) |
 
 **Atlas's drawer**: ⌃L opens pi's model selector (the Model button).
 

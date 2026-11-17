@@ -621,6 +621,8 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/claude_lists.odin", "read_plugins", "jg.parse", "", ""}, // a Claude settings.json's enabledPlugins (at most 4 MB, on a worker) // a Claude settings file's enabledPlugins (at most 4 MB; only once its stamp changed)
 		{"src/core/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
 		{"src/core/ctl.odin", "json_path", "jg.parse_string", "", ""},
+		{"src/core/files_ops.odin", "files_copy_result", "jg.parse_string", "", ""}, // fs_copy's finished data (the core's)
+		{"src/core/files_ops.odin", "files_trash_result", "jg.parse_string", "", ""}, // delete_path's data (the core's)
 		{"src/core/machines.odin", "machines_read", "jg.parse_string", "", ""},
 		{"src/core/machine_install.odin", "core_tarball_release_size", "jg.parse_string", "", ""}, // the network (bounded: UPDATE_JSON_MAX)
 		{"src/core/machines.odin", "hub_msg_type", "jg.parse_string", "", ""},

@@ -35,7 +35,7 @@ Show_File :: struct {
 
 // The session a caller's show_file goes to, or why not.
 @(private = "file")
-show_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
+show_session :: proc(caller: Caller, session: u64, path := "") -> (^Open_Session, string) {
 	s: ^Open_Session
 	switch caller.kind {
 	case .Panel:
@@ -45,6 +45,7 @@ show_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
 		s = own
 	case .UI, .Script:
 		s = session != 0 ? find_session(session) : cur()
+		if s == nil && session == 0 && caller.kind == .UI do return nil, no_session_for_file(path) // the user's over a hub link (else a Files session: show_file_apply)
 		if s == nil do return nil, session != 0 ? "no such session" : "no session on screen"
 	case .Control, .Internal:
 		if session != 0 do s = find_session(session)
@@ -66,8 +67,12 @@ refuse :: proc(code, msg, hint: string) -> Result {
 }
 
 show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bool) {
-	s, serr := show_session(caller, c.session)
-	if s == nil {
+	s, serr := show_session(caller, c.session, c.path)
+	// the user's (this window, a paired browser's Files tree) with no session on screen, or a
+	// Files session's: by the file's project, in its Files session (made below, once the file
+	// passed every check; files_session.odin)
+	files := files_session_may_create(caller) && c.session == 0
+	if s == nil && !files {
 		if caller.kind == .Panel && c.session != 0 do return refuse("other_session", serr, "leave session out: the file opens next to your own tab"), false
 		return fail(serr), false
 	}
@@ -76,7 +81,11 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	agent := caller.kind == .Panel || caller.kind == .Control
 	p := c.path
 	if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
-	if !filepath.is_abs(p) do p, _ = filepath.join({s.cwd, p}, context.temp_allocator)
+	base := s != nil ? s.cwd : fs_base_dir()
+	if !filepath.is_abs(p) {
+		if base == "" do return fail(serr), false
+		p, _ = filepath.join({base, p}, context.temp_allocator)
+	}
 	p, _ = filepath.clean(p, context.temp_allocator)
 	// before anything touches the file system: devices, and for agents the volumes that can hang
 	if show_device(p) do return refuse("device", "a device (/dev)", "only regular text files are shown"), false
@@ -88,7 +97,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	if settings_credential(p) || settings_credential(rp) do return refuse("credentials", CREDENTIAL_REFUSED, CRED_HINT), false
 	if agent && (show_secret(p) || show_secret(rp)) do return refuse("secret", "it looks like a secret (keys, tokens, sign-ins)", "an agent never shows keys, tokens or sign-ins: tell the user the file's path if they want to open it themselves"), false
 	switch path_kind(p) {
-	case .Missing: return refuse("no_such_file", fmt.tprintf("no such file: %s", p), fmt.tprintf("a relative path is from the session's folder, %s; check the path, or give an absolute one", s.cwd)), false
+	case .Missing: return refuse("no_such_file", fmt.tprintf("no such file: %s", p), fmt.tprintf("a relative path is from the session's folder, %s; check the path, or give an absolute one", base)), false
 	case .Dir:     return refuse("folder", "that is a folder", "show a file in it"), false
 	case .Other:   return refuse("not_a_file", "not a regular file (a pipe, device or socket)", "only regular text files are shown"), false
 	case .File:
@@ -106,6 +115,11 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		case strings.has_prefix(refused, "Too large"): return refuse("too_large", refused, "tell the user the file's path, or show a smaller excerpt saved as its own text file"), false
 		}
 		return refuse("unreadable", refused, "only readable text files are shown"), false
+	}
+	if files {
+		fp := file_project(p)
+		if fp == nil && s == nil do return fail(no_session_for_file(p)), false
+		if fp != nil && (s == nil || !session_holds_file(s, p)) do s = files_session_ensure(fp) // one the session holds stays in it
 	}
 	kind := md ? "markdown" : "editor"
 	data :: proc(kind, path: string, session: u64, again: bool) -> string {

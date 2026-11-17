@@ -92,6 +92,7 @@ Delete_Path :: struct {
 	path:    string, // moved to the Trash; confirms (class delete)
 	paths:   []string, // a batch (path, if given, is one more): all checked before any moves, one confirmation (fs_delete_plan)
 	confirm: string,
+	undoable: bool, // the user's own delete in the window's Files tree: no confirmation when every item gets a restore id (fs_restore_promised; the window's Undo puts them back)
 }
 
 Reveal_In_Finder :: struct {
@@ -217,7 +218,7 @@ files_cmd_apply :: proc(cmd: Command, caller: Caller, request_id: u64 = 0) -> (r
 		} else {
 			// every rule before asking (as a batch does), and again when it runs
 			if _, e := fs_delete_check(p, caller); e != "" do return fail(e), false
-			gr, go_on, gch := confirm_gate(Delete_Path{path = p}, .Delete, caller, "", fmt.tprintf("move %s to the Trash?", p))
+			gr, go_on, gch := confirm_gate(Delete_Path{path = p}, .Delete, caller, "", fmt.tprintf("move %s to the Trash?", p), skip = files_delete_unasked(c, caller, []string{p})) // the tree's own: Undo instead
 			if !go_on do return gr, gch
 			ch = gch
 		}
@@ -278,7 +279,7 @@ delete_batch_apply :: proc(c: Delete_Path, caller: Caller) -> (r: Result, change
 		plan, err = fs_delete_plan(plan, rules)
 		if err != "" do return fail(err), ch
 	} else {
-		gr, go_on, gch := confirm_gate(parked, .Delete, caller, "", fs_delete_summary(plan))
+		gr, go_on, gch := confirm_gate(parked, .Delete, caller, "", fs_delete_summary(plan), skip = files_delete_unasked(c, caller, plan)) // the tree's own: Undo instead
 		if !go_on do return gr, gch
 		ch = gch
 	}

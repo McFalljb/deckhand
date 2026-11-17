@@ -172,9 +172,11 @@ PANEL_TITLE_MAX :: 128
 COLLAPSED_MAX :: 64
 
 // What runs in an open session's main tab (its first): pi, or Claude Code (a Claude-only session).
+// Files: no agent and no main tab, only the project's file tabs (files_session.odin).
 Session_Agent :: enum u8 {
 	Pi,
 	Claude,
+	Files,
 }
 
 Open_Session :: struct {

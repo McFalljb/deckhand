@@ -88,10 +88,11 @@ files_open_in_pane :: proc(pane: u64, paths: []string) {
 		toast_show(fmt.tprintf("Not opened: %s", r.error), err = true)
 		return
 	}
-	// the keyboard ends in the target pane (a file open elsewhere comes forward there on the way)
-	defer ui_run(core.Focus_Pane{pane = pane})
 	notes := make([dynamic]string, context.temp_allocator)
-	opened, files := 0, 0
+	opened, files, here := 0, 0, 0
+	// the keyboard ends in the target pane when a file opened there (a file open elsewhere came
+	// forward on the way); else where the core opened the last one
+	defer if here > 0 do ui_run(core.Focus_Pane{pane = pane})
 	for p in paths {
 		name := core.one_line(filepath.base(p), context.temp_allocator)
 		if core.path_kind(p) == .Dir {
@@ -113,7 +114,15 @@ files_open_in_pane :: proc(pane: u64, paths: []string) {
 		opened += 1
 		cs := core.find_session(sid)
 		if cs == nil || r.created_id == 0 do continue
-		if tp := core.pane_of_tab(cs, r.created_id); tp != nil && tp.id != pane {
+		tp := core.pane_of_tab(cs, r.created_id)
+		if tp == nil {
+			// open_file's rule (#175): a Files session opens a file outside its project in that
+			// project's own Files session. Never moved across sessions: said
+			append(&notes, fmt.tprintf("%s: opened in its project's Files session", name))
+			continue
+		}
+		here += 1
+		if tp.id != pane {
 			if core.pane_tab_count(cs, tp.id) > 1 do ui_run(core.Move_Tab{tab_id = r.created_id, pane = pane, index = -1})
 			else do append(&notes, fmt.tprintf("%s: open in another pane", name))
 		}
@@ -298,6 +307,7 @@ files_drops_tick :: proc() -> bool {
 		return false // its finished event ends it (files_drops_on_event)
 	}
 	if dq.retry_at != {} && time.tick_since(dq.retry_at) < 0 do return false
+	if files_copy_running() do return false // a paste's copies (ui_files_clip.odin) hold the one copy slot: after them
 	for dq.waiting == 0 && dq.next < len(dq.copies) {
 		c := dq.copies[dq.next]
 		dq.calling = true

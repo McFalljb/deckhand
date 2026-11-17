@@ -22,7 +22,8 @@ package main
 // parent/child, Enter opens, Space previews, F2 renames, ⌘A selects every row,
 // ⌘⌫ moves the selection to the Trash (one confirmation), Esc clears a selection
 // of several, else gives the keyboard back; letters jump to the next row whose
-// name starts with them (files_type). Renaming is inline (focus widget "files_name"; Enter or a click elsewhere
+// name starts with them (files_type). ⌘C ⌘X ⌘V ⌘D, a drag with ⌥ (copies), ⌘Z and the tree's own
+// Move to Trash: ui_files_clip.odin, ui_files_undo.odin. Renaming is inline (focus widget "files_name"; Enter or a click elsewhere
 // renames, Esc cancels); a new file or folder's name field is a row of its own, the first in its
 // folder (files_new_row_at), with the error under it. Right-click selects the row first.
 
@@ -233,7 +234,7 @@ files_panel :: proc(row_w_: f32) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), 0, 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 	}) {
 		// the folder's name on the left (as the Sessions tab's project rows: a folder), the buttons on the right
-		name := root != "" ? filepath.base(core.files_base()) : "No folder" // the project's; the switcher below names the checkout
+		name := root != "" ? core.files_tree_name() : "No folder" // the project's, as the sidebar names it; the switcher below names the checkout
 		room := row_w - px(PAD_ROW + KIND_ICON + GAP_INLINE + GAP_GROUP) - f32(len(Files_Tool)) * px(FILES_TOOL + GAP_BUTTONS)
 		icon(.Folder, th.text_muted, KIND_ICON)
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
@@ -418,6 +419,7 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 		if active do ink = th.text
 		col := files_git_color(letter)
 		if col == {} || r.ignored || dot_file || active do col = ink
+		if files_clip_is_cut(r.path) do col, ink = with_alpha(col, 0.45), with_alpha(ink, 0.45) // cut: dimmed until the paste or Esc
 		icon(core.file_kind_icon(core.file_kind(r.name, r.kind == .Dir), r.expanded), ink, FILES_KIND_ICON)
 		weight: u16 = active ? WEIGHT_BOLD : WEIGHT_REGULAR
 		room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + FILES_NAME_X) - px(ROW_BUTTON + SP_1)
@@ -562,6 +564,7 @@ files_drag_cancel :: proc() {
 	if fu.press || fu.dragging do app.redraw = true
 	if fu.dragging do files_drag_cursor(.DEFAULT)
 	fu.press, fu.dragging = false, false
+	files_drag_copy = false
 	files_drop_set({})
 	files_drop_forget()
 }
@@ -603,9 +606,13 @@ files_drag_event :: proc(e: ^sapp.Event) -> bool {
 	#partial switch e.type {
 	case .KEY_DOWN:
 		if e.key_code == .ESCAPE do files_drag_cancel()
+		else if files_drag_alt(e.modifiers) do fu.drop_check = true // ⌥: copy or move (ui_files_clip.odin)
 		app.key_taken = true
 		return true
-	case .CHAR, .KEY_UP, .CLIPBOARD_PASTED, .FILES_DROPPED:
+	case .KEY_UP:
+		if files_drag_alt(e.modifiers) do fu.drop_check = true
+		return true
+	case .CHAR, .CLIPBOARD_PASTED, .FILES_DROPPED:
 		return true
 	case .UNFOCUSED:
 		files_drag_cancel()
@@ -700,12 +707,13 @@ files_drag_update :: proc(x, y: f32) {
 	over, over_dir, ok := files_drop_over(x, y)
 	if !ok || over != fu.press_path do fu.drag_left = true
 	// worked out again only for another row or a changed listing (a name is looked up per item)
-	key := fmt.tprintf("%v\x00%s\x00%v\x00%s", ok, core.files_root(), over_dir, over)
+	key := fmt.tprintf("%v\x00%s\x00%v\x00%s\x00%v", ok, core.files_root(), over_dir, over, files_drag_copy)
 	if key != fu.drop_key || core.files_cache_gen != fu.drop_gen {
 		delete(fu.drop_key)
 		fu.drop_key, fu.drop_gen = strings.clone(key), core.files_cache_gen
 		d: core.Files_Drop
-		if ok do d = core.files_drop_at({sources = fu.drag_paths[:], root = core.files_root(), over = over, over_dir = over_dir, exists = proc(p: string) -> bool {return os.exists(p)}})
+		input := core.Files_Drop_Input{sources = fu.drag_paths[:], root = core.files_root(), over = over, over_dir = over_dir, exists = proc(p: string) -> bool {return os.exists(p)}}
+		if ok do d = files_drag_copy ? core.files_copy_drop_at(input) : core.files_drop_at(input) // ⌥: a copy's rules
 		files_drop_set(d)
 	}
 	d := files_drop_now()
@@ -778,7 +786,7 @@ files_drop_run :: proc(dir: string) {
 	root := core.files_root()
 	label := core.files_drop_dir_label(root, dir)
 	moves := core.files_drop_moves(fu.drag_paths[:], dir)
-	done := make([dynamic]string, context.temp_allocator)
+	done, froms := make([dynamic]string, context.temp_allocator), make([dynamic]string, context.temp_allocator)
 	stopped := ""
 	for m in moves {
 		r := ui_run(core.Rename_Path{from = m.from, to = m.to})
@@ -787,15 +795,17 @@ files_drop_run :: proc(dir: string) {
 			break
 		}
 		append(&done, m.to)
+		append(&froms, m.from)
 		// listed again (a separate core's own watcher marks its listings; these are this window's)
 		core.files_path_changed(m.from)
 		core.files_path_changed(m.to)
 	}
 	what := len(done) == 1 ? filepath.base(done[0]) : fmt.tprintf("%d items", len(done))
+	serial := files_undo_record(.Move, root, done[:], froms[:]) // ⌘Z moves them back (ui_files_undo.odin)
 	switch {
 	case stopped != "" && len(done) == 0: toast_show(fmt.tprintf("Not moved %s", stopped), err = true)
 	case stopped != "":                   toast_show(fmt.tprintf("Moved %s to %s, then stopped: %s", what, label, stopped), err = true)
-	case len(done) > 0:                   toast_show(fmt.tprintf("Moved %s to %s", what, label))
+	case len(done) > 0:                   files_toast_undo(fmt.tprintf("Moved %s to %s", what, label), serial)
 	}
 	if len(done) == 0 do return
 	v := core.tree_view()
@@ -814,6 +824,7 @@ files_drag_layout :: proc() {
 	name := n > 1 ? fmt.tprintf("%d items", n) : filepath.base(n == 1 ? core.files_drop_sources(fu.drag_paths[:])[0] : fu.drag_path)
 	files_pane_drop_layout() // the pane under the pointer ringed (ui_files_drops.odin)
 	if label := files_pane_drop_label(); label != "" do name = fmt.tprintf("%s: %s", label, name)
+	else if files_drag_copy do name = fmt.tprintf("+ Copy %s", name) // ⌥ held: the drop copies
 	if clay.UI(clay.ID("files_drag"))({
 		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
@@ -835,9 +846,12 @@ files_follow_active :: proc(root: string) {
 	if e == nil || e.view != .File || e.path == "" || root == "" do return
 	p := core.fs_real(e.path)
 	if p == core.files_ui.active_file do return
+	// only into the tree it is in: a tree of another project (selected in the sidebar) stays put,
+	// and the file is revealed once the tree shows its project again
+	if !files_reveals(p, root) do return
 	delete(core.files_ui.active_file)
 	core.files_ui.active_file = strings.clone(p)
-	if strings.has_prefix(p, strings.concatenate({root, "/"}, context.temp_allocator)) do ui_do(core.Files_Reveal{path = p})
+	ui_do(core.Files_Reveal{path = p})
 }
 
 // Scrolls so row i shows (centred when far).
@@ -898,6 +912,7 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 // (main.odin). True if consumed.
 files_event :: proc(e: ^sapp.Event) -> bool {
 	if fu.dragging {
+		if (e.type == .MOUSE_MOVE || e.type == .MOUSE_UP) && files_drag_alt(e.modifiers) do fu.drop_check = true // ⌥ read at the release too
 		#partial switch e.type {
 		case .MOUSE_DOWN:
 			files_drag_cancel() // another button: no drop
@@ -1002,7 +1017,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if !fu.dragging do return true // the tree changed root: ended, nothing drops
 			if !fu.drag_left {
 				// it never left the pressed row: a click after all (below)
-				fu.dragging = false
+				fu.dragging, files_drag_copy = false, false
 				files_drag_cursor(.DEFAULT)
 				files_drop_set({})
 				files_drop_forget()
@@ -1020,9 +1035,11 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			// over the panes: the paths it carries (the pressed row's, or the selection's it was
 			// in) go to the pane under the release only (files_pane_drop). Inside the left column
 			// a drag only ever moves files: nothing reaches a pane
-			if !over_sidebar(e.mouse_x) do files_pane_drop(core.files_drag_paste_paths(fu.drag_path, fu.drag_paths[:]), e.mouse_x, e.mouse_y)
-			else if refused != "" do toast_show(fmt.tprintf("Not moved: %s", refused), err = true)
+			if !over_sidebar(e.mouse_x) do files_pane_drop(core.files_drag_paste_paths(fu.drag_path, fu.drag_paths[:]), e.mouse_x, e.mouse_y) // ⌥ means nothing more there
+			else if refused != "" do toast_show(fmt.tprintf(files_drag_copy ? "Not copied: %s" : "Not moved: %s", refused), err = true)
+			else if dir != "" && files_drag_copy do files_copy_drop_run(fu.drag_paths[:], dir) // ⌥ at the release: a copy (ui_files_clip.odin)
 			else if dir != "" && !noop do files_drop_run(dir)
+			files_drag_copy = false
 			return true
 		}
 		if fu.press_mods do return true // ⌘ or shift changed the selection: nothing opens
@@ -1032,7 +1049,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if fu.press_dir {
 				if fu.press_clicks == 1 do files_toggle(p)
 			} else {
-				if core.path_kind(p) == .File do ui_do(core.Open_File{path = p, session = files_session(), preview = fu.press_clicks < 2})
+				if core.path_kind(p) == .File do files_open(p, preview = fu.press_clicks < 2)
 			}
 		}
 		return true
@@ -1066,6 +1083,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 @(private = "file")
 files_key :: proc(e: ^sapp.Event) -> bool {
 	cmd := e.modifiers & sapp.MODIFIER_SUPER != 0
+	if cmd && files_clip_key(e) do return true // ⌘C ⌘X ⌘V ⌘D ⌘Z (ui_files_clip.odin)
 	if cmd && e.key_code != .BACKSPACE && e.key_code != .UP && e.key_code != .DOWN && e.key_code != .A do return false
 	if cmd && e.modifiers & sapp.MODIFIER_ALT != 0 do return false // ⌥⌘↑ ⌥⌘↓: sessions (menubar.odin)
 	app.redraw = true
@@ -1090,7 +1108,7 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	case .A:
 		if cmd do core.files_sel_all(v, rows)
 	case .ESCAPE:
-		if !core.files_sel_collapse(v) do ui_do(core.Set_Focus{""}) // several selected: the cursor's row alone first
+		if !core.files_sel_collapse(v) && !files_clip_cancel_cut() do ui_do(core.Set_Focus{""}) // several selected: the cursor's row alone first; a cut: taken back
 	case .UP:
 		// up past a heading: the row above it
 		move(rows, cmd ? 0 : (i < 0 ? 0 : i - 1), back = true, extend = shift)
@@ -1110,13 +1128,12 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	case .ENTER, .KP_ENTER, .SPACE:
 		if i < 0 do break
 		if rows[i].kind == .Dir do files_toggle(rows[i].path)
-		else do ui_do(core.Open_File{path = rows[i].path, session = files_session(), preview = e.key_code == .SPACE})
+		else do files_open(rows[i].path, preview = e.key_code == .SPACE)
 	case .F2:
 		if i >= 0 do files_step(rows[i].path, .Rename)
 	case .BACKSPACE, .DELETE:
 		if !(cmd || e.key_code == .DELETE) do break
-		if sel := core.files_sel_paths(v, rows); len(sel) > 1 do ui_do(core.Delete_Path{paths = sel}) // one confirmation for them all
-		else if i >= 0 do ui_do(core.Delete_Path{path = rows[i].path})
+		files_trash(files_clip_selection()) // the user's own: Undo, no confirmation where it can be put back (ui_files_clip.odin)
 	}
 	return true
 }
@@ -1247,31 +1264,35 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 		// several rows: only what acts on them all (no open, new, rename, reveal)
 		// the count after nesting (a folder and what is in it: one), as the confirmation says
 		n := len(core.fs_delete_merge(multi))
-		append(items, core.Menu_Item{label = n == 1 ? "Move to Trash…" : fmt.tprintf("Move %d items to Trash…", n), keys = "⌘⌫", cmd = core.Delete_Path{paths = multi}})
+		append(items, core.Menu_Item{label = n == 1 ? "Move to Trash" : fmt.tprintf("Move %d items to Trash", n), keys = "⌘⌫", files = .Trash})
+		sep(items)
+		files_clip_menu_items(path, items, multi = true) // Cut, Copy, Duplicate (ui_files_clip.odin)
 		sep(items)
 		append(items, core.Menu_Item{label = "Copy paths", files = .Copy_Path})
 		append(items, core.Menu_Item{label = "Copy relative paths", files = .Copy_Relative})
 		return
 	}
 	if !is_dir {
-		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path, session = files_session()}})
-		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, session = files_session(), preview = true}})
+		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path}}) // no session: by the file's project (files_open)
+		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, preview = true}})
 		append(items, core.Menu_Item{label = "Open to the side", files = .Open_Side})
-		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path, session = files_session()}})
+		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path}})
 		sep(items)
 	}
 	append(items, core.Menu_Item{label = "New file…", files = .New_File})
 	append(items, core.Menu_Item{label = "New folder…", files = .New_Folder})
+	sep(items)
+	files_clip_menu_items(path, items, multi = false) // Cut, Copy, Paste, Duplicate (ui_files_clip.odin)
 	if !is_root {
 		sep(items)
 		append(items, core.Menu_Item{label = "Rename…", keys = "F2", files = .Rename})
-		append(items, core.Menu_Item{label = "Move to Trash…", keys = "⌘⌫", cmd = core.Delete_Path{path = path}})
+		append(items, core.Menu_Item{label = "Move to Trash", keys = "⌘⌫", files = .Trash})
 	}
 	sep(items)
 	append(items, core.Menu_Item{label = "Reveal in Finder", cmd = core.Reveal_In_Finder{path = path}})
 	append(items, core.Menu_Item{label = "Copy path", files = .Copy_Path})
 	append(items, core.Menu_Item{label = "Copy relative path", files = .Copy_Relative})
-	if s := files_session(); s != 0 {
+	if s := files_session(); s != 0 && files_tree_is_session(core.cur()) { // only into the session whose folder the tree shows
 		dir := is_dir ? path : filepath.dir(path)
 		append(items, core.Menu_Item{label = "Open terminal here", cmd = core.New_Shell_Tab{session = s, cwd = dir}})
 	}
@@ -1297,7 +1318,7 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 		return true
 	case .Open_Side:
 		// open_file, then that tab in a new pane on the right (a pane holding only it shows it already)
-		r := ui_run(core.Open_File{path = path, session = files_session()})
+		r := ui_run(core.Open_File{path = path})
 		if !r.ok {
 			toast_show(r.error, true)
 			return false
@@ -1305,6 +1326,8 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 		if s, t, _ := find_tab(r.created_id); s != nil && core.pane_tab_count(s, t.pane) > 1 {
 			ui_do_menu(core.Split_Pane{pane = t.pane, direction = .Right, tab_id = r.created_id}, "Open to the side")
 		}
+	case .Copy, .Cut, .Paste, .Duplicate, .Trash:
+		files_clip_step(path, step) // ui_files_clip.odin
 	case .Copy_Relative:
 		relative :: proc(path, root: string) -> string {
 			if strings.has_prefix(path, root) && len(path) > len(root) do return path[len(root) + 1:]
@@ -1408,7 +1431,7 @@ files_commit_edit :: proc(blur := false) {
 	case .New_File:
 		path = strings.concatenate({fu.target, "/", name}, context.temp_allocator)
 		r = ui_run(core.Create_File{path = path})
-		if r.ok do ui_do(core.Open_File{path = path, session = files_session()})
+		if r.ok do ui_do(core.Open_File{path = path}) // by the file's project (files_open)
 	case .New_Folder:
 		path = strings.concatenate({fu.target, "/", name}, context.temp_allocator)
 		r = ui_run(core.Create_Dir{path = path})
@@ -1417,6 +1440,9 @@ files_commit_edit :: proc(blur := false) {
 		failed(r.error, blur)
 		return
 	}
+	// ⌘Z undoes it (ui_files_undo.odin)
+	if fu.edit == .Rename do files_undo_record(.Move, core.files_root(), {path}, {fu.target})
+	else do files_undo_record(.Create, core.files_root(), {path}, nil)
 	fu.edit = .None
 	delete(fu.edit_err)
 	fu.edit_err = ""
@@ -1507,7 +1533,7 @@ files_filter_key :: proc(key: sapp.Keycode) -> bool {
 			core.files_select_in(core.tree_view(), rows[0].path)
 			files_scroll_to(0, len(rows))
 			// Enter while filtering opens the best match
-			if key != .DOWN && rows[0].kind == .File && state.files.filter != "" do ui_do(core.Open_File{path = rows[0].path, session = files_session()})
+			if key != .DOWN && rows[0].kind == .File && state.files.filter != "" do ui_do(core.Open_File{path = rows[0].path})
 		}
 		ui_do(core.Set_Focus{"files"})
 		return true

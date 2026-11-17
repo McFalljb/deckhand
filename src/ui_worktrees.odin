@@ -449,7 +449,7 @@ wt_menu_pick :: proc(i: int) {
 	}
 	c := r.checkouts[row.checkout]
 	if c.missing || c.bare do return
-	ui_do(core.Files_Set_Root{path = c.path})
+	ui_do(core.Files_Set_Root{base = core.files_base(), path = c.path}) // the window's tree: its base, never the core's idea of it
 	wt_menu_close()
 }
 

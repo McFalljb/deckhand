@@ -291,7 +291,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		handoff_items(&items, p.id) // New session on <machine> in <project> (ui_handoff.odin)
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
 		// else a new one), once per account while there are several; only while it is installed
-		if p.group == .Projects && core.claude_installed() do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
+		if p.group == .Projects && core.claude_offered(p.id) do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
 		if p.group == .Projects && core.codex_offered(p.id) do core.claude_account_items(&items, "New Codex tab", core.New_Claude_Tab{project_id = p.id, codex = true}) // once per Codex account while there are several (codex.odin)
 		if core.folder_of(.Jobs) != "" do append(&items, core.Menu_Item{label = "New job for this project…", cmd = core.Job_Sheet{open = true, for_project = core.path_tilde(p.cwd)}})
 		append(&items, core.Menu_Item{label = "Rename…", rename = true})

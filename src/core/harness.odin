@@ -278,6 +278,17 @@ codex_offered :: proc(id: u64) -> bool {
 	return codex_installed()
 }
 
+// Whether New Claude tab is offered for id (a project's or an open session's): this Mac's, while
+// claude is installed here; another machine's, while its checklist says it has Claude Code
+// (machine_harnesses), never by this Mac's install.
+claude_offered :: proc(id: u64) -> bool {
+	if no := id_machine(id); no != 0 {
+		_, claude, _ := machine_harnesses(no)
+		return claude
+	}
+	return claude_installed()
+}
+
 // Whether machine no's core starts Codex tabs for this Mac (its hello's features: codex_tabs).
 machine_codex :: proc(no: u64) -> bool {
 	for m in state.machines do if m.no == no do return m.codex

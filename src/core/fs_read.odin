@@ -42,30 +42,67 @@ fs_check_read :: proc(path: string, caller: Caller, allow_root := false) -> (abs
 }
 
 // The listed checkout of a known project's repository that real path dir is in ("" = none): a
-// folder at or above it (below HOME) holding a verified .git, of the repository of a project (or
-// open session) folder that is that repository's top.
+// folder at or above it (below HOME) holding a verified .git that wt_sibling_err accepts for a
+// project (or open session) folder.
 @(private = "file")
 fs_read_checkout :: proc(dir: string) -> string {
-	home := os.get_env("HOME", context.temp_allocator)
-	if home == "" do return "" // where HOME is cannot be told: no checkout reads
-	homes := [2]string{home, fs_real(home)}
+	homes, ok := wt_homes()
+	if !ok do return "" // where HOME is cannot be told: no checkout reads
 	for d := dir; len(d) > 1; d = filepath.dir(d) {
-		if fs_read_home_or_above(d, homes) do return ""
+		if wt_home_or_above(d, homes) do return ""
 		common := wt_verified(d)
 		if common == "" do continue
-		for r in fs_base_roots() {
-			w := wt_where(r)
-			if w.common != common || w.top != r || fs_read_home_or_above(r, homes) do continue // only from a repository's top
-			repo := wt_repo_for(r, counts = false) // the last scan; a new one only when none is current
-			if repo == nil || !repo.loaded do continue
-			if c := wt_checkout(repo, d); c != nil && !c.missing do return d
-		}
+		for r in fs_base_roots() do if wt_where(r).common == common && wt_sibling_err(r, d, listed = true) == "" do return d
 	}
 	return ""
 }
 
+WT_NOT_FROM_HERE :: "only a project at its repository's top folder shows its other checkouts"
+
+// Why path may not be another checkout shown for base, a project (or open session) folder ("" = it
+// may): the one rule for reads there (fs_check_read) and for files_set_root, for every caller.
+// HOME must be set; base must be its repository's top folder (the folder holding .git; not a
+// subfolder of a repository, so never the repository's top or another package from a monorepo's
+// package, nor HOME from a folder under a dotfiles HOME) and below HOME; path must be below HOME
+// (never HOME, above it, or /) and really a checkout of that repository (wt_verified: a .git folder
+// that is the common dir, or a linked worktree's .git file pointing back; no crafted .git file, no
+// link); listed: and the last scan listed it, its folder there (the scan is read, not started
+// while one is current: wt_repo_for without counts).
+wt_sibling_err :: proc(base, path: string, listed: bool) -> string {
+	homes, ok := wt_homes()
+	if !ok do return "HOME is not set: no other checkout"
+	b := fs_real(base)
+	if !wt_switchable_base(b) do return WT_NOT_FROM_HERE
+	p := fs_real(path)
+	if wt_home_or_above(p, homes) do return "not HOME or a folder above it"
+	common := wt_verified(p)
+	if common == "" || common != wt_where(b).common do return "not a checkout of the project's repository"
+	if !listed do return ""
+	r := wt_repo_for(b, counts = false)
+	if r == nil || !r.loaded do return "worktrees are being read: try again"
+	if c := wt_checkout(r, p); c == nil || c.missing do return "not a checkout of the project's repository"
+	return ""
+}
+
+// Whether a project (or session) folder may show its repository's other checkouts: it is its
+// repository's top folder, below HOME (HOME set).
+wt_switchable_base :: proc(base: string) -> bool {
+	homes, ok := wt_homes()
+	if !ok do return false
+	b := fs_real(base)
+	w := wt_where(b)
+	return w.common != "" && w.top == b && !wt_home_or_above(b, homes)
+}
+
 @(private = "file")
-fs_read_home_or_above :: proc(d: string, homes: [2]string) -> bool {
+wt_homes :: proc() -> (homes: [2]string, ok: bool) {
+	home := os.get_env("HOME", context.temp_allocator)
+	if home == "" do return {}, false
+	return {home, fs_real(home)}, true
+}
+
+@(private = "file")
+wt_home_or_above :: proc(d: string, homes: [2]string) -> bool {
 	if d == "" || d == "/" do return true
 	for h in homes do if h != "" && within(h, d) do return true
 	return false

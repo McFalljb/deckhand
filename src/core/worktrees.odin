@@ -727,7 +727,7 @@ worktrees_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Re
 			return {ok = true}, false
 		}
 		if !os.is_dir(p) do return fail("no such folder"), false
-		if err := wt_checkout_err(base, p, listed = caller.kind != .Internal); err != "" do return fail(err), false
+		if err := wt_sibling_err(base, p, listed = caller.kind != .Internal); err != "" do return fail(err), false // the read rule's (fs_read.odin), for every caller
 		return {ok = true}, files_checkout_set(base, p)
 	case Worktree_Session:
 		// commands.odin starts it (open_new_session); the checks are here

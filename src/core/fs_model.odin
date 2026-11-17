@@ -160,7 +160,7 @@ fs_roots :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
 	base := fs_base_roots()
 	append(&out, ..base)
-	for c in state.files.checkouts do if list_index(base, c.base) >= 0 && list_index(out[:], c.path) < 0 do append(&out, c.path)
+	for c in state.files.checkouts do if list_index(base, c.base) >= 0 && list_index(out[:], c.path) < 0 && wt_sibling_err(c.base, c.path, listed = false) == "" do append(&out, c.path) // a choice saved before that rule: never a root
 	return out[:]
 }
 

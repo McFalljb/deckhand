@@ -297,3 +297,100 @@ fs_read_only_from_a_repository_top :: proc(t: ^testing.T) {
 	os.set_env("HOME", home)
 	testing.expect(t, ls(wt, web).ok, "HOME back")
 }
+
+// files_set_root follows the same rule (wt_sibling_err) for every caller: a project in a subfolder
+// of its repository, or under a HOME that is a repository, never makes the repository's top (or
+// HOME) a tree root; a repository-top project's sibling worktree still may; a saved choice that
+// breaks the rule is dropped on restore and is never a root meanwhile.
+@(test)
+files_set_root_only_from_a_repository_top :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	tmp := strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")
+	if tmp == "" do tmp = "/tmp"
+	made := fmt.tprintf("%s/dh-setroot-%d", tmp, time.now()._nsec)
+	os.make_directory_all(made)
+	base := fs_real(made, context.allocator)
+	defer os.remove_all(base)
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator), context.temp_allocator)
+	home := fmt.tprintf("%s/home", base)
+	os.make_directory_all(home)
+	os.set_env("HOME", home)
+	os.set_env("GIT_CONFIG_NOSYSTEM", "1")
+	defer {os.set_env("HOME", old_home); os.unset_env("GIT_CONFIG_NOSYSTEM")}
+	callers := []Caller{{kind = .UI}, {kind = .Script}, {kind = .UI, web = true}, {kind = .Control}}
+	set :: proc(b, p: string, by: Caller) -> Result {return run_command(Files_Set_Root{base = b, path = p}, by)}
+
+	// a monorepo package project
+	mono := fmt.tprintf("%s/mono", base)
+	mono_wt := fmt.tprintf("%s/mono-wt", base)
+	rd_put(fmt.tprintf("%s/pkg/a/a.txt", mono), "a\n")
+	if !rd_git(mono, "init", "-q") do return // no git here
+	rd_git(mono, "add", ".")
+	rd_git(mono, "commit", "-qm", "init")
+	rd_git(mono, "worktree", "add", "-q", "-b", "mw", mono_wt)
+	pkg := fmt.tprintf("%s/pkg/a", mono)
+	append(&state.projects, Project{id = new_id(), group = .Projects, cwd = strings.clone(pkg), label = "a"})
+	testing.expect(t, rd_scan(pkg), "scanned")
+	for by in callers {
+		testing.expect(t, !set(pkg, mono, by).ok, "the repository's top from a package")
+		testing.expect(t, !set(pkg, mono_wt, by).ok, "a sibling worktree from a package")
+	}
+	testing.expect(t, !set(pkg, mono, {kind = .Internal}).ok, "a restore too")
+	testing.expect_value(t, len(state.files.checkouts), 0)
+
+	// HOME is a dotfiles repository; a project under it
+	rd_put(fmt.tprintf("%s/.zsh_history", home), "h\n")
+	rd_put(fmt.tprintf("%s/code/foo/f.txt", home), "f\n")
+	rd_git(home, "init", "-q")
+	rd_git(home, "add", ".zsh_history")
+	rd_git(home, "commit", "-qm", "dotfiles")
+	foo := fmt.tprintf("%s/code/foo", home)
+	append(&state.projects, Project{id = new_id(), group = .Projects, cwd = strings.clone(foo), label = "foo"})
+	rd_scan(foo)
+	for by in callers do testing.expect(t, !set(foo, home, by).ok, "HOME from a project under it")
+	// a project that is HOME's repository's worktree (its own top): HOME is still never one
+	dots := fmt.tprintf("%s/dots-wt", base)
+	rd_git(home, "worktree", "add", "-q", "-b", "dw", dots)
+	append(&state.projects, Project{id = new_id(), group = .Projects, cwd = strings.clone(dots), label = "dots"})
+	testing.expect(t, rd_scan(dots), "scanned")
+	for by in callers do testing.expect(t, !set(dots, home, by).ok, "HOME as a checkout")
+	testing.expect_value(t, len(state.files.checkouts), 0)
+
+	// a repository-top project and its sibling worktree: as today
+	proj := fmt.tprintf("%s/proj", base)
+	wt := fmt.tprintf("%s/proj-wt", base)
+	rd_put(fmt.tprintf("%s/a.txt", proj), "a\n")
+	rd_git(proj, "init", "-q")
+	rd_git(proj, "add", ".")
+	rd_git(proj, "commit", "-qm", "init")
+	rd_git(proj, "worktree", "add", "-q", "-b", "w1", wt)
+	append(&state.projects, Project{id = new_id(), group = .Projects, cwd = strings.clone(proj), label = "proj"})
+	testing.expect(t, rd_scan(proj), "scanned")
+	r := set(proj, wt, {kind = .Script})
+	testing.expect(t, r.ok, r.error)
+	testing.expect(t, list_index(fs_roots(), wt) >= 0, "a root")
+	// HOME unset: refused
+	os.unset_env("HOME")
+	testing.expect(t, !set(proj, wt, {kind = .UI}).ok, "HOME unset")
+	os.set_env("HOME", home)
+
+	// saved before this rule: a bad choice is never a root, and a restore drops it
+	files_checkout_set(pkg, mono)
+	files_checkout_set(foo, home)
+	testing.expect(t, list_index(fs_roots(), mono) < 0 && list_index(fs_roots(), home) < 0, "never roots")
+	testing.expect(t, !run_command(List_Dir{path = home}, {kind = .Script}).ok, "HOME not listed")
+	saved := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expect(t, strings.contains(saved, mono), "saved as it was")
+	state = State{}
+	workspace_restore(saved)
+	rd_scan(proj)
+	has :: proc(p: string) -> bool {
+		for c in state.files.checkouts do if c.path == p do return true
+		return false
+	}
+	testing.expect(t, !has(mono) && !has(home), "dropped on restore")
+	testing.expect(t, has(wt), "the good one kept")
+}

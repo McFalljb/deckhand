@@ -449,6 +449,12 @@ wt_menu_pick :: proc(i: int) {
 	}
 	c := r.checkouts[row.checkout]
 	if c.missing || c.bare do return
+	// a project in a subfolder of its repository shows none of its other checkouts (the core refuses:
+	// wt_sibling_err): the row's actions instead (a terminal there, a session there)
+	if !core.wt_switchable_base(core.files_base()) {
+		wt_menu_actions(i, {})
+		return
+	}
 	ui_do(core.Files_Set_Root{base = core.files_base(), path = c.path}) // the window's tree: its base, never the core's idea of it
 	wt_menu_close()
 }
@@ -521,6 +527,7 @@ wt_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 		}
 		c := r.checkouts[row.checkout]
 		if c.missing do return fmt.tprintf("%s is gone (git worktree prune drops it)", core.fs_display(c.path)), ""
+		if !core.wt_switchable_base(core.files_base()) do return fmt.tprintf("%s · the tree shows a checkout only for a project at its repository's top folder", core.fs_display(c.path)), ""
 		vs := c.upstream != "" && !c.gone ? c.upstream : r.default_branch
 		if c.main && c.upstream == "" do return core.fs_display(c.path), ""
 		return fmt.tprintf("%s · ahead/behind %s", core.fs_display(c.path), vs), ""

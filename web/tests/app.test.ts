@@ -250,7 +250,7 @@ test("new session: one row per account, one choice starts at once, none says why
   assert.deepEqual(newTabChoices(s, 3, { project_id: 10 }, false, "x"), [], "an unknown machine: none");
 });
 
-import { barsFor } from "../src/app/bars.ts";
+import { barPrimary, barsFor } from "../src/app/bars.ts";
 
 test("status strip: a tab's own bars, then its harness's hot-reload bars; none for other tabs", () => {
   const s = new Store();
@@ -263,6 +263,34 @@ test("status strip: a tab's own bars, then its harness's hot-reload bars; none f
   assert.deepEqual(barsFor(s, tab(8, { shell_tab: {} })), []);
   s.applyDelta({ version: 2, sections: { webbars: null } });
   assert.deepEqual(barsFor(s, tab(5, { claude_tab: {} })), []);
+});
+
+test("new session: a project whose picker differs (its last used account) gets its own rows, first as the native picker's", () => {
+  const s = new Store();
+  const work = { harness: "claude", label: "Claude Code · work", account: "/h/.claude-work" };
+  const home = { harness: "claude", label: "Claude Code · home", account: "/h/.claude" };
+  s.applyFull({ version: 1, state: {
+    projects: { projects: [{ id: 7, group: "projects", machine: 0 }, { id: 8, group: "projects", machine: 0 }] },
+    web: { watch: [], new: [{ machine: 0, projects: [work, home], chats: [work, home], note: "", claude_tab: [], codex_tab: [], project_rows: [{ project: 7, rows: [home, work] }] }] },
+  } });
+  assert.deepEqual(newSessionChoices(s, 7).map((c) => c.label), ["Claude Code · home", "Claude Code · work"], "project 7: its last used first");
+  assert.deepEqual(newSessionChoices(s, 7)[0].cmd, { type: "new_claude_session", project_id: 7, account: "/h/.claude" });
+  assert.deepEqual(newSessionChoices(s, 8).map((c) => c.label), ["Claude Code · work", "Claude Code · home"], "another project: its kind's list");
+});
+
+test("status strip: Restart anyway is carried as the core wrote it, never the strip's primary button", () => {
+  const s = new Store();
+  const actions = [
+    { label: "Restart anyway", command: { type: "claude_restart_anyway", tab_id: 5 } },
+    { label: "Later", command: { type: "claude_reload_later" } },
+  ];
+  s.applyFull({ version: 1, state: { webbars: [{ tab: 0, harness: "claude", kind: "claude_reload", tone: "info", text: "Restarting Claude — 1 tab waits until idle · Claude: a subagent silent for 2h 05m", actions }] } });
+  const tab = (id: number, kind: object) => ({ id, machine: 0, kind, title: "", status: "running", agent: "idle", waiting: false, question: false }) as any;
+  const bars = barsFor(s, tab(5, { claude_tab: {} }));
+  assert.deepEqual(bars.map((b) => b.actions.map((a) => a.label)), [["Restart anyway", "Later"]]);
+  assert.deepEqual(bars[0].actions[0].command, { type: "claude_restart_anyway", tab_id: 5 });
+  assert.equal(barPrimary(bars[0]), 1, "the last command (Later) is the strip's primary, not Restart anyway");
+  assert.deepEqual(barsFor(s, tab(6, { claude_tab: { codex: true } })), [], "a Codex tab: not Claude Code's bar");
 });
 
 test("status strip: another machine's tab shows none of this machine's bars (#152 review)", () => {

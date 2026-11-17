@@ -49,21 +49,7 @@ claude_reload_counts :: core.claude_reload_counts
 claude_bar_shows :: core.claude_bar_shows
 claude_reload_message :: core.claude_reload_message
 
-// A tab of this bar whose waiting restart is held only by subagents silent for hours (the core's
-// note: claude_reload.odin busy_why), and that silence ("a subagent silent for 2h 05m").
-claude_reload_silent_tab :: proc(update: bool) -> (tab: ^core.Tab, why: string) {
-	for &s in state.open_sessions {
-		if s.home do continue
-		for &t in s.tabs {
-			if _, is := t.kind.(core.Claude_Tab); !is || t.status != .Running || t.reload.queued != .Restart do continue
-			if update ? !core.claude_reload_outdated(&t) : !t.reload.stale do continue
-			i := strings.index(t.reload.note, core.CLAUDE_SILENT_NOTE)
-			if i < 0 do continue
-			return &t, strings.trim_right(t.reload.note[i:], ")")
-		}
-	}
-	return nil, ""
-}
+claude_reload_silent_tab :: core.claude_reload_silent_tab
 
 // ~ for the home folder.
 @(private = "file")

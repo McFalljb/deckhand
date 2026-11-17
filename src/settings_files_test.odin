@@ -347,6 +347,13 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	os.make_directory_all(fmt.tprintf("%s/.pi/prompts", proj))
 	write_mode(fmt.tprintf("%s/.pi/prompts/p.md", proj), "p", 0o644)
 	write_mode(fmt.tprintf("%s/.pi/.env", proj), "K=v", 0o644)
+	// the Coding agents rows look at this HOME only: no claude or pi of this machine's PATH (its
+	// version would show), no stand-in binary named by another test
+	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
+	defer os.set_env("PATH", old_path)
+	os.set_env("PATH", "/usr/bin:/bin")
+	os.unset_env("DECKHAND_CLAUDE_BIN")
+	os.unset_env("DECKHAND_CODEX_BIN")
 	core.harness_checklist_forget() // the Coding agents rows look at this HOME (another test's are cached)
 	core.settings_watch = true // as while the Settings page shows: its folders are polled
 	defer core.settings_watch = false

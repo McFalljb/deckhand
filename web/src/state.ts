@@ -162,6 +162,7 @@ export interface WebNewChoices {
   claude_tab?: WebNewTab[]; // New Claude tab there ([] = not installed)
   codex_tab?: WebNewTab[];
   note: string; // why a list is empty
+  project_rows?: { project: number; rows: WebNewChoice[] }[]; // a project whose picker is not its kind's list (its last used account first)
 }
 
 export interface PaneLeaf {

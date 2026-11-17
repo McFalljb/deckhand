@@ -843,6 +843,28 @@ claude_accounts_default_choice :: proc(t: ^testing.T) {
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = "61616161-0000-4000-8000-000000000001", source = "startup"}, CA_SCRIPT)
 	testing.expect_value(t, core.claude_account_pick(core.find_project(pid)), home)
 	testing.expect_value(t, core.claude_account_pick(nil), work)
+	// a browser's New session picker (web.new) offers the same first as the native one: in this
+	// project its last used, elsewhere the chosen default
+	{
+		core.claude_installed_probe = proc() -> bool {return true}
+		defer core.claude_installed_probe = nil
+		core.pi_installed_probe = proc() -> bool {return false}
+		defer core.pi_installed_probe = nil
+		native := core.new_session_choices(core.find_project(pid), "")
+		testing.expect(t, len(native) == 2 && native[0].label == "Claude Code · Claude", "the native picker: the project's pick first")
+		web := ""
+		secs := core.state_sections(state)
+		for x in core.web_view_cached(secs[:]) do if x[0] == "web" do web = x[1]
+		quoted :: proc(s: string) -> string {
+			b := strings.builder_make(context.temp_allocator)
+			core.json_quote(&b, s)
+			return strings.to_string(b)
+		}
+		row :: proc(label, dir: string) -> string {return fmt.tprintf(`{{"harness":"claude","label":%s,"account":%s}}`, quoted(label), quoted(dir))}
+		this := fmt.tprintf(`{{"project":%d,"rows":[%s,%s]}}`, pid, row("Claude Code · Claude", home), row("Claude Code · Work", work))
+		testing.expectf(t, strings.contains(web, this), "this project: its pick first: %s", web)
+		testing.expectf(t, strings.contains(web, fmt.tprintf(`"projects":[%s,%s]`, row("Claude Code · Work", work), row("Claude Code · Claude", home))), "elsewhere: the default first: %s", web)
+	}
 	// kept across a relaunch
 	text := core.workspace_json()
 	delete(state.settings.claude_account_default)

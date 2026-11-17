@@ -323,15 +323,17 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 // label, account}], chats [same], claude_tab [{account, name}], codex_tab [same], note}] in the
 // picker's order (the last used first), one row per account while there are several; the tab
 // lists are New Claude tab and New Codex tab there ([] = not installed). note: why a list is empty.
+// project_rows (this machine's, while there are several accounts): [{project, rows [same]}] for
+// each project whose picker differs from its kind's list (its last used account first: the native
+// picker's own rows, new_session_choices).
 @(private = "file")
 web_view_new_choices :: proc(b: ^strings.Builder) {
 	// the picker's rows: Claude Code and Codex once per account while there are several (the
-	// default's first is the core's pick), each with its account ("" = the core's pick)
-	list :: proc(b: ^strings.Builder, no: u64, group: Sidebar_Group) {
-		p := Project{id = no << MACHINE_ID_SHIFT, machine = no, group = group}
+	// default's first is the core's pick, or p's own), each with its account ("" = the core's pick)
+	rows :: proc(b: ^strings.Builder, p: ^Project) {
 		strings.write_byte(b, '[')
 		n := 0
-		for it in new_session_choices(&p, "") {
+		for it in new_session_choices(p, "") {
 			h, ok := harness_of(it.cmd)
 			if !ok do continue
 			if n > 0 do strings.write_byte(b, ',')
@@ -345,6 +347,10 @@ web_view_new_choices :: proc(b: ^strings.Builder) {
 			strings.write_byte(b, '}')
 		}
 		strings.write_byte(b, ']')
+	}
+	list :: proc(b: ^strings.Builder, no: u64, group: Sidebar_Group) {
+		p := Project{id = no << MACHINE_ID_SHIFT, machine = no, group = group}
+		rows(b, &p)
 	}
 	// New Claude tab / New Codex tab there: once per account while there are several (this
 	// machine's; claude_account_items), [] while that harness is not there
@@ -388,19 +394,52 @@ web_view_new_choices :: proc(b: ^strings.Builder) {
 		tabs(b, no, true)
 		strings.write_string(b, `,"note":`)
 		json_quote(b, no == 0 ? NO_HARNESS : machine_no_harness_note(no))
+		if no == 0 do web_view_new_project_rows(b, rows)
 		strings.write_byte(b, '}')
 	}
 	strings.write_byte(b, ']')
 }
 
+// This machine's projects whose New session picker is not their kind's list (with several
+// accounts, its last used account first: claude_account_pick): ,"project_rows":[{project, rows}].
+@(private = "file")
+web_view_new_project_rows :: proc(b: ^strings.Builder, rows: proc(b: ^strings.Builder, p: ^Project)) {
+	if len(claude_accounts(false)) < 2 && len(claude_accounts(true)) < 2 do return
+	strings.write_string(b, `,"project_rows":[`)
+	kinds: [Sidebar_Group]string
+	for g in Sidebar_Group do if g == .Projects || g == .Chats {
+		p := Project{group = g}
+		k := strings.builder_make(context.temp_allocator)
+		rows(&k, &p)
+		kinds[g] = strings.to_string(k)
+	}
+	n := 0
+	for &p in state.projects {
+		if p.machine != 0 || (p.group != .Projects && p.group != .Chats) do continue
+		r := strings.builder_make(context.temp_allocator)
+		rows(&r, &p)
+		if strings.to_string(r) == kinds[p.group] do continue
+		if n > 0 do strings.write_byte(b, ',')
+		n += 1
+		fmt.sbprintf(b, `{{"project":%d,"rows":%s}}`, p.id, strings.to_string(r))
+	}
+	strings.write_byte(b, ']')
+}
+
 // What the New session picker reads besides the other sections (web_view_cached's key): which
-// harnesses this machine has and the last used one.
+// harnesses this machine has and the last used one; with several accounts, each project's pick
+// (claude_account_pick: its last used account, from the history no section carries).
 @(private = "file")
 web_view_new_key :: proc() -> u64 {
 	k := u64(state.settings.last_harness)
 	if pi_installed() do k |= 1 << 8
 	if claude_installed() do k |= 1 << 9
 	if codex_installed() do k |= 1 << 10
+	for codex in ([2]bool{false, true}) do if len(claude_accounts(codex)) >= 2 {
+		for &p in state.projects do if p.machine == 0 {
+			k = hash.fnv64a(transmute([]u8)claude_account_pick(&p, codex), k)
+		}
+	}
 	return k
 }
 

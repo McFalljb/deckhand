@@ -371,23 +371,24 @@ files_drop_no_pane_under_an_overlay :: proc(t: ^testing.T) {
 @(test)
 files_drops_queue_never_sticks :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	when !core.TEST_HOOKS do return
-	defer files_drops_test_reset()
-	// another link than the copy's (the core restarted)
-	files_drops_test_waiting(77, time.tick_now(), rawptr(uintptr(0x10)))
-	testing.expect(t, files_drops_busy(), "waiting")
-	files_drops_tick()
-	testing.expect(t, !files_drops_busy(), "the queue ended")
-	testing.expect(t, strings.contains(toast.text, "stopped following"), toast.text)
-	// past the deadline
-	files_drops_test_waiting(78, time.tick_add(time.tick_now(), -(time.Duration(DROPS_FOLLOW_MAX) + time.Second)), nil)
-	files_drops_tick()
-	testing.expect(t, !files_drops_busy(), "the queue ended at the deadline")
-	// an unrelated finished while a copy runs (not being started): not kept
-	files_drops_test_waiting(79, time.tick_now(), nil)
-	files_drops_on_event(core.Finished_Event{request_id = 5, result = {ok = true}})
-	testing.expect_value(t, files_drops_test_kept(), 0)
-	files_drops_on_event(core.Finished_Event{request_id = 79, result = {ok = true, data = `{"path":"/x/a.txt","copied":1}`}})
-	testing.expect(t, !files_drops_busy(), "its own finished ends it")
-	testing.expect(t, strings.contains(toast.text, "a.txt"), toast.text)
+	when core.TEST_HOOKS {
+		defer files_drops_test_reset()
+		// another link than the copy's (the core restarted)
+		files_drops_test_waiting(77, time.tick_now(), rawptr(uintptr(0x10)))
+		testing.expect(t, files_drops_busy(), "waiting")
+		files_drops_tick()
+		testing.expect(t, !files_drops_busy(), "the queue ended")
+		testing.expect(t, strings.contains(toast.text, "stopped following"), toast.text)
+		// past the deadline
+		files_drops_test_waiting(78, time.tick_add(time.tick_now(), -(time.Duration(DROPS_FOLLOW_MAX) + time.Second)), nil)
+		files_drops_tick()
+		testing.expect(t, !files_drops_busy(), "the queue ended at the deadline")
+		// an unrelated finished while a copy runs (not being started): not kept
+		files_drops_test_waiting(79, time.tick_now(), nil)
+		files_drops_on_event(core.Finished_Event{request_id = 5, result = {ok = true}})
+		testing.expect_value(t, files_drops_test_kept(), 0)
+		files_drops_on_event(core.Finished_Event{request_id = 79, result = {ok = true, data = `{"path":"/x/a.txt","copied":1}`}})
+		testing.expect(t, !files_drops_busy(), "its own finished ends it")
+		testing.expect(t, strings.contains(toast.text, "a.txt"), toast.text)
+	}
 }

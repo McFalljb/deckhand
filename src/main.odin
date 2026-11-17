@@ -150,6 +150,7 @@ init :: proc "c" () {
 	if !core.autotest_active || core.hook_env(.Data_Dir) != "" do core.titles_load(core.data_dir(context.temp_allocator))
 	core.claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
 	core.rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
+	core.rescan_at = time.tick_now() // a Rescan when the window comes to the front waits from here (commands.odin)
 	// control socket (socket.odin); `--print-token script|control` mints a
 	// token for local scripts and prints it once, as shell exports
 	// (development and test builds only: a release build mints a control token only from

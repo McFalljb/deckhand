@@ -44,43 +44,10 @@ IDS := [Claude_Reload_Part]string {
 @(private = "file")
 open_details: [2]bool // [0] settings, [1] update
 
-// The running Claude tabs a bar is about (update: the update bar).
-claude_reload_counts :: proc(update: bool) -> (n: Reload_Counts) {
-	for &s in state.open_sessions {
-		if s.home do continue
-		for &t in s.tabs {
-			if _, is := t.kind.(core.Claude_Tab); !is do continue
-			if t.status == .Exited && core.restart_waiting(t.id) && strings.has_prefix(t.reload.note, "restarting") {
-				n.reloading += 1
-				continue
-			}
-			if t.status != .Running do continue
-			if update ? !core.claude_reload_outdated(&t) : !t.reload.stale do continue
-			if t.reload.queued == .Restart {
-				n.queued += 1
-				continue
-			}
-			switch core.claude_restart_class(&t) {
-			case .Idle:           n.idle += 1
-			case .Busy, .Blocked: n.busy += 1
-			case .No_Bridge:      n.no_bridge += 1
-			}
-		}
-	}
-	return
-}
-
-claude_bar_shows :: proc(update: bool) -> bool {
-	info := state.reload.claude
-	if update {
-		if info.update_dismissed || info.ident == "" do return false
-	} else if info.dismissed do return false
-	n := claude_reload_counts(update)
-	return n.idle + n.busy + n.no_bridge + n.queued + n.reloading > 0 || (!update && info.from_save)
-}
-
-@(private = "file")
-tabs_word :: proc(k: int) -> string {return k == 1 ? "tab" : "tabs"}
+// The bars' model is the core's (reload_bars.odin): a browser shows the same text.
+claude_reload_counts :: core.claude_reload_counts
+claude_bar_shows :: core.claude_bar_shows
+claude_reload_message :: core.claude_reload_message
 
 // A tab of this bar whose waiting restart is held only by subagents silent for hours (the core's
 // note: claude_reload.odin busy_why), and that silence ("a subagent silent for 2h 05m").
@@ -96,33 +63,6 @@ claude_reload_silent_tab :: proc(update: bool) -> (tab: ^core.Tab, why: string) 
 		}
 	}
 	return nil, ""
-}
-
-// The bar's text, and whether its Restart button shows.
-claude_reload_message :: proc(update: bool) -> (msg: string, can: bool) {
-	n := claude_reload_counts(update)
-	head := "Claude Code settings changed"
-	if update do head = fmt.tprintf("Claude Code updated to %s", core.claude_version_label(state.reload.claude.version))
-	else if plugin := core.claude_plugin_dir(); plugin != "" && len(state.reload.claude.changed) > 0 {
-		only := true
-		for p in state.reload.claude.changed do if !strings.has_prefix(p, strings.concatenate({plugin, "/"}, context.temp_allocator)) do only = false
-		if only do head = "Deckhand's Claude plugin changed"
-	}
-	switch {
-	case n.idle > 0:
-		msg = fmt.tprintf("%s — Restart %d idle Claude %s", head, n.idle, tabs_word(n.idle))
-		if n.busy > 0 do msg = fmt.tprintf("%s · %d busy when idle", msg, n.busy)
-		return msg, true
-	case n.busy > 0:
-		return fmt.tprintf("%s — %d busy Claude %s restart when idle", head, n.busy, tabs_word(n.busy)), true
-	case n.queued > 0:
-		return fmt.tprintf("Restarting Claude — %d %s wait until idle", n.queued, tabs_word(n.queued)), false
-	case n.reloading > 0:
-		return fmt.tprintf("Restarting %d Claude %s…", n.reloading, tabs_word(n.reloading)), false
-	case n.no_bridge > 0:
-		return fmt.tprintf("%s — %d Claude %s never reported its conversation: restart by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
-	}
-	return fmt.tprintf("%s — new Claude tabs use it", head), false
 }
 
 // ~ for the home folder.

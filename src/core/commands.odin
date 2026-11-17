@@ -1382,6 +1382,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		claude_accounts_refresh() // Claude Code's config folders again, then each one's projects/ (claude_disk.odin)
 		claude_scan_prepare()
 		scan_thread = thread.create_and_start_with_poly_data(request_id, scan_worker)
+		rescan_at = time.tick_now()
 		return {ok = true, pending = true}, false
 	case Refresh_Shell_Env:
 		if !login_env.gui {
@@ -2814,6 +2815,27 @@ close_all :: proc() {
 // ---- Rescan on a worker thread ----
 
 scan_thread: ^thread.Thread
+
+// Sessions started outside Deckhand (pi or Claude Code in a terminal) show without a manual
+// Rescan: the window coming to the front (window.facts active) or a paired browser attaching
+// runs one, at most once every RESCAN_ON_ACTIVE since the last scan began, never while one runs.
+// Test mode and unit tests: only when a test asks (rescan_on_active_tests).
+RESCAN_ON_ACTIVE :: 3 * time.Minute
+rescan_at: time.Tick // the last scan's start: the launch's (main.odin, serve.odin), each Rescan
+when TEST_HOOKS {
+	rescan_on_active_tests: bool
+}
+
+// True: a Rescan started.
+rescan_when_active :: proc() -> bool {
+	when TEST_HOOKS {
+		if (ODIN_TEST || test_mode()) && !rescan_on_active_tests do return false
+	}
+	if scan_thread != nil do return false
+	if rescan_at != {} && time.tick_since(rescan_at) < RESCAN_ON_ACTIVE do return false
+	run_command(Rescan{}, {kind = .Internal})
+	return scan_thread != nil
+}
 
 @(private = "file")
 scan_worker :: proc(request_id: u64) {

@@ -12,7 +12,10 @@ package main
 // opens in a preview tab (a double-click or Enter keeps it). ⌘-click adds or
 // takes out a row, shift-click selects a range (core files_sel_*); neither opens
 // anything. A plain press inside a selection of several keeps it until the release.
-// Dragging a row onto a terminal pastes its quoted path. Keyboard (focus widget
+// Dragging a row (or the selection it is in) within the tree moves it: onto a folder row into
+// it, onto a file row into its folder, below the rows into the root (core files_drop_at; one
+// rename_path each); a closed folder held over opens, the list scrolls at its edges, Esc
+// cancels. Dragging a row onto a terminal pastes its quoted path. Keyboard (focus widget
 // "files"): ↑/↓ move (with shift: extend), ←/→ close/open or go to the
 // parent/child, Enter opens, Space previews, F2 renames, ⌘A selects every row,
 // ⌘⌫ moves the selection to the Trash (one confirmation), Esc clears a selection
@@ -24,6 +27,7 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
+import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:time"
@@ -134,7 +138,21 @@ Files_Ui :: struct {
 	press_mods: bool, // the press had ⌘ or shift: it changed the selection; its release opens nothing
 	press_keep: bool, // a plain press on a row of a selection of several: kept until the release
 	dragging:   bool,
-	drag_path:  string, // owned
+	drag_path:  string, // owned: the pressed row's (onto a terminal: its quoted path)
+	// a drag to move (files_drag_update): what is dragged, captured at the press as paths (rows that
+	// move under the pointer mid-drag never change it); where it would drop now
+	drag_paths: [dynamic]string, // owned
+	drop_dir:   string, // owned: core.Files_Drop's
+	drop_noop:  bool,
+	drop_refused: string, // owned
+	spring_path: string, // owned: the closed folder under the pointer, opened after FILES_SPRING
+	spring_at:  time.Tick,
+	edge_at:    time.Tick, // the last edge scroll's step
+	edge_in:    time.Tick, // when the pointer reached the edge (it scrolls after FILES_EDGE_DELAY)
+	drop_key:   string, // owned: what the drop was worked out for (the row, the root)
+	drop_gen:   u64, // and the listings' generation then (core.files_cache_gen)
+	drop_check: bool, // the rows changed under the pointer (spring, edge scroll): the drop again next frame
+	drag_left:  bool, // the drag left the pressed row (until then its release is a click: no ghost, no drop)
 	multi:      bool, // several rows selected (drawn: the cursor's row ringed too)
 	// type-to-select: what was typed, the last key's time
 	typed:      [64]u8,
@@ -274,9 +292,13 @@ files_panel :: proc(row_w_: f32) {
 	overflow := total > fu.view_h
 	if overflow do row_w -= px(FILES_SCROLL_THUMB + 2)
 	if clay.UI(clay.ID("files_list"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, childGap = pu(2)}}) {
+		// a drag into the root: the whole list is the drop's band (a folder's: its rows, files_row)
+		into_root := fu.dragging && fu.drop_dir == root && core.files_drop_band(files_drop_now(), root)
 		if clay.UI(clay.ID("files_rows"))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = {0, -px(offset)}},
+			backgroundColor = into_root ? cc(with_alpha(th.accent, FILES_DROP_TINT)) : {},
+			cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 		}) {
 			if n == 0 {
 				d := core.files_dir(root, false)
@@ -353,11 +375,14 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 	}
 	v := core.tree_view()
 	more_hover := ui_hover == Hit(Hit_Files{what = .More, index = slot})
-	hovered := ui_hover == Hit(Hit_Files{what = .Row, index = slot}) || more_hover
+	hovered := (ui_hover == Hit(Hit_Files{what = .Row, index = slot}) || more_hover) && !fu.dragging // a drag shows its band instead
 	selected := core.files_sel_has(v, r.path)
 	is_cursor := r.path == v.cursor
 	active := r.path == v.active_file
 	bg, em := overlay(id, selected, hovered)
+	// a drag's target folder: its row and the rows inside it, one band (the root's: the list's)
+	band := fu.dragging && fu.drop_dir != core.files_root() && core.files_drop_band(files_drop_now(), r.path)
+	if band && !selected do bg = cc(with_alpha(th.accent, FILES_DROP_TINT))
 	// the keyboard's row: the accent ring while the tree has the keyboard; among several selected
 	// rows, a muted ring otherwise
 	ring: core.Rgba
@@ -366,7 +391,7 @@ files_row :: proc(rows: []core.Files_Row, i, slot: int, row_w: f32, a: runtime.A
 	if clay.UI(id)({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth)), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 		backgroundColor = bg,
-		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+		cornerRadius = clay.CornerRadiusAll(px(band ? 0 : RADIUS_SM)),
 		border = {color = cc(ring), width = clay.BorderOutside(pu(ring != {} ? core.BORDER_W : 0))},
 	}) {
 		chev := r.kind == .Dir ? (r.expanded ? "▾" : "▸") : ""
@@ -518,25 +543,221 @@ files_name_box :: proc(w: f32, placeholder := "") {
 // opened over it: ui_bell.odin).
 files_drag_cancel :: proc() {
 	if fu.press || fu.dragging do app.redraw = true
+	if fu.dragging do files_drag_cursor(.DEFAULT)
 	fu.press, fu.dragging = false, false
+	files_drop_set({})
+	files_drop_forget()
 }
 
 when core.TEST_HOOKS {
-	// Tests: a drag of path from the Files tab in progress; whether one is.
-	files_drag_for_test :: proc(path: string) {
+	// Tests: a drag of path from the Files tab in progress (sources: what it moves; nil: path
+	// alone); whether one is; where it would drop now.
+	files_drag_for_test :: proc(path: string, sources: []string = nil) {
 		delete(fu.press_path)
 		delete(fu.drag_path)
 		fu.press_path, fu.drag_path = strings.clone(path), strings.clone(path)
-		fu.press, fu.dragging = true, true
+		files_drag_sources_set(sources != nil ? sources : []string{path})
+		fu.press, fu.dragging, fu.drag_left = true, true, true
 	}
 	files_dragging :: proc() -> bool {return fu.press || fu.dragging}
+	files_drop_for_test :: proc() -> core.Files_Drop {return files_drop_now()}
 }
 
-// The file being dragged, under the pointer.
+// Hovering a closed folder this long while dragging opens it (spring-loaded, as Finder does).
+FILES_SPRING :: 600 * time.Millisecond
+// The band a drag's target folder shows in (the accent at this alpha).
+FILES_DROP_TINT :: 0.18
+// Edge scroll while dragging: logical px a second, at the very edge (less further in).
+FILES_EDGE_SPEED :: 600
+// and only once the pointer has stayed at the edge this long
+FILES_EDGE_DELAY :: 300 * time.Millisecond
+
+// What the drag moves: owned copies of paths.
+@(private = "file")
+files_drag_sources_set :: proc(paths: []string) {
+	for p in fu.drag_paths do delete(p)
+	clear(&fu.drag_paths)
+	for p in paths do append(&fu.drag_paths, strings.clone(p))
+	files_drop_forget()
+}
+
+// The drop the pointer is over now (owned copies of its strings in fu).
+@(private = "file")
+files_drop_set :: proc(d: core.Files_Drop) {
+	if d.dir != fu.drop_dir || d.noop != fu.drop_noop || d.refused != fu.drop_refused do app.redraw = true
+	if d.dir != fu.drop_dir {
+		delete(fu.drop_dir)
+		fu.drop_dir = strings.clone(d.dir)
+	}
+	if d.refused != fu.drop_refused {
+		delete(fu.drop_refused)
+		fu.drop_refused = strings.clone(d.refused)
+	}
+	fu.drop_noop = d.noop
+}
+
+// The drop is worked out again at the next move (files_drag_update), the spring starts over.
+@(private = "file")
+files_drop_forget :: proc() {
+	delete(fu.drop_key)
+	fu.drop_key = ""
+	delete(fu.spring_path)
+	fu.spring_path = ""
+	fu.edge_in = {}
+}
+
+files_drop_now :: proc() -> core.Files_Drop {return {dir = fu.drop_dir, noop = fu.drop_noop, refused = fu.drop_refused}}
+
+@(private = "file")
+files_drag_cursor :: proc(c: sapp.Mouse_Cursor) {
+	if sapp.isvalid() && sapp.get_mouse_cursor() != c do sapp.set_mouse_cursor(c)
+}
+
+// The tree's row under (x, y), from the last layout, as a drop sees it: a row's path and whether
+// it is a folder; over = "" with ok: the empty space below the rows (the root). ok false: no
+// drop there (outside the list, the new name's field, an error or "N more…" row).
+@(private = "file")
+files_drop_over :: proc(x, y: f32) -> (over: string, over_dir, ok: bool) {
+	if !files_shown() || core.files_root() == "" || !over_sidebar(x) do return "", false, false
+	clay.SetPointerState({x, y}, false)
+	if !clay.PointerOver(clay.ID("files_list")) do return "", false, false
+	if clay.PointerOver(clay.ID("fnew", 0)) || clay.PointerOver(clay.ID("fnew", 1)) do return "", false, false
+	for p, i in fu.drawn do if clay.PointerOver(clay.ID("frow", u32(i))) {
+		if p == "" do return "", false, false
+		return p, fu.drawn_dir[i], true
+	}
+	return "", false, true
+}
+
+// The pointer moved during a drag (or the rows moved under it): the drop it is over now, the
+// pointer's shape (no: nowhere in the tree, nothing to move, refused), a closed folder's spring.
+files_drag_update :: proc(x, y: f32) {
+	app.pointer = {x, y}
+	app.redraw = true
+	fu.drop_check = false
+	if !over_sidebar(x) {
+		// over the panes: onto a terminal it pastes the pressed row's path (files_event)
+		fu.drag_left = true
+		files_drop_set({})
+		files_drop_forget()
+		files_drag_cursor(.DEFAULT)
+		return
+	}
+	over, over_dir, ok := files_drop_over(x, y)
+	if !ok || over != fu.press_path do fu.drag_left = true
+	// worked out again only for another row or a changed listing (a name is looked up per item)
+	key := fmt.tprintf("%v\x00%s\x00%v\x00%s", ok, core.files_root(), over_dir, over)
+	if key != fu.drop_key || core.files_cache_gen != fu.drop_gen {
+		delete(fu.drop_key)
+		fu.drop_key, fu.drop_gen = strings.clone(key), core.files_cache_gen
+		d: core.Files_Drop
+		if ok do d = core.files_drop_at({sources = fu.drag_paths[:], root = core.files_root(), over = over, over_dir = over_dir, exists = proc(p: string) -> bool {return os.exists(p)}})
+		files_drop_set(d)
+	}
+	d := files_drop_now()
+	files_drag_cursor(fu.drag_left && (d.dir == "" || d.noop || d.refused != "") ? .NOT_ALLOWED : .DEFAULT)
+	// a closed folder under the pointer opens after FILES_SPRING (not one being dragged, or inside one)
+	spring := ""
+	if ok && over_dir && !core.files_is_open(over) {
+		spring = over
+		for s in fu.drag_paths do if core.within(over, s) do spring = ""
+	}
+	if spring != fu.spring_path {
+		delete(fu.spring_path)
+		fu.spring_path = strings.clone(spring)
+		fu.spring_at = time.tick_now()
+	}
+}
+
+// Per frame (main.odin's frame, before the layout): a drag's spring-loaded folder opens, the list
+// scrolls while the pointer is at its top or bottom edge, and the drop follows rows that moved
+// under a still pointer. True: draw again (a timer is running).
+files_drag_tick :: proc() -> bool {
+	if !fu.dragging do return false
+	again := false
+	if fu.drop_check {
+		files_drag_update(app.pointer.x, app.pointer.y) // the rows the last frame laid out
+		again = true
+	}
+	if fu.spring_path != "" {
+		if time.tick_since(fu.spring_at) >= FILES_SPRING {
+			ui_do(core.Files_Expand{path = fu.spring_path, expanded = true})
+			delete(fu.spring_path)
+			fu.spring_path = ""
+			fu.drop_check = true
+		}
+		again = true
+	}
+	// edge scroll: within a row's height of the list's top or bottom (or past it, in its column)
+	step := f32(0)
+	if d := clay.GetElementData(clay.ID("files_list")); d.found && over_sidebar(app.pointer.x) {
+		b := d.boundingBox
+		zone := px(FILES_ROW_H)
+		y := app.pointer.y
+		if y < b.y + zone && y > b.y - 2 * zone do step = -min((b.y + zone - y) / zone, 1)
+		else if y > b.y + b.height - zone && y < b.y + b.height + 2 * zone do step = min((y - (b.y + b.height - zone)) / zone, 1)
+	}
+	if step != 0 && fu.edge_in == {} {
+		fu.edge_in = time.tick_now() // a drag from the edge row does not scroll at once
+		again = true
+	} else if step != 0 && time.tick_since(fu.edge_in) < FILES_EDGE_DELAY {
+		again = true
+	} else if step != 0 {
+		dt := fu.edge_at == {} ? f32(1.0 / 60) : f32(min(time.duration_seconds(time.tick_since(fu.edge_at)), 0.05))
+		fu.edge_at = time.tick_now()
+		v := core.tree_view()
+		before := v.scroll
+		v.scroll += step * FILES_EDGE_SPEED * dt
+		_, _, v.scroll = core.files_visible(fu.count, v.scroll, fu.view_h, FILES_ROW_H)
+		if v.scroll != before do fu.drop_check = true
+		again = true
+	}
+	if step == 0 do fu.edge_at, fu.edge_in = {}, {}
+	return again
+}
+
+// The drag was dropped at dir (files_drop_at's, not refused): each item moves with rename_path,
+// in order, stopping at the first refusal (a toast names the item; those moved stay moved). The
+// moved items are selected where they went (dir's row while it is closed).
+@(private = "file")
+files_drop_run :: proc(dir: string) {
+	root := core.files_root()
+	label := core.files_drop_dir_label(root, dir)
+	moves := core.files_drop_moves(fu.drag_paths[:], dir)
+	done := make([dynamic]string, context.temp_allocator)
+	stopped := ""
+	for m in moves {
+		r := ui_run(core.Rename_Path{from = m.from, to = m.to})
+		if !r.ok {
+			stopped = fmt.tprintf("%s: %s", filepath.base(m.from), r.error)
+			break
+		}
+		append(&done, m.to)
+		// listed again (a separate core's own watcher marks its listings; these are this window's)
+		core.files_path_changed(m.from)
+		core.files_path_changed(m.to)
+	}
+	what := len(done) == 1 ? filepath.base(done[0]) : fmt.tprintf("%d items", len(done))
+	switch {
+	case stopped != "" && len(done) == 0: toast_show(fmt.tprintf("Not moved %s", stopped), err = true)
+	case stopped != "":                   toast_show(fmt.tprintf("Moved %s to %s, then stopped: %s", what, label, stopped), err = true)
+	case len(done) > 0:                   toast_show(fmt.tprintf("Moved %s to %s", what, label))
+	}
+	if len(done) == 0 do return
+	v := core.tree_view()
+	if dir == root || core.files_is_open(dir) {
+		core.files_select_in(v, done[0])
+		if len(done) > 1 do core.files_sel_set(v, done[:])
+	} else do core.files_select_in(v, dir)
+	fu.reveal_near = true
+}
+
+// What is being dragged, under the pointer: its name, or "N items".
 files_drag_layout :: proc() {
-	if !fu.dragging do return
+	if !fu.dragging || !fu.drag_left do return
 	th := theme()
-	name := filepath.base(fu.drag_path)
+	n := len(core.files_drop_sources(fu.drag_paths[:]))
+	name := n > 1 ? fmt.tprintf("%d items", n) : filepath.base(n == 1 ? core.files_drop_sources(fu.drag_paths[:])[0] : fu.drag_path)
 	if clay.UI(clay.ID("files_drag"))({
 		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
@@ -620,6 +841,26 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 // Events for the Files tab and the tab switch, before the generic handling
 // (main.odin). True if consumed.
 files_event :: proc(e: ^sapp.Event) -> bool {
+	// a drag owns the keyboard until it ends: Esc cancels it, other keys do nothing (none reaches
+	// a terminal); the window losing focus ends it
+	if fu.dragging {
+		#partial switch e.type {
+		case .KEY_DOWN:
+			if e.key_code == .ESCAPE do files_drag_cancel()
+			app.key_taken = true
+			return true
+		case .CHAR, .KEY_UP:
+			return true
+		case .UNFOCUSED:
+			files_drag_cancel()
+			return false
+		case .MOUSE_DOWN:
+			files_drag_cancel() // another button: no drop
+			return true
+		case .MOUSE_MOVE:
+			if e.modifiers & sapp.MODIFIER_LMB == 0 do files_drag_cancel() // its release went elsewhere
+		}
+	}
 	#partial switch e.type {
 	case .MOUSE_DOWN:
 		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
@@ -679,6 +920,9 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			delete(fu.press_path)
 			fu.press_path = strings.clone(p)
 			fu.press, fu.press_dir, fu.press_at, fu.press_clicks = true, fu.drawn_dir[h.index], {e.mouse_x, e.mouse_y}, app.clicks
+			// what a drag from here would move, as paths now: the selection it is in, else the row
+			if len(v.selected) > 1 && core.files_sel_has(v, p) do files_drag_sources_set(core.files_sel_paths(v, rows))
+			else do files_drag_sources_set({p})
 		case .List:
 			if state.focus_widget != "files" do ui_do(core.Set_Focus{"files"})
 		case .Name: return false // the field's own handling (widget_event) ran first
@@ -690,13 +934,13 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		if fu.press && e.modifiers & sapp.MODIFIER_LMB != 0 {
 			d := [2]f32{e.mouse_x, e.mouse_y} - fu.press_at
 			if !fu.dragging && abs(d.x) + abs(d.y) > px(FILES_DRAG_START) {
-				fu.dragging = true
+				fu.dragging, fu.drag_left = true, false
 				delete(fu.drag_path)
 				fu.drag_path = strings.clone(fu.press_path)
+				if sapp.isvalid() do set_hover(nil, false) // no hover under a drag (no window: tests)
 			}
 			if fu.dragging {
-				app.pointer = {e.mouse_x, e.mouse_y}
-				app.redraw = true
+				files_drag_update(e.mouse_x, e.mouse_y)
 				return true
 			}
 		}
@@ -704,10 +948,30 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		if !fu.press do return false
 		fu.press = false
 		if fu.dragging {
+			// where it is dropped now (the rows may have moved since the last move)
+			files_drag_update(e.mouse_x, e.mouse_y)
+			if !fu.drag_left {
+				// it never left the pressed row: a click after all (below)
+				fu.dragging = false
+				files_drag_cursor(.DEFAULT)
+				files_drop_set({})
+				files_drop_forget()
+				app.redraw = true
+			}
+		}
+		if fu.dragging {
+			d := files_drop_now()
+			dir, refused, noop := strings.clone(d.dir, context.temp_allocator), strings.clone(d.refused, context.temp_allocator), d.noop // fu's go below
 			fu.dragging = false
+			files_drag_cursor(.DEFAULT)
+			files_drop_set({})
+			files_drop_forget()
 			app.redraw = true
-			// onto a terminal: its quoted path, as a dropped file
+			// onto a terminal: the pressed row's quoted path, as a dropped file. Inside the left
+			// column a drag only ever moves files: nothing reaches a pane
 			if !over_sidebar(e.mouse_x) do sidebar_drop({fu.drag_path}, e.mouse_x, e.mouse_y)
+			else if refused != "" do toast_show(fmt.tprintf("Not moved: %s", refused), err = true)
+			else if dir != "" && !noop do files_drop_run(dir)
 			return true
 		}
 		if fu.press_mods do return true // ⌘ or shift changed the selection: nothing opens

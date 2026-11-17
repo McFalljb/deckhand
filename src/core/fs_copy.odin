@@ -43,6 +43,7 @@ FS_COPY_NAMES_MAX :: 1000 // "name copy N" names tried
 
 FS_COPY_INTO_ITSELF :: "a folder cannot be copied into itself"
 FS_COPY_TAKEN :: "the target already exists"
+FS_COPY_SECRET :: "looks like a secret: not copied; move it yourself if you mean to" // the user's own, from outside every project (fs_copy_outside_source)
 FS_COPY_CREDENTIAL :: "a credential is in it (%s): only you, in Deckhand's window, may copy it; nothing was copied"
 
 Fs_Copy_Kind :: enum u8 {
@@ -79,13 +80,67 @@ fs_copy_busy: map[string]bool
 
 // The source and target checked: both inside a project (fs_check), the source there, the
 // target's folder there. a, b: their absolute paths (b as asked, before a unique name).
+// The user at this window may also copy IN from outside every project (fs_copy_outside_source).
 fs_copy_paths :: proc(from, to: string, caller: Caller) -> (a, b: string, err: string) {
 	e: string
 	a, _, e = fs_check(from, caller)
-	if e != "" do return "", "", e
+	if e != "" {
+		out, oerr, applies := fs_copy_outside_source(from, caller)
+		if !applies do return "", "", e
+		if oerr != "" do return "", "", oerr
+		a = out
+	}
 	b, _, e = fs_check(to, caller)
 	if e != "" do return "", "", e
 	return a, b, ""
+}
+
+// A copy's source outside every project (files dropped from Finder onto the Files tree): only for
+// the user at this window (fs_user_here; never a browser, another machine's core, a script, a
+// control caller or Deckhand itself), only an absolute path, only one in no project at all (one
+// inside a project keeps fs_check's refusal: its .git, the project's own folder), never in or at
+// a .git folder (any case), never a project's folder by another spelling (by the file). Its secrets (show_secret:
+// keys, ~/.ssh, ~/.aws, .netrc, …) are never copied in: one alone is refused, one inside a folder
+// left out and said (fs_copy_plan, FS_COPY_SECRET). abs: its folder's real path and its own name (the link itself, never
+// followed: fs_copy_run opens that folder and checks its real path again). Everything else is
+// fs_copy_plan's, unchanged: the target, into itself, credentials (the user's left out and said),
+// .git left out, the caps.
+// applies false: not such a source (the caller keeps fs_check's refusal); else abs, or err.
+fs_copy_outside_source :: proc(from: string, caller: Caller) -> (abs, err: string, applies: bool) {
+	context.allocator = context.temp_allocator // filepath's copies
+	if !fs_user_here(caller) || !filepath.is_abs(from) do return "", "", false
+	base := filepath.base(from)
+	if base == "" || base == "." || base == ".." || base == "/" do return "", "", false
+	parent := fs_real(filepath.dir(from))
+	if parent == "" do return "", "", false
+	full := parent == "/" ? strings.concatenate({"/", base}, context.temp_allocator) : strings.concatenate({parent, "/", base}, context.temp_allocator)
+	roots := fs_roots()
+	for r in roots do if within(full, r) do return "", "", false
+	// nor one reached through a project (a link in it that leads out): every folder on the path as
+	// given, by its real path too
+	for d := filepath.dir(from); ; d = filepath.dir(d) {
+		rd := fs_real(d)
+		for r in roots do if within(d, r) || within(rd, r) do return "", "", false
+		if d == "/" || d == "." || d == "" do break
+	}
+	// nor a project's folder (or one inside it) by another spelling: a volume that ignores case
+	// takes /x/PROJ for /x/proj. By the file: the source and every folder above it, against each
+	// project's folder (stat: a link to a project counts as one too)
+	Id :: struct {dev, ino: u64}
+	ids := make([dynamic]Id, context.temp_allocator)
+	for r in roots {
+		st: posix.stat_t
+		if posix.stat(strings.clone_to_cstring(r), &st) == .OK do append(&ids, Id{u64(st.st_dev), u64(st.st_ino)})
+	}
+	for d := full; ; d = filepath.dir(d) {
+		st: posix.stat_t
+		if posix.stat(strings.clone_to_cstring(d), &st) == .OK {
+			for id in ids do if id == (Id{u64(st.st_dev), u64(st.st_ino)}) do return "", "", false
+		}
+		if d == "/" || d == "." || d == "" do break
+	}
+	if fs_in_git(full) do return "", "not inside .git", true
+	return full, "", true
 }
 
 // Every rule of a copy, nothing written: the paths (fs_copy_paths), never into itself, credential
@@ -97,6 +152,9 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 	a, b, e := fs_copy_paths(from, to, caller)
 	if e != "" do return {}, e
 	user := fs_user_here(caller)
+	// a source from outside every project (fs_copy_outside_source): the user's secrets stay out
+	_, _, ce := fs_check(from, caller)
+	outside := ce != ""
 	sa: posix.stat_t
 	if posix.lstat(strings.clone_to_cstring(a, context.temp_allocator), &sa) != .OK do return {}, "no such file or folder"
 	if path_kind(filepath.dir(b)) != .Dir do return {}, "the target's folder does not exist"
@@ -128,6 +186,7 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 	home := fs_real(os.get_env("HOME", context.temp_allocator)) // show_secret's, once for the tree
 	if cerr := copy_credential_check(a, ".", is_dir, user, true, ids, home); cerr != "" do return {}, cerr
 	if user && settings_credential(a, ids) do return {}, "it is a credential: not copied"
+	if outside && show_secret(a, home) do return {}, FS_COPY_SECRET
 	// in a credential place (at, above or inside one; the user's only by now), every entry is
 	// checked by the full rule; else only below a folder that is one by what it holds, and links
 	// (copy_credential)
@@ -164,6 +223,10 @@ fs_copy_plan :: proc(from, to: string, unique: bool, caller: Caller, allocator: 
 					continue
 				}
 				d := posix.S_ISDIR(st.st_mode)
+				if outside && show_secret(full, home) {
+					append(&skipped, Fs_Copy_Skip{strings.clone(rel, allocator), FS_COPY_SECRET})
+					continue
+				}
 				full_rule := f.place || posix.S_ISLNK(st.st_mode) // a link: where it leads decides too
 				if cerr := copy_credential_check(full, rel, d, user, full_rule, ids, home, &st); cerr != "" do return {}, cerr
 				if user && !d && copy_credential(full, full_rule, ids, &st) {

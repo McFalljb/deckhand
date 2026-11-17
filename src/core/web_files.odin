@@ -202,9 +202,19 @@ file_save_apply :: proc(c: File_Save, caller: Caller) -> Result {
 	if err != "" do return fail(err)
 	// Codex's hooks: shown, never written (codex_view_only), as in the window's editor
 	if codex_view_only(p) || codex_view_only(strings.concatenate({strings.trim_right(dir, "/"), "/", name}, context.temp_allocator)) do return fail("Codex's hooks are read-only here")
+	when TEST_HOOKS {
+		if web_file_save_race != nil do web_file_save_race() // tests: a folder swapped after the check
+	}
 	dirfd, derr := web_file_dir(dir, name, caller)
 	if derr != "" do return fail(derr)
 	defer posix.close(dirfd)
+	// again where the folder actually opened is (a folder on the way swapped for a link after the
+	// checks above): never Codex's hooks nor a credentials or state file there
+	if at := fd_real_path(dirfd); at != "" {
+		full := strings.concatenate({strings.trim_right(at, "/"), "/", name}, context.temp_allocator)
+		if codex_view_only(full) do return fail("Codex's hooks are read-only here")
+		if settings_credential(full) do return fail(CREDENTIAL_REFUSED)
+	} else do return fail("cannot tell where its folder is")
 	// an existing regular file only (a new one: create_file), as it is now
 	now, st, rerr, _ := web_file_bytes(dirfd, name)
 	if rerr != "" do return fail(rerr)
@@ -241,4 +251,9 @@ file_save_apply :: proc(c: File_Save, caller: Caller) -> Result {
 	nst: posix.stat_t
 	posix.fstatat(dirfd, strings.clone_to_cstring(name, context.temp_allocator), &nst, {.SYMLINK_NOFOLLOW})
 	return {ok = true, data = strings.clone(web_file_json(p, nst, web_file_hash(transmute([]u8)c.text), nil, saved = true))}
+}
+
+when TEST_HOOKS {
+	// Tests: runs between file_save_apply's path checks and its opening the folder (a swap there).
+	web_file_save_race: proc()
 }

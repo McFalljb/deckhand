@@ -192,3 +192,41 @@ web_files_codex_hooks_read_only :: proc(t: ^testing.T) {
 		} else do testing.expect(t, r.ok, r.error)
 	}
 }
+
+// #152 review: a folder on the way swapped for a link into Codex's home after the path was checked
+// (CODEX_HOME inside the project): the save never lands in Codex's hooks.
+@(test)
+web_files_codex_hooks_swapped_folder :: proc(t: ^testing.T) {
+	when TEST_HOOKS { // the swap needs web_file_save_race (hook-only)
+		context.allocator = runtime.heap_allocator()
+		inbox_drain()
+		state = State{}
+		defer state = State{}
+		tmpl := strings.clone_to_cstring(fmt.tprintf("%s/wfs-XXXXXX", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")), context.temp_allocator)
+		base := fs_real(string(posix.mkdtemp(([^]u8)(tmpl))))
+		defer os.remove_all(base)
+		proj := fmt.tprintf("%s/proj", base)
+		cx := fmt.tprintf("%s/codex-home", proj)
+		os.make_directory_all(fmt.tprintf("%s/hooks", cx))
+		os.make_directory_all(fmt.tprintf("%s/a/hooks", proj))
+		old, had := os.lookup_env("CODEX_HOME", context.temp_allocator)
+		os.set_env("CODEX_HOME", cx)
+		defer if had do os.set_env("CODEX_HOME", old); else do os.unset_env("CODEX_HOME")
+		hook := fmt.tprintf("%s/hooks/pre.sh", cx)
+		_ = os.write_entire_file(hook, transmute([]u8)string("echo hook\n"))
+		_ = os.write_entire_file(fmt.tprintf("%s/a/hooks/pre.sh", proj), transmute([]u8)string("mine\n"))
+		append(&state.projects, Project{id = new_id(), group = .Projects, cwd = strings.clone(proj)})
+		@(static) swap_proj: string
+		swap_proj = proj
+		web_file_save_race = proc() {
+			// proj/a -> proj/codex-home: proj/a/hooks is now Codex's hooks folder
+			os.rename(fmt.tprintf("%s/a", swap_proj), fmt.tprintf("%s/a-old", swap_proj))
+			posix.symlink(strings.clone_to_cstring(fmt.tprintf("%s/codex-home", swap_proj), context.temp_allocator), strings.clone_to_cstring(fmt.tprintf("%s/a", swap_proj), context.temp_allocator))
+		}
+		defer web_file_save_race = nil
+		r := run_command(File_Save{path = fmt.tprintf("%s/a/hooks/pre.sh", proj), text = "rm -rf ~\n", force = true}, Caller{kind = .UI, web = true})
+		testing.expect(t, !r.ok, "not saved")
+		data, _ := os.read_entire_file(hook, context.temp_allocator)
+		testing.expect_value(t, string(data), "echo hook\n")
+	}
+}

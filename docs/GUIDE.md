@@ -1375,6 +1375,10 @@ as it does anywhere else.
 
 Deckhand has a small code editor with syntax highlighting.
 
+- **Highlighted languages**: C, C++, Objective-C, Odin, Go, Rust, Zig, Python, JavaScript,
+  TypeScript (and JSX/TSX), Lua, shell, Makefiles, Dockerfiles, HTML, CSS, JSON, YAML, TOML, INI
+  and Markdown, in editor tabs and in Markdown code blocks. Other files show as plain text.
+
 - **To open a file**, click it in the Files tab (a single click opens a *preview* tab that the
   next click replaces; double-click, Enter or editing keeps it), or press ⌘P and type part of its
   name. A double-click on a preview tab keeps it too.

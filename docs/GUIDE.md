@@ -1443,7 +1443,12 @@ Sessions.
 
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
-  (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
+  (deleted) and **!** (conflict). Gitignored files show dimmed; the header's eye (Hide ignored files /
+  Show ignored files) hides them and takes them out of the selection, and is kept across restarts.
+  `.git` never shows.
+- **Icons**: each row has a folder (open or closed) or a file icon by kind: code, docs, config,
+  images, shell scripts, package manifests and lock files, git files, `.env` files, archives and
+  binaries, and agent instructions (`AGENTS.md`, `CLAUDE.md`).
 - **Mouse**: a click opens a folder or previews a file; ⌘-click adds or removes a row, shift-click
   selects a range (neither opens anything); a right-click selects the row (one already selected
   keeps the selection), then opens its menu; drag a row onto a terminal to paste its path (or a
@@ -1458,6 +1463,9 @@ Sessions.
   moves either if the target has an item with the same name; a toast says so. If a move is
   refused part-way (a terminal working in that folder, for example), the toast names the item;
   what already moved stays moved.
+- **To copy files to another app** (macOS), drag rows out of the window: Finder copies them (never
+  moves them), a terminal gets their paths, other apps get the files. Credential files, and folders
+  holding one (or too large to check), stay behind.
 - **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
   (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
   shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
@@ -1468,7 +1476,8 @@ Sessions.
   file tabs only, no agent, one per project, back after a relaunch (one pane); it closes with its
   last tab, and terminals, browser and agent tabs need a real session (New session). Any reason a
   file does not open (sign-ins, too large, binary, gone) shows as a toast.
-- **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
+- **Header buttons**: New file, New folder, Collapse all, Hide/Show ignored files, Refresh, Reveal
+  in Finder.
 - **New file / New folder**: the name field opens as the first row of the folder (the selected
   folder, the selected file's, else the project's), opened and scrolled to; an error shows under
   it. Enter (or a click elsewhere) creates and selects it; Esc, or no name, cancels.

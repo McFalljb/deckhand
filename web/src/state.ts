@@ -63,7 +63,7 @@ export interface Tab {
 export interface OpenSession {
   id: number;
   machine: number;
-  agent: string; // pi | claude
+  agent: string; // pi | claude | files (a project's open files, no agent)
   pi_session_id: string;
   project_id: number;
   cwd: string;

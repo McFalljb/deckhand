@@ -818,6 +818,12 @@ a { color: inherit; }
 .file-row.sel { background: var(--selected); color: var(--text); }
 .file-row .title.active { font-weight: 600; color: var(--text); }
 .file-row .title.dot { color: var(--text-muted); }
+/* gitignored (and what is under an ignored folder): dimmed (the header's eye hides them) */
+.file-row.ign .icon.kind, .file-row.ign .title.dot { opacity: 0.6; }
+/* ... but the open file's row and a selected row read at full contrast (a dotfile's too) */
+.file-row .title.dot.active, .file-row.sel .title.dot { color: var(--text); }
+.file-row.ign.sel .icon.kind, .file-row.ign.sel .title.dot, .file-row.ign .title.dot.active { opacity: 1; }
+.files-head .icon-btn[aria-pressed="true"] { color: var(--accent); }
 /* git marks: the window's letters and colours (filetree.ts gitTone; src/ui_files.odin) */
 .file-row .g-add { color: var(--done); }
 .file-row .g-mod { color: var(--waiting); }

@@ -4,7 +4,7 @@
 // reload.
 
 import { dragText } from "./filetree.ts";
-import { clipCut, clipLabel, clipOf, copyingText, copyResult, planCopy, runCopies, type Clip } from "./fileclip.ts";
+import { clipCut, clipLabel, clipOf, clipWithout, copyingText, copyResult, planCopy, runCopies, type Clip } from "./fileclip.ts";
 import { lookFor, runUndo, statOf, undoCheck, undoLabel, UndoStack, type UndoOp, type UndoRec } from "./fileundo.ts";
 import { IS_MAC, type App, type MenuItem, type ToastAction } from "./ctx.ts";
 import type { Result } from "../link.ts";
@@ -20,6 +20,7 @@ export interface Tree {
   refresh(): void;
   bump(): void;
   moveTo(sources: string[], dir: string): Promise<number | void>;
+  hidden(path: string): boolean; // not drawn now (ignored files hidden)
 }
 
 let clip: Clip | null = null;
@@ -48,6 +49,11 @@ export function clearClip(t: Tree): void {
   t.bump();
 }
 
+// Rows hidden (the eye hides ignored files): they drop out of the clip.
+export function dropHidden(t: Tree): void {
+  clip = clipWithout(clip, t.hidden);
+}
+
 // Esc in the tree: a cut is called off (its rows undimmed). true: it was one.
 export function cancelCut(t: Tree): boolean {
   if (clip?.mode !== "cut") return false;
@@ -74,6 +80,9 @@ const systemClip = (): boolean => !!navigator.clipboard && window.isSecureContex
 export async function paste(t: Tree, dir: string): Promise<void> {
   const c = clip;
   if (!c || c.root !== t.root) return void t.app.toast("Nothing to paste", true);
+  // an item hidden since (it became ignored while ignored files are hidden): never pasted unseen
+  const unseen = c.paths.find(t.hidden);
+  if (unseen) return void t.app.toast(`${unseen.slice(unseen.lastIndexOf("/") + 1)} is hidden now (ignored files are hidden); show them to paste it`, true);
   if (c.mode === "copy") return copyInto(t, c.paths, dir);
   const moved = await t.moveTo(c.paths, dir);
   if (moved && clip === c) clearClip(t);

@@ -1586,7 +1586,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		if os.machine != 0 do kv_str(&o, "machine", machine_name(os.machine)) // another machine's (machine_mirror.odin)
 		// a Claude-only session (claude.odin): its main tab is a Claude tab, and its id (here and as
 		// claude_session_id) is that tab's Claude session id
-		kv_str(&o, "agent", os.agent == .Claude ? "claude" : "pi")
+		kv_str(&o, "agent", os.agent == .Claude ? "claude" : os.agent == .Files ? "files" : "pi")
 		if os.agent == .Claude do kv_str(&o, "claude_session_id", os.pi_session_id)
 		kv_str(&o, "pi_session_id", os.pi_session_id)
 		kv_str(&o, "session_dir", os.session_dir)

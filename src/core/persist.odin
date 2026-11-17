@@ -317,7 +317,7 @@ workspace_json :: proc() -> string {
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
 	unwritten := make(map[u64]bool, context.temp_allocator) // saved without a session file ("no_file")
 	for &s in state.open_sessions {
-		if s.home || s.machine != 0 do continue // another machine's is its own to save (machine_mirror.odin)
+		if s.home || s.machine != 0 || s.agent == .Files do continue // another machine's is its own to save (machine_mirror.odin); Files sessions: files_sessions below
 		// a Claude-only session once its Claude session id came (claude.session), a pi session once
 		// its file is there, or before that while it has a live tab beside pi (no pi there: its pi
 		// tab exited 127, the user works in a shell next to it)
@@ -338,6 +338,7 @@ workspace_json :: proc() -> string {
 		if p.group != .Projects || p.machine != 0 do continue // Chats is always there; another machine's is its own
 		keep := p.dir == "" || p.name != "" || p.by_hand || p.id == state.selected_project
 		for s in saved do if s.project_id == p.id do keep = true
+		if files_session_of(p.id) != nil do keep = true
 		if !keep do continue
 		if n > 0 do strings.write_byte(&w.b, ',')
 		n += 1
@@ -421,6 +422,7 @@ workspace_json :: proc() -> string {
 		// another machine's on screen: shown again once its link brings it back (persist_machine_merged)
 		ks(&w, "current_machine_session", s.pi_session_id)
 	}
+	write_files_sessions(&w)
 	// Home: only its pi session id (its dir and cwd are Deckhand's own)
 	if hs := home_session(); hs != nil {
 		strings.write_string(&w.b, ",\n")
@@ -948,6 +950,8 @@ workspace_restore :: proc(text: string) -> string {
 		}
 	}
 
+	read_files_sessions(root, has_current)
+
 	delete(persist.focus_machine)
 	persist.focus_machine = ""
 	if fm, fok := root["current_machine_session"].(json.String); fok && !has_current && len(fm) <= 256 do persist.focus_machine = strings.clone(string(fm))
@@ -1216,4 +1220,88 @@ sb_group :: proc(c: Set_Bell, g: Bell_Group) -> Maybe(bool) {
 	case .Jobs:     return c.jobs
 	}
 	return nil
+}
+
+// The projects' Files sessions (files_session.odin), by project folder: their file tabs (a file
+// view's or Markdown tab's path) and which one was active; "current" when one was on screen. Its
+// own key, so an older Deckhand (which reads open_sessions only) leaves them out and keeps the rest.
+@(private = "file")
+write_files_sessions :: proc(w: ^W) {
+	n := 0
+	for &s in state.open_sessions {
+		if s.agent != .Files || s.machine != 0 do continue
+		p := find_project(s.project_id)
+		if p == nil do continue
+		paths := 0
+		for tab in s.tabs {
+			if et, is := tab.kind.(Editor_Tab); is && et.view == .File do paths += 1
+			if _, is := tab.kind.(Markdown_Tab); is do paths += 1
+		}
+		if paths == 0 do continue
+		if n == 0 {
+			strings.write_string(&w.b, ",\n")
+			w.first = true
+			k(w, "files_sessions")
+			strings.write_byte(&w.b, '[')
+		} else do strings.write_string(&w.b, ",\n")
+		n += 1
+		open_obj(w)
+		ks(w, "project", p.cwd)
+		k(w, "tabs")
+		strings.write_byte(&w.b, '[')
+		active, j := 0, 0
+		for tab in s.tabs {
+			path, kind := "", ""
+			if et, is := tab.kind.(Editor_Tab); is && et.view == .File do path, kind = et.path, "editor"
+			if mt, is := tab.kind.(Markdown_Tab); is do path, kind = mt.path, "markdown"
+			if path == "" do continue
+			if j > 0 do strings.write_byte(&w.b, ',')
+			if tab.id == s.active_tab do active = j
+			j += 1
+			open_obj(w)
+			ks(w, "kind", kind)
+			ks(w, "path", path)
+			close_obj(w)
+		}
+		strings.write_byte(&w.b, ']')
+		ki(w, "active_tab", active)
+		if s.id == state.current_session || (state.current_session == 0 && s.id == state.shown_before) do kb(w, "current", true)
+		close_obj(w)
+	}
+	if n > 0 do strings.write_byte(&w.b, ']')
+}
+
+// The saved Files sessions back: a project that is not listed (removed, or its folder renamed) or
+// gone is skipped, and so is each file the open rules refuse now (files_restore_ok); one with no
+// file left does not come back. Never anything else of the workspace.
+@(private = "file")
+read_files_sessions :: proc(root: json.Object, has_current: bool) {
+	list, _ := root["files_sessions"].(json.Array)
+	for v, i in list {
+		if i >= FILES_SESSIONS_MAX do break
+		o, ok := v.(json.Object)
+		if !ok do continue
+		pcwd, _ := o["project"].(json.String)
+		if !strings.has_prefix(pcwd, "/") do continue
+		p := project_by_cwd(string(pcwd))
+		if p == nil do continue
+		want, _ := o["active_tab"].(json.Integer)
+		saved, _ := o["tabs"].(json.Array)
+		tabs := make([dynamic]Restore_Tab, context.temp_allocator)
+		for tv, j in saved {
+			if j >= FILES_TABS_MAX do break
+			to, tok := tv.(json.Object)
+			if !tok do continue
+			kind, _ := to["kind"].(json.String)
+			path, _ := to["path"].(json.String)
+			if !strings.has_prefix(path, "/") do continue
+			switch kind {
+			case "editor":   append(&tabs, Restore_Tab{kind = .Editor, cwd = string(path), active = i64(j) == i64(want)})
+			case "markdown": append(&tabs, Restore_Tab{kind = .Markdown, cwd = string(path), active = i64(j) == i64(want)})
+			}
+		}
+		s := files_session_restore(p, tabs[:])
+		if s == nil do continue
+		if cur_, _ := o["current"].(json.Boolean); cur_ && !has_current do persist.focus_tab = s.active_tab
+	}
 }

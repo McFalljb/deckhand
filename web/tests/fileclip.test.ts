@@ -105,3 +105,14 @@ test("a credential left out is named as one, never by its path", async () => {
   const out = await runCopies(run, [{ from: R + "/cfg", to: R + "/s/cfg" }]);
   assert.deepEqual(out.skipped, ["a credential", "cfg/.git"]);
 });
+
+test("rows hidden (ignored files hidden) drop out of the clip; none left: no clip", async () => {
+  const { clipWithout } = await import("../src/app/fileclip.ts");
+  const c = clipOf("copy", R, [R + "/a.txt", R + "/node_modules", R + "/b.log"]);
+  const hidden = (p: string) => p.endsWith(".log") || p.startsWith(R + "/node_modules");
+  assert.deepEqual(clipWithout(c, hidden), { mode: "copy", root: R, paths: [R + "/a.txt"] });
+  assert.equal(clipWithout(clipOf("cut", R, [R + "/b.log"]), hidden), null);
+  assert.equal(clipWithout(null, hidden), null);
+  // nothing hidden: the same clip
+  assert.equal(clipWithout(c, () => false), c);
+});

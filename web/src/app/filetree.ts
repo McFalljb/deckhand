@@ -19,16 +19,18 @@ export interface Listing {
 export type Edit = { kind: "file" | "dir"; dir: string; err: string } | { kind: "rename"; path: string; err: string };
 
 export type Row =
-  | { t: "entry"; path: string; e: Entry; depth: number }
+  | { t: "entry"; path: string; e: Entry; depth: number; ign?: boolean } // ign: ignored, or inside an ignored folder (shown dimmed)
   | { t: "new"; dir: string; kind: "file" | "dir"; depth: number }
   | { t: "err"; at: string; text: string; depth: number; edit?: boolean } // a folder (at) that cannot be listed, or the field's error (at: its folder or path)
   | { t: "wait"; at: string; depth: number }; // listing the folder at…
 
 // The rows: folders first as listed, an open folder's children under it; the new-name field as
-// the first child of its folder (the folder open), its error under it.
-export function treeRows(root: string, listed: Map<string, Listing>, open: Set<string>, edit: Edit | null): Row[] {
+// the first child of its folder (the folder open), its error under it. Ignored entries (and all
+// under an ignored folder) are marked ign; hideIgnored leaves them out (so never selected, trashed
+// or moved: what is not drawn is not in the selection).
+export function treeRows(root: string, listed: Map<string, Listing>, open: Set<string>, edit: Edit | null, hideIgnored = false): Row[] {
   const rows: Row[] = [];
-  const walk = (dir: string, depth: number) => {
+  const walk = (dir: string, depth: number, inIgnored: boolean) => {
     if (edit && edit.kind !== "rename" && edit.dir === dir) {
       rows.push({ t: "new", dir, kind: edit.kind, depth });
       if (edit.err) rows.push({ t: "err", at: dir, text: edit.err, depth, edit: true });
@@ -37,14 +39,86 @@ export function treeRows(root: string, listed: Map<string, Listing>, open: Set<s
     if (!l) return void rows.push({ t: "wait", at: dir, depth });
     if (l.err) return void rows.push({ t: "err", at: dir, text: l.err, depth });
     for (const e of l.entries) {
+      const ign = inIgnored || !!e.ignored;
+      if (ign && hideIgnored) continue;
       const path = dir + "/" + e.name;
-      rows.push({ t: "entry", path, e, depth });
+      rows.push(ign ? { t: "entry", path, e, depth, ign } : { t: "entry", path, e, depth });
       if (edit && edit.kind === "rename" && edit.path === path && edit.err) rows.push({ t: "err", at: path, text: edit.err, depth, edit: true });
-      if (e.kind === "dir" && open.has(path)) walk(path, depth + 1);
+      if (e.kind === "dir" && open.has(path)) walk(path, depth + 1, ign);
     }
   };
-  walk(root, 0);
+  walk(root, 0, false);
   return rows;
+}
+
+// Whether a folder is ignored or inside an ignored one, as listed (unknown: no). The tree asks such
+// an open folder (node_modules, build) again less often.
+export function inIgnored(root: string, dir: string, listed: Map<string, Listing>): boolean {
+  if (!dir.startsWith(root + "/")) return false;
+  let at = root;
+  for (const part of dir.slice(root.length + 1).split("/")) {
+    const e = listed.get(at)?.entries.find((x) => x.name === part);
+    if (!e) return false;
+    if (e.ignored) return true;
+    at += "/" + part;
+  }
+  return false;
+}
+
+// ---- file icons ----
+// One icon per kind of file, by its name (the native tree's kinds: folder closed and open, a generic
+// file, source code, Markdown and docs, config, images, shell scripts, lockfiles and package
+// manifests, git's files, .env files, binaries and archives, agent instructions). The names are
+// icons.tsx's.
+export type FileIcon =
+  | "folder" | "folder-open" | "file" | "file-code" | "file-doc" | "file-config" | "file-image" | "file-shell"
+  | "file-lock" | "file-git" | "file-env" | "file-binary" | "file-agent";
+
+// The table is the window's, entry for entry (src/core/file_kinds.odin FILE_KIND_NAMES,
+// FILE_KIND_PREFIXES, FILE_KIND_EXTS): change both together. Maps, never plain objects: a file named
+// "constructor" or "x.__proto__" is a file.
+const table = (rows: [FileIcon, string][]): Map<string, FileIcon> => new Map(rows.flatMap(([k, list]) => list.split(" ").map((x): [string, FileIcon] => [x, k])));
+
+// Whole names (lowercase), looked up first: package.json is a manifest, not config.
+const NAMES = table([
+  ["file-agent", "agents.md agents.override.md claude.md"],
+  ["file-git", ".gitignore .gitattributes .gitmodules .gitkeep .git-blame-ignore-revs .mailmap"],
+  ["file-lock", "package.json package-lock.json npm-shrinkwrap.json yarn.lock pnpm-lock.yaml cargo.lock poetry.lock gemfile.lock composer.lock pipfile.lock podfile.lock mix.lock flake.lock uv.lock deno.lock pnpm-workspace.yaml bun.lockb deno.json cargo.toml go.mod go.sum go.work gemfile pipfile pyproject.toml requirements.txt composer.json podfile package.swift package.resolved mix.exs build.zig.zon"],
+  ["file-config", "makefile gnumakefile justfile procfile cmakelists.txt rakefile"],
+  ["file-doc", "readme license licence copying changelog contributing authors notice"],
+  ["file-config", ".editorconfig .prettierrc .eslintrc .npmrc .nvmrc .tool-versions .dockerignore"],
+  ["file-shell", ".bashrc .bash_profile .zshrc .zprofile .zshenv .profile .envrc"],
+]);
+
+// Name prefixes (Dockerfile.dev, Containerfile-prod).
+const PREFIXES: [string, FileIcon][] = [["dockerfile", "file-config"], ["containerfile", "file-config"]];
+
+// Extensions (lowercase, no dot).
+const EXTS = table([
+  ["file-code", "odin c h cc cpp cxx hpp hh m mm swift go rs zig py rb js mjs cjs jsx ts tsx mts cts java kt kts scala cs fs lua php pl r dart ex exs erl hs ml clj vue svelte css scss sass less html htm sql glsl hlsl metal wgsl vim el nim jl asm s"],
+  ["file-doc", "md markdown mdx txt rst adoc org tex rtf pdf doc docx odt"],
+  ["file-config", "json jsonc json5 yaml yml toml ini cfg conf xml plist properties nix mk cmake gradle"],
+  ["file-env", "env"],
+  ["file-image", "png jpg jpeg gif webp svg ico icns bmp tif tiff heic avif psd"],
+  ["file-shell", "sh bash zsh fish ps1 bat cmd command"],
+  ["file-lock", "lock"],
+  ["file-binary", "zip tar gz tgz bz2 xz zst 7z rar dmg pkg iso jar whl exe dll so dylib a o bin wasm class pyc deb rpm ttf otf woff woff2 mp3 wav mp4 mov sqlite db"],
+]);
+
+// The icon of a row: a folder by whether it is open; a file (any case) by its whole name, then a
+// name prefix, then .env / .env.*, then the text after its last dot (a dotfile's leading dot and a
+// trailing dot are not one); else the generic file. As file_kind (src/core/file_kinds.odin).
+export function fileIcon(name: string, kind: Entry["kind"], open = false): FileIcon {
+  if (kind === "dir") return open ? "folder-open" : "folder";
+  if (!name) return "file";
+  const n = name.toLowerCase();
+  const named = NAMES.get(n);
+  if (named) return named;
+  for (const [pre, k] of PREFIXES) if (n.startsWith(pre)) return k;
+  if (n === ".env" || n.startsWith(".env.")) return "file-env";
+  const dot = n.lastIndexOf(".");
+  if (dot <= 0 || dot === n.length - 1) return "file";
+  return EXTS.get(n.slice(dot + 1)) ?? "file";
 }
 
 export const isDir = (r: Row | undefined): boolean => r?.t === "entry" && r.e.kind === "dir";
@@ -330,7 +404,7 @@ export interface FolderRow {
   kids: boolean; // has folders inside (when listed), or not known yet
 }
 
-export function folderRows(root: string, listed: Map<string, Listing>, open: Set<string>): FolderRow[] {
+export function folderRows(root: string, listed: Map<string, Listing>, open: Set<string>, hideIgnored = false): FolderRow[] {
   const rows: FolderRow[] = [];
   const state = (d: string): FolderRow["state"] => {
     const l = listed.get(d);
@@ -338,13 +412,13 @@ export function folderRows(root: string, listed: Map<string, Listing>, open: Set
   };
   const kids = (d: string): boolean => {
     const l = listed.get(d);
-    return !l || (!l.err && l.entries.some((e) => e.kind === "dir"));
+    return !l || (!l.err && l.entries.some((e) => e.kind === "dir" && !(hideIgnored && e.ignored)));
   };
   const walk = (dir: string, depth: number) => {
     const l = listed.get(dir);
     if (!l || l.err) return;
     for (const e of l.entries) {
-      if (e.kind !== "dir") continue;
+      if (e.kind !== "dir" || (hideIgnored && e.ignored)) continue; // hidden: not a target (what is under it neither)
       const path = dir + "/" + e.name;
       const on = open.has(path);
       rows.push({ path, name: e.name, depth, open: on, state: state(path), kids: kids(path) });

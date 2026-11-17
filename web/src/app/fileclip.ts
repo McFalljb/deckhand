@@ -29,6 +29,14 @@ export function clipCut(c: Clip | null, root: string, path: string): boolean {
   return !!c && c.mode === "cut" && c.root === root && c.paths.some((p) => under(path, p));
 }
 
+// What is left of a clip once rows are hidden (ignored files hidden): hidden paths drop out; none
+// left, no clip.
+export function clipWithout(c: Clip | null, hidden: (path: string) => boolean): Clip | null {
+  if (!c || !c.paths.some(hidden)) return c;
+  const paths = c.paths.filter((p) => !hidden(p));
+  return paths.length ? { ...c, paths } : null;
+}
+
 // The phone's bar: "a.txt copied", "3 items cut".
 export function clipLabel(c: Clip | null): string {
   if (!c) return "";

@@ -1,8 +1,10 @@
 // The Files tab (the left column) and the session's editor and Markdown tabs in a browser.
 // The tree is the session's folder (else the selected project's), listed with list_dir (inside a
-// project, git status codes, .git and ignored left out; asked again every few seconds with the
-// listing's hash, so an unchanged folder sends nothing; not while the page is hidden), folders
-// opened in the page itself. One row has focus (sel); the keys move it (arrows, Home, End), Enter
+// project, git status codes, .git left out; gitignored entries shown dimmed, or hidden by the
+// header's eye, remembered per browser; asked again every few seconds with the listing's hash, so
+// an unchanged folder sends nothing; an open folder inside an ignored one every 30 s; not while the
+// page is hidden), folders opened in the page itself. Each row has an icon for its kind of file
+// (filetree.ts fileIcon). One row has focus (sel); the keys move it (arrows, Home, End), Enter
 // opens a file (show_file: a Markdown tab for .md, an editor tab otherwise; credentials and binaries
 // refused) or opens and closes a folder, F2 renames, Delete or ⌘⌫ moves to the Trash (delete_path:
 // the confirmation bar asks), Esc clears it. Several rows can be picked (pick): ⌘/Ctrl-click,
@@ -28,10 +30,11 @@ import { FileReads, knowFile, knownFile } from "./filecache.ts";
 import { CodeBlock, CodeEdit } from "./Code.tsx";
 import { longPressProps } from "./Peek.tsx";
 import { fileTabPath } from "./Panes.tsx";
-import { cancelCut, clipItems, confirmed as fsConfirmed, copyInto, created, deleting, hasClip, isCut, moved, resetFor, rootClipItems, take, treeKey, type Tree } from "./fileops.ts";
+import { cancelCut, clipItems, dropHidden, confirmed as fsConfirmed, copyInto, created, deleting, hasClip, isCut, moved, resetFor, rootClipItems, take, treeKey, type Tree } from "./fileops.ts";
 import { planCopy } from "./fileclip.ts";
 import { ClipBar } from "./FileClipBar.tsx";
-import { clickPick, dragText, dropDir, entryPaths, extendPick, folderRows, gitLetter, gitTone, isEditRow, movedPath, moveResult, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, planMove, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
+import { storageGet, storageSet } from "../ui/dom.ts";
+import { clickPick, dragText, dropDir, entryPaths, fileIcon, inIgnored, extendPick, folderRows, gitLetter, gitTone, isEditRow, movedPath, moveResult, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, planMove, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -70,6 +73,14 @@ let dropFx = "none"; // what the last dragover showed (copy with Option/Alt): th
 let hover = { path: "", timer: 0 }; // a closed folder hovered: opened after HOVER_OPEN_MS
 let edge = { dir: 0, timer: 0 }; // scrolling while the pointer is near the top or bottom edge
 const HOVER_OPEN_MS = 600;
+// Ignored files (gitignored): shown dimmed unless hidden (the header's eye; per browser). Hidden rows
+// are not drawn, so never selected, dragged, moved or trashed.
+const HIDE_KEY = "deckhand.files.hideIgnored";
+let hideIgnored = storageGet(HIDE_KEY) === "1";
+// The poll: an open folder inside an ignored one (node_modules, build: big, rarely edited by hand)
+// every SLOW_EVERY-th time (30 s); the rest every time (5 s).
+const SLOW_EVERY = 6;
+let polls = 0;
 const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 async function list(app: App, path: string) {
@@ -77,7 +88,7 @@ async function list(app: App, path: string) {
   asking.add(path);
   const had = listed.get(path);
   try {
-    const r = await app.link.run({ type: "list_dir", path, ...(had?.hash && !had.err ? { since: had.hash } : {}) });
+    const r = await app.link.run({ type: "list_dir", path, ignored: true, ...(had?.hash && !had.err ? { since: had.hash } : {}) });
     if (r.ok) {
       const d = json(r.data);
       if (d.same) return; // unchanged since the last listing
@@ -93,10 +104,29 @@ async function list(app: App, path: string) {
   }
 }
 
-function refresh(app: App, root: string) {
+// poll: the timer's (an ignored folder only every SLOW_EVERY-th time); else all of them now.
+function refresh(app: App, root: string, poll = false) {
   if (!root) return;
+  const slow = poll && polls++ % SLOW_EVERY !== 0;
   list(app, root);
-  for (const d of open) if (d.startsWith(root + "/")) list(app, d);
+  for (const d of open) if (d.startsWith(root + "/") && !(slow && inIgnored(root, d, listed))) list(app, d);
+}
+
+// The eye: hide or show ignored files. Hiding: what goes is unselected, and a rename, Move to… or
+// drag of it ends.
+function setHideIgnored(root: string, hide: boolean, app?: App) {
+  hideIgnored = hide;
+  storageSet(HIDE_KEY, hide ? "1" : "0");
+  if (hide) {
+    const shown = new Set(entryPaths(treeRows(root, listed, open, null, true)));
+    const gone = (p: string) => p !== root && p.startsWith(root + "/") && !shown.has(p);
+    if (sel && gone(sel)) focusOne("");
+    if (edit && gone(edit.kind === "rename" ? edit.path : edit.dir)) edit = null;
+    if (mover?.sources.some(gone)) mover = null;
+    if (drag?.sources.some(gone)) endDrag();
+    if (app) dropHidden(treeOf(app, root)); // hidden rows leave the clipboard too
+  }
+  bump();
 }
 
 function toggle(app: App, path: string) {
@@ -358,6 +388,7 @@ function treeOf(app: App, root: string): Tree {
     refresh: () => refresh(app, root),
     bump: () => bump(),
     moveTo: (s, d) => moveTo(app, root, s, d),
+    hidden: (p) => hideIgnored && inIgnored(root, p, listed),
   };
 }
 
@@ -442,7 +473,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
     picking = false;
     if (drag && drag.root !== root) endDrag();
     mover = null;
-    const t = window.setInterval(() => !document.hidden && refresh(app, root), 5000);
+    const t = window.setInterval(() => !document.hidden && refresh(app, root, true), 5000);
     const seen = () => !document.hidden && refresh(app, root);
     document.addEventListener("visibilitychange", seen);
     return () => {
@@ -496,7 +527,7 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
   }, [active, root]);
 
   const rowH = app.phone ? 44 : 26;
-  const rows = root ? treeRows(root, listed, open, edit) : [];
+  const rows = root ? treeRows(root, listed, open, edit, hideIgnored) : [];
   // the picked rows still drawn (listed again: what went drops out; a closed folder's rows too)
   order = entryPaths(rows);
   // a move's items selected in their new place once they are listed there (or as many as are, a
@@ -709,6 +740,16 @@ export function FilesPanel({ onOpen }: { onOpen?: () => void } = {}) {
         <button type="button" class="icon-btn small" title="New folder" aria-label="New folder" onClick={() => startNew(app, root, target(), "dir")}>
           <Icon name="new-folder" size={13} />
         </button>
+        <button
+          type="button"
+          class="icon-btn small"
+          title={hideIgnored ? "Show ignored files" : "Hide ignored files"}
+          aria-label={hideIgnored ? "Show ignored files" : "Hide ignored files"}
+          aria-pressed={hideIgnored ? "true" : "false"}
+          onClick={() => setHideIgnored(root, !hideIgnored, app)}
+        >
+          <Icon name={hideIgnored ? "eye-off" : "eye"} size={13} />
+        </button>
         <button type="button" class="icon-btn small" title="Collapse all" aria-label="Collapse all" onClick={() => collapseAll(root)}>
           <Icon name="collapse-all" size={13} />
         </button>
@@ -810,7 +851,7 @@ function MovePicker({ app, root, sources }: { app: App; root: string; sources: s
       >
         <div class="sheet-title">{title}</div>
         <div class="move-list" ref={list0}>
-          {folderRows(root, listed, pickerOpen).map((r) => {
+          {folderRows(root, listed, pickerOpen, hideIgnored).map((r) => {
             const bad = why(r.path);
             return (
               <div key={r.path} class={"row move-row" + (chosen === r.path ? " sel" : "")} style={{ paddingLeft: 4 + r.depth * 16 + "px" }}>
@@ -822,7 +863,7 @@ function MovePicker({ app, root, sources }: { app: App; root: string; sources: s
                   <span class="move-chev" />
                 )}
                 <button type="button" class="move-pick" disabled={!!bad} title={bad || r.path} aria-pressed={chosen === r.path ? "true" : "false"} onClick={() => setChosen(r.path)}>
-                  <Icon name="folder" size={14} class="muted" />
+                  <Icon name={r.open && r.depth ? "folder-open" : "folder"} size={14} class="muted" />
                   <span class="title">{r.depth ? r.name : r.name + "/"}</span>
                   {r.open && r.state === "wait" ? <span class="muted small">Listing…</span> : r.open && r.state === "err" ? <span class="error-ink small">cannot list it</span> : null}
                 </button>
@@ -928,7 +969,7 @@ function NameField({ app, root, initial, dir, label }: { app: App; root: string;
 }
 
 function FileRow({ app, root, path, r, active, stop }: { app: App; root: string; path: string; r: Extract<Row, { t: "entry" }>; active: boolean; stop: boolean }) {
-  const { e, depth } = r;
+  const { e, depth, ign } = r;
   const isDir = e.kind === "dir";
   const on = isDir && open.has(path);
   const letter = gitLetter(e.git, isDir);
@@ -958,7 +999,7 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
   return (
     <div
       ref={me}
-      class={"row file-row" + (selected ? " sel" : "") + (inDrop ? " drop" : "") + (isCut(root, path) ? " cut" : "")}
+      class={"row file-row" + (selected ? " sel" : "") + (inDrop ? " drop" : "") + (ign ? " ign" : "") + (isCut(root, path) ? " cut" : "")}
       style={{ paddingLeft: 8 + depth * 16 + "px" }}
       role="treeitem"
       aria-level={depth + 1}
@@ -1011,11 +1052,11 @@ function FileRow({ app, root, path, r, active, stop }: { app: App; root: string;
       }}
     >
       {isDir ? <Icon name={on ? "chevron-down" : "chevron-right"} size={12} class="chev" /> : <span class="chev-gap" />}
-      <Icon name={isDir ? "folder" : "file"} size={14} class="muted" />
+      <Icon name={fileIcon(e.name, e.kind, on)} size={14} class="muted kind" />
       {renaming ? (
         <NameField app={app} root={root} initial={e.name} dir={isDir} label={"Rename " + e.name} />
       ) : (
-        <span class={"title " + (e.name.startsWith(".") ? "dot" : tone) + (active ? " active" : "")}>{e.name}</span>
+        <span class={"title " + (e.name.startsWith(".") || ign ? "dot" : tone) + (active ? " active" : "")}>{e.name}</span>
       )}
       <span class="spacer" />
       {letter && !renaming ? <span class={"ch-letter " + tone}>{letter}</span> : null}

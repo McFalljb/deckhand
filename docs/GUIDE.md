@@ -1468,6 +1468,8 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   press Esc), ⌘V pastes into the selected folder (or the selected file's folder, else the top of
   the project). A copy whose name is taken there becomes "name copy" ("a copy.txt", then
   "a copy 2.txt"); a cut never renames: if the name is taken, nothing moves and a toast says so.
+  A cut stays in its project: showing another project or checkout drops it. A copy can be pasted
+  into another project. Items hidden since (ignored files hidden) are not pasted.
   ⌘D duplicates the selection next to itself. ⌘C also puts the paths on the clipboard as text,
   quoted for a shell, so ⌘V in a terminal pastes them; text on the clipboard never pastes into the
   tree. One copy runs at a time: a toast says "Copying 3 items…", then what was copied, what was
@@ -1478,7 +1480,9 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   tree's last operation done in this window: a new file or folder goes to the Trash (only while it
   is unchanged: a file with the same size and modification time, an empty folder), a rename or
   move goes back (not if something now has the old name), a copy goes to the Trash (only while
-  unchanged), a Move to Trash comes back from the Trash (all of a batch). The last 20 operations
+  unchanged; a copied folder: nothing in it changed, and the confirmation bar asks first), a Move
+  to Trash comes back from the Trash (all of a batch; if part of it cannot, the toast says how many
+  came back and ⌘Z tries the rest again). The last 20 operations
   are kept until the tree shows another project or checkout; there is no redo. Anything changed
   since is not undone ("Not undone: a.txt changed since"). In an editor tab ⌘Z is the editor's.
 - **To copy files to another app** (macOS), drag rows out of the window: Finder copies them (never

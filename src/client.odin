@@ -222,36 +222,6 @@ client_run :: proc(cmd: core.Command) -> core.Result {
 	return client_take(id)
 }
 
-// client_run, and when the result says pending, the core's request id its finished event carries
-// (window.test_event sees it: in process every event, over core.sock the ones this window
-// follows; 0 = none, or the bounded wait gave up). Temp-allocated strings.
-client_run_req :: proc(cmd: core.Command, wait := CLIENT_WAIT) -> (r: core.Result, request_id: u64) {
-	if !client.attached {
-		reply: core.Reply
-		request_id = core.inbox_submit(cmd, {kind = .UI}, &reply)
-		core.inbox_drain()
-		r = result_temp(reply.result)
-		core.result_free(reply.result)
-		return r, r.pending ? request_id : 0
-	}
-	client_facts()
-	id := client_id()
-	client_raw(core.window_msg_command(cmd, id))
-	if client.sock != nil {
-		start := time.tick_now()
-		for !(id in client.results) && !client.lost && time.tick_since(start) < wait do client_io(20)
-		if !(id in client.results) {
-			client.abandoned[strings.clone(id, runtime.heap_allocator())] = true
-			return {ok = true, pending = true}, 0
-		}
-	} else {
-		for core.window_link_pump() {}
-		core.inbox_drain()
-	}
-	request_id = client.pending[id] or_else 0
-	return client_take(id), request_id
-}
-
 // A command's result now, as a direct core.run_command gave it: a ui command, or (kind .Internal)
 // one of core.WINDOW_COMMANDS. Main thread. Temp-allocated strings.
 client_call :: proc(cmd: core.Command, kind: core.Caller_Kind = .UI) -> core.Result {
@@ -555,7 +525,7 @@ client_on_frames :: proc() {
 				core.result_free(old)
 				client.results[m.id] = r
 			} else do client.results[strings.clone(m.id, heap)] = r
-			if m.result.pending && m.request_id != 0 && m.id != "" && !(m.id in client.pending) { // in process too: client_run_req
+			if m.result.pending && m.request_id != 0 && m.id != "" && !(m.id in client.pending) { // in process too (ui_files_drops.odin)
 				if client.pending == nil do client.pending = make(map[string]u64, heap)
 				client.pending[strings.clone(m.id, heap)] = m.request_id
 			}

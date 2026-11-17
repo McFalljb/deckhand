@@ -221,6 +221,32 @@ files_clip_paste_and_undo_through_event :: proc(t: ^testing.T) {
 	fc_key(.Z)
 	testing.expect(t, fc_has(dir, "it's.txt"), "undo: put back from the Trash")
 	testing.expect(t, !fc_sent_any(), "nothing reached a terminal")
+
+	// Review round 1: a cut is its tree's only. Another project on screen drops it (and its
+	// dimming); back in the first tree nothing is cut any more, nothing moves
+	fc_select(dir, "a.txt")
+	fc_key(.X)
+	other := fmt.aprintf("%s-other", dir)
+	os.make_directory_all(other)
+	defer os.remove_all(other)
+	append(&state.projects, core.Project{id = 2, cwd = strings.clone(other), label = "other"})
+	state.open_sessions[0].cwd = strings.clone(other)
+	core.files_refresh()
+	core.files_state_gen += 1
+	testing.expect(t, !files_clip_is_cut(strings.concatenate({dir, "/a.txt"}, context.temp_allocator)), "another tree: the cut is dropped")
+	fc_key(.V)
+	testing.expect(t, fc_has(dir, "a.txt") && !os.exists(fmt.tprintf("%s/a.txt", other)), "nothing moved into the other project")
+	state.open_sessions[0].cwd = strings.clone(dir)
+	core.files_refresh()
+	core.files_state_gen += 1
+
+	// P3 (a): Paste from the empty space's menu (the root's) goes to the root, not the selected folder
+	fc_select(dir, "src/keep.txt")
+	fc_key(.C)
+	fc_select(dir, "src")
+	files_clip_step(dir, .Paste)
+	fc_wait_copy()
+	testing.expect(t, fc_has(dir, "keep.txt"), "pasted into the root")
 }
 
 @(private = "file")

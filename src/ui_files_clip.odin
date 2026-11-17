@@ -28,6 +28,7 @@ import sapp "../vendor/sokol-odin/sokol/app"
 Clip :: struct {
 	paths: [dynamic]string, // owned: what ⌘C or ⌘X took
 	cut:   bool,
+	root:  string, // owned: the tree's root then (a cut is that tree's only)
 }
 
 @(private = "file")
@@ -46,6 +47,8 @@ Copy_Job :: struct {
 	early:      [dynamic]Early, // finished events seen before the request id was known
 	finished:   bool, // the running one's finished came: result
 	result:     core.Result, // heap
+	started:    time.Tick, // the running fs_copy's start (FILES_COPY_DEADLINE)
+	link:       rawptr, // the core link then (client.sock): another one (a lost core, a reattach) ends the job
 }
 
 @(private = "file")
@@ -100,7 +103,16 @@ clip_set :: proc(paths: []string, cut: bool) {
 	clear(&clip.paths)
 	for p in paths do append(&clip.paths, strings.clone(p))
 	clip.cut = cut && len(paths) > 0
+	delete(clip.root)
+	clip.root = len(paths) > 0 ? strings.clone(core.files_root()) : ""
 	app.redraw = true
+}
+
+// A cut whose tree is no longer on screen (another project or checkout) is dropped, its rows'
+// dimming with it: it never moves into another tree.
+@(private = "file")
+clip_sync :: proc() {
+	if clip.cut && clip.root != core.files_root() do clip_set(nil, false)
 }
 
 // ⌘C (cut false) or ⌘X: the paths go on the window's file clipboard; ⌘C puts them on the system
@@ -122,6 +134,7 @@ files_clip_take :: proc(paths: []string, cut: bool) {
 
 // A row the clipboard holds as cut (drawn dimmed until the paste or Esc).
 files_clip_is_cut :: proc(path: string) -> bool {
+	clip_sync()
 	if !clip.cut do return false
 	for p in clip.paths do if p == path do return true
 	return false
@@ -134,21 +147,32 @@ files_clip_cancel_cut :: proc() -> bool {
 	return true
 }
 
-files_clip_has :: proc() -> bool {return len(clip.paths) > 0}
+files_clip_has :: proc() -> bool {
+	clip_sync()
+	return len(clip.paths) > 0
+}
 
 // The tree has the keyboard (the Edit menu's Cut, Copy, Paste act on it then).
 files_tree_keys :: proc() -> bool {return files_shown() && state.focus_widget == "files"}
 
-// ⌘V: the clipboard into the folder the selection says (core.files_paste_target).
-files_clip_paste :: proc() {
+// ⌘V: the clipboard into the folder the selection says (core.files_paste_target); at: a row
+// menu's row instead (the root: the empty space's menu).
+files_clip_paste :: proc(at := "") {
+	clip_sync()
 	root := core.files_root()
 	if len(clip.paths) == 0 || root == "" do return // nothing of the tree's (text never pastes here)
-	v := core.tree_view()
-	cursor := v.cursor
-	if core.files_row_of(core.tree_rows(), cursor) < 0 do cursor = "" // not a row that shows: the root
+	cursor := at
+	if at == "" {
+		cursor = core.tree_view().cursor
+		if core.files_row_of(core.tree_rows(), cursor) < 0 do cursor = "" // not a row that shows: the root
+	}
 	dir := core.files_paste_target(root, cursor, cursor != "" && core.path_kind(cursor) == .Dir)
 	paths := make([]string, len(clip.paths), context.temp_allocator)
 	for p, i in clip.paths do paths[i] = strings.clone(p, context.temp_allocator)
+	if why := core.files_clip_refused(root, clip.root, paths, clip.cut, core.files_path_hidden); why != "" {
+		toast_show(fmt.tprintf("Not pasted: %s", why), err = true)
+		return
+	}
 	if clip.cut {
 		files_move_into(paths, dir)
 		return
@@ -257,7 +281,8 @@ copy_next :: proc() {
 		ordered_remove(&job.items, 0)
 		defer {delete(it.from); delete(it.to)}
 		job.request_id = 0
-		r, rid := client_run_req(core.Fs_Copy{from = it.from, to = it.to, unique = it.unique}, wait = FILES_COPY_ANSWER)
+		job.started, job.link = time.tick_now(), rawptr(client.sock)
+		r, rid := files_copy_call(core.Fs_Copy{from = it.from, to = it.to, unique = it.unique})
 		if !r.ok {
 			copy_end(fmt.tprintf("%s: %s", filepath.base(it.from), r.error))
 			return
@@ -284,6 +309,32 @@ copy_next :: proc() {
 
 // How long the window waits for fs_copy's answer (its checks count the tree first).
 FILES_COPY_ANSWER :: 5 * time.Second
+// A copy's finished that has not come this long after it started is given up on (the core's
+// link dropped or restarted; 2 GB copies well within it): the job ends, undo is free again.
+FILES_COPY_DEADLINE :: 15 * time.Minute
+
+// A command whose result may be pending, and the core's request id its finished carries (as
+// client_run; over core.sock client_call_wait). Temp-allocated strings.
+@(private = "file")
+files_copy_call :: proc(cmd: core.Command) -> (r: core.Result, request_id: u64) {
+	if !client.attached {
+		reply: core.Reply
+		request_id = core.inbox_submit(cmd, {kind = .UI}, &reply)
+		core.inbox_drain()
+		r = core.result_clone(reply.result, context.temp_allocator)
+		core.result_free(reply.result)
+		return r, r.pending ? request_id : 0
+	}
+	if client.sock != nil do return client_call_wait(cmd, FILES_COPY_ANSWER) // a separate core
+	// in process: as client_run, its result's request id kept (client.odin records it)
+	client_facts()
+	id := client_next_id()
+	client_send_raw(core.window_msg_command(cmd, id))
+	for core.window_link_pump() {}
+	core.inbox_drain()
+	request_id = client.pending[id] or_else 0
+	return client_take_result(id), request_id
+}
 
 // Every event the window's core hook sees (window.test_event): a running copy's finished is kept
 // for files_copy_tick (never acted on here: this runs inside the core's drain).
@@ -309,7 +360,15 @@ early_clear :: proc() {
 
 // Per frame: a copy's finished event came; the next item starts. True: draw again.
 files_copy_tick :: proc() -> bool {
-	if !job.running || !job.finished do return false
+	if !job.running do return false
+	if !job.finished {
+		// the core's link dropped or was replaced, or no finished for too long: its end is unknown
+		if job.request_id != 0 && (client.lost || job.link != rawptr(client.sock) || time.tick_since(job.started) >= FILES_COPY_DEADLINE) {
+			copy_end("the copy's end was not heard from Deckhand's core (it may have restarted); the tree shows what was copied")
+			return true
+		}
+		return false
+	}
 	r := job.result
 	job.result = {}
 	job.finished = false
@@ -451,7 +510,7 @@ files_clip_step :: proc(path: string, step: core.Files_Step) {
 	#partial switch step {
 	case .Copy:      files_clip_take(menu_paths(path), false)
 	case .Cut:       files_clip_take(menu_paths(path), true)
-	case .Paste:     files_clip_paste() // the menu selected its row: into it (a folder) or its folder
+	case .Paste:     files_clip_paste(path) // into that row (a folder) or its folder; the empty space's menu: the root
 	case .Duplicate: files_duplicate(menu_paths(path))
 	case .Trash:     files_trash(menu_paths(path))
 	}

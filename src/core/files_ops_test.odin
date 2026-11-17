@@ -256,3 +256,116 @@ files_ops_delete_unasked :: proc(t: ^testing.T) {
 	testing.expect(t, !fs_restore_promised({"/dev/null"}), "another volume: asks")
 	testing.expect(t, !fs_restore_promised({fmt.tprintf("%s/missing", dir)}), "missing: no promise")
 }
+
+// Review round 1 (P2-1): undo of a copied FOLDER compares the whole tree (an edit deep inside
+// is "changed since"), and its delete always asks (no undoable: the bar confirms).
+@(test)
+files_ops_undo_copied_folder_tree :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := ops_dir()
+	defer os.remove_all(dir)
+	api := fmt.tprintf("%s/api copy", dir)
+	os.make_directory_all(fmt.tprintf("%s/handlers", api))
+	x := fmt.tprintf("%s/handlers/x.go", api)
+	_ = os.write_entire_file(x, transmute([]u8)string("package x"))
+	f := fmt.tprintf("%s/f.txt", dir)
+	_ = os.write_entire_file(f, nil)
+	cp := files_undo_make(.Copy, dir, {api})
+	defer files_undo_free(cp)
+	testing.expect_value(t, files_undo_check(cp, dir), "")
+	dp, _ := files_undo_commands(cp)[0].(Delete_Path)
+	testing.expect(t, !dp.undoable, "a folder's undo asks in the bar")
+	cf := files_undo_make(.Copy, dir, {f})
+	defer files_undo_free(cf)
+	df, _ := files_undo_commands(cf)[0].(Delete_Path)
+	testing.expect(t, df.undoable, "a file's undo asks nothing")
+	// an edit deep inside (the top folder's mtime does not change)
+	time.sleep(20 * time.Millisecond)
+	_ = os.write_entire_file(x, transmute([]u8)string("package x // edited"))
+	testing.expect_value(t, files_undo_check(cp, dir), "api copy changed since")
+	// a file added deep inside
+	cp2 := files_undo_make(.Copy, dir, {api})
+	defer files_undo_free(cp2)
+	_ = os.write_entire_file(fmt.tprintf("%s/handlers/y.go", api), nil)
+	testing.expect_value(t, files_undo_check(cp2, dir), "api copy changed since")
+}
+
+// The merge with #169's rewritten delete_path: the user's undoable delete in the window asks
+// nothing; a browser's, a control caller's and a plain one ask.
+@(test)
+files_ops_undoable_delete_through_run_command :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	saved := fs_trash_fn
+	defer fs_trash_fn = saved
+	state = State{}
+	defer state = State{}
+	dir := ops_dir()
+	defer os.remove_all(dir)
+	append(&state.projects, Project{id = new_id(), cwd = strings.clone(dir), label = "proj"})
+	fs_trash_fn = proc(path: string) -> bool {return os.rename(path, fmt.tprintf("%s.trashed", path)) == nil}
+	home_dev := false
+	{
+		h, _, hok := files_lstamp(os.get_env("HOME", context.temp_allocator))
+		s, _, _ := files_lstamp(dir)
+		home_dev = hok && h.dev == s.dev
+	}
+	if !home_dev do return // the temp folder is on another volume: it asks (files_ops_delete_unasked)
+	for name in ([]string{"a", "b", "c", "d", "e"}) do _ = os.write_entire_file(fmt.tprintf("%s/%s", dir, name), nil)
+	p :: proc(dir, n: string) -> string {return fmt.tprintf("%s/%s", dir, n)}
+	// the user in the window, undoable: one path and a batch, no confirmation
+	r := run_command(Delete_Path{path = p(dir, "a"), undoable = true}, {kind = .UI})
+	testing.expectf(t, r.ok && !os.exists(p(dir, "a")), "single: %q", r.error)
+	r = run_command(Delete_Path{paths = {p(dir, "b"), p(dir, "c")}, undoable = true}, {kind = .UI})
+	testing.expectf(t, r.ok && !os.exists(p(dir, "b")) && !os.exists(p(dir, "c")), "batch: %q", r.error)
+	testing.expect_value(t, len(state.pending_confirmations), 0)
+	// a browser, a control caller (its policy: ask), the user without undoable: ask
+	state.settings.confirm[.Control][.Delete] = .Ask
+	for c in ([]Caller{{kind = .UI, web = true}, {kind = .Control}}) {
+		r = run_command(Delete_Path{path = p(dir, "d"), undoable = true}, c)
+		testing.expectf(t, r.error == "needs_confirmation" && os.exists(p(dir, "d")), "%v: %q", c, r.error)
+		r = run_command(Delete_Path{paths = {p(dir, "d"), p(dir, "e")}, undoable = true}, c)
+		testing.expectf(t, r.error == "needs_confirmation" && os.exists(p(dir, "e")), "%v batch: %q", c, r.error)
+	}
+	r = run_command(Delete_Path{path = p(dir, "d")}, {kind = .UI})
+	testing.expect_value(t, r.error, "needs_confirmation")
+}
+
+// Review round 1 (P2-2): a cut belongs to the tree it was cut in; a copy may go to another
+// project (the core's rules decide); a row hidden since (ignored rows hidden) is never pasted.
+@(test)
+files_ops_clip_refused :: proc(t: ^testing.T) {
+	hidden :: proc(root, path: string) -> bool {return strings.has_suffix(path, "/node_modules")}
+	testing.expect_value(t, files_clip_refused("/p", "/p", {"/p/a"}, true, hidden), "")
+	testing.expect_value(t, files_clip_refused("/q", "/p", {"/p/a"}, true, hidden), "the cut items are in another project or checkout: cut them again here")
+	testing.expect_value(t, files_clip_refused("/q", "/p", {"/p/a"}, false, hidden), "") // a copy across projects: the core decides
+	testing.expect_value(t, files_clip_refused("/p", "/p", {"/p/a", "/p/node_modules"}, false, hidden), "node_modules is hidden now (ignored files are hidden): show them, or copy again")
+}
+
+// P3 (a): Paste from a row's menu goes where that row says; from the empty space: the root.
+@(test)
+files_ops_menu_paste_target :: proc(t: ^testing.T) {
+	testing.expect_value(t, files_paste_target("/p", "/p", true), "/p")
+	testing.expect_value(t, files_paste_target("/p", "/p/lib", true), "/p/lib")
+	testing.expect_value(t, files_paste_target("/p", "/p/lib/a.go", false), "/p/lib")
+}
+
+// P3 (b): an undo that stops partway keeps what was not undone (the last record shrinks).
+@(test)
+files_ops_undo_partial :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := ops_dir()
+	defer os.remove_all(dir)
+	st: Files_Undo_Stack
+	defer files_undo_clear(&st, "")
+	files_undo_push(&st, dir, files_undo_make(.Trash, dir, {"/x/1", "/x/2", "/x/3"}, ids = {"a", "b", "c"}))
+	files_undo_keep_rest(&st, 2) // restored the first two
+	u := files_undo_top(&st, dir)
+	testing.expect(t, u != nil && len(u.items) == 1 && u.items[0].id == "c", "the third stays undoable")
+	for n in ([]string{"m1", "m2", "m3"}) do _ = os.write_entire_file(fmt.tprintf("%s/%s", dir, n), nil)
+	files_undo_push(&st, dir, files_undo_make(.Move, dir, {fmt.tprintf("%s/m1", dir), fmt.tprintf("%s/m2", dir), fmt.tprintf("%s/m3", dir)}, froms = {"/o/1", "/o/2", "/o/3"}))
+	files_undo_keep_rest(&st, 1) // moves undo the last first: m3 went back
+	u = files_undo_top(&st, dir)
+	testing.expect(t, u != nil && len(u.items) == 2 && u.items[1].from == "/o/2", "m1 and m2 stay undoable")
+	files_undo_keep_rest(&st, 2)
+	testing.expect_value(t, len(st.ops), 1) // nothing left of it: gone
+}

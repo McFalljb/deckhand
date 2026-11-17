@@ -61,20 +61,38 @@ files_undo_last :: proc(serial: u64 = 0) {
 	kind := u.kind
 	paths, froms := make([]string, len(u.items), context.temp_allocator), make([]string, len(u.items), context.temp_allocator)
 	for it, i in u.items do paths[i], froms[i] = strings.clone(it.path, context.temp_allocator), strings.clone(it.from, context.temp_allocator) // the record goes below
-	failed := ""
-	for c in core.files_undo_commands(u^) {
+	failed, asks := "", false
+	cmds := core.files_undo_commands(u^)
+	done := 0
+	for c in cmds {
 		r := client_run(c)
-		if !r.ok {
-			failed = r.error == "needs_confirmation" ? "it asks first: confirm in the bar" : r.error
+		if !r.ok && r.error == "needs_confirmation" {
+			asks = true // a copied folder (or another disk): the bar asks before it goes to the Trash
 			break
 		}
+		if !r.ok {
+			failed = r.error
+			break
+		}
+		done += 1
 		#partial switch x in c {
 		case core.Rename_Path: core.files_path_changed(x.from); core.files_path_changed(x.to)
 		case core.Restore_Path: core.files_path_changed(core.json_path(r.data, "path"))
 		}
 	}
-	core.files_undo_pop(&undo) // done, or stopped: never twice
 	for p in paths do core.files_path_changed(p)
+	if failed != "" && done > 0 && done < len(cmds) {
+		// part of it: what was undone stays undone, the rest stays the last thing to undo
+		core.files_undo_keep_rest(&undo, done)
+		verb := kind == .Trash ? "Put back" : "Moved back"
+		toast_show(fmt.tprintf("%s %d of %d, then: %s (⌘Z tries the rest again)", verb, done, len(cmds), failed), err = true)
+		return
+	}
+	core.files_undo_pop(&undo) // done, asked, or refused: never twice
+	if asks {
+		toast_show(fmt.tprintf("Confirm in the bar to move %s to the Trash", core.files_what(paths)))
+		return
+	}
 	if failed != "" {
 		toast_show(fmt.tprintf("Not undone: %s", failed), err = true)
 		return

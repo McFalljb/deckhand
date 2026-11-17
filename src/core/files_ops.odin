@@ -206,6 +206,50 @@ Files_Undo_Item :: struct {
 	id:    string, // Trash: its restore id
 	stamp: Disk_Stamp, // Create, Copy, Move: the item as the operation left it (lstat)
 	dir:   bool,
+	tree:  Files_Tree_Stamp, // Create, Copy of a folder: everything in it then
+}
+
+// A folder's whole tree, for "changed since": how many entries and the newest modification
+// time among them (links not followed). over: past FILES_UNDO_WALK_MAX entries (never undone).
+Files_Tree_Stamp :: struct {
+	n:      int,
+	newest: i64,
+	over:   bool,
+}
+
+FILES_UNDO_WALK_MAX :: 20_000 // entries looked at in a folder's tree (fs_copy's own limit)
+
+// The tree under folder path (not path itself), walked without following links, bounded.
+files_tree_stamp :: proc(path: string) -> (s: Files_Tree_Stamp) {
+	stack := make([dynamic]string, context.temp_allocator)
+	append(&stack, path)
+	for len(stack) > 0 {
+		d := pop(&stack)
+		f, err := os.open(d)
+		if err != nil {
+			s.over = true // unreadable: never "unchanged"
+			return
+		}
+		names, rerr := os.read_dir(f, -1, context.temp_allocator)
+		os.close(f)
+		if rerr != nil {
+			s.over = true
+			return
+		}
+		for fi in names {
+			s.n += 1
+			if s.n > FILES_UNDO_WALK_MAX {
+				s.over = true
+				return
+			}
+			full := strings.concatenate({d, "/", fi.name}, context.temp_allocator)
+			st, isdir, ok := files_lstamp(full)
+			if !ok do continue
+			s.newest = max(s.newest, st.mtime)
+			if isdir do append(&stack, full)
+		}
+	}
+	return
 }
 
 Files_Undo :: struct {
@@ -245,6 +289,7 @@ files_undo_make :: proc(kind: Files_Undo_Kind, root: string, paths: []string, fr
 				continue
 			}
 			it.stamp, it.dir = s, d
+			if d && (kind == .Copy || kind == .Create) do it.tree = files_tree_stamp(p)
 		}
 		append(&items, it)
 	}
@@ -328,7 +373,11 @@ files_undo_check :: proc(u: Files_Undo, root: string) -> string {
 			if d {
 				// a new folder: still empty; a copied one: nothing added or taken out at its top
 				if u.kind == .Create && !files_dir_empty(it.path) do return fmt.tprintf("%s changed since (it is not empty)", name)
-				if u.kind == .Copy && s.mtime != it.stamp.mtime do return fmt.tprintf("%s changed since", name)
+				if u.kind == .Copy {
+					// the whole tree as the copy left it: an edit or a new file deep inside counts
+					now := files_tree_stamp(it.path)
+					if s.mtime != it.stamp.mtime || it.tree.over || now.over || now != it.tree do return fmt.tprintf("%s changed since", name)
+				}
 			} else if s.size != it.stamp.size || s.mtime != it.stamp.mtime {
 				return fmt.tprintf("%s changed since", name)
 			}
@@ -364,9 +413,14 @@ files_undo_commands :: proc(u: Files_Undo) -> []Command {
 	out := make([dynamic]Command)
 	switch u.kind {
 	case .Create, .Copy:
+		// a folder (a copy's may hold the user's work since): no undoable, the bar asks first
 		paths := make([]string, len(u.items))
-		for it, i in u.items do paths[i] = it.path
-		append(&out, Delete_Path{paths = paths, undoable = true})
+		folder := false
+		for it, i in u.items {
+			paths[i] = it.path
+			if it.dir && u.kind == .Copy do folder = true
+		}
+		append(&out, Delete_Path{paths = paths, undoable = !folder})
 	case .Move:
 		#reverse for it in u.items do append(&out, Rename_Path{from = it.path, to = it.from})
 	case .Trash:
@@ -386,4 +440,39 @@ files_undo_done_text :: proc(u: Files_Undo) -> string {
 	case .Trash:  return fmt.tprintf("Undone: %s put back", what)
 	}
 	return "Undone"
+}
+
+// Why the window's file clipboard cannot paste into the tree at root now ("" = it can): a cut is
+// that tree's only (clip_root: where it was cut; never moved into another project or checkout
+// from a clipboard); a path the tree hides now (ignored rows hidden: hidden, files_path_hidden) is
+// never pasted, cut or copied. A copy into another project is the core's to allow (fs_copy).
+files_clip_refused :: proc(root, clip_root: string, paths: []string, cut: bool, hidden: proc(root, path: string) -> bool) -> string {
+	if cut && clip_root != root do return "the cut items are in another project or checkout: cut them again here"
+	if hidden != nil do for p in paths do if hidden(clip_root, p) {
+		return fmt.tprintf("%s is hidden now (ignored files are hidden): show them, or copy again", filepath.base(p))
+	}
+	return ""
+}
+
+// An undo of the last record that stopped after done of its commands (files_undo_commands): the
+// record keeps only what was not undone (Trash: the ones after them; Move: the first ones, as
+// moves undo the last first); none left: it goes.
+files_undo_keep_rest :: proc(st: ^Files_Undo_Stack, done: int) {
+	if len(st.ops) == 0 do return
+	u := &st.ops[len(st.ops) - 1]
+	n := len(u.items)
+	if done <= 0 do return
+	if done >= n {
+		files_undo_pop(st)
+		return
+	}
+	lo, hi := done, n // Trash: in order
+	if u.kind == .Move do lo, hi = 0, n - done
+	kept := make([]Files_Undo_Item, hi - lo)
+	for it, i in u.items {
+		if i >= lo && i < hi do kept[i - lo] = it
+		else do files_undo_item_free(it)
+	}
+	delete(u.items)
+	u.items = kept
 }

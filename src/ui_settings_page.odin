@@ -32,6 +32,7 @@ import "core:fmt"
 import "core:mem/virtual"
 import "core:path/filepath"
 import "core:strings"
+import "core:time"
 import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -458,6 +459,45 @@ SP_SECTION_WHY := [core.Setting_Section]string {
 	.Project       = "This project's own files. Deckhand opens them for you to edit, and makes a missing one only when you click Create.",
 }
 
+// The page's rows (core.settings_file_rows), built again only when what they show may have changed,
+// not on every frame (a build reads and parses pi's settings.json, lists pi's extensions/ and the
+// jobs folder, and stats and checks every path): settings_gen moved (this window's poll saw a
+// folder change, or one of its own commands), a state message came (the core changed something:
+// a machine's status, a toggle, an account), the project shown is another, or EDITOR_POLL passed
+// (an outside edit inside a file shows within it, as the poll's folders do). Unit tests draw no
+// frames and set State directly: there it builds every time (as core.pi_extras_outdated).
+Sp_Rows :: struct {
+	arena:     virtual.Arena, // the rows' strings
+	rows:      []core.Settings_File_Row,
+	project:   string, // in arena
+	gen:       u64, // core.settings_gen at the build
+	state_gen: u64, // client.state_gen at the build
+	at:        time.Tick,
+	built:     bool,
+	builds:    int, // how many builds (tests)
+}
+sp_rows: Sp_Rows
+
+sp_rows_now :: proc() -> []core.Settings_File_Row {
+	if core.app_frames_called == 0 do return core.settings_file_rows()
+	project := core.settings_project_cwd()
+	if sp_rows.built && sp_rows.gen == core.settings_gen && sp_rows.state_gen == client.state_gen && sp_rows.project == project && time.tick_since(sp_rows.at) < core.EDITOR_POLL {
+		return sp_rows.rows
+	}
+	virtual.arena_destroy(&sp_rows.arena)
+	_ = virtual.arena_init_growing(&sp_rows.arena)
+	a := virtual.arena_allocator(&sp_rows.arena)
+	{
+		// the build temp-allocates everything it returns: here, into the arena (kept until the next)
+		context.temp_allocator = a
+		sp_rows.rows = core.settings_file_rows()
+	}
+	sp_rows.project = strings.clone(project, a)
+	sp_rows.gen, sp_rows.state_gen, sp_rows.at, sp_rows.built = core.settings_gen, client.state_gen, time.tick_now(), true
+	sp_rows.builds += 1
+	return sp_rows.rows
+}
+
 settings_page_layout :: proc() {
 	th := theme()
 	virtual.arena_destroy(&spage.arena)
@@ -475,7 +515,7 @@ settings_page_layout :: proc() {
 		spage.query = strings.clone(query)
 		spage.sel = -1
 	}
-	rows := core.settings_file_rows()
+	rows := sp_rows_now()
 	project := core.settings_project_cwd()
 	if spage.section == .Project && project == "" do spage.section = .Appearance
 	total := centre_width()

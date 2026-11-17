@@ -466,6 +466,7 @@ deck_meta_line :: proc(s: ^core.Open_Session, from: ^core.Tab, room: f32) {
 	th := theme()
 	small := FONT_UI_SMALL
 	harness := core.HARNESSES[core.open_session_harness(s)]
+	if s.agent == .Files do harness.name, harness.glyph = "Files", .Folder // no agent (core/files_session.odin)
 	mach := deck_machine(s)
 	dots, ndots := deck_others(s, from)
 	tabs := ndots > 0 ? fmt.tprintf("%d tabs", len(s.tabs)) : ""

@@ -1625,9 +1625,9 @@ machine_connect_apply :: proc(c: Machine_Connect) -> Result {
 // screen, else the last shown (Home holds only its pi tab; another machine's is not this Mac's).
 machine_local_session :: proc() -> ^Open_Session {
 	s := cur()
-	if s != nil && !s.home && s.machine == 0 do return s
+	if s != nil && !s.home && s.machine == 0 && s.agent != .Files do return s // a Files session holds no terminal or browser tab
 	s = nil
-	for &o in state.open_sessions do if !o.home && o.machine == 0 && !o.missing && (s == nil || o.shown_at > s.shown_at) do s = &o
+	for &o in state.open_sessions do if !o.home && o.machine == 0 && !o.missing && o.agent != .Files && (s == nil || o.shown_at > s.shown_at) do s = &o
 	return s
 }
 

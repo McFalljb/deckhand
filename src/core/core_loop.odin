@@ -49,6 +49,7 @@ core_tick_body :: proc() {
 	pump_all()
 	pty_reap()
 	persist_tick()
+	files_sessions_sweep() // a Files session whose file never opened (files_session.odin)
 	titles_tick() // titles the worker read (titles.odin)
 	web_view_tick() // a browser's open sessions: their titles and ages, at most once a second each (web_view.odin)
 	jobs_tick() // Atlas's jobs: notes, the clock, running runs (jobs.odin)

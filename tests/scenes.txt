@@ -65,6 +65,7 @@ fail-fast-test      | required |                       |    6 | src/autotest.odi
 fetch-cef-test      | required |                       |    5 | scripts/fetch-cef.sh tests/scripts/fetch-cef-test.sh
 files               | full     | test-trash            |   37 | src/core/files.odin src/core/file_kinds.odin src/core/fs_model.odin src/core/trash_*.odin src/ui_files.odin src/editor_watch.odin src/native/editor_macos.m tests/scripts/files* src/core/ui_files_core.odin
 files-nested        | full     |                       |   20 | src/core/files.odin src/core/fs_model.odin src/ui_files.odin src/core/project_tidy.odin tests/scripts/files-nested.* src/core/ui_files_core.odin
+files-session       | full     |                       |   10 | src/core/files_session.odin src/ui_files_open.odin src/core/files.odin src/core/show_file.odin tests/scripts/files-session*
 fish-shell          | full     |                       |    6 | src/core/login_env.odin src/core/harness.odin tests/scripts/fish-shell.* tests/scripts/fake-fish.sh tests/scripts/fake-claude.py src/core/pty*.odin
 harness-setup       | full     |                       |   40 | src/core/harness_install.odin src/core/harness_manifest.odin src/ui_harness.odin src/ui_setup.odin tests/scripts/harness-setup* tests/scripts/fake-install.sh src/core/ui_setup_core.odin
 hidden-window       | full     | inproc                |    9 | src/core/core_loop.odin src/core/platform.odin src/platform_darwin.odin tests/scripts/hidden-window* tests/scripts/fake-pi-flood.py

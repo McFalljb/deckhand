@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dragText, dropDir, folderLabel, shellQuote, folderRows, gitLetter, gitTone, isEditRow, moveResult, movedPath, moveSel, newTarget, parentsOf, planMove, relPath, rowKey, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
+import { dragText, dropDir, fileIcon, inIgnored, folderLabel, shellQuote, folderRows, gitLetter, gitTone, isEditRow, moveResult, movedPath, moveSel, newTarget, parentsOf, planMove, relPath, rowKey, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
 
 const R = "/p";
 const listed = new Map<string, Listing>([
@@ -298,4 +298,66 @@ test("move: waiting for a confirmation says how many are not moved", () => {
   assert.equal(moveResult(R, R + "/src", [R + "/a"], undefined, 2), "Moved a to src/. Waiting for confirmation; 2 not moved");
   assert.equal(moveResult(R, R + "/src", [], undefined, 0), "Waiting for confirmation");
   assert.equal(moveResult(R, R + "/src", [], undefined, 1), "Waiting for confirmation; 1 not moved");
+});
+
+test("file icons: folders by open, files by name then last extension, any case", () => {
+  const table: [string, "file" | "dir" | "symlink", boolean, string][] = [
+    ["src", "dir", false, "folder"],
+    ["src", "dir", true, "folder-open"],
+    ["notes", "file", false, "file"],
+    ["a.unknownext", "file", false, "file"],
+    ["main.ts", "file", false, "file-code"],
+    ["App.TSX", "file", false, "file-code"],
+    ["core.odin", "file", false, "file-code"],
+    ["index.html", "file", false, "file-code"],
+    ["README.md", "file", false, "file-doc"],
+    ["README", "file", false, "file-doc"],
+    ["LICENSE", "file", false, "file-doc"],
+    ["notes.txt", "file", false, "file-doc"],
+    ["tsconfig.json", "file", false, "file-config"],
+    ["ci.yml", "file", false, "file-config"],
+    ["Makefile", "file", false, "file-config"],
+    ["Dockerfile", "file", false, "file-config"],
+    ["logo.svg", "file", false, "file-image"],
+    ["shot.PNG", "file", false, "file-image"],
+    ["build.sh", "file", false, "file-shell"],
+    [".zshrc", "file", false, "file-shell"],
+    ["package.json", "file", false, "file-lock"],
+    ["package-lock.json", "file", false, "file-lock"],
+    ["Cargo.toml", "file", false, "file-lock"],
+    ["go.sum", "file", false, "file-lock"],
+    ["something.lock", "file", false, "file-lock"],
+    [".gitignore", "file", false, "file-git"],
+    [".gitattributes", "file", false, "file-git"],
+    [".env", "file", false, "file-env"],
+    [".env.local", "file", false, "file-env"],
+    ["prod.env", "file", false, "file-env"],
+    ["dist.tar.gz", "file", false, "file-binary"],
+    ["app.wasm", "file", false, "file-binary"],
+    ["AGENTS.md", "file", false, "file-agent"],
+    ["CLAUDE.md", "file", false, "file-agent"],
+    ["link", "symlink", false, "file"],
+    [".hidden", "file", false, "file"],
+  ];
+  for (const [name, kind, open, want] of table) assert.equal(fileIcon(name, kind, open), want, name);
+});
+
+test("ignored: dimmed (ign) with all under an ignored folder; hidden ones not drawn, nor picked, nor targets", () => {
+  const l = new Map<string, Listing>([
+    [R, { entries: [{ name: "node_modules", kind: "dir", ignored: true }, { name: "src", kind: "dir" }, { name: "out.log", kind: "file", ignored: true }, { name: "a.txt", kind: "file" }], err: "" }],
+    [R + "/node_modules", { entries: [{ name: "left-pad", kind: "dir" }], err: "" }],
+    [R + "/src", { entries: [{ name: "main.ts", kind: "file" }], err: "" }],
+  ]);
+  const open = new Set([R + "/node_modules", R + "/src"]);
+  const ign = (rows: Row[]) => rows.flatMap((r) => (r.t === "entry" ? [r.e.name + (r.ign ? "*" : "")] : []));
+  assert.deepEqual(ign(treeRows(R, l, open, null)), ["node_modules*", "left-pad*", "src", "main.ts", "out.log*", "a.txt"]);
+  assert.deepEqual(ign(treeRows(R, l, open, null, true)), ["src", "main.ts", "a.txt"]);
+  // the slow poll: a folder in or under an ignored one
+  assert.equal(inIgnored(R, R + "/node_modules", l), true);
+  assert.equal(inIgnored(R, R + "/node_modules/left-pad", l), true);
+  assert.equal(inIgnored(R, R + "/src", l), false);
+  assert.equal(inIgnored(R, R + "/gone", l), false);
+  // Move to…: hidden folders are not targets
+  assert.deepEqual(folderRows(R, l, new Set(), true).map((r) => r.name), ["p", "src"]);
+  assert.deepEqual(folderRows(R, l, new Set(), false).map((r) => r.name), ["p", "node_modules", "src"]);
 });

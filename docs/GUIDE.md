@@ -1354,7 +1354,8 @@ as it does anywhere else.
 - **To scroll**, use the wheel or trackpad (pi handles its own scrolling).
 - **To make the text bigger or smaller**, press ⌘+ or ⌘− (⌘0: back to the look's size), or use
   the View menu. It sets the terminals' and the editor's text size and is remembered.
-- **To paste a file's path**, drag its row from the Files tab onto the terminal.
+- **To paste a file's path**, drag its row from the Files tab onto the terminal (a selection of
+  several: all their paths, separated by spaces).
 - **Links**: hold **⌘** over a link to underline it and see where it goes (at the bottom of the
   terminal); **⌘-click** opens it in your default browser, and a mail link in your mail app.
   **⇧⌘-click** opens a web link in a new browser tab of the session, in front (in your default
@@ -1430,7 +1431,18 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
 - **Mouse**: a click opens a folder or previews a file; ⌘-click adds or removes a row, shift-click
   selects a range (neither opens anything); a right-click selects the row (one already selected
-  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path.
+  keeps the selection), then opens its menu; drag a row onto a terminal to paste its path (or a
+  selection's paths).
+- **To move files**, drag a row (or a selection it is in) within the tree: onto a folder to move
+  it there, onto a file to move it next to that file, below the last row to move it to the top of
+  the project. The target folder is highlighted while you drag. Hold the pointer over a closed
+  folder to open it, or near the top or bottom of the list to scroll. **Esc** cancels the drag;
+  other keys and ⌘V do nothing until you let go.
+  Nothing asks first; a toast says where the items went ("Moved a.txt to src/"). Nothing moves
+  if the target is the item itself, a folder inside it, or the folder it is already in. Nothing
+  moves either if the target has an item with the same name; a toast says so. If a move is
+  refused part-way (a terminal working in that folder, for example), the toast names the item;
+  what already moved stays moved.
 - **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
   (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
   shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
@@ -2822,7 +2834,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Space | Open in preview |
 | F2 | Files: rename |
 | ⌘⌫ | Files: move the selection to Trash (asks first, once) |
-| Esc | Clear a selection of several, else give the keyboard back |
+| Esc | Clear a selection of several, else give the keyboard back (while dragging: cancel the move) |
 
 **Atlas's drawer**: ⌃L opens pi's model selector (the Model button).
 

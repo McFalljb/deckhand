@@ -337,3 +337,30 @@ files_drag_root_change_cancels :: proc(t: ^testing.T) {
 	os.remove_all(dir)
 	os.remove_all(other)
 }
+
+// Ignored rows hidden (or shown) mid-drag, by a script or agent: the drag ends, nothing moves
+// (it may carry a row that no longer shows).
+@(test)
+files_drag_hide_ignored_cancels :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	when !core.TEST_HOOKS do return
+	defer pk_reset()
+	defer state.files.hide_ignored = false
+	dir := fd_setup()
+	fd_write(dir, "a.txt")
+	fd_write(dir, "lib/x.go")
+	ax, ay, _ := fd_row("/a.txt")
+	fd_ev(.MOUSE_DOWN, ax, ay)
+	fd_ev(.MOUSE_MOVE, ax, ay + 30, sapp.MODIFIER_LMB)
+	testing.expect(t, files_dragging(), "dragging")
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .Script}).ok)
+	files_drag_tick()
+	testing.expect(t, !files_dragging(), "the drag ended")
+	_ = ui_layout(FD_W, FD_H)
+	lx, ly, _ := fd_row("/lib")
+	fd_ev(.MOUSE_MOVE, lx, ly, sapp.MODIFIER_LMB)
+	fd_ev(.MOUSE_UP, lx, ly)
+	testing.expect(t, fd_exists(dir, "a.txt") && !fd_exists(dir, "lib/a.txt"), "nothing moved")
+	os.remove_all(dir)
+}

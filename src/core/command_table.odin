@@ -168,6 +168,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "worktree_session", args = "project_id, path", does = "start a new pi session of a project running in one of its repository's checkouts (kept with the project's sessions); created_id = open session id", who = .Anyone},
 	{type = "worktrees_done", args = "common, out", does = "a worker read a repository's worktrees and branches", who = .Internal},
 	{type = "set_files_filter", args = "text", does = "filter the Files tree: fuzzy words matched against paths (\"\" = the tree)", who = .Anyone},
+	{type = "set_files_hide_ignored", args = "hide", does = "hide gitignored files in the Files tree (default false: shown, dimmed); saved", who = .Anyone},
 	{type = "job_list", args = "unread?", does = "Atlas's jobs: notes_dir, paused, unread, jobs [{id, name, path, project, schedule, enabled, paused, paused_why, running, queued, next_due, last_at, last_status, last_headline, last_run, unread, error, warnings, recent, needs_you}] (unread: only jobs with unread runs); summaries are redacted", who = .Query},
 	{type = "job_runs", args = "job, limit?", does = "a job's last runs (default 10), newest first: run, summary_path, meta (status, scheduled_at, started, ended, exit, cost, turns, headline, needs_you, blocked, delivered, read); redacted", who = .Query},
 	{type = "job_run_now", args = "job", does = "run a job now (refused while jobs are paused or the job runs; for callers other than the user also while the job is paused or disabled)", who = .Anyone},

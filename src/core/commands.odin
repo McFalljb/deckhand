@@ -657,6 +657,7 @@ Command :: union {
 	Files_Collapse_All,
 	Files_Reveal,
 	Set_Files_Filter,
+	Set_Files_Hide_Ignored,
 	// worktrees and branches (worktrees.odin)
 	List_Worktrees,
 	Files_Set_Root,
@@ -1977,7 +1978,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, sent
 	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done:
 		return tab_host_apply(cmd, caller, request_id) // editor: the window hosts it (tabhost_route.odin)
-	case Set_Left_Tab, Files_Expand, Files_Collapse_All, Files_Reveal, Set_Files_Filter:
+	case Set_Left_Tab, Files_Expand, Files_Collapse_All, Files_Reveal, Set_Files_Filter, Set_Files_Hide_Ignored:
 		return files_apply(cmd, caller)
 	case List_Worktrees, Files_Set_Root, Worktree_Cleanup, Worktree_Cleanup_Done, Worktrees_Done:
 		return worktrees_apply(cmd, caller, request_id)

@@ -41,6 +41,10 @@ Files_Reveal :: struct {
 Set_Files_Filter :: struct {
 	text: string,
 }
+// Gitignored rows leave the tree (hide) or show again, dimmed (the default). Saved.
+Set_Files_Hide_Ignored :: struct {
+	hide: bool,
+}
 
 LEFT_TAB_NAMES := [Left_Tab]string {
 	.Sessions = "sessions",
@@ -81,6 +85,11 @@ files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 		delete(state.files.filter)
 		state.files.filter = strings.clone(text)
 		files_state_gen += 1
+		return {ok = true}, true
+	case Set_Files_Hide_Ignored:
+		if c.hide == state.files.hide_ignored do return {ok = true}, false
+		state.files.hide_ignored = c.hide
+		files_state_gen += 1 // the rows are built again (and hidden ones leave the selection: files_rows)
 		return {ok = true}, true
 	case Files_Expand:
 		// keyed by the path as the tree shows it: a symlinked folder opens in
@@ -305,6 +314,10 @@ walked: map[string]bool // folders the last rebuild listed (keys borrowed from f
 
 @(private = "file")
 walk_roots: []string // the known folders, while files_rows walks (temp allocator)
+@(private = "file")
+walk_hide: bool // ignored entries are left out while files_rows walks (hidden then lists them)
+@(private = "file")
+walk_hidden: map[string]bool // temp allocator
 
 // Bumped whenever a listing is (re)loaded or marked stale.
 files_cache_gen: u64
@@ -530,6 +543,42 @@ files_sel_all :: proc(v: ^Files_View, rows: []Files_Row) {
 	window_state_changed()
 }
 
+// The ignored rows left out of the tree (hidden: their paths; anything below one is hidden too)
+// leave the selection; a hidden cursor (and anchor) goes to its nearest shown folder, "" at the
+// root. True: something changed.
+files_sel_drop_hidden :: proc(v: ^Files_View, root: string, hidden: map[string]bool) -> bool {
+	if len(hidden) == 0 do return false
+	is_hidden :: proc(p, root: string, hidden: map[string]bool) -> bool {
+		if p == "" || !within(p, root) do return false
+		for q := p; len(q) > len(root); q = filepath.dir(q) do if q in hidden do return true
+		return false
+	}
+	changed := false
+	if is_hidden(v.cursor, root, hidden) {
+		c := filepath.dir(v.cursor)
+		for is_hidden(c, root, hidden) do c = filepath.dir(c)
+		files_sel_cursor(v, c == root ? "" : c)
+		changed = true
+	}
+	if is_hidden(v.anchor, root, hidden) {
+		files_sel_anchor(v, v.cursor)
+		changed = true
+	}
+	keep := make([dynamic]string, context.temp_allocator)
+	dropped := false
+	for p in v.selected {
+		if is_hidden(p, root, hidden) do dropped = true
+		else do append(&keep, p)
+	}
+	if dropped {
+		if len(keep) == 0 && v.cursor != "" do append(&keep, v.cursor) // never nothing: the cursor's row
+		files_sel_set(v, keep[:])
+		changed = true
+	}
+	if changed do window_state_changed()
+	return changed
+}
+
 // Esc: the cursor's row alone. False: it was already (Esc then gives the keyboard back).
 files_sel_collapse :: proc(v: ^Files_View) -> bool {
 	if len(v.selected) <= 1 do return false
@@ -586,8 +635,13 @@ files_rows :: proc(root: string) -> []Files_Row {
 		open := make(map[string]bool, context.temp_allocator)
 		for d in files_expanded_dirs(root) do open[d] = true
 		walk_roots = fs_roots() // once per rebuild (realpath per project)
+		walk_hide = state.files.hide_ignored
+		walk_hidden = make(map[string]bool, context.temp_allocator)
 		files_walk(&files_ui, root, "", 0, false, open, a)
 		walk_roots = nil
+		// rows the user cannot see are never selected (nothing hidden is trashed or moved)
+		if walk_hide do files_sel_drop_hidden(&files_ui, root, walk_hidden)
+		walk_hide, walk_hidden = false, nil
 		// listings of folders no longer shown are dropped: memory follows what is open
 		drop := make([dynamic]string, context.temp_allocator)
 		for k, _ in files_cache do if !(k in walked) do append(&drop, k)
@@ -616,6 +670,10 @@ files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, 
 	}
 	shown := 0
 	for e, i in d.entries {
+		if e.ignored && walk_hide {
+			walk_hidden[strings.concatenate({dir, "/", e.name}, context.temp_allocator)] = true
+			continue
+		}
 		if len(v.rows) >= FILES_ROWS_MAX || shown >= FILES_DIR_MAX {
 			append(&v.rows, Files_Row{path = strings.clone(dir, a), depth = depth, more = len(d.entries) - i})
 			return

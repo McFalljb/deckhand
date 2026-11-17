@@ -770,6 +770,12 @@ ACTIONS := [?]Action {
 		if root == "" do return nil, false
 		return core.Files_Collapse_All{root = root}, true
 	}, done = proc() -> string {return "Folders collapsed"}},
+	// the header's eye: gitignored rows leave the tree (and the selection: core files_rows), or come back dimmed
+	{id = "files_toggle_ignored", label = "Hide ignored files", title = proc() -> string {
+		return state.files.hide_ignored ? "Show ignored files" : "Hide ignored files"
+	}, make = proc() -> (core.Command, bool) {
+		return core.Set_Files_Hide_Ignored{hide = !state.files.hide_ignored}, true
+	}},
 	{id = "files_refresh", label = "Refresh files", make = proc() -> (core.Command, bool) {
 		root := core.files_root()
 		if root == "" do return nil, false

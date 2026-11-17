@@ -78,6 +78,8 @@ cx_reset :: proc(version := "0.167.2") -> runtime.Allocator {
 	core.codex_login_set(.Signed_In) // never asks (a stand-in would only sleep)
 	core.claude_cli_override = CX_CLI
 	core.claude_status_reset()
+	core.codex_disk_cache_clear() // the found Codex rows (codex_disk.odin): every test reads its own CODEX_HOME
+	core.codex_disk_gap = 0
 	return runtime.heap_allocator()
 }
 
@@ -1051,9 +1053,9 @@ codex_disk_long_cwd_skipped :: proc(t: ^testing.T) {
 	for c in ([]string{long, "/tmp/x\\u0000y", "/tmp/ok"}) {
 		path := fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id)
 		_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":"cli"}}}}`+"\n", id, c))
-		cwd, skip := core.codex_first_line(path)
+		cwd, source, skip := core.codex_first_line(path)
 		testing.expectf(t, skip == (c != "/tmp/ok"), "%d bytes: skip %v", len(c), skip)
-		if c == "/tmp/ok" do testing.expect_value(t, cwd, "/tmp/ok")
+		if c == "/tmp/ok" do testing.expect(t, cwd == "/tmp/ok" && source == "cli", cwd)
 	}
 }
 
@@ -1110,6 +1112,169 @@ codex_only_folders_are_projects :: proc(t: ^testing.T) {
 	os.remove(cli_path)
 	core.rescan_now()
 	testing.expect(t, !has(cli) && has(ide), "dropped once no rollout records it")
+}
+
+// A Codex rollout under home's sessions/<day> (a "YYYY/MM/DD" path) whose session_meta says cwd and
+// source (raw JSON). Its path.
+@(private = "file")
+cx_rollout :: proc(home, day, id, cwd, source: string) -> string {
+	d := fmt.tprintf("%s/sessions/%s", home, day)
+	os.make_directory_all(d)
+	stamp, _ := strings.replace_all(day, "/", "-", context.temp_allocator)
+	path := fmt.tprintf("%s/rollout-%s-%s.jsonl", d, stamp, id)
+	_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":%s}}}}`+"\n"+`{{"type":"response_item"}}`+"\n", id, cwd, source))
+	return path
+}
+
+// A Codex id numbered n.
+@(private = "file")
+cx_id :: proc(n: int) -> string {
+	return fmt.tprintf("01a1d0d6-5353-7ff3-9308-%012x", n)
+}
+
+// The Codex rows listed for the selected project: id -> title.
+@(private = "file")
+cx_found :: proc() -> map[string]string {
+	out := make(map[string]string, context.temp_allocator)
+	for f in state.claude_disk do if f.listed && f.harness == .Codex do out[f.id] = f.title
+	return out
+}
+
+// A Codex home (CODEX_HOME) and a project selected in a fresh state; the found-row cache forgotten.
+@(private = "file")
+cx_disk_setup :: proc(tag: string) -> (home, dir: string, pid: u64) {
+	home = cx_dir(tag)
+	os.set_env("CODEX_HOME", home)
+	dir = cx_dir(fmt.tprintf("%s-proj", tag))
+	pid = core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	return
+}
+
+@(private = "file")
+cx_disk_show :: proc(pid: u64) {
+	core.run_command(core.Select_Project{project_id = pid}, CX_UI)
+	core.claude_disk_wait()
+	core.claude_disk_wait()
+}
+
+// Every rollout is looked at, however old or many (no day or file cap): one in the oldest of 70 day
+// folders, and the oldest of 450 in one day, are rows.
+@(test)
+codex_disk_no_caps :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("nocaps")
+	defer os.unset_env("CODEX_HOME")
+	defer core.codex_disk_cache_clear()
+	for d in 0 ..< 70 do cx_rollout(home, fmt.tprintf("2026/%02d/%02d", 1 + d / 28, 1 + d % 28), cx_id(1000 + d), d == 0 ? dir : "/elsewhere", `"cli"`)
+	for i in 0 ..< 450 do cx_rollout(home, "2026/10/01", cx_id(i), i == 0 ? dir : "/elsewhere", `"cli"`)
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expectf(t, cx_id(1000) in found, "the oldest day's: %v", found)
+	testing.expectf(t, cx_id(0) in found, "the oldest of 450: %v", found)
+	testing.expect_value(t, len(found), 2)
+}
+
+// Which rollouts are rows, by session_meta's source: the CLI's ("cli") and Codex Desktop's
+// ("vscode"); never `codex exec`'s, a sub-agent's (an object) or a source Deckhand does not know.
+@(test)
+codex_disk_source_filter :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("source")
+	defer os.unset_env("CODEX_HOME")
+	defer core.codex_disk_cache_clear()
+	sources := []string{`"cli"`, `"vscode"`, `"exec"`, `{"subagent":"review"}`, `"mcp"`, `"CLI"`, `""`, `7`}
+	for s, i in sources do cx_rollout(home, "2026/11/12", cx_id(i), dir, s)
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expect(t, cx_id(0) in found && cx_id(1) in found, "cli and vscode listed")
+	testing.expectf(t, len(found) == 2, "only cli and vscode: %v", found)
+}
+
+// The saved meta cache (data dir, codex-sessions.tsv, 0600, versioned): a relaunch reads no rollout
+// it has read before, only a new or changed one; a vanished file's entry goes from the file too;
+// a corrupt or foreign file is ignored, never a crash.
+@(test)
+codex_disk_cache_saved :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("saved")
+	defer os.unset_env("CODEX_HOME")
+	defer core.codex_disk_cache_clear()
+	data := cx_dir("saved-data")
+	core.codex_disk_cache_at(data)
+	a := cx_rollout(home, "2026/11/10", cx_id(1), dir, `"cli"`)
+	b := cx_rollout(home, "2026/11/11", cx_id(2), dir, `"vscode"`)
+	c := cx_rollout(home, "2026/11/12", cx_id(3), dir, `"exec"`)
+	cx_disk_show(pid)
+	testing.expect_value(t, len(cx_found()), 2)
+	file := fmt.tprintf("%s/codex-sessions.tsv", data)
+	st: posix.stat_t
+	testing.expect(t, posix.stat(strings.clone_to_cstring(file, context.temp_allocator), &st) == .OK && st.st_mode & {.IRGRP, .IWGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH} == {}, "saved, 0600")
+	text, _ := os.read_entire_file(file, context.temp_allocator)
+	testing.expectf(t, strings.has_prefix(string(text), "deckhand codex sessions 1\n") && strings.count(string(text), "\n") == 4, "%q", string(text))
+
+	// a relaunch: nothing read again; then only what changed or is new
+	core.codex_disk_cache_clear()
+	core.codex_disk_gap = 0
+	core.codex_disk_cache_at(data)
+	before := core.claude_disk_bytes_read
+	cx_disk_show(pid)
+	testing.expect_value(t, core.claude_disk_bytes_read, before)
+	testing.expect_value(t, len(cx_found()), 2)
+	os.remove(c)
+	_ = os.write_entire_file(b, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":"exec"}}}}`+"\n", cx_id(2), dir))
+	cx_rollout(home, "2026/11/13", cx_id(4), dir, `"cli"`)
+	before = core.claude_disk_bytes_read
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expectf(t, len(found) == 2 && cx_id(1) in found && cx_id(4) in found, "%v", found)
+	testing.expect(t, core.claude_disk_bytes_read > before && core.claude_disk_bytes_read - before < 1000, "only the changed and the new one read")
+	text, _ = os.read_entire_file(file, context.temp_allocator)
+	testing.expect(t, !strings.contains(string(text), c) && strings.contains(string(text), a), "the vanished one's entry is gone")
+
+	// corrupt, foreign or truncated: ignored (each file read again), never a crash
+	for junk in ([]string{"garbage\x00\xff\n\t\t\t", "deckhand codex sessions 1\n1\t2\n\t\t\t\t\t\t\t\nx\ty\tz\tcli\tid\t/a\t/b\t/c\n", "deckhand codex sessions 99\n", ""}) {
+		_ = os.write_entire_file(file, transmute([]u8)junk)
+		core.codex_disk_cache_clear()
+		core.codex_disk_gap = 0
+		core.codex_disk_cache_at(data)
+		cx_disk_show(pid)
+		testing.expectf(t, len(cx_found()) == 2, "after %q: %v", junk, cx_found())
+	}
+}
+
+// Titles: <home>/session_index.jsonl names a listed row (its last line for the id wins), sanitised
+// as other titles are; a line too long is skipped; read again when it changes; never written.
+@(test)
+codex_disk_titles :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("titles")
+	defer os.unset_env("CODEX_HOME")
+	defer core.codex_disk_cache_clear()
+	for i in 1 ..= 4 do cx_rollout(home, "2026/11/12", cx_id(i), dir, `"cli"`)
+	index := fmt.tprintf("%s/session_index.jsonl", home)
+	line :: proc(id, name: string) -> string {
+		return fmt.tprintf(`{{"id":"%s","thread_name":"%s","updated_at":"2026-11-12T10:00:00.000Z"}}`+"\n", id, name)
+	}
+	text := strings.concatenate({line(cx_id(1), "First name"), line(cx_id(1), "Renamed"), line(cx_id(2), `Two\u0007\nlines‮ here`), line(cx_id(3), strings.repeat("x", 40_000)), "not json\n", line(cx_id(9), "not listed")})
+	_ = os.write_entire_file(index, transmute([]u8)text)
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expect_value(t, found[cx_id(1)], "Renamed")
+	testing.expect_value(t, found[cx_id(2)], "Two  lines here")
+	testing.expect_value(t, found[cx_id(3)], "")
+	testing.expect_value(t, found[cx_id(4)], "")
+	testing.expect(t, !(cx_id(9) in found), "an index line names no row of its own")
+	time.sleep(1100 * time.Millisecond) // a new mtime
+	text2 := strings.concatenate({text, line(cx_id(4), "Four")})
+	_ = os.write_entire_file(index, transmute([]u8)text2)
+	cx_disk_show(pid)
+	testing.expect_value(t, cx_found()[cx_id(4)], "Four")
+	got, _ := os.read_entire_file(index, context.temp_allocator)
+	testing.expect(t, string(got) == text2, "never written")
 }
 
 // ---- Codex accounts (claude_accounts.odin with codex; docs/CODEX.md §6a) ----

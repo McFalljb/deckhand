@@ -1,29 +1,41 @@
 package core
 
 // Codex conversations started outside Deckhand, as rows (docs/CODEX.md §2b): what the found-row
-// scan (claude_disk_scan, claude_disk.odin) reads of Codex's sessions folders. Read only, never
-// written.
+// scan (claude_disk_scan, claude_disk.odin) reads of Codex's homes. Read only, never written.
 //
-//   - Where: each Codex account's <home>/sessions/YYYY/MM/DD folders, newest first; at most
-//     CODEX_DISK_DAYS_MAX day folders and CODEX_DISK_FILES_MAX files a home; regular files named
-//     rollout-<time>-<uuid>.jsonl only, the id from the name (codex_disk_files).
+//   - Where: each Codex account's <home>/sessions/YYYY/MM/DD folders, all of them (newest first,
+//     up to the hard ceilings CODEX_DISK_DIRS_MAX folders and CODEX_DISK_FILES_MAX files a home:
+//     only a broken folder reaches them); regular files named rollout-<time>-<uuid>.jsonl only,
+//     the id from the name (codex_disk_files).
 //   - What: the first line only (session_meta: its id, cwd and source), at most
-//     CODEX_DISK_LINE_MAX, through the Claude scan's cache, budget and worker (codex_first_line).
+//     CODEX_DISK_LINE_MAX (codex_first_line), once per file ever: the meta cache (path, size,
+//     mtime -> id, cwd, source, account, created) is saved in the data dir (CODEX_CACHE_FILE), so
+//     a launch reads only new or changed rollouts. All of it on a worker (codex_pass): the main
+//     thread only filters the cache (codex_disk_found).
+//   - Which: source "cli" (the CLI) and "vscode" (Codex Desktop) only (codex_source_listed): never
+//     `codex exec`'s, a sub-agent's (an object) or a source Deckhand does not know.
+//   - Titles: <home>/session_index.jsonl (id, thread_name, updated_at; the last line for an id
+//     wins), joined to the listed rows only, read again when its size or mtime changes.
 //   - The scan picks a harness's lister and first-line reader by an exhaustive switch on Harness
 //     (disk_files, disk_first_line): a new harness's found rows add a case to each.
 
+import "base:runtime"
 import "core:encoding/json"
 import jg "../jsonguard"
+import "core:fmt"
+import "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
+import "core:thread"
 import "core:time"
 
-CODEX_DISK_DAYS_MAX :: 60 // day folders looked at, newest first
-CODEX_DISK_FILES_MAX :: 400 // rollouts looked at, newest first
+CODEX_DISK_DIRS_MAX :: 20_000 // folders walked a home (years, months, days): a hard ceiling
+CODEX_DISK_FILES_MAX :: 50_000 // rollouts listed a home, newest first: a hard ceiling
 CODEX_DISK_LINE_MAX :: 64 * 1024 // a rollout's first line (session_meta, ~25 KB); longer: skipped
 CODEX_CWD_MAX :: 1024 // a rollout's cwd; longer (or with a NUL): skipped, never walked
 
@@ -35,40 +47,59 @@ Disk_File :: struct {
 	modified, created: time.Time,
 }
 
+// An account's folder (its home) and the folder its conversation files are in, as the main thread
+// found them for a worker's listing.
+Disk_Home :: struct {
+	account, root: string,
+}
+
 // ---- per harness ----
 
-// The newest conversation files of every account of harness h, as its lister finds them. Claude
-// Code's are listed per project by claude_disk_scan itself (its folder names); pi's are its own
-// (sessions.odin). Temp.
-disk_files :: proc(h: Harness) -> []Disk_File {
+// The accounts of harness h whose conversation files a worker lists (disk_files). Main thread
+// (the accounts and the environment are the main thread's). Temp.
+disk_homes :: proc(h: Harness) -> []Disk_Home {
+	out := make([dynamic]Disk_Home, context.temp_allocator)
 	switch h {
 	case .Codex:
-		return codex_disk_files()
+		for a in claude_accounts(codex = true) do if root := codex_sessions_dir(a.dir); root != "" do append(&out, Disk_Home{account = a.dir, root = root})
+	case .Pi, .Claude:
+	}
+	return out[:]
+}
+
+// The conversation files of homes (disk_homes) of harness h, as its lister finds them, newest
+// first. Claude Code's are listed per project by claude_disk_scan itself (its folder names); pi's
+// are its own (sessions.odin). Any thread. Temp.
+disk_files :: proc(h: Harness, homes: []Disk_Home) -> []Disk_File {
+	switch h {
+	case .Codex:
+		return codex_disk_files(homes)
 	case .Pi, .Claude:
 		return nil
 	}
 	return nil
 }
 
-// What the scan reads of one of harness h's files (from disk_files): the cwd it ran in, or skip
-// (not a conversation to list). Any thread.
-disk_first_line :: proc(h: Harness, path: string) -> (cwd: string, skip: bool) {
+// What the scan reads of one of harness h's files (from disk_files): the cwd it ran in and how it
+// was started (its source), or skip (not a conversation). Any thread.
+disk_first_line :: proc(h: Harness, path: string) -> (cwd, source: string, skip: bool) {
 	switch h {
 	case .Codex:
 		return codex_first_line(path)
 	case .Pi, .Claude:
-		return "", true
+		return "", "", true
 	}
-	return "", true
+	return "", "", true
 }
 
 // ---- Codex's conversations (~/.codex/sessions; codex.odin) ----
 
 // A rollout's session_meta (its first line, at most CODEX_DISK_LINE_MAX, never more of the file):
-// the cwd it ran in. skip: not a conversation to list (no session_meta, an id that is not the
-// file's, a subagent's, `codex exec`'s or any source but "cli" and "vscode"). Never written to; nothing in it reaches a
+// the cwd it ran in and its source (how it was started: "cli", "vscode", "exec"; cut to
+// CODEX_SOURCE_MAX). skip: not a conversation to list (no session_meta, an id that is not the
+// file's, a subagent's or another non-string source). Never written to; nothing in it reaches a
 // shell or the screen (the cwd is only compared with the project's folder). Any thread.
-codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
+codex_first_line :: proc(path: string) -> (cwd, source: string, skip: bool) {
 	skip = true
 	// never a FIFO or a link swapped in since the listing (open would block, or go elsewhere)
 	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NONBLOCK, .NOFOLLOW, .CLOEXEC})
@@ -90,12 +121,12 @@ codex_first_line :: proc(path: string) -> (cwd: string, skip: bool) {
 	pl, _ := o["payload"].(json.Object)
 	id, _ := pl["id"].(json.String)
 	c, _ := pl["cwd"].(json.String)
-	// an interactive thread only: never a subagent's ({"subagent": …}) nor `codex exec`'s
-	if src, _ := pl["source"].(json.String); src != "cli" && src != "vscode" do return
+	src, src_ok := pl["source"].(json.String)
+	if !src_ok do return // a subagent's ({"subagent": …})
 	name := strings.trim_suffix(filepath.base(path), ".jsonl")
 	if !codex_id_ok(string(id)) || !strings.has_suffix(name, string(id)) || !filepath.is_abs(string(c)) do return
 	if len(c) > CODEX_CWD_MAX || strings.index_byte(string(c), 0) >= 0 do return
-	return string(c), false
+	return string(c), cut_utf8(string(src), CODEX_SOURCE_MAX), false
 }
 
 // A Codex home's sessions folder ("" = none; in tests and test mode never the developer's own
@@ -110,23 +141,19 @@ codex_sessions_dir :: proc(home: string) -> string {
 	return home == "" ? "" : strings.concatenate({home, "/sessions"}, context.temp_allocator)
 }
 
-// The newest rollouts of each Codex account's home, by their folders' and names' dates
-// (sessions/YYYY/MM/DD/rollout-<time>-<uuid>.jsonl): at most CODEX_DISK_DAYS_MAX day folders and
-// CODEX_DISK_FILES_MAX files a home; regular files only. Temp.
+// The rollouts of each Codex home (disk_homes), newest first by their folders' and names' dates
+// (sessions/YYYY/MM/DD/rollout-<time>-<uuid>.jsonl): all of them, up to the hard ceilings
+// (CODEX_DISK_DIRS_MAX folders walked, CODEX_DISK_FILES_MAX files a home); regular files only.
+// Any thread. Temp.
 @(private = "file")
-codex_disk_files :: proc() -> []Disk_File {
+codex_disk_files :: proc(homes: []Disk_Home) -> []Disk_File {
 	out := make([dynamic]Disk_File, context.temp_allocator)
-	for a in claude_accounts(codex = true) do codex_disk_files_of(&out, a.dir)
+	for h in homes do codex_disk_files_in(&out, h.account, h.root)
 	return out[:]
 }
 
-@(private = "file")
-codex_disk_files_of :: proc(all: ^[dynamic]Disk_File, home: string) {
-	codex_disk_files_in(all, home, codex_sessions_dir(home))
-}
-
-// codex_disk_files_of with home's sessions folder given (root: codex_sessions_dir, taken on the
-// main thread). Any thread.
+// The rollouts of one home (root: its sessions folder, codex_sessions_dir, taken on the main
+// thread), as codex_disk_files. Any thread.
 codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 	out := make([dynamic]Disk_File, context.temp_allocator)
 	defer append(all, ..out[:])
@@ -145,12 +172,16 @@ codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 		slice.sort_by(list[:], proc(a, b: os.File_Info) -> bool {return a.name > b.name})
 		return list[:]
 	}
-	days := 0
+	dirs := 0
 	for y in numbered(root) {
+		if dirs >= CODEX_DISK_DIRS_MAX do return
+		dirs += 1
 		for m in numbered(y.fullpath) {
+			if dirs >= CODEX_DISK_DIRS_MAX do return
+			dirs += 1
 			for d in numbered(m.fullpath) {
-				if days >= CODEX_DISK_DAYS_MAX || len(out) >= CODEX_DISK_FILES_MAX do return
-				days += 1
+				if dirs >= CODEX_DISK_DIRS_MAX || len(out) >= CODEX_DISK_FILES_MAX do return
+				dirs += 1
 				entries, err := os.read_all_directory_by_path(d.fullpath, context.temp_allocator)
 				if err != nil do continue
 				slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {return a.name > b.name})
@@ -166,5 +197,444 @@ codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 				}
 			}
 		}
+	}
+}
+
+// ---- the saved meta cache and the titles (a worker) ----
+//
+// codex_disk_refresh (the scan, main thread) starts a pass on a worker, at most one at a time and
+// one per codex_disk_gap: the saved file read (once a run), every home listed, the entries of
+// files gone dropped, session_index.jsonl read again where its size or mtime changed, then the
+// first line of each new or changed rollout read, CODEX_BATCH at a time, the rows made again after
+// each batch (claude_disk_tick); the file saved at the end when anything changed.
+//
+// The saved file (CODEX_CACHE_FILE in the data dir, as titles.odin's: 0600, written atomically):
+// a version line, then one line per rollout: size, mtime (ns), created (ns), source, id, account,
+// cwd, path, tab-separated (an entry with a tab or a line break in it is not saved: read again).
+// A different version, a file over CODEX_CACHE_BYTES_MAX or a line that does not parse is not
+// used (those rollouts are read again); at most CODEX_CACHE_MAX entries.
+
+CODEX_SOURCE_MAX :: 32 // bytes of a rollout's source kept
+CODEX_CACHE_FILE :: "codex-sessions.tsv"
+@(private = "file")
+CODEX_CACHE_VERSION :: "deckhand codex sessions 1"
+CODEX_CACHE_MAX :: 100_000 // rollouts known (and saved): a hard ceiling
+@(private = "file")
+CODEX_CACHE_BYTES_MAX :: 64 << 20 // a bigger saved file is not read
+@(private = "file")
+CODEX_BATCH :: 64 // first lines read between two showings of the rows
+CODEX_INDEX_FILE :: "session_index.jsonl"
+@(private = "file")
+CODEX_INDEX_BYTES_MAX :: 16 << 20 // read of a home's session_index.jsonl: its last 16 MB
+@(private = "file")
+CODEX_INDEX_LINE_MAX :: 16 * 1024 // a longer index line is skipped
+
+// The least time between the starts of two passes (tests: 0).
+codex_disk_gap := 10 * time.Second
+
+// What the cache knows of a rollout (by its path). Strings: heap.
+@(private = "file")
+Codex_Meta :: struct {
+	size, mtime, created:     i64, // mtime and created: ns
+	id, cwd, source, account: string, // source "" = not a conversation to list (skip, a sub-agent's)
+}
+
+// A home's session_index.jsonl as last read.
+@(private = "file")
+Codex_Index :: struct {
+	size, mtime: i64,
+	titles:      map[string]string, // id -> title; heap
+}
+
+@(private = "file")
+codex_cache: struct {
+	mu:      sync.Mutex,
+	entries: map[string]Codex_Meta, // keys: heap
+	index:   map[string]Codex_Index, // by home; keys: heap
+	homes:   [dynamic]Disk_Home, // the next pass's homes (heap)
+	file:    string, // the saved cache ("" = not saved); heap
+	loaded:  bool, // the saved file was read (once a run)
+	running: bool, // a pass is on
+	changed: bool, // the rows are to be made again (claude_disk_tick)
+	started: time.Tick, // the last pass's start
+}
+
+// A row's source the list shows: the CLI's and Codex Desktop's; never `codex exec`'s, a
+// sub-agent's (no string: "") or one Deckhand does not know.
+codex_source_listed :: proc(source: string) -> bool {
+	return source == "cli" || source == "vscode"
+}
+
+// A listed rollout of a folder's, for the scan. Temp.
+Codex_Found :: struct {
+	id, account, title: string,
+	modified, created:  time.Time,
+}
+
+// The listed rollouts (codex_source_listed) whose cwd is cwd or real, byte for byte, newest first,
+// with their titles (session_index.jsonl; "" = none). Only the cache: no file is read. Main
+// thread. Temp.
+codex_disk_found :: proc(cwd, real: string) -> []Codex_Found {
+	out := make([dynamic]Codex_Found, context.temp_allocator)
+	sync.lock(&codex_cache.mu)
+	for _, e in codex_cache.entries {
+		if !codex_source_listed(e.source) || e.cwd == "" || (e.cwd != cwd && e.cwd != real) do continue
+		title := ""
+		if ix, ok := codex_cache.index[e.account]; ok do title = ix.titles[e.id]
+		append(&out, Codex_Found{id = strings.clone(e.id, context.temp_allocator), account = strings.clone(e.account, context.temp_allocator), title = strings.clone(title, context.temp_allocator), modified = {_nsec = e.mtime}, created = {_nsec = e.created}})
+	}
+	sync.unlock(&codex_cache.mu)
+	slice.sort_by(out[:], proc(a, b: Codex_Found) -> bool {return a.modified._nsec > b.modified._nsec})
+	return out[:]
+}
+
+// The saved cache goes in dir (the data dir; titles_load) from now on, read by the next pass.
+codex_disk_cache_at :: proc(dir: string) {
+	heap := runtime.heap_allocator()
+	path, _ := filepath.join({dir, CODEX_CACHE_FILE}, heap)
+	sync.lock(&codex_cache.mu)
+	defer sync.unlock(&codex_cache.mu)
+	delete(codex_cache.file, heap)
+	codex_cache.file = path
+	codex_cache.loaded = false
+}
+
+// A pass over the Codex homes on the worker, unless one is on or started less than
+// codex_disk_gap ago. Main thread (the scan).
+codex_disk_refresh :: proc() {
+	heap := runtime.heap_allocator()
+	homes := disk_homes(.Codex)
+	sync.lock(&codex_cache.mu)
+	defer sync.unlock(&codex_cache.mu)
+	if codex_cache.running || (codex_cache.started != {} && time.tick_since(codex_cache.started) < codex_disk_gap) do return
+	for h in codex_cache.homes {
+		delete(h.account, heap)
+		delete(h.root, heap)
+	}
+	clear(&codex_cache.homes)
+	if codex_cache.homes.allocator.procedure == nil do codex_cache.homes = make([dynamic]Disk_Home, heap)
+	for h in homes do append(&codex_cache.homes, Disk_Home{account = strings.clone(h.account, heap), root = strings.clone(h.root, heap)})
+	codex_cache.running = true
+	codex_cache.started = time.tick_now()
+	context.allocator = heap // the thread frees itself with it
+	thread.create_and_start(codex_pass, runtime.default_context(), self_cleanup = true)
+}
+
+// Whether the rows are to be made again (a pass stored something), and from now on not. Main thread.
+codex_disk_take_changed :: proc() -> bool {
+	sync.lock(&codex_cache.mu)
+	defer sync.unlock(&codex_cache.mu)
+	c := codex_cache.changed
+	codex_cache.changed = false
+	return c
+}
+
+// Whether a pass is on (tests wait on it).
+codex_disk_busy :: proc() -> bool {
+	sync.lock(&codex_cache.mu)
+	defer sync.unlock(&codex_cache.mu)
+	return codex_cache.running
+}
+
+@(private = "file")
+meta_free :: proc(m: ^Codex_Meta) {
+	heap := runtime.heap_allocator()
+	delete(m.id, heap)
+	delete(m.cwd, heap)
+	delete(m.source, heap)
+	delete(m.account, heap)
+	m^ = {}
+}
+
+// A source as kept: letters, digits, '_', '-' and '.' only, else "?" (one Deckhand does not know).
+@(private = "file")
+source_kept :: proc(s: string) -> string {
+	for ch in transmute([]u8)s do if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-' || ch == '.') do return "?"
+	return cut_utf8(s, CODEX_SOURCE_MAX)
+}
+
+// Stores what a rollout's first line says (under the lock).
+@(private = "file")
+meta_put :: proc(f: Disk_File, cwd, source: string) {
+	heap := runtime.heap_allocator()
+	m := Codex_Meta{size = f.size, mtime = f.modified._nsec, created = f.created._nsec, id = strings.clone(f.id, heap), cwd = strings.clone(cwd, heap), source = strings.clone(source_kept(source), heap), account = strings.clone(f.account, heap)}
+	if e, ok := &codex_cache.entries[f.path]; ok {
+		meta_free(e)
+		e^ = m
+		return
+	}
+	if len(codex_cache.entries) >= CODEX_CACHE_MAX {
+		meta_free(&m)
+		return
+	}
+	codex_cache.entries[strings.clone(f.path, heap)] = m
+}
+
+@(private = "file")
+codex_publish :: proc() {
+	sync.lock(&codex_cache.mu)
+	codex_cache.changed = true
+	sync.unlock(&codex_cache.mu)
+	if platform.wake != nil do platform.wake()
+}
+
+// One pass (codex_disk_refresh). The worker.
+@(private = "file")
+codex_pass :: proc() {
+	heap := runtime.heap_allocator()
+	sync.lock(&codex_cache.mu)
+	homes := make([]Disk_Home, len(codex_cache.homes), context.temp_allocator)
+	for h, i in codex_cache.homes do homes[i] = {account = strings.clone(h.account, context.temp_allocator), root = strings.clone(h.root, context.temp_allocator)}
+	file := strings.clone(codex_cache.file, context.temp_allocator)
+	load := !codex_cache.loaded && file != ""
+	if load do codex_cache.loaded = true
+	sync.unlock(&codex_cache.mu)
+
+	saved: map[string]Codex_Meta // temp
+	if load do saved = codex_cache_read(file)
+	files := disk_files(.Codex, homes)
+	todo := make([dynamic]Disk_File, context.temp_allocator)
+	dirty, changed := false, false
+	{
+		sync.lock(&codex_cache.mu)
+		defer sync.unlock(&codex_cache.mu)
+		if codex_cache.entries.allocator.procedure == nil do codex_cache.entries = make(map[string]Codex_Meta, heap)
+		seen := make(map[string]bool, len(files), context.temp_allocator)
+		for f in files do seen[f.path] = true
+		// files gone (or no longer listed: a home removed, past a ceiling)
+		gone := make([dynamic]string, context.temp_allocator)
+		for k in codex_cache.entries do if !seen[k] do append(&gone, k)
+		for k in gone {
+			e := codex_cache.entries[k]
+			meta_free(&e)
+			delete_key(&codex_cache.entries, k)
+			delete(k, heap)
+		}
+		if len(gone) > 0 do dirty, changed = true, true
+		carried := 0
+		for f in files {
+			if e, ok := codex_cache.entries[f.path]; ok {
+				if e.size != f.size || e.mtime != f.modified._nsec do append(&todo, f)
+				continue
+			}
+			if s, ok := saved[f.path]; ok && s.size == f.size && s.mtime == f.modified._nsec && s.id == f.id {
+				meta_put(f, s.cwd, s.source)
+				carried += 1
+				changed = true
+				continue
+			}
+			append(&todo, f)
+		}
+		if load && carried != len(saved) do dirty = true
+	}
+	if codex_index_refresh(homes) do changed = true
+	if changed do codex_publish()
+	// the first lines, each read in a scratch arena (a pass may read thousands)
+	scratch: virtual.Arena
+	_ = virtual.arena_init_growing(&scratch)
+	defer virtual.arena_destroy(&scratch)
+	for f, i in todo {
+		{
+			context.temp_allocator = virtual.arena_allocator(&scratch)
+			cwd, source, skip := disk_first_line(.Codex, f.path)
+			if skip do cwd, source = "", ""
+			sync.lock(&codex_cache.mu)
+			meta_put(f, cwd, source)
+			sync.unlock(&codex_cache.mu)
+		}
+		free_all(virtual.arena_allocator(&scratch))
+		dirty = true
+		if (i + 1) % CODEX_BATCH == 0 || i == len(todo) - 1 do codex_publish()
+	}
+	if dirty && file != "" do codex_cache_save(file)
+	free_all(context.temp_allocator)
+	sync.lock(&codex_cache.mu)
+	codex_cache.running = false
+	sync.unlock(&codex_cache.mu)
+	if platform.wake != nil do platform.wake()
+}
+
+// The saved cache's entries (by path), what of it parses. The worker. Temp.
+@(private = "file")
+codex_cache_read :: proc(file: string) -> map[string]Codex_Meta {
+	out := make(map[string]Codex_Meta, context.temp_allocator)
+	fi, err := os.stat(file, context.temp_allocator)
+	if err != nil || fi.type != .Regular || fi.size > CODEX_CACHE_BYTES_MAX do return out
+	data, rerr := os.read_entire_file(file, context.temp_allocator)
+	if rerr != nil do return out
+	text := string(data)
+	first := true
+	for line in strings.split_lines_iterator(&text) {
+		if first {
+			first = false
+			if line != CODEX_CACHE_VERSION do return out
+			continue
+		}
+		if len(out) >= CODEX_CACHE_MAX do break
+		f := strings.split(line, "\t", context.temp_allocator)
+		if len(f) != 8 do continue
+		size, ok1 := strconv.parse_i64(f[0])
+		mtime, ok2 := strconv.parse_i64(f[1])
+		created, ok3 := strconv.parse_i64(f[2])
+		source, id, account, cwd, path := f[3], f[4], f[5], f[6], f[7]
+		if !ok1 || !ok2 || !ok3 || size < 0 || !codex_id_ok(id) || !filepath.is_abs(path) || !filepath.is_abs(account) do continue
+		if source_kept(source) != source || strings.index_byte(line, 0) >= 0 do continue
+		if cwd != "" && (!filepath.is_abs(cwd) || len(cwd) > CODEX_CWD_MAX) do continue
+		out[path] = {size = size, mtime = mtime, created = created, id = id, cwd = cwd, source = source, account = account}
+	}
+	return out
+}
+
+// Writes the cache (codex_cache_read's format). The worker.
+@(private = "file")
+codex_cache_save :: proc(file: string) {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, CODEX_CACHE_VERSION)
+	strings.write_byte(&b, '\n')
+	sync.lock(&codex_cache.mu)
+	for p, e in codex_cache.entries {
+		if strings.contains_any(p, "\t\n\r") || strings.contains_any(e.cwd, "\t\n\r") || strings.contains_any(e.account, "\t\n\r") do continue
+		fmt.sbprintf(&b, "%d\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", e.size, e.mtime, e.created, e.source, e.id, e.account, e.cwd, p)
+	}
+	sync.unlock(&codex_cache.mu)
+	if err := write_atomic(file, strings.to_string(b)); err != "" do log_ln("Deckhand: could not save the Codex session cache:", err)
+}
+
+// A title from session_index.jsonl as other titles are shown: one line, control characters and
+// invalid UTF-8 replaced (clean_title), invisible characters dropped (one_line), at most
+// CLAUDE_TITLE_MAX bytes. Temp.
+@(private = "file")
+codex_title_clean :: proc(s: string) -> string {
+	return cut_utf8(strings.trim_space(one_line(clean_title(s, context.temp_allocator), context.temp_allocator)), CLAUDE_TITLE_MAX)
+}
+
+// Each home's session_index.jsonl read again where its size or mtime changed (only its last
+// CODEX_INDEX_BYTES_MAX; lines over CODEX_INDEX_LINE_MAX skipped); a home gone, or its file, forgotten.
+// Never written. Whether anything changed. The worker.
+@(private = "file")
+codex_index_refresh :: proc(homes: []Disk_Home) -> (changed: bool) {
+	heap := runtime.heap_allocator()
+	forget :: proc(k: string) {
+		heap := runtime.heap_allocator()
+		ix := codex_cache.index[k]
+		for id, t in ix.titles {
+			delete(id, heap)
+			delete(t, heap)
+		}
+		delete(ix.titles)
+		key := k
+		delete_key(&codex_cache.index, k)
+		delete(key, heap)
+	}
+	for h in homes {
+		path := strings.concatenate({h.account, "/", CODEX_INDEX_FILE}, context.temp_allocator)
+		// never a FIFO or a link (open would block, or go elsewhere)
+		fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NONBLOCK, .NOFOLLOW, .CLOEXEC})
+		st: posix.stat_t
+		if fd < 0 || posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) {
+			if fd >= 0 do posix.close(fd)
+			sync.lock(&codex_cache.mu)
+			if h.account in codex_cache.index {
+				for k in codex_cache.index do if k == h.account {
+					forget(k)
+					break
+				}
+				changed = true
+			}
+			sync.unlock(&codex_cache.mu)
+			continue
+		}
+		size := i64(st.st_size)
+		mtime := i64(st.st_mtim.tv_sec) * 1e9 + i64(st.st_mtim.tv_nsec)
+		sync.lock(&codex_cache.mu)
+		old, had := codex_cache.index[h.account]
+		sync.unlock(&codex_cache.mu)
+		if had && old.size == size && old.mtime == mtime {
+			posix.close(fd)
+			continue
+		}
+		start := max(0, size - CODEX_INDEX_BYTES_MAX)
+		buf := make([]u8, size - start, context.temp_allocator)
+		got := 0
+		for got < len(buf) {
+			want := len(buf) - got
+			n := int(posix.pread(fd, raw_data(buf[got:]), uint(want), posix.off_t(start + i64(got))))
+			if n <= 0 do break
+			got += n
+		}
+		posix.close(fd)
+		text := string(buf[:got])
+		if start > 0 { // it starts inside a line
+			nl := strings.index_byte(text, '\n')
+			text = nl >= 0 ? text[nl + 1:] : ""
+		}
+		titles := make(map[string]string, heap)
+		for line in strings.split_lines_iterator(&text) {
+			if len(line) < 2 || len(line) > CODEX_INDEX_LINE_MAX || line[0] != '{' || !json_depth_ok(line) do continue
+			v, perr := jg.parse(transmute([]u8)line, .JSON, false, context.temp_allocator)
+			if perr != nil do continue
+			o, _ := v.(json.Object)
+			id, _ := o["id"].(json.String)
+			name, nok := o["thread_name"].(json.String)
+			if !nok || !codex_id_ok(string(id)) do continue
+			t := strings.clone(codex_title_clean(string(name)), heap)
+			if prev, ok := &titles[string(id)]; ok {
+				delete(prev^, heap)
+				prev^ = t
+			} else do titles[strings.clone(string(id), heap)] = t
+		}
+		sync.lock(&codex_cache.mu)
+		if codex_cache.index.allocator.procedure == nil do codex_cache.index = make(map[string]Codex_Index, heap)
+		for k in codex_cache.index do if k == h.account {
+			forget(k)
+			break
+		}
+		codex_cache.index[strings.clone(h.account, heap)] = {size = size, mtime = mtime, titles = titles}
+		sync.unlock(&codex_cache.mu)
+		changed = true
+	}
+	// homes no longer listed
+	sync.lock(&codex_cache.mu)
+	defer sync.unlock(&codex_cache.mu)
+	stale := make([dynamic]string, context.temp_allocator)
+	for k in codex_cache.index {
+		kept := false
+		for h in homes do if h.account == k do kept = true
+		if !kept do append(&stale, k)
+	}
+	for k in stale do forget(k)
+	if len(stale) > 0 do changed = true
+	return
+}
+
+when TEST_HOOKS {
+	// Forgets everything, the saved file's place too (tests); waits for a pass first.
+	codex_disk_cache_clear :: proc() {
+		for codex_disk_busy() do time.sleep(time.Millisecond)
+		heap := runtime.heap_allocator()
+		sync.lock(&codex_cache.mu)
+		defer sync.unlock(&codex_cache.mu)
+		for k, &e in codex_cache.entries {
+			meta_free(&e)
+			delete(k, heap)
+		}
+		clear(&codex_cache.entries)
+		ks := make([dynamic]string, context.temp_allocator)
+		for k in codex_cache.index do append(&ks, k)
+		for k in ks {
+			ix := codex_cache.index[k]
+			for id, t in ix.titles {
+				delete(id, heap)
+				delete(t, heap)
+			}
+			delete(ix.titles)
+			delete_key(&codex_cache.index, k)
+			delete(k, heap)
+		}
+		delete(codex_cache.file, heap)
+		codex_cache.file = ""
+		codex_cache.loaded = false
+		codex_cache.changed = false
+		codex_cache.started = {}
 	}
 }

@@ -24,9 +24,10 @@ package core
 //     by stat (the file it reported, else its account's folder for the project).
 //   - A click resumes the conversation in a Claude-only session under its account, by the
 //     transcript's absolute path (--resume <path>), with no flags (claude_disk_resume).
-//   - Codex conversations (codex_disk.odin, docs/CODEX.md §2b): the newest rollouts in Codex's
-//     sessions/YYYY/MM/DD folders, read through the same cache and worker, but only their first
-//     line (session_meta: its id and cwd); rows with no title and no path, resumed by id.
+//   - Codex conversations (codex_disk.odin, docs/CODEX.md §2b): the rollouts in Codex's
+//     sessions/YYYY/MM/DD folders, from that file's own saved cache, filled on its worker (only
+//     their first line, session_meta: its id, cwd and source), titled from session_index.jsonl;
+//     rows with no path, resumed by id.
 //   - Projects where only Claude ran (scan_projects, on the Rescan worker): every folder under
 //     each account's projects/ whose newest transcript records a `cwd` whose own folder name is
 //     that folder's; never a folder decoded from its name. Projects where only Codex ran: the
@@ -126,7 +127,9 @@ line_parsable :: proc(line: string) -> bool {
 @(private = "file")
 found_read :: proc(h: Harness, path: string, size: i64) -> (title, cwd: string, sidechain: bool) {
 	if h != .Claude {
-		cwd, sidechain = disk_first_line(h, path)
+		source: string
+		cwd, source, sidechain = disk_first_line(h, path)
+		if !codex_source_listed(source) do sidechain = true
 		return
 	}
 	f, err := os.open(path)
@@ -331,6 +334,7 @@ claude_disk_tick :: proc() {
 	changed := found_cache.changed
 	found_cache.changed = false
 	sync.unlock(&found_cache.mu)
+	if codex_disk_take_changed() do changed = true // Codex rollouts read on its own worker (codex_disk.odin)
 	if !changed do return
 	claude_disk_rescan()
 	window_state_changed()
@@ -342,7 +346,7 @@ claude_disk_wait :: proc() {
 		sync.lock(&found_cache.mu)
 		busy := found_cache.running || len(found_cache.queue) > 0
 		sync.unlock(&found_cache.mu)
-		if !busy do break
+		if !busy && !codex_disk_busy() do break
 		time.sleep(10 * time.Millisecond)
 	}
 	claude_disk_tick()
@@ -501,23 +505,20 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	}
 	// Codex conversations that ran in p's folder. Deckhand's own are its history's rows; an id
 	// Claude's transcript has is Claude's (one id, one harness: codex.odin)
-	// (codex_disk.odin: its lister and first-line reader)
-	h :: Harness.Codex
+	// (codex_disk.odin: its cache, filled on its worker; nothing read here)
+	codex_disk_refresh()
 	m := 0
 	// the cwd as Codex wrote it, byte for byte: the project's path or its real path (never a
 	// path from the file resolved: a planted one would cost a walk per file per rescan)
-	preal := fs_real(p.cwd)
-	for c in disk_files(h) {
+	for c in codex_disk_found(p.cwd, fs_real(p.cwd)) {
 		if m >= MAX_SESSIONS do break
 		if rec, _ := claude_record(c.id); rec != nil do continue
 		if session_listed(state.sessions[:], c.id) || session_listed(state.chats[:], c.id) do continue
 		dup := false
 		for f in out do if f.id == c.id do dup = true
 		if dup do continue
-		_, cwd, skip, known := found_info(h, c.path, c.size, c.modified, &budget)
-		if !known || skip || (cwd != p.cwd && cwd != preal) do continue
 		m += 1
-		append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), modified = c.modified, created = c.created, listed = true, harness = h})
+		append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), title = strings.clone(c.title), modified = c.modified, created = c.created, listed = true, harness = .Codex})
 	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
@@ -707,8 +708,11 @@ found_cwd :: proc(path: string, size, mtime: i64, h := Harness.Claude) -> (cwd: 
 		return
 	}
 	sync.unlock(&cwd_cache.mu)
-	if h != .Claude do cwd, sidechain = disk_first_line(h, path)
-	else {
+	if h != .Claude {
+		source: string
+		cwd, source, sidechain = disk_first_line(h, path)
+		if !codex_source_listed(source) do sidechain = true // only the found rows' kinds (codex_disk.odin)
+	} else {
 		ok: bool
 		if cwd, sidechain, ok = transcript_cwd(path, size); !ok do return
 	}

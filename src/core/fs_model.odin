@@ -102,7 +102,9 @@ fs_trash_or_fake :: proc(path: string) -> bool {
 	dir := "build/test-trash"
 	os.make_directory_all(dir)
 	to, _ := filepath.join({dir, fmt.tprintf("%d-%s", fs_model.gen, filepath.base(path))}, context.temp_allocator)
-	return os.rename(path, to) == nil
+	if os.rename(path, to) != nil do return false
+	fs_trash_where = fs_real(to) // restore_path can bring it back (fs_restore.odin)
+	return true
 }
 
 // The real path (symlinks resolved): realpath of the longest part that
@@ -701,7 +703,6 @@ fs_model_changed :: proc(path: string, watcher_flags: Maybe(u32) = nil) {
 // window's when it is another process. Its watcher would tell it too, but behind whatever queued
 // first: a burst of thousands of events (a checkout, npm install) held the user's new file back
 // for seconds (the files scene under load).
-@(private = "file")
 fs_changed_ours :: proc(path: string) {
 	fs_model_changed(path)
 	window_path_changed(path)
@@ -761,7 +762,8 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 	p, e := fs_delete_check(path, caller)
 	if e != "" do return e
-	return fs_trash_checked(p)
+	err, _ = fs_trash_checked(p)
+	return
 }
 
 // fs_delete's rules, nothing moved: inside a project (fs_check_write: never its folder, never .git),
@@ -906,17 +908,23 @@ fs_delete_summary :: proc(plan: []string) -> string {
 	return strings.to_string(b)
 }
 
-// Moves a checked path (fs_delete_check) to the Trash; what changed is told.
-fs_trash_checked :: proc(p: string) -> (err: string) {
-	fs_trash_why = ""
+// Moves a checked path (fs_delete_check) to the Trash; what changed is told. restore_id: what
+// restore_path takes to put it back ("" = the Trash did not say where it went; fs_restore.odin).
+fs_trash_checked :: proc(p: string) -> (err: string, restore_id: string) {
+	fs_trash_why, fs_trash_where = "", ""
+	st: posix.stat_t
+	known := posix.lstat(strings.clone_to_cstring(p, context.temp_allocator), &st) == .OK
 	if !fs_trash_fn(p) {
 		why := fs_trash_why
-		fs_trash_why = ""
-		return why != "" ? why : "could not move it to the Trash"
+		fs_trash_why, fs_trash_where = "", ""
+		return why != "" ? why : "could not move it to the Trash", ""
 	}
+	where_ := fs_trash_where
+	fs_trash_where = ""
+	if known do restore_id = fs_trashed_add(p, where_, u64(st.st_dev), u64(st.st_ino))
 	fs_changed_ours(p)
 	window_files_deleted(p) // open buffers of them say so
-	return ""
+	return "", restore_id
 }
 
 // Why the last fs_trash_fn failed, when it could say ("" = the plain message): the Linux core's
@@ -1219,4 +1227,56 @@ editors_renamed :: proc(from, to: string) {
 		window_view_moved(tab.id, np) // its buffer follows (tab_views.odin)
 	}
 	window_watch_sync()
+}
+
+// ---- find_files ----
+
+FIND_FILES_DEFAULT :: 100 // results when limit is not given
+FIND_FILES_MAX :: 500
+
+// find_files's data: the project's files (as the Files tree's filter lists them: git's list,
+// ignored ones left out; else a walk that skips hidden folders) that match every word of query,
+// best first (files_filter_match), relative to root: {root, paths, more?}. root: a known project
+// folder ("" = the caller's, as relative paths start: fs_base_for). Never inside .git; a file
+// settings_credential flags is left out for everyone; for anyone but the user here also anything
+// at or inside a credential place (fs_credential_place). Temp allocator.
+fs_find_files :: proc(root, query: string, limit: int, caller: Caller) -> (data: string, err: string) {
+	if strings.trim_space(query) == "" do return "", "query is empty"
+	base := root != "" ? root : fs_base_for(caller)
+	if base == "" do return "", "no project here: give root"
+	p, _, e := fs_check(base, caller, allow_root = true)
+	if e != "" do return "", e
+	if list_index(fs_roots(), p) < 0 do return "", "root must be a project folder"
+	n := limit <= 0 ? FIND_FILES_DEFAULT : min(limit, FIND_FILES_MAX)
+	user := fs_user_here(caller)
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"root":`)
+	json_quote(&b, p)
+	strings.write_string(&b, `,"paths":[`)
+	shown, more := 0, false
+	// a project that is itself in a credential place: nothing for anyone else
+	if user || !fs_credential_place(p) {
+		files := fs_project_files(p)
+		ids := credential_ids() // once for every result
+		none: [1]Cred_Id
+		if len(ids) == 0 do ids = none[:0]
+		for i in files_filter_match(files, query) {
+			rel := files[i]
+			if fs_in_git(rel) do continue
+			full := strings.concatenate({p, "/", rel}, context.temp_allocator)
+			if settings_credential(full, ids) do continue
+			if !user && fs_credential_place(full) do continue
+			if shown == n {
+				more = true
+				break
+			}
+			if shown > 0 do strings.write_byte(&b, ',')
+			json_quote(&b, rel)
+			shown += 1
+		}
+	}
+	strings.write_byte(&b, ']')
+	if more do strings.write_string(&b, `,"more":true`)
+	strings.write_byte(&b, '}')
+	return strings.to_string(b), ""
 }

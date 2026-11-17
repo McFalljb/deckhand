@@ -1172,6 +1172,7 @@ confirm_pending :: proc(token: string) {
 		case core.Create_File: cmd = core.Create_File{path = c.path, confirm = token}
 		case core.Create_Dir:  cmd = core.Create_Dir{path = c.path, confirm = token}
 		case core.Rename_Path: cmd = core.Rename_Path{from = c.from, to = c.to, confirm = token}
+		case core.Fs_Copy:     cmd = core.Fs_Copy{from = c.from, to = c.to, unique = c.unique, confirm = token}
 		case core.Worktree_Cleanup: cmd = core.Worktree_Cleanup{path = c.path, confirm = token}
 		case core.Job_Delete:  cmd = core.Job_Delete{job = c.job, confirm = token}
 		case core.Changes_Discard: cmd = core.Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}

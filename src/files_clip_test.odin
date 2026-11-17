@@ -225,6 +225,10 @@ files_clip_paste_and_undo_through_event :: proc(t: ^testing.T) {
 	// Review round 1: a cut is its tree's only. Another project on screen drops it (and its
 	// dimming); back in the first tree nothing is cut any more, nothing moves
 	fc_select(dir, "a.txt")
+	fc_key(.D) // an operation to undo, made before the root changes
+	fc_wait_copy()
+	testing.expect(t, fc_has(dir, "a copy.txt"), "duplicated")
+	fc_select(dir, "a.txt")
 	fc_key(.X)
 	other := fmt.aprintf("%s-other", dir)
 	os.make_directory_all(other)
@@ -234,11 +238,17 @@ files_clip_paste_and_undo_through_event :: proc(t: ^testing.T) {
 	core.files_refresh()
 	core.files_state_gen += 1
 	testing.expect(t, !files_clip_is_cut(strings.concatenate({dir, "/a.txt"}, context.temp_allocator)), "another tree: the cut is dropped")
+	files_copy_tick() // a frame: the root watch (the undo stack goes too)
 	fc_key(.V)
 	testing.expect(t, fc_has(dir, "a.txt") && !os.exists(fmt.tprintf("%s/a.txt", other)), "nothing moved into the other project")
 	state.open_sessions[0].cwd = strings.clone(dir)
 	core.files_refresh()
 	core.files_state_gen += 1
+	files_copy_tick()
+	// back in the first tree: what was done before the switch is not undone (a stack per root)
+	fc_focus("files")
+	fc_key(.Z)
+	testing.expect(t, fc_has(dir, "a copy.txt"), "the undo stack went with the root change")
 
 	// P3 (a): Paste from the empty space's menu (the root's) goes to the root, not the selected folder
 	fc_select(dir, "src/keep.txt")

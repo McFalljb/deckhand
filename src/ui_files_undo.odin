@@ -25,6 +25,11 @@ files_undo_record :: proc(kind: core.Files_Undo_Kind, root: string, paths: []str
 	return core.files_undo_push(&undo, root, core.files_undo_make(kind, root, paths, froms, ids))
 }
 
+// The tree shows root now: another root's operations go (files_root_watch).
+files_undo_root_changed :: proc(root: string) {
+	if undo.root != root do core.files_undo_clear(&undo, root)
+}
+
 // A toast for an operation; while serial is the last one, it has an Undo button.
 files_toast_undo :: proc(text: string, serial: u64) {
 	if serial == 0 {

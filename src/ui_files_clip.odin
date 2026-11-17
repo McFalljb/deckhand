@@ -108,6 +108,21 @@ clip_set :: proc(paths: []string, cut: bool) {
 	app.redraw = true
 }
 
+// Per frame: the tree's root changed (another session or project selected, another checkout,
+// a second click on a project row): a cut is dropped and the undo stack emptied, at once, even
+// when the first root comes back before anything else looks.
+@(private = "file")
+watched_root: string
+
+files_root_watch :: proc() {
+	root := core.files_root()
+	if root == watched_root do return
+	delete(watched_root, runtime.heap_allocator())
+	watched_root = strings.clone(root, runtime.heap_allocator())
+	clip_sync()
+	files_undo_root_changed(root)
+}
+
 // A cut whose tree is no longer on screen (another project or checkout) is dropped, its rows'
 // dimming with it: it never moves into another tree.
 @(private = "file")
@@ -360,6 +375,7 @@ early_clear :: proc() {
 
 // Per frame: a copy's finished event came; the next item starts. True: draw again.
 files_copy_tick :: proc() -> bool {
+	files_root_watch()
 	if !job.running do return false
 	if !job.finished {
 		// the core's link dropped or was replaced, or no finished for too long: its end is unknown

@@ -163,10 +163,11 @@ handoff_menus :: proc(t: ^testing.T) {
 	defer teardown(&f)
 	want := "New session on nuc in api|New session on box in api (~/work/api)|New session on box in api (/srv/api)"
 
-	// the project's menu: right after its New session (and New session with flags…)
+	// the project's menu: right after its New session (and New session with flags…, while an agent
+	// is installed here: not on every machine the tests run on)
 	menu_open(Menu_Project(1), {})
 	all := labels(menu_items())
-	testing.expectf(t, strings.contains(all, strings.concatenate({"New session|New session with flags…|", want}, context.temp_allocator)), "project menu: %q", all)
+	testing.expectf(t, strings.contains(all, strings.concatenate({"New session|", want}, context.temp_allocator)) || strings.contains(all, strings.concatenate({"New session|New session with flags…|", want}, context.temp_allocator)), "project menu: %q", all)
 	// each row is that project's harness picker, with no folder of this Mac's
 	for it in menu_items() do if strings.has_prefix(it.label, "New session on ") {
 		ns, ok := it.picker.?

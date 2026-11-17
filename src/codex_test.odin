@@ -1053,7 +1053,7 @@ codex_disk_long_cwd_skipped :: proc(t: ^testing.T) {
 	for c in ([]string{long, "/tmp/x\\u0000y", "/tmp/ok"}) {
 		path := fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id)
 		_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":"cli"}}}}`+"\n", id, c))
-		cwd, source, skip := core.codex_first_line(path)
+		cwd, source, skip, _ := core.codex_first_line(path)
 		testing.expectf(t, skip == (c != "/tmp/ok"), "%d bytes: skip %v", len(c), skip)
 		if c == "/tmp/ok" do testing.expect(t, cwd == "/tmp/ok" && source == "cli", cwd)
 	}
@@ -1095,7 +1095,7 @@ codex_only_folders_are_projects :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
 	testing.expect(t, !has(cli), "the launch reads no rollout")
 	testing.expect(t, core.claude_startup_rescan_due(), "a Codex home with sessions/")
-	core.rescan_now()
+	cx_rescan() // the Rescan's worker (rescan_now on the main thread takes the cache as it is)
 	testing.expect(t, has(cli) && has(ide), "interactive threads' folders")
 	testing.expect(t, !has(ex) && !has(sub), "never codex exec's or a subagent's")
 	if p := core.project_by_cwd(cli); p != nil do testing.expect(t, p.claude && p.dir == "", "found on disk only")
@@ -1110,7 +1110,7 @@ codex_only_folders_are_projects :: proc(t: ^testing.T) {
 	testing.expect(t, !projects[0].claude, "pi's folder stays pi's")
 	// the rollout gone: the next Rescan drops the folder
 	os.remove(cli_path)
-	core.rescan_now()
+	cx_rescan()
 	testing.expect(t, !has(cli) && has(ide), "dropped once no rollout records it")
 }
 
@@ -1137,14 +1137,18 @@ codex_projects_from_cache :: proc(t: ^testing.T) {
 	cx_rollout(home, "2026/11/12", cx_id(1), a, `"cli"`)
 	cx_rollout(home, "2026/11/11", cx_id(2), strings.concatenate({b, "/"}), `"vscode"`) // a trailing slash
 	cx_rollout(home, "2026/11/10", cx_id(3), fake_home, `"cli"`)
+	link := fmt.tprintf("%s/homelink", cx_dir("links")) // a link to the home folder: the same folder
+	posix.symlink(strings.clone_to_cstring(fake_home, context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator))
+	cx_rollout(home, "2026/11/09", cx_id(4), link, `"cli"`)
 	// the rows' pass reads every rollout once; the Rescan after it reads none
 	pid := core.run_command(core.Add_Project{cwd = a}, CX_UI).created_id
 	cx_disk_show(pid)
 	before := core.claude_disk_bytes_read
-	core.rescan_now()
+	cx_rescan()
 	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
 	testing.expect(t, core.project_by_cwd(b) != nil, "a Codex-only folder (its cwd cleaned)")
 	testing.expect(t, core.project_by_cwd(fake_home) == nil, "never the home folder")
+	testing.expect(t, core.project_by_cwd(link) == nil, "never a link to the home folder")
 	// b's row: its rollout's cwd had a trailing slash
 	if p := core.project_by_cwd(b); p != nil {
 		cx_disk_show(p.id)
@@ -1154,9 +1158,97 @@ codex_projects_from_cache :: proc(t: ^testing.T) {
 	cx_cache_clear()
 	core.codex_disk_cache_at(data)
 	before = core.claude_disk_bytes_read
-	core.rescan_now()
+	cx_rescan()
 	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
 	testing.expect(t, core.project_by_cwd(b) != nil, "from the saved cache")
+}
+
+// A Rescan on its worker (the Rescan command), waited for.
+@(private = "file")
+cx_rescan :: proc() {
+	core.run_command(core.Rescan{}, CX_UI)
+	for _ in 0 ..< 2000 {
+		core.inbox_drain()
+		if core.scan_thread == nil do break
+		time.sleep(5 * time.Millisecond)
+	}
+}
+
+// The synchronous scan on the main thread (a new Chats or main folder: rescan_now) never reads a
+// rollout: Codex's folders come from the cache as it is, and a pass is started on the worker; the
+// next Rescan (its worker) has what that pass read.
+@(test)
+codex_rescan_now_uses_cache :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("syncscan")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	a := cx_dir("sync-a")
+	cx_rollout(home, "2026/11/12", cx_id(1), a, `"cli"`)
+	inline := core.codex_disk_passes_inline
+	core.rescan_now()
+	testing.expect_value(t, core.codex_disk_passes_inline - inline, 0)
+	core.claude_disk_wait() // the pass it started, on the worker
+	cx_rescan()
+	testing.expect(t, core.project_by_cwd(a) != nil, "the next Rescan has it")
+}
+
+// The lister looks at no more than codex_disk_dir_entries_max entries of any folder (a folder of
+// junk is read no further), and a saved cache row longer than a row can be is not used.
+@(test)
+codex_disk_lister_bounded :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	defer cx_cache_clear()
+	home := cx_dir("bounded")
+	old := core.codex_disk_dir_entries_max
+	core.codex_disk_dir_entries_max = 50
+	defer core.codex_disk_dir_entries_max = old
+	cx_rollout(home, "2026/11/12", cx_id(1), "/x", `"cli"`)
+	for i in 0 ..< 300 {
+		_ = os.write_entire_file(fmt.tprintf("%s/sessions/2026/11/12/junk-%d", home, i), nil)
+		os.make_directory_all(fmt.tprintf("%s/sessions/2026/%d", home, 100 + i)) // numbered month folders
+	}
+	before := core.codex_disk_entries_seen
+	_ = core.disk_files(.Codex, {{account = home, root = fmt.tprintf("%s/sessions", home)}})
+	seen := core.codex_disk_entries_seen - before
+	testing.expectf(t, seen <= 50 * 60, "%d entries looked at", seen) // ≤ 50 a folder, each folder walked
+	testing.expectf(t, seen < 600, "%d entries looked at (a folder of 300 is read no further than 50)", seen)
+	// a saved row: at most 16 KB, exactly 8 fields
+	file := fmt.tprintf("%s/codex-sessions.tsv", cx_dir("rows"))
+	row :: proc(path: string) -> string {
+		return fmt.tprintf("10\t20\t30\tcli\t%s\t/acct\t/cwd\t%s\n", cx_id(7), path)
+	}
+	text := strings.concatenate({"deckhand codex sessions 1\n", row("/ok/path"), row(strings.concatenate({"/", strings.repeat("a", 20_000, context.temp_allocator)})), strings.repeat("\t", 100_000, context.temp_allocator), "\n"})
+	_ = os.write_entire_file(file, transmute([]u8)text)
+	when core.TEST_HOOKS do testing.expect_value(t, core.codex_disk_cache_rows(file), 1)
+}
+
+// A rollout that cannot be read now (permissions, an I/O error) is not remembered as not a
+// conversation: the next pass reads it again (its size and mtime unchanged).
+@(test)
+codex_disk_unreadable_retried :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("unreadable")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	dir := cx_dir("unreadable-proj")
+	path := cx_rollout(home, "2026/11/12", cx_id(1), dir, `"cli"`)
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	posix.chmod(cpath, {})
+	defer posix.chmod(cpath, {.IRUSR, .IWUSR})
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	cx_disk_show(pid)
+	testing.expect_value(t, len(cx_found()), 0)
+	posix.chmod(cpath, {.IRUSR, .IWUSR})
+	cx_disk_show(pid)
+	testing.expectf(t, cx_id(1) in cx_found(), "read again once readable: %v", cx_found())
 }
 
 // A Codex rollout under home's sessions/<day> (a "YYYY/MM/DD" path) whose session_meta says cwd and

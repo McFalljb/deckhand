@@ -43,6 +43,7 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:thread"
 import "core:time"
 
@@ -140,7 +141,7 @@ line_parsable :: proc(line: string) -> bool {
 found_read :: proc(h: Harness, path: string, size: i64) -> (title, cwd: string, sidechain: bool) {
 	if h != .Claude {
 		source: string
-		cwd, source, sidechain = disk_first_line(h, path)
+		cwd, source, sidechain, _ = disk_first_line(h, path)
 		if !codex_source_listed(source) do sidechain = true
 		return
 	}
@@ -781,6 +782,18 @@ claude_scan_dirs: [dynamic]Claude_Scan_Dir
 // The home folder (HOME, clean, and its real path), taken with claude_scan_dirs: never a project
 // found on disk (found_project). Heap.
 claude_scan_home: [2]string
+// The home folder's identity (device and inode: a link to it, or its name in another case on a
+// case-insensitive volume, is the same folder), taken with it.
+claude_scan_home_id: struct {
+	dev: posix.dev_t,
+	ino: posix.ino_t,
+	ok:  bool,
+}
+
+// Whether this thread is the Rescan's worker (scan_worker, commands.odin): there a Codex pass
+// may run now; on the main thread (rescan_now) the scan takes the cache as it is.
+@(thread_local)
+claude_scan_on_worker: bool
 
 // The launch (main.odin, until the saved workspace is back): no transcript read on the main thread.
 claude_disk_launching: bool
@@ -812,9 +825,12 @@ claude_scan_prepare :: proc() {
 	}
 	for h in claude_scan_home do delete(h, heap)
 	claude_scan_home = {}
+	claude_scan_home_id = {}
 	if h := os.get_env("HOME", context.temp_allocator); h != "" && filepath.is_abs(h) {
 		c, _ := filepath.clean(h, heap)
 		claude_scan_home = {c, strings.clone(fs_real(c), heap)}
+		st: posix.stat_t
+		if posix.stat(strings.clone_to_cstring(c, context.temp_allocator), &st) == .OK do claude_scan_home_id = {dev = st.st_dev, ino = st.st_ino, ok = true}
 	}
 }
 
@@ -862,7 +878,10 @@ claude_scan_projects :: proc(projects: ^[dynamic]Project) {
 // new or changed rollouts read). Any thread.
 @(private = "file")
 codex_scan_projects :: proc(projects: ^[dynamic]Project, homes: []Disk_Home) {
-	codex_disk_pass_now(homes)
+	// on the main thread (rescan_now: a new Chats or main folder) never a read: the cache as it is,
+	// and a pass on the worker for the next Rescan
+	if claude_scan_on_worker do codex_disk_pass_now(homes)
+	else do codex_disk_start(homes, force = true)
 	for f in codex_disk_folders(homes) do found_project(projects, f.cwd, f.newest, f.oldest)
 }
 
@@ -873,6 +892,10 @@ codex_scan_projects :: proc(projects: ^[dynamic]Project, homes: []Disk_Home) {
 @(private = "file")
 found_project :: proc(projects: ^[dynamic]Project, c: string, newest, oldest: time.Time) {
 	for h in claude_scan_home do if h != "" && c == h do return
+	if claude_scan_home_id.ok {
+		st: posix.stat_t // followed: a link to the home folder is the home folder
+		if posix.stat(strings.clone_to_cstring(c, context.temp_allocator), &st) == .OK && st.st_dev == claude_scan_home_id.dev && st.st_ino == claude_scan_home_id.ino do return
+	}
 	found := false
 	for &p in projects do if p.cwd == c {
 		if time.diff(p.newest, newest) > 0 do p.newest = newest

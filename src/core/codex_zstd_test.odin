@@ -58,12 +58,12 @@ zst_rollout :: proc(dir: string, data: []u8, ext := ".jsonl.zst", id := ZST_ID) 
 codex_zst_first_line_good :: proc(t: ^testing.T) {
 	dir := zst_dir("good")
 	for data, i in ([][]u8{ZST_GOOD, ZST_WINDOW_8M}) {
-		cwd, _, skip := codex_first_line(zst_rollout(dir, data))
+		cwd, _, skip, _ := codex_first_line(zst_rollout(dir, data))
 		testing.expectf(t, !skip, "fixture %d skipped", i)
 		testing.expect_value(t, cwd, "/tmp/deckhand-zst-project")
 	}
 	// its id is checked against the name as for a plain one
-	_, _, skip := codex_first_line(zst_rollout(dir, ZST_GOOD, id = "01a1d0d6-5353-7ff3-9308-ff91070ad541"))
+	_, _, skip, _ := codex_first_line(zst_rollout(dir, ZST_GOOD, id = "01a1d0d6-5353-7ff3-9308-ff91070ad541"))
 	testing.expect(t, skip, "an id that is not its file's")
 }
 
@@ -90,7 +90,7 @@ codex_zst_first_line_untrusted :: proc(t: ^testing.T) {
 	}
 	for c in cases {
 		before := sync.atomic_load(&claude_disk_bytes_read)
-		_, _, skip := codex_first_line(zst_rollout(dir, c.data))
+		_, _, skip, _ := codex_first_line(zst_rollout(dir, c.data))
 		read := sync.atomic_load(&claude_disk_bytes_read) - before
 		testing.expectf(t, skip, "%s: not skipped", c.name)
 		testing.expectf(t, read <= CODEX_ZST_IN_MAX, "%s: read %d bytes", c.name, read)
@@ -99,7 +99,7 @@ codex_zst_first_line_untrusted :: proc(t: ^testing.T) {
 	// decodes no more than the caps
 	fd := posix.open(strings.clone_to_cstring(zst_rollout(dir, ZST_LONG_LINE), context.temp_allocator), {.CLOEXEC})
 	defer posix.close(fd)
-	line, decoded, ok := codex_zst_first_line(fd)
+	line, decoded, ok, _ := codex_zst_first_line(fd)
 	testing.expect(t, !ok && line == "", "no line")
 	testing.expectf(t, decoded > 0 && decoded <= min(CODEX_ZST_OUT_MAX, CODEX_DISK_LINE_MAX), "decoded %d", decoded)
 }

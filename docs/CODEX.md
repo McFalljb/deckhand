@@ -187,7 +187,9 @@ the selected project and Chats. **Codex's files are read only, never written.**
 - **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), and each Codex
   account's `<home>/sessions` (§6a), every `YYYY/MM/DD/` folder, newest first (no age or count
   limit; hard ceilings against a broken folder: 20,000 folders walked and 50,000 files a home,
-  `CODEX_DISK_DIRS_MAX`, `CODEX_DISK_FILES_MAX`),
+  `CODEX_DISK_DIRS_MAX`, `CODEX_DISK_FILES_MAX`; each folder read entry by entry, names only, and
+  no further than 20,000 entries, `codex_disk_dir_entries_max`, so a folder of millions is never
+  statted, kept or sorted whole; only rollout names are statted),
   regular files named `rollout-<time>-<uuid>.jsonl` or `.jsonl.zst` (Codex Desktop compresses older
   rollouts with zstd; when both are there, the plain one) only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
   (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set or a home they added,
@@ -201,7 +203,8 @@ the selected project and Chats. **Codex's files are read only, never written.**
   for a pass (`codex_disk_refresh`: one at a time, at most one per 10 s) and shows the cache
   (`codex_disk_found`); the pass lists every home, drops the entries of files gone, reads the
   first line of each new or changed rollout (size or mtime), and has the rows made again every 64
-  files. The payload's `id` must be
+  files. What was read and found wanting is remembered; a rollout that could not be read (open,
+  stat or read failed: permissions, an I/O error) is not, so each pass reads it again. The payload's `id` must be
   the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source`
   `"cli"` (the CLI) or `"vscode"` (Codex Desktop) to be a row (`codex_source_listed`:
   `codex exec`'s, a subagent's, an object, and any source Deckhand does not know are not). The
@@ -211,7 +214,8 @@ the selected project and Chats. **Codex's files are read only, never written.**
   (`titles_load`): a version line (`deckhand codex sessions 1`), then per rollout its size, mtime,
   created time, source, id, account (home), cwd and path, tab-separated; written atomically, 0600,
   at the end of a pass that changed anything; at most 100,000 entries (`CODEX_CACHE_MAX`). A file
-  over 64 MB, of another version, or a line that does not parse is not used (those rollouts are
+  over 64 MB, of another version, or a row over 16 KB, without exactly 8 tab-separated fields (counted
+  before it is split) or that does not parse is not used (those rollouts are
   read again). A launch reads only new or changed rollouts.
 - **Titles**: each home's `session_index.jsonl` (one object a line: `id`, `thread_name`,
   `updated_at`; the last line for an id wins), joined to the listed rows only (a row it does not
@@ -230,9 +234,12 @@ the selected project and Chats. **Codex's files are read only, never written.**
   saved cache after a pass on the Rescan worker (`codex_disk_pass_now`, `codex_disk_folders`: a
   Rescan reads no rollout the cache knows). The cwd is cleaned once, when it enters the cache, so
   a project and its rows match byte for byte (a trailing slash is the same folder). Merged by
-  folder with pi's and Claude's (`found_project`); never the home folder itself (`HOME`, or its
-  real path: a session started in `~` makes no project; a project added there by hand is left as
-  it is); a folder no one else knows is a project
+  folder with pi's and Claude's (`found_project`); never the home folder itself (`HOME`, its
+  real path, or any path that is the same folder by device and inode: a link to it, another case
+  on a case-insensitive volume; a session started in `~` makes no project; a project added there
+  by hand is left as it is). On the main thread (`rescan_now`: a new Chats or main folder) the scan
+  reads no rollout: it takes the cache as it is and starts a pass on the worker, which the next
+  Rescan uses; a folder no one else knows is a project
   found on disk only, exactly as a Claude-only folder is (`Project.claude`: saved; a Rescan that
   no longer finds it drops it unless you added, named or opened it; temp and missing folders are
   hidden by the tidy rules, as any project's). The launch's first scan reads no rollout, and a Rescan follows when a

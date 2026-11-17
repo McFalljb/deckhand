@@ -41,6 +41,14 @@ CODEX_DISK_DIRS_MAX :: 20_000 // folders walked a home (years, months, days): a 
 CODEX_DISK_FILES_MAX :: 50_000 // rollouts listed a home, newest first: a hard ceiling
 CODEX_DISK_LINE_MAX :: 64 * 1024 // a rollout's first line (session_meta, ~25 KB); longer: skipped
 CODEX_CWD_MAX :: 1024 // a rollout's cwd; longer (or with a NUL): skipped, never walked
+
+// Directory entries one folder may have looked at (tests lower it): past it the folder is read no
+// further (a broken or planted folder cannot make the lister stat, keep and sort millions).
+codex_disk_dir_entries_max := 20_000
+// Directory entries the lister has looked at (tests).
+codex_disk_entries_seen: i64
+// Passes run on the caller's thread (codex_disk_pass_now; tests).
+codex_disk_passes_inline: int
 // a compressed rollout (.jsonl.zst, codex_zst_first_line): measured, its first line is at most ~49 KB
 // and decodes from its first 128 KB; past either cap without a newline it is skipped
 CODEX_ZST_IN_MAX :: 256 * 1024 // compressed bytes read, at most
@@ -91,14 +99,14 @@ disk_files :: proc(h: Harness, homes: []Disk_Home) -> []Disk_File {
 
 // What the scan reads of one of harness h's files (from disk_files): the cwd it ran in and how it
 // was started (its source), or skip (not a conversation). Any thread.
-disk_first_line :: proc(h: Harness, path: string) -> (cwd, source: string, skip: bool) {
+disk_first_line :: proc(h: Harness, path: string) -> (cwd, source: string, skip, unreadable: bool) {
 	switch h {
 	case .Codex:
 		return codex_first_line(path)
 	case .Pi, .Claude:
-		return "", "", true
+		return "", "", true, false
 	}
-	return "", "", true
+	return "", "", true, false
 }
 
 // ---- Codex's conversations (~/.codex/sessions; codex.odin) ----
@@ -108,23 +116,35 @@ disk_first_line :: proc(h: Harness, path: string) -> (cwd, source: string, skip:
 // CODEX_SOURCE_MAX). skip: not a conversation to list (no session_meta, an id that is not the
 // file's, a subagent's or another non-string source; a .zst that does not decode within its
 // caps). Never written to; nothing in it reaches a shell or the screen (the cwd is only compared
-// with the project's folder). Any thread.
-codex_first_line :: proc(path: string) -> (cwd, source: string, skip: bool) {
+// with the project's folder). unreadable: it could not be read now (open, stat or read failed:
+// permissions, an I/O error), so skip says nothing of what it is: read it again later. Any thread.
+codex_first_line :: proc(path: string) -> (cwd, source: string, skip, unreadable: bool) {
 	skip = true
 	// never a FIFO or a link swapped in since the listing (open would block, or go elsewhere)
 	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NONBLOCK, .NOFOLLOW, .CLOEXEC})
-	if fd < 0 do return
+	if fd < 0 {
+		unreadable = posix.errno() != .ELOOP // a link (planted, never followed) is what it is
+		return
+	}
 	defer posix.close(fd)
 	st: posix.stat_t
-	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return
+	if posix.fstat(fd, &st) != .OK {
+		unreadable = true
+		return
+	}
+	if !posix.S_ISREG(st.st_mode) do return
 	name, zst := codex_rollout_stem(filepath.base(path))
 	line: string
 	if zst {
 		ok: bool
-		if line, _, ok = codex_zst_first_line(fd); !ok do return
+		if line, _, ok, unreadable = codex_zst_first_line(fd); !ok do return
 	} else {
 		buf := make([]u8, CODEX_DISK_LINE_MAX, context.temp_allocator)
 		got := int(posix.pread(fd, raw_data(buf), len(buf), 0))
+		if got < 0 {
+			unreadable = true
+			return
+		}
 		sync.atomic_add(&claude_disk_bytes_read, i64(max(got, 0)))
 		nl := strings.index_byte(string(buf[:max(got, 0)]), '\n')
 		if nl < 0 do return
@@ -143,7 +163,7 @@ codex_first_line :: proc(path: string) -> (cwd, source: string, skip: bool) {
 	if !src_ok do return // a subagent's ({"subagent": …})
 	if !codex_id_ok(string(id)) || !strings.has_suffix(name, string(id)) || !filepath.is_abs(string(c)) do return
 	if len(c) > CODEX_CWD_MAX || strings.index_byte(string(c), 0) >= 0 do return
-	return string(c), cut_utf8(string(src), CODEX_SOURCE_MAX), false
+	return string(c), cut_utf8(string(src), CODEX_SOURCE_MAX), false, false
 }
 
 // A rollout file name without its extension, and whether it is compressed: "x.jsonl" -> "x", false;
@@ -159,8 +179,9 @@ codex_rollout_stem :: proc(name: string) -> (stem: string, zst: bool) {
 // at most CODEX_ZST_IN_MAX compressed bytes are read (CODEX_ZST_READ at a time), decoding stops at
 // min(CODEX_ZST_OUT_MAX, CODEX_DISK_LINE_MAX) bytes without a newline, and a frame asking for a
 // window over 2^CODEX_ZST_WINDOW_LOG_MAX is refused before zstd allocates it; any of those, a
-// decode error or the end of the file first: ok false. decoded: the bytes decoded (tests). Any thread.
-codex_zst_first_line :: proc(fd: posix.FD) -> (line: string, decoded: int, ok: bool) {
+// decode error or the end of the file first: ok false. decoded: the bytes decoded (tests). unreadable:
+// a read failed (not what the file is). Any thread.
+codex_zst_first_line :: proc(fd: posix.FD) -> (line: string, decoded: int, ok, unreadable: bool) {
 	d := zstd.dctx_create()
 	if d == nil do return
 	defer zstd.dctx_free(d)
@@ -170,6 +191,7 @@ codex_zst_first_line :: proc(fd: posix.FD) -> (line: string, decoded: int, ok: b
 	read := 0
 	for read < CODEX_ZST_IN_MAX {
 		got := int(posix.pread(fd, raw_data(in_buf), uint(min(CODEX_ZST_READ, CODEX_ZST_IN_MAX - read)), posix.off_t(read)))
+		unreadable = got < 0 // a read error: not what the file is
 		if got <= 0 do return // the end (truncated: no newline yet) or an error
 		read += got
 		sync.atomic_add(&claude_disk_bytes_read, i64(got))
@@ -180,7 +202,7 @@ codex_zst_first_line :: proc(fd: posix.FD) -> (line: string, decoded: int, ok: b
 			r := zstd.decompress_stream(d, &output, &input)
 			if zstd.is_error(r) != 0 do return
 			if nl := strings.index_byte(string(out[decoded:output.pos]), '\n'); nl >= 0 {
-				return string(out[:decoded + nl]), int(output.pos), true
+				return string(out[:decoded + nl]), int(output.pos), true, false
 			}
 			decoded = int(output.pos)
 			if decoded == len(out) do return // the caps, and no newline
@@ -219,18 +241,19 @@ codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 	out := make([dynamic]Disk_File, context.temp_allocator)
 	defer append(all, ..out[:])
 	if root == "" do return
-	// the numbered folders under dir, newest (largest) first
-	numbered :: proc(dir: string) -> []os.File_Info {
-		entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
-		if err != nil do return nil
-		list := make([dynamic]os.File_Info, context.temp_allocator)
-		for e in entries {
-			if e.type != .Directory || e.name == "" do continue
+	// the numbered folders under dir, newest (largest) first (names only: nothing statted)
+	numbered :: proc(dir: string) -> []string {
+		list := make([dynamic]string, context.temp_allocator)
+		for e in dir_entries(dir) {
+			if e.type != .DIR && e.type != .UNKNOWN do continue
 			digits := true
 			for ch in transmute([]u8)e.name do if ch < '0' || ch > '9' do digits = false
-			if digits do append(&list, e)
+			if !digits do continue
+			p := strings.concatenate({dir, "/", e.name}, context.temp_allocator)
+			if e.type == .UNKNOWN && path_kind_nofollow(p) != .DIR do continue
+			append(&list, p)
 		}
-		slice.sort_by(list[:], proc(a, b: os.File_Info) -> bool {return a.name > b.name})
+		slice.sort_by(list[:], proc(a, b: string) -> bool {return a > b})
 		return list[:]
 	}
 	seen := make(map[string]int, allocator = context.temp_allocator) // id -> its index in out
@@ -238,24 +261,30 @@ codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 	for y in numbered(root) {
 		if dirs >= CODEX_DISK_DIRS_MAX do return
 		dirs += 1
-		for m in numbered(y.fullpath) {
+		for m in numbered(y) {
 			if dirs >= CODEX_DISK_DIRS_MAX do return
 			dirs += 1
-			for d in numbered(m.fullpath) {
+			for d in numbered(m) {
 				if dirs >= CODEX_DISK_DIRS_MAX || len(out) >= CODEX_DISK_FILES_MAX do return
 				dirs += 1
-				entries, err := os.read_all_directory_by_path(d.fullpath, context.temp_allocator)
-				if err != nil do continue
-				slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {return a.name > b.name})
-				for e in entries {
+				// the rollouts' names first (no stat); only those are statted
+				names := make([dynamic]string, context.temp_allocator)
+				for e in dir_entries(d) {
+					if e.type != .REG && e.type != .UNKNOWN do continue
+					if strings.has_prefix(e.name, "rollout-") do append(&names, e.name)
+				}
+				slice.sort_by(names[:], proc(a, b: string) -> bool {return a > b})
+				for n in names {
 					if len(out) >= CODEX_DISK_FILES_MAX do break
-					if e.type != .Regular || !strings.has_prefix(e.name, "rollout-") do continue
-					name, zst := codex_rollout_stem(e.name)
+					name, zst := codex_rollout_stem(n)
 					if name == "" || len(name) < 37 || name[len(name) - 37] != '-' do continue
 					id := name[len(name) - 36:]
 					if !codex_id_ok(id) do continue
+					path := strings.concatenate({d, "/", n}, context.temp_allocator)
+					e, err := os.lstat(path, context.temp_allocator)
+					if err != nil || e.type != .Regular do continue
 					created := e.creation_time != {} ? e.creation_time : e.modification_time
-					f := Disk_File{id = id, path = e.fullpath, account = home, size = e.size, modified = e.modification_time, created = created}
+					f := Disk_File{id = id, path = path, account = home, size = e.size, modified = e.modification_time, created = created}
 					// one row an id: the plain file when Codex has left both (it compresses a copy)
 					if i, dup := seen[id]; dup {
 						if !zst && strings.has_suffix(out[i].path, ".zst") do out[i] = f
@@ -267,6 +296,45 @@ codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 			}
 		}
 	}
+}
+
+// A folder's entry as readdir gives it: its name (temp) and type (UNKNOWN on a file system that
+// does not say).
+@(private = "file")
+Dir_Entry :: struct {
+	name: string,
+	type: posix.D_Type,
+}
+
+// The entries of dir, read one at a time and at most codex_disk_dir_entries_max of them (past it
+// the folder counts as cut short): never all of a folder of millions statted, kept and sorted.
+// "." and ".." left out. Any thread. Temp.
+@(private = "file")
+dir_entries :: proc(dir: string) -> []Dir_Entry {
+	out := make([dynamic]Dir_Entry, context.temp_allocator)
+	d := posix.opendir(strings.clone_to_cstring(dir, context.temp_allocator))
+	if d == nil do return nil
+	defer posix.closedir(d)
+	n := 0
+	for n < codex_disk_dir_entries_max {
+		e := posix.readdir(d)
+		if e == nil do break
+		n += 1
+		name := string(cstring(raw_data(e.d_name[:])))
+		if name == "." || name == ".." || name == "" do continue
+		append(&out, Dir_Entry{name = strings.clone(name, context.temp_allocator), type = e.d_type})
+	}
+	sync.atomic_add(&codex_disk_entries_seen, i64(n))
+	return out[:]
+}
+
+// Whether path is a folder, not following a link (an entry readdir did not type).
+@(private = "file")
+path_kind_nofollow :: proc(path: string) -> posix.D_Type {
+	st: posix.stat_t
+	if posix.lstat(strings.clone_to_cstring(path, context.temp_allocator), &st) != .OK do return .UNKNOWN
+	if posix.S_ISDIR(st.st_mode) do return .DIR
+	return .UNKNOWN
 }
 
 // ---- the saved meta cache and the titles (a worker) ----
@@ -290,6 +358,8 @@ CODEX_CACHE_VERSION :: "deckhand codex sessions 1"
 CODEX_CACHE_MAX :: 100_000 // rollouts known (and saved): a hard ceiling
 @(private = "file")
 CODEX_CACHE_BYTES_MAX :: 64 << 20 // a bigger saved file is not read
+@(private = "file")
+CODEX_CACHE_ROW_MAX :: 16 * 1024 // a saved row longer than this is not used (a path and a cwd fit far within it)
 @(private = "file")
 CODEX_BATCH :: 64 // first lines read between two showings of the rows
 CODEX_INDEX_FILE :: "session_index.jsonl"
@@ -371,11 +441,16 @@ codex_disk_cache_at :: proc(dir: string) {
 // A pass over the Codex homes on the worker, unless one is on or started less than
 // codex_disk_gap ago. Main thread (the scan).
 codex_disk_refresh :: proc() {
+	codex_disk_start(disk_homes(.Codex))
+}
+
+// A pass over homes on the worker, unless one is on, or (unless forced) started less than
+// codex_disk_gap ago. Never waits. Main thread.
+codex_disk_start :: proc(homes: []Disk_Home, force := false) {
 	heap := runtime.heap_allocator()
-	homes := disk_homes(.Codex)
 	sync.lock(&codex_cache.mu)
 	defer sync.unlock(&codex_cache.mu)
-	if codex_cache.running || (codex_cache.started != {} && time.tick_since(codex_cache.started) < codex_disk_gap) do return
+	if codex_cache.running || (!force && codex_cache.started != {} && time.tick_since(codex_cache.started) < codex_disk_gap) do return
 	for h in codex_cache.homes {
 		delete(h.account, heap)
 		delete(h.root, heap)
@@ -408,6 +483,7 @@ codex_disk_busy :: proc() -> bool {
 // A pass over homes now, on the calling thread (the Rescan's scan, claude_scan_projects), after
 // any pass already on; whatever the gap. With the cache warm it reads no rollout.
 codex_disk_pass_now :: proc(homes: []Disk_Home) {
+	codex_disk_passes_inline += 1
 	heap := runtime.heap_allocator()
 	for {
 		sync.lock(&codex_cache.mu)
@@ -575,15 +651,19 @@ codex_pass_run :: proc() {
 	for f, i in todo {
 		{
 			context.temp_allocator = virtual.arena_allocator(&scratch)
-			cwd, source, skip := disk_first_line(.Codex, f.path)
+			cwd, source, skip, unreadable := disk_first_line(.Codex, f.path)
 			if skip do cwd, source = "", ""
 			else do cwd, _ = filepath.clean(cwd, context.temp_allocator) // as a project's cwd (a trailing slash, "/./")
-			sync.lock(&codex_cache.mu)
-			meta_put(f, cwd, source)
-			sync.unlock(&codex_cache.mu)
+			// not readable now (permissions, an I/O error): not remembered, so the next pass reads
+			// it again (once a pass); only what was read and found wanting is kept
+			if !unreadable {
+				sync.lock(&codex_cache.mu)
+				meta_put(f, cwd, source)
+				sync.unlock(&codex_cache.mu)
+				dirty = true
+			}
 		}
 		free_all(virtual.arena_allocator(&scratch))
-		dirty = true
 		if (i + 1) % CODEX_BATCH == 0 || i == len(todo) - 1 do codex_publish()
 	}
 	if dirty && file != "" do codex_cache_save(file)
@@ -610,6 +690,8 @@ codex_cache_read :: proc(file: string) -> map[string]Codex_Meta {
 			continue
 		}
 		if len(out) >= CODEX_CACHE_MAX do break
+		// a row as codex_cache_save writes one: never split a long or many-tabbed line
+		if len(line) > CODEX_CACHE_ROW_MAX || strings.count(line, "\t") != 7 do continue
 		f := strings.split(line, "\t", context.temp_allocator)
 		if len(f) != 8 do continue
 		size, ok1 := strconv.parse_i64(f[0])
@@ -748,6 +830,11 @@ codex_index_refresh :: proc(homes: []Disk_Home) -> (changed: bool) {
 }
 
 when TEST_HOOKS {
+	// The rows of a saved cache file that would be used (tests).
+	codex_disk_cache_rows :: proc(file: string) -> int {
+		return len(codex_cache_read(file))
+	}
+
 	// Forgets everything, the saved file's place too (tests); waits for a pass first.
 	codex_disk_cache_clear :: proc() {
 		for codex_disk_busy() do time.sleep(time.Millisecond)

@@ -2809,6 +2809,7 @@ scan_thread: ^thread.Thread
 
 @(private = "file")
 scan_worker :: proc(request_id: u64) {
+	claude_scan_on_worker = true // a Codex pass may run here (claude_disk.odin)
 	scan := new(Scan_Result)
 	scan_projects(scan)
 	inbox_submit(Rescan_Done{request_id = request_id, scan = scan}, {kind = .Internal})

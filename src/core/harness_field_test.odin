@@ -15,6 +15,9 @@ import "core:testing"
 OLD_CLAUDE_TAB :: `{"session_id":"s1","args":[],"readonly":false,"guard_stopped":false,"turn":"unknown","held":[],"model":"","ended":"none","account":"/a","resume_path":"","codex":false}`
 @(private = "file")
 OLD_CODEX_TAB :: `{"session_id":"s1","args":[],"readonly":false,"guard_stopped":false,"turn":"unknown","held":[],"model":"","ended":"none","account":"/a","resume_path":"","codex":true}`
+// Claude_Tab's fields added after the bool, as the stream writes their zero values.
+@(private = "file")
+CLAUDE_TAB_GROWN :: `,"permission_mode":""` // claude_mode.odin
 @(private = "file")
 OLD_CLAUDE_RECORD :: `{"id":"r1","cwd":"","project":"/p","title":"","used":3,"args":[],"named":false,"transcript":"","model":"","readonly":false,"account":"","codex":false}`
 @(private = "file")
@@ -31,12 +34,14 @@ harness_state_wire_codex_bool :: proc(t: ^testing.T) {
 		ct := Claude_Tab{session_id = "s1", account = "/a", harness = h}
 		strings.builder_reset(&b)
 		wire_write(&b, &ct, type_info_of(Claude_Tab))
-		testing.expect_value(t, strings.to_string(b), want_tab)
+		// the bool's bytes, then the fields grown since (grow-only: appended, never in between)
+		grown := strings.concatenate({want_tab[:len(want_tab) - 1], CLAUDE_TAB_GROWN, "}"}, context.temp_allocator)
+		testing.expect_value(t, strings.to_string(b), grown)
 		// inside a tab's kind too (the tabs:<id> section's form)
 		tab := Tab{id = 7, kind = ct, title = "T"}
 		strings.builder_reset(&b)
 		wire_write(&b, &tab, type_info_of(Tab))
-		testing.expectf(t, strings.contains(strings.to_string(b), strings.concatenate({`"kind":{"claude_tab":`, want_tab, "}"}, context.temp_allocator)), "the tab's kind: %s", strings.to_string(b))
+		testing.expectf(t, strings.contains(strings.to_string(b), strings.concatenate({`"kind":{"claude_tab":`, grown, "}"}, context.temp_allocator)), "the tab's kind: %s", strings.to_string(b))
 
 		rec := Claude_Record{id = "r1", project = "/p", used = 3, harness = h}
 		strings.builder_reset(&b)

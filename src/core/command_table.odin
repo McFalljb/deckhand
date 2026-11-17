@@ -134,7 +134,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_confirm_policy", args = "caller, class, mode", does = "how a caller's destructive commands of a class are confirmed (ask, trusted, auto)", who = .User},
 	{type = "set_close_confirm", args = "tab_kind, rule", does = "when closing a running tab asks (auto, always, never)", who = .User},
 	{type = "pi.session", args = "tab_id?, pi_session_id, session_file?, cwd?", does = "a pi tab reports its session", who = .Report},
-	{type = "pi.status", args = "tab_id?, agent, waiting, question?, blockers?", does = "a pi tab reports its status", who = .Report},
+	{type = "pi.status", args = "tab_id?, agent, waiting, question?, blockers?, model?, provider?, thinking?", does = "a pi tab reports its status (and its model)", who = .Report},
 	{type = "panel.set", args = "panel, title?, rows", does = "a pi tab publishes one of its panels", who = .Bridge},
 	{type = "panel.remove", args = "panel", does = "a pi tab removes one of its panels", who = .Bridge},
 	{type = "pi.attached", args = "attachment_id", does = "a pi tab's bridge: the user's message took that attachment of pending comments (pi.attach); they are cleared", who = .Bridge},

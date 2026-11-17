@@ -738,7 +738,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_text_size":       cmd = Set_Text_Size{size = get_enum(&r, "size", TEXT_SIZE_NAMES)}
 	// bridge reports: tab_id optional (0 = the caller's own pi tab)
 	case "pi.session":          cmd = Pi_Session_Update{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id"), session_file = get_str(&r, "session_file", optional = true), cwd = get_str(&r, "cwd", optional = true)}
-	case "pi.status":           cmd = Pi_Status_Update{tab_id = opt_u64(&r, "tab_id"), agent = get_enum(&r, "agent", AGENT_NAMES), waiting = get_bool(&r, "waiting"), question = opt_bool(&r, "question").? or_else false, blockers = get_strings(&r, "blockers")}
+	case "pi.status":           cmd = Pi_Status_Update{tab_id = opt_u64(&r, "tab_id"), agent = get_enum(&r, "agent", AGENT_NAMES), waiting = get_bool(&r, "waiting"), question = opt_bool(&r, "question").? or_else false, blockers = get_strings(&r, "blockers"), model = get_str(&r, "model", optional = true), provider = get_str(&r, "provider", optional = true), thinking = get_str(&r, "thinking", optional = true)}
 	case "panel.set":           cmd = Panel_Set{tab_id = opt_u64(&r, "tab_id"), panel = get_str(&r, "panel"), title = get_str(&r, "title", optional = true), rows = get_rows(&r, "rows")}
 	case "panel.remove":        cmd = Panel_Remove{tab_id = opt_u64(&r, "tab_id"), panel = get_str(&r, "panel")}
 	case "set_panel_collapsed": cmd = Set_Panel_Collapsed{panel = get_str(&r, "panel"), collapsed = get_bool(&r, "collapsed")}

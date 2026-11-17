@@ -1019,8 +1019,9 @@ folder is gone, or a restored open session whose session file or folder is gone 
 never started). The app's own restore runs the internal-only command `restore_session`
 (`{"type":"restore_session","project_id","pi_session_id","session_dir","tabs":[{"kind","title","cwd","active"?}]}`),
 which appears in events and the log but cannot be sent.
-Pi tabs also carry the bridge's last `pi.status` (`agent` is `unknown` until it reports), its
-panels (§5), and the open session the last `pi.session` (`pi_session_id`, `session_file`).
+Pi tabs also carry the bridge's last `pi.status` (`agent` is `unknown` until it reports; `model`
+as `provider/id` and `thinking` while it reported them), its panels (§5), and the open session
+the last `pi.session` (`pi_session_id`, `session_file`).
 
 ### Events and subscription
 
@@ -1074,7 +1075,7 @@ From the bridge (requests, caller `panel` or `control`):
 | type | fields | meaning |
 |---|---|---|
 | `pi.session` | `pi_session_id`, `session_file`, `cwd` | sent after `hello` and on every session switch (pi's `session_start` after `/new`, `/resume`, fork); Deckhand updates the open session's `pi_session_id` and `session_file` (`cwd` is not used yet) |
-| `pi.status` | `agent`: `idle`\|`working`\|`error`, `waiting`: bool, `question`: bool, `blockers`: [string] | sent on change; `waiting` = a pi dialog is open (question tool, permission prompt): `pi_prompt` is refused while it is; `question` = pi's last answer ended with a question (shown, does not block prompts; absent = false); drives status dots and the close rule |
+| `pi.status` | `agent`: `idle`\|`working`\|`error`, `waiting`: bool, `question`: bool, `blockers`: [string], `model`?, `provider`?, `thinking`?: string | sent on change (a model or thinking switch too); `model`, `provider`, `thinking`: pi's model id, its provider and thinking level when the bridge knows them (absent from an older bridge: the tab shows no model; each kept only when it is a short word of letters, digits and `-_.:/@[]`); `waiting` = a pi dialog is open (question tool, permission prompt): `pi_prompt` is refused while it is; `question` = pi's last answer ended with a question (shown, does not block prompts; absent = false); drives status dots and the close rule |
 | `panel.set` | `panel`, `title`?, `rows` | publishes or replaces one of the tab's panels (§5) |
 | `panel.remove` | `panel` | removes it (no change if it is not there) |
 | `pi.attached` | `attachment_id` | the user's message took that `pi.attach`: its comments are cleared (those edited since stay); an id Deckhand does not know changes nothing |

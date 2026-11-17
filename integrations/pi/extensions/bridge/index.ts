@@ -8,7 +8,9 @@
  *   in memory (see deskToken) for every later hello, also after a reload or session switch.
  * - Reports `pi.session` (id, file, cwd) after each handshake; a session switch or reload starts a
  *   new extension runtime, which connects again and reports the new session.
- * - Reports `pi.status {agent, waiting, question, blockers}` when it changes (see status() in protocol.ts).
+ * - Reports `pi.status {agent, waiting, question, blockers}` when it changes (see status() in protocol.ts),
+ *   with pi's model when it knows one (`model`: its id, `provider`, `thinking`: the thinking level;
+ *   absent when unknown; never anything else of the model), also after a model or thinking switch.
  * - Tells other extensions its tab id (`deckhand:tab`, after each handshake).
  * - If the hello result's `capabilities` include `panels`, publishes the panels producers hand it
  *   on `kit:desk:panels` (extensions/panels, pi-kit's sidebar or any other; merged by panel name)
@@ -78,6 +80,8 @@ export default function (pi: ExtensionAPI) {
 	let question = false;
 	let subTimer: NodeJS.Timeout | undefined;
 	let reloadId: unknown; // a pi.reload waiting for its result
+	let selected: unknown; // the model pi's last model_select named (ctx.model may be a snapshot)
+	let thinking: unknown; // and its last thinking_level_select's level
 	const panels = new Map<string, Panel>(); // the latest of each panel, from any producer (PANELS_EVENT)
 	const panelSent = new Map<string, string>(); // panel -> the last panel.set/remove sent on this connection
 	let panelTimer: NodeJS.Timeout | undefined;
@@ -106,13 +110,29 @@ export default function (pi: ExtensionAPI) {
 	function current() {
 		return status({ idle: ctx!.isIdle(), error, dialogs, question, shells, runs });
 	}
+	/** pi's model as pi.status says it: id, provider, thinking level (each only when a non-empty string). */
+	function modelInfo(): Record<string, string> {
+		try {
+			const out: Record<string, string> = {};
+			const m = (selected ?? ctx?.model) as { id?: unknown; provider?: unknown } | undefined;
+			if (!m || typeof m.id !== "string" || !m.id) return out;
+			out.model = m.id;
+			if (typeof m.provider === "string" && m.provider) out.provider = m.provider;
+			const p = pi as unknown as { getThinkingLevel?: () => unknown };
+			const t = thinking ?? (ctx as { thinkingLevel?: unknown } | undefined)?.thinkingLevel ?? (typeof p.getThinkingLevel === "function" ? p.getThinkingLevel() : undefined);
+			if (typeof t === "string" && t) out.thinking = t;
+			return out;
+		} catch {
+			return {};
+		}
+	}
 	const notIdle = () => busyReasons(current(), ctx!.hasPendingMessages());
 
 	/** Send pi.status if it changed; answer wait_idle requests once pi is idle. */
 	function update() {
 		if (!ctx || closed) return;
 		try {
-			const s = JSON.stringify(current());
+			const s = JSON.stringify({ ...current(), ...modelInfo() });
 			if (ready && s !== sent) {
 				sent = s;
 				send({ type: "pi.status", ...JSON.parse(s) });
@@ -327,6 +347,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_e, c) => {
 		if (c.mode !== "tui" || !deskSocket() || !deskToken(true)) return;
 		ctx = c;
+		selected = thinking = undefined; // this runtime's model: ctx.model until a switch
 		// The extensions after us start once the first handshake says the mode (or it fails, or
 		// MODE_WAIT_MS): the repeat on resources_discover then reaches a sidebar among them.
 		const known = new Promise<void>((r) => (modeKnown = r));
@@ -385,6 +406,15 @@ export default function (pi: ExtensionAPI) {
 		update();
 	});
 	pi.on("agent_settled", () => update());
+	// a newer model or thinking level: pi.status says it (modelInfo)
+	pi.on("model_select", (e) => {
+		selected = (e as { model?: unknown }).model;
+		update();
+	});
+	pi.on("thinking_level_select", (e) => {
+		thinking = (e as { level?: unknown }).level;
+		update();
+	});
 	// Compaction outside a run (/compact) also makes pi busy; isIdle() flips around these events.
 	const compaction = (start: boolean) => (e: { reason: string }) => {
 		if (e.reason === "manual") compacting = start; // automatic compaction runs inside a run: prompts queue

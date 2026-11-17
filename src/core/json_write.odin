@@ -686,6 +686,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "agent", AGENT_NAMES[c.agent])
 		kv_bool(&w, "waiting", c.waiting)
 		kv_bool(&w, "question", c.question)
+		if c.model != "" do kv_str(&w, "model", c.model)
+		if c.provider != "" do kv_str(&w, "provider", c.provider)
+		if c.thinking != "" do kv_str(&w, "thinking", c.thinking)
 		key(&w, "blockers")
 		// events and the log: what kind and which id only ("shell sh1"), never a command or a
 		// task, as panel rows are only counted; the state keeps the text (Tab.blockers)
@@ -1664,6 +1667,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_str(&to, "agent", AGENT_NAMES[t.agent])
 				kv_bool(&to, "waiting", t.waiting)
 				kv_bool(&to, "question", t.question)
+				if pt := t.kind.(Pi_Tab); pt.model != "" do kv_str(&to, "model", pt.model)
+				if pt := t.kind.(Pi_Tab); pt.thinking != "" do kv_str(&to, "thinking", pt.thinking)
 				key(&to, "blockers")
 				write_strings(b, t.blockers[:])
 				key(&to, "reload") // hot reload (reload.odin)

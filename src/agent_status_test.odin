@@ -215,6 +215,39 @@ status_unseen_and_bell :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.tab_status_view(sh^).source, core.Status_Source.None)
 }
 
+// A pi tab's model from its bridge's pi.status (a newer bridge): on the tab, in its tooltip and the
+// snapshot; an older bridge (no model) or a lost connection shows none; only short words go.
+@(test)
+status_bridge_pi_model :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, _, a_pi, _ := as_reset()
+	defer as_done()
+	_, pt, _ := core.find_tab(a_pi)
+	me := core.Caller{kind = .Panel, tab_id = a_pi}
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle}, me) // an older bridge
+	testing.expect_value(t, core.claude_tab_tip(pt^), "")
+	c, err := core.parse_command(`{"type":"pi.status","agent":"idle","waiting":false,"model":"claude-sonnet-9","provider":"anthropic","thinking":"high"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	st := c.(core.Pi_Status_Update)
+	st.tab_id = a_pi
+	testing.expect(t, core.run_command(st, me).ok)
+	testing.expect_value(t, pt.kind.(core.Pi_Tab).model, "anthropic/claude-sonnet-9")
+	testing.expect_value(t, core.claude_tab_tip(pt^), "pi · model anthropic/claude-sonnet-9 · thinking high")
+	snap := core.run_command(core.Get_State{}, {kind = .UI}).data
+	testing.expect(t, strings.contains(snap, `"model":"anthropic/claude-sonnet-9"`), "in the snapshot")
+	// an id that already names its provider is not doubled; no thinking level: none said
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle, model = "openai/gpt-9", provider = "openai"}, me)
+	testing.expect_value(t, core.claude_tab_tip(pt^), "pi · model openai/gpt-9")
+	// not a model name: none
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle, model = "x\x1b[31m y", provider = "p"}, me)
+	testing.expect_value(t, core.claude_tab_tip(pt^), "")
+	// the connection gone (Deckhand's own unknown): none until it reports again
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle, model = "m1"}, me)
+	testing.expect_value(t, core.claude_tab_tip(pt^), "pi · model m1")
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Unknown}, {kind = .Internal})
+	testing.expect_value(t, core.claude_tab_tip(pt^), "")
+}
+
 @(test)
 status_bridge_precedence :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // State and `terms` outlive the test

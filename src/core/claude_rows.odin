@@ -149,9 +149,35 @@ claude_rows_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 
 // The tooltip line naming a Claude tab's model ("" = none).
 claude_tab_tip :: proc(tab: Tab) -> string {
+	if pt, is_pi := tab.kind.(Pi_Tab); is_pi { 	// its bridge's report (pi_tab_model_set)
+		if pt.model == "" do return ""
+		if pt.thinking != "" do return fmt.tprintf("pi · model %s · thinking %s", pt.model, pt.thinking)
+		return fmt.tprintf("pi · model %s", pt.model)
+	}
 	ct, is := tab.kind.(Claude_Tab)
 	if !is || ct.model == "" do return ""
 	return fmt.tprintf("%s · model %s", ct.codex ? "Codex" : "Claude Code", ct.model)
+}
+
+// A pi tab's model from its bridge's pi.status: "provider/id" and the thinking level, each a short
+// word (claude_model_clean's characters; anything else: none). A status without them (an older
+// bridge, a lost connection) clears them.
+pi_tab_model_set :: proc(tab: ^Tab, c: Pi_Status_Update) {
+	pt, is := &tab.kind.(Pi_Tab)
+	if !is do return
+	id := claude_model_clean(c.model)
+	provider := claude_model_clean(c.provider)
+	model := id
+	if id != "" && provider != "" && !strings.has_prefix(id, strings.concatenate({provider, "/"}, context.temp_allocator)) do model = claude_model_clean(strings.concatenate({provider, "/", id}, context.temp_allocator))
+	thinking := id != "" ? claude_model_clean(c.thinking) : ""
+	if pt.model != model {
+		delete(pt.model)
+		pt.model = strings.clone(model)
+	}
+	if pt.thinking != thinking {
+		delete(pt.thinking)
+		pt.thinking = strings.clone(thinking)
+	}
 }
 
 // The snapshot's model of a Claude tab (claude_tab_json).

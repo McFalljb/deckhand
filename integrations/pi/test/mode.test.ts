@@ -339,3 +339,49 @@ test("mode (PI_KIT_DIR): next to pi-kit's shell (ours steps back) and no sidebar
 	const kitShell = path.join(KIT, "shell/index.ts");
 	await shellReachesDeckhand([await fromFile(OUR_SHELL), await fromFile(kitShell)], kitShell);
 });
+
+/** The bridge, loaded and started with `model` (pi's ctx.model) and `thinking` (ctx.thinkingLevel) set first. */
+async function bridgeWithModel(model: unknown, thinking?: string) {
+	const pi = piRules();
+	live.push(pi);
+	Object.assign(pi.ctx.sessionManager, { getSessionId: () => "s1", getSessionFile: () => "" });
+	pi.ctx.model = model;
+	if (thinking) pi.ctx.thinkingLevel = thinking;
+	await pi.load("/deckhand/pi/extensions/bridge", (await import(`../extensions/bridge/index.ts?${Math.random()}`)).default);
+	assert.deepEqual(await pi.start(), { exitCode: 0, errors: [] });
+	return pi;
+}
+
+test("bridge: pi.status says pi's model, its provider and thinking level; a model or thinking switch says it again", async () => {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			const pi = await bridgeWithModel({ id: "claude-sonnet-9", provider: "anthropic", apiKey: "never-sent" }, "high");
+			const first = await dh.waitFor("pi.status with the model", (m) => m.type === "pi.status" && m.model === "claude-sonnet-9");
+			assert.equal(first.provider, "anthropic");
+			assert.equal(first.thinking, "high");
+			assert.ok(!JSON.stringify(dh.got).includes("never-sent"), "only the id and provider of the model");
+			pi.ctx.model = { id: "gpt-9", provider: "openai" };
+			await pi.fire("model_select", { type: "model_select", model: pi.ctx.model, previousModel: undefined, source: "set" });
+			await dh.waitFor("pi.status with the new model", (m) => m.type === "pi.status" && m.model === "gpt-9" && m.provider === "openai");
+			pi.ctx.thinkingLevel = "low";
+			await pi.fire("thinking_level_select", { type: "thinking_level_select", level: "low", previousLevel: "high" });
+			await dh.waitFor("pi.status with the new thinking level", (m) => m.type === "pi.status" && m.model === "gpt-9" && m.thinking === "low");
+		});
+	} finally {
+		dh.close();
+	}
+});
+
+test("bridge: with no model known (or a pi without ctx.model), pi.status has no model fields", async () => {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			await bridgeWithModel(undefined);
+			const st = await dh.waitFor("pi.status", (m) => m.type === "pi.status");
+			assert.ok(!("model" in st) && !("provider" in st) && !("thinking" in st), JSON.stringify(st));
+		});
+	} finally {
+		dh.close();
+	}
+});

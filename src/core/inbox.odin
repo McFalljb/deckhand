@@ -163,7 +163,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Pi_Status_Update:
 		b := make([]string, len(c.blockers), allocator)
 		for x, i in c.blockers do b[i] = s(x, allocator)
-		return Pi_Status_Update{tab_id = c.tab_id, agent = c.agent, waiting = c.waiting, question = c.question, blockers = b}
+		return Pi_Status_Update{tab_id = c.tab_id, agent = c.agent, waiting = c.waiting, question = c.question, blockers = b, model = s(c.model, allocator), provider = s(c.provider, allocator), thinking = s(c.thinking, allocator)}
 	case Pi_Prompt:
 		imgs := make([]Prompt_Image, len(c.images), allocator)
 		for im, i in c.images do imgs[i] = {mime = s(im.mime, allocator), data = s(im.data, allocator)}
@@ -358,6 +358,9 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Pi_Status_Update:
 		for x in c.blockers do delete(x, allocator)
 		delete(c.blockers, allocator)
+		delete(c.model, allocator)
+		delete(c.provider, allocator)
+		delete(c.thinking, allocator)
 	case Pi_Prompt:
 		delete(c.text, allocator)
 		for im in c.images {

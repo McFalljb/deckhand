@@ -893,8 +893,14 @@ claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool
 	return {ok = true, created_id = s.id}, true
 }
 
-// Frees a Claude tab's own data (its kind's strings and held texts).
+// Frees a Claude or pi tab's own data (its kind's strings and held texts).
 tab_free_kind :: proc(tab: ^Tab) {
+	if pt, is_pi := &tab.kind.(Pi_Tab); is_pi {
+		delete(pt.model)
+		delete(pt.thinking)
+		pt.model, pt.thinking = "", ""
+		return
+	}
 	ct, is := &tab.kind.(Claude_Tab)
 	if !is do return
 	delete(ct.session_id)

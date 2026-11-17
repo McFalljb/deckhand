@@ -504,7 +504,10 @@ Green is not a session's colour: it means a machine is online, or a job's last r
 pi tabs report through Deckhand's pi integration ([pi in Deckhand](#pi-in-deckhand)). Any other program in a terminal tab can report too, with
 the OSC 7501 program status protocol: Claude Code (2.1.295 or newer) does by itself. When both
 could speak for a pi tab, its bridge wins. Hover a mark's tab or row to see what it is in words,
-what it said, where it came from (pi bridge or OSC 7501) and for how long.
+what it said, where it came from (pi bridge or OSC 7501) and for how long. Hovering a pi tab also
+shows its model and thinking level ("pi · model anthropic/claude-sonnet-4-5 · thinking high"), as
+a Claude tab shows its model; after a switch in pi it follows (an older Deckhand pi integration
+reports none).
 
 Waiting work is never hidden: hidden rows, folded sections and filters always leave sessions
 that wait for you visible.

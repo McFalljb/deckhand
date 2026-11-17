@@ -1741,3 +1741,69 @@ codex_reopen_closed_tab :: proc(t: ^testing.T) {
 		testing.expect(t, tb != nil && core.tab_harness(tb^) == .Codex, "reopened in Codex")
 	} else do testing.fail(t)
 }
+
+// Codex Desktop's Chat mode runs each conversation in a folder it makes under
+// ~/Documents/Codex/<date>/<slug>: such a conversation is a chat (listed in Chats with its title,
+// never a found project), resumed in its own folder (Codex needs it), from its found row and from
+// the history; a project the user added there stays a project; ~/Documents/Codex itself is not a chat.
+@(test)
+codex_app_chats_in_chats :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("appchats")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("appchats-nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	fake_home := cx_dir("appchats-home")
+	os.set_env("HOME", fake_home)
+	old_root := core.home_root
+	defer core.home_root = old_root
+	core.home_root = cx_dir("appchats-data")
+	root := fmt.tprintf("%s/Documents/Codex", fake_home)
+	chat := fmt.tprintf("%s/2026-11-16/we-had-a-chat-a-while", root)
+	mine := fmt.tprintf("%s/2026-11-15/kept-as-a-project", root)
+	for d in ([]string{chat, mine}) do os.make_directory_all(d)
+	cx_rollout(home, "2026/11/16", cx_id(1), chat, `"vscode"`)
+	cx_rollout(home, "2026/11/15", cx_id(2), mine, `"vscode"`)
+	cx_rollout(home, "2026/11/14", cx_id(3), root, `"vscode"`)
+	_ = os.write_entire_file(fmt.tprintf("%s/session_index.jsonl", home), transmute([]u8)fmt.tprintf(`{{"id":"%s","thread_name":"We had a chat","updated_at":"2026-11-16T10:00:00.000Z"}}`+"\n", cx_id(1)))
+	core.rescan_now()
+	pid := core.run_command(core.Add_Project{cwd = mine}, CX_UI).created_id
+	cx_rescan()
+	cx_disk_show(pid)
+	testing.expect(t, core.project_by_cwd(chat) == nil, "a Codex Desktop chat's folder is no project")
+	testing.expect(t, core.project_by_cwd(mine) != nil, "the user's project stays")
+	testing.expect(t, core.project_by_cwd(root) != nil, "~/Documents/Codex itself is a folder like any other")
+	testing.expectf(t, cx_id(2) in cx_found(), "the user's project lists its own: %v", cx_found())
+	chats := core.chats_project()
+	testing.expect(t, chats != nil)
+	if chats == nil do return
+	in_chats := make(map[string]string, context.temp_allocator)
+	for f in state.claude_disk_chats do if f.listed && f.harness == .Codex do in_chats[f.id] = f.title
+	testing.expectf(t, in_chats[cx_id(1)] == "We had a chat", "in Chats with its title: %v", in_chats)
+	testing.expect(t, !(cx_id(2) in in_chats) && !(cx_id(3) in in_chats), "only chats' folders")
+	js := core.state_json()
+	testing.expect(t, strings.contains(js, fmt.tprintf(`"id":"%s","project":"%s"`, cx_id(1), chats.cwd)), "the browser's Chats too")
+	// its click: `codex resume` in the chat's own folder, not the chats folder
+	argf := fmt.tprintf("%s/argv", cx_dir("appchats-out"))
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, argf))
+	r := core.run_command(core.Open_Session_Cmd{project_id = chats.id, pi_session_id = cx_id(1)}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	want := fmt.tprintf("resume\n%s\n--no-daemon\n-C\n%s\n", cx_id(1), chat)
+	got := cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, want), "%q", got)
+	rec, _ := core.claude_record(cx_id(1))
+	testing.expect(t, rec != nil && rec.project == chats.cwd && rec.cwd == chat, "the history: a chat that ran in its folder")
+	// closed and resumed from the history: its folder again
+	core.run_command(core.Close_Session{session = r.created_id}, core.Caller{kind = .Internal})
+	os.remove(argf)
+	rr := core.run_command(core.Claude_Resume{claude_session_id = cx_id(1)}, CX_UI)
+	testing.expect(t, rr.ok, rr.error)
+	got = cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, want), "%q", got)
+	if rs, _, _ := core.find_tab(rr.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
+}

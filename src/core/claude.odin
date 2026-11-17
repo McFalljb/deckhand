@@ -847,17 +847,22 @@ codex_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Resul
 	if !codex_id_ok(f.id) do return fail("not a Codex session id"), false
 	if claude_conversation_seen(p, f.id) do return fail("that id is another harness's conversation"), false
 	if mr, missing := codex_missing(caller); missing do return mr, false
-	if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
+	// a Codex Desktop chat (Chats; f.cwd): in the folder it ran in, as Codex needs
+	cwd := f.cwd != "" ? f.cwd : p.cwd
+	if f.cwd != "" && !os.is_dir(cwd) do return fail("the chat's folder is gone"), false
+	if f.cwd == "" && (p.missing || !os.is_dir(p.cwd)) do return fail("the project's folder is gone"), false
 	if claude_open_tab(f.id) != 0 || claude_tab_of_session(f.id) != 0 do return fail("that conversation is open in a tab"), false
 	// under the account whose home it was found in, while that is configured
 	if !claude_account_known(f.account, harness = .Codex) do return fail("its Codex account is no longer in Settings → Codex accounts"), false
-	return claude_open_session(p, p.cwd, f.id, nil, caller, claude_account_dir(f.account, harness = .Codex), harness = .Codex)
+	return claude_open_session(p, cwd, f.id, nil, caller, claude_account_dir(f.account, harness = .Codex), harness = .Codex)
 }
 
 // Where a Claude session of the history runs again: the folder it ran in while that is still
 // inside its project, else the project's (temp).
 @(private = "file")
 claude_resume_cwd :: proc(rec: ^Claude_Record, p: ^Project, s: ^Open_Session = nil) -> string {
+	// a Codex Desktop chat in Chats: the folder Codex made for it (codex_chat_roots), as Codex wrote it
+	if p.group == .Chats && rec.harness == .Codex && codex_chat_folder(rec.cwd, codex_chat_roots_here()) && os.is_dir(rec.cwd) do return rec.cwd
 	if rec.cwd != "" && os.is_dir(rec.cwd) {
 		at := fs_real(rec.cwd)
 		if within(at, fs_real(p.cwd)) || (s != nil && within(at, fs_real(s.cwd))) do return at

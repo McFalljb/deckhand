@@ -296,7 +296,9 @@ settings. The Developer ID will close that gap.
   kept there do not show in Deckhand.
 - A **chat** is a conversation (pi, Claude Code or Codex) outside any project. Chats run in one
   folder, the main folder's `chats/` (or `~/Chats` without a main folder, or the folder you
-  chose), so `cd <that folder> && pi --resume` finds them too. That folder has its own **chat
+  chose), so `cd <that folder> && pi --resume` finds them too. Codex Desktop's Chat-mode
+  conversations (each in its own folder under `~/Documents/Codex`) list in Chats too and resume in
+  their own folder. The chats folder has its own **chat
   instructions** (`AGENTS.md`, which pi and Codex read there besides your global one): the
   starter makes the agent a conversation partner and researcher, not a coding agent. It
   explains, looks things up, cites sources and draws diagrams in text. Edit them with the

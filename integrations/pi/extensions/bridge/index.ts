@@ -25,7 +25,9 @@
  * - Answers `pi.prompt` (a user message, with `images` if given; follow-up while a run is going),
  *   `pi.wait_idle` (when pi is idle with nothing queued and no blockers, or a timeout) and
  *   `pi.reload` (refused unless that same idle holds: a reload kills the kit's background shells;
- *   the result comes after it).
+ *   the result comes after it) and `pi.name` (the session's name, with pi's own setSessionName as
+ *   `/name` does; one line, at most NAME_MAX; refused unless that same idle holds, and by a pi
+ *   without setSessionName).
  * - Holds Deckhand's pending comments (`pi.attach` replaces them, `pi.attach_clear` drops them, and
  *   so does a dropped connection) and adds them to the next message the user types in pi (the
  *   `input` hook: text after the user's, images after theirs; not a `/` command), then tells
@@ -56,6 +58,7 @@ const IDLE_SETTLE_MS = 250; // wait_idle needs idle to hold this long (a shell's
 const PANEL_EVERY_MS = 1000; // panel updates are coalesced to one per this
 const COMMAND_TIMEOUT_MS = 60_000; // a deckhand:command without timeoutMs
 const MODE_WAIT_MS = 1000; // session_start waits this long at most for the first handshake (the mode)
+const NAME_MAX = 200; // pi.name: Deckhand sends at most 80 characters
 const arr = (v: unknown) => (Array.isArray(v) ? v : []);
 
 export default function (pi: ExtensionAPI) {
@@ -208,6 +211,20 @@ export default function (pi: ExtensionAPI) {
 			// Reload is a command-context operation: run it through our command.
 			pi.sendUserMessage(`/${RELOAD_COMMAND}`, { expandPromptTemplates: true });
 			return;
+		}
+		if (m.type === "pi.name") {
+			const name = typeof m.name === "string" ? m.name.trim() : "";
+			if (!name || name.length > NAME_MAX || /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(name)) return answer(m.id, { ok: false, error: "the name must be one line of text" });
+			const set = (pi as unknown as { setSessionName?: (n: string) => void }).setSessionName;
+			if (typeof set !== "function") return answer(m.id, { ok: false, error: "this pi cannot be renamed from Deckhand: type /name <name> in it" });
+			const why = notIdle();
+			if (why.length) return answer(m.id, { ok: false, error: `pi is busy (${why.join("; ")}): rename it once it is idle` });
+			try {
+				set.call(pi, name);
+			} catch (e) {
+				return answer(m.id, { ok: false, error: `pi did not take the name: ${e instanceof Error ? e.message : String(e)}` });
+			}
+			return answer(m.id, { ok: true });
 		}
 		answer(m.id, { ok: false, error: `unknown type ${String(m.type)}` });
 	}

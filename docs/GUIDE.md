@@ -718,7 +718,9 @@ is waiting for you).
 - **To pin** a project or session to the top of its section, click the pin on its row or use
   **…** → Pin. Pinned rows get Move up / Move down in the same menu.
 - **To rename a project**, use **…** → Rename…, or the palette's "Rename project". A pi session
-  is named in pi: type `/name My title` in the session. A Claude row: **…** → Rename….
+  is named in pi: type `/name My title` in the session, or, while it is open here and pi is idle,
+  **…** → Rename… on its row (type the name, Enter): Deckhand asks that pi to name it, as `/name`
+  does, so pi's own session list shows the name too. A Claude row: **…** → Rename….
 - **To hide** a project or session, use **…** → Hide. Nothing is deleted.
 - **To see hidden rows**, click the sort button on a section heading and tick **Show hidden**
   (or the palette's "Show hidden projects and sessions"). Hidden rows then show, and their menu

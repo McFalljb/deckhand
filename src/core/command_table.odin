@@ -112,6 +112,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "quit", args = "confirm?, stop_sessions?", does = "quit Deckhand (stop_sessions: the session holder's sessions too; keep_sessions)", who = .Anyone, confirm = .App_Quit},
 	{type = "pi_prompt", args = "tab_id, text, images?", does = "send a prompt to a pi tab as a user message, with images [{mime, data (base64)}] if given (at most 8, 2 MB; refused while it waits for the user)", who = .Anyone, long_running = true},
 	{type = "pi_wait_idle", args = "tab_id, timeout_ms?", does = "wait until a pi tab is idle", who = .Anyone, long_running = true},
+	{type = "pi_rename", args = "pi_session_id, name", does = "rename a pi session (its name in pi, as /name; at most 80 characters, one line): asks its running pi through the tab's bridge, so only a session open in a running pi tab here, and not while pi is busy; Deckhand never writes pi's file", who = .Anyone, long_running = true},
 	{type = "pi_restart", args = "tab_id, pick_model?", does = "start pi again in a pi tab whose process exited, on the same session (the dead tab's Restart); pick_model: pi's model selector opens once it is up (Restart with model…)", who = .Anyone},
 	{type = "pi_reload", args = "tab_id, confirm?", does = "reload a pi tab once it is idle", who = .Anyone, confirm = .Session_Restart, long_running = true},
 	{type = "set_terminal_text_size", args = "pt", does = "the terminals' and the editor's text size in points, 9-28 (0 = the look's, 14)", who = .Anyone},

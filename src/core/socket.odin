@@ -460,7 +460,7 @@ command_session :: proc(cmd: Command) -> u64 {
 
 // ---- pi tab bridge (main thread) ----
 
-// Sends a pi_prompt/pi_reload/pi_wait_idle to the tab's bridge connection
+// Sends a pi_prompt/pi_reload/pi_wait_idle/pi_rename to the tab's bridge connection
 // (the newest one with that tab's token). The bridge's result line finishes
 // `request_id`. False if no bridge is connected or it is not reading.
 socket_bridge_send :: proc(tab_id: u64, request_id: u64, cmd: Command) -> bool {
@@ -488,6 +488,9 @@ socket_bridge_send :: proc(tab_id: u64, request_id: u64, cmd: Command) -> bool {
 		write_prompt_images(&b, c.images) // Send now's crops (comments.odin)
 	case Pi_Reload:
 		strings.write_string(&b, `"pi.reload"`)
+	case Pi_Rename:
+		strings.write_string(&b, `"pi.name","name":`)
+		json_quote(&b, c.name)
 	case Pi_Wait_Idle:
 		strings.write_string(&b, `"pi.wait_idle"`)
 		if c.timeout_ms > 0 do fmt.sbprintf(&b, `,"timeout_ms":%d`, c.timeout_ms) // none = no timeout

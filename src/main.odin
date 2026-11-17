@@ -1245,7 +1245,8 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			} else if in_filter {
 				filter_enter()
 			} else if state.focus_widget == "rename_session" {
-				ui_do(core.Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				if r, _ := core.claude_record(rename_session); r != nil do ui_do(core.Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				else do ui_do_menu(core.Pi_Rename{pi_session_id = rename_session, name = tf_text(f)}, "Rename") // a pi session: its pi names it (pi_rename.odin); a refusal toasts
 				ui_do(core.Set_Focus{""})
 			} else {
 				ui_do(core.Rename_Project{state.selected_project, tf_text(f)})

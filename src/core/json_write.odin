@@ -257,6 +257,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Pi_Reload:           return "pi_reload"
 	case Pi_Restart:          return "pi_restart"
 	case Pi_Wait_Idle:        return "pi_wait_idle"
+	case Pi_Rename:           return "pi_rename"
 	case Panel_Set:           return "panel.set"
 	case Panel_Remove:        return "panel.remove"
 	case Set_Panel_Collapsed: return "set_panel_collapsed"
@@ -713,6 +714,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Pi_Wait_Idle:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "timeout_ms", c.timeout_ms)
+	case Pi_Rename:
+		kv_str(&w, "pi_session_id", c.pi_session_id)
+		kv_str(&w, "name", redact ? fmt.tprintf("<redacted %d bytes>", len(c.name)) : c.name)
 	case Panel_Set:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_str(&w, "panel", c.panel)

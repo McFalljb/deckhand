@@ -620,6 +620,7 @@ Command :: union {
 	Pi_Reload,
 	Pi_Restart,
 	Pi_Wait_Idle,
+	Pi_Rename, // pi_rename.odin
 	Panel_Set,
 	Panel_Remove,
 	Set_Panel_Collapsed,
@@ -1947,6 +1948,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if !socket_bridge_send(c.tab_id, request_id, cmd) do return fail("no bridge connected for this tab"), ch
 		reload_sent(tab, request_id) // hot reload's bookkeeping (reload.odin)
 		return {ok = true, pending = true}, true
+	case Pi_Rename:
+		return pi_rename_apply(c, caller, request_id) // through the tab's bridge (pi_rename.odin)
 	case Pi_Wait_Idle:
 		_, tab := pi_tab(c.tab_id)
 		if r, bad := bridge_target(tab, caller); bad do return r, false

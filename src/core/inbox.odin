@@ -169,6 +169,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		for im, i in c.images do imgs[i] = {mime = s(im.mime, allocator), data = s(im.data, allocator)}
 		return Pi_Prompt{tab_id = c.tab_id, text = s(c.text, allocator), images = imgs}
 	case Pi_Reload:           return Pi_Reload{tab_id = c.tab_id, confirm = s(c.confirm, allocator)}
+	case Pi_Rename:           return Pi_Rename{pi_session_id = s(c.pi_session_id, allocator), name = s(c.name, allocator)}
 	case Bridge_Done:         return Bridge_Done{request_id = c.request_id, ok = c.ok, error = s(c.error, allocator)}
 	case Panel_Set:
 		rows := make([]Panel_Row, len(c.rows), allocator)
@@ -400,6 +401,9 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Core_Handover:       delete(c.to, allocator)
 	case Set_Agent_Model:     delete(c.model, allocator)
 	case Pi_Reload:           delete(c.confirm, allocator)
+	case Pi_Rename:
+		delete(c.pi_session_id, allocator)
+		delete(c.name, allocator)
 	case Pi_Reload_All, Pi_Restart_Updated, Reload_Watch: reload_free(cmd, allocator)
 	case Claude_Restart_Changed, Claude_Reload_Watch: claude_reload_free(cmd, allocator)
 	case Bridge_Done:         delete(c.error, allocator)

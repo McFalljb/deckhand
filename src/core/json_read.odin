@@ -749,6 +749,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "pi_restart_updated":  cmd = Pi_Restart_Updated{confirm = get_str(&r, "confirm", optional = true)}
 	case "pi_reload_later":     cmd = Pi_Reload_Later{restart = opt_bool(&r, "restart").? or_else false}
 	case "pi_wait_idle":        cmd = Pi_Wait_Idle{tab_id = get_u64(&r, "tab_id"), timeout_ms = opt_u64(&r, "timeout_ms")}
+	case "pi_rename":           cmd = Pi_Rename{pi_session_id = get_str(&r, "pi_session_id"), name = get_str(&r, "name")}
 	case "open_file":           cmd = Open_File{path = get_str(&r, "path"), line = int(opt_u64(&r, "line")), col = int(opt_u64(&r, "col")), session = opt_u64(&r, "session"), preview = opt_bool(&r, "preview").? or_else false}
 	case "keep_tab":            cmd = Keep_Tab{tab_id = get_u64(&r, "tab_id")}
 	case "editor_state":        cmd = Editor_State{tab_id = get_u64(&r, "tab_id")}

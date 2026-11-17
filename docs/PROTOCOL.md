@@ -309,6 +309,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `pi_restart_updated` | `confirm`? | **user only**: restarts the pi tabs that started with another pi version than the one on disk, or with other optional pi extensions than the user's choices now (`set_pi_extension`) (`pi --session <file>`, same session; Atlas with its own arguments): idle ones now, busy or blocked ones once idle (same confirmation rule); `data`: `{"restarting", "queued", "no_bridge"}`. Each restart first sends `pi.wait_idle` (`timeout_ms` 1500) to the tab's bridge and stops pi only on its OK (a timeout queues it again); the new pi starts once the old process has exited (SIGKILL after 5 s) |
 | `pi_reload_later` | `restart`? | **user only**: hides the reload bar (`restart`: the pi-update bar) until the next change (version) and drops the reloads (restarts) still queued |
 | `pi_wait_idle` | `tab_id`, `timeout_ms`? | `pi.wait_idle` to the bridge; **long-running** |
+| `pi_rename` | `pi_session_id`, `name` | renames a pi session the way `/name` does: `pi.name` to the bridge of the session's running pi tab on this machine, which names it with pi's own `setSessionName` (pi appends a `session_info` entry; Deckhand never writes pi's file, and the row's title follows once pi saved it). `name`: trimmed, one line, at most 80 characters. Refused: `"this pi session is not open in a running pi tab here: …"` (not open, pi not running, or its bridge never reported), `"pi is busy: rename it once it is idle"` (working, waiting or with blockers), `"a caller cannot act on its own tab"`; the bridge's own refusal (busy, a pi without `setSessionName`: type `/name`) is the `finished` result. The log and events carry the name's length only. **Long-running** |
 | `pi.session`, `pi.status` | as in §4, plus `tab_id` | bridge reports; also accepted as commands (with `tab_id`) from scripts, for tests |
 | `panel.set`, `panel.remove` | as in §5, plus `tab_id` | only from the tab's own bridge (caller `panel`): control, scripts and the user get `not allowed for this caller` |
 | `set_confirm_policy` | `caller`, `class`, `mode` | **user only**; see §3 confirmation |
@@ -1086,8 +1087,8 @@ script may report; `control` may not.
 
 To the bridge (Deckhand → pi, on the same connection as requests with `id` = `"d<n>"`; the
 bridge replies `{"id":"d<n>","v":1,"type":"result","result":{"ok":…,"error"?:…}}`, which
-finishes the control command that caused it). They are sent by the `pi_prompt`, `pi_reload` and
-`pi_wait_idle` commands (§3) to the newest connection holding that tab's token; with none, the
+finishes the control command that caused it). They are sent by the `pi_prompt`, `pi_reload`,
+`pi_wait_idle` and `pi_rename` (`pi.name` with `name`) commands (§3) to the newest connection holding that tab's token; with none, the
 command fails with `"no bridge connected for this tab"`. If the bridge disconnects first, the
 `finished` result is `"the pi tab's bridge disconnected"`. A caller cannot send them to its own
 tab.
@@ -1107,6 +1108,9 @@ tab.
 - `pi.wait_idle` without `timeout_ms` waits with no timeout (`pi_wait_idle` omits it when unset
   or 0). `pi.reload` is refused by the bridge unless pi is idle (`"not idle: …"`, passed through
   as the `finished` result): send `pi_wait_idle` first, then `pi_reload`.
+- `pi.name` (`name`): the bridge names the session with pi's `setSessionName`, as `/name` does,
+  only while pi is idle; a pi without it answers that the user should type `/name`; a name that is
+  empty, not one line or over 200 characters is refused.
 - The bundled integration removes every `DECKHAND_*` variable from its process environment when
   it loads (children started later then inherit none), but the token's safety comes from being
   single-use, not from that. Deckhand sets them only for a pi that loads the integration.

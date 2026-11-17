@@ -1015,7 +1015,7 @@ codex_sessions_on_disk :: proc(t: ^testing.T) {
 	for f in state.claude_disk do if f.listed {
 		listed += 1
 		testing.expect_value(t, f.id, ids[0])
-		testing.expect(t, f.codex && f.path == "", "a Codex row, no path kept")
+		testing.expect(t, f.harness == .Codex && f.path == "", "a Codex row, no path kept")
 	}
 	testing.expect_value(t, listed, 1)
 	js := core.state_json()

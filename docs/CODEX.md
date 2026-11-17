@@ -180,7 +180,7 @@ at each file rather than "the Read tool". Nothing pending: nothing printed. If t
 
 ## 2b. Sessions found on disk
 
-`claude_disk_scan` (`src/core/claude_disk.odin`) lists Codex conversations beside Claude Code's for
+`claude_disk_scan` (`src/core/claude_disk.odin`; Codex's lister and first-line reader in `src/core/codex_disk.odin`) lists Codex conversations beside Claude Code's for
 the selected project and Chats. **Read only, never written.**
 
 - **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), and each Codex

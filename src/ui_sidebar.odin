@@ -328,6 +328,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin
 		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_offered(id) do core.claude_account_items(&items, "New Codex tab here", core.New_Claude_Tab{session = id, codex = true}) // codex.odin
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
+		else if core.pi_rename_offered(t.pi_session_id) do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a pi session open here: its running pi names it (pi_rename.odin)
 		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
 		pi_handoff_items(&items, t.project_id, t.pi_session_id) // Continue this conversation on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)
@@ -440,11 +441,13 @@ menu_run :: proc(i: int) {
 	}
 	if it.rename {
 		if t, ok := target.(Menu_Session); ok {
-			// a Claude session's row: its field takes the row (claude_rename on Enter)
+			// a Claude session's row: its field takes the row (claude_rename on Enter); a pi
+			// session's: pi_rename on Enter (its running pi names it)
 			delete(rename_session)
 			rename_session = strings.clone(t.pi_session_id)
 			title := ""
 			if r, _ := core.claude_record(t.pi_session_id); r != nil do title = r.title
+			else do title = pi_session_name(t.pi_session_id)
 			tf_set(&rename_field, title)
 			tf_select_all(&rename_field) // typing replaces it
 			ui_do(core.Set_Focus{"rename_session"})
@@ -2283,4 +2286,12 @@ attention_view_toggle :: proc() {
 	if state.focus_widget == "files" do ui_do(core.Set_Focus{""}) // the Files or Settings tree had the keyboard
 	if !state.layout.left_open || state.layout.left_tab != .Sessions do ui_do(core.Set_Left_Tab{tab = .Sessions})
 	ui_do(core.Set_Sidebar_View{view = v})
+}
+
+// A pi session's title as its row shows it (the rename field starts with it; "" = none).
+@(private = "file")
+pi_session_name :: proc(id: string) -> string {
+	for s in state.sessions do if s.id == id do return s.title
+	for s in state.chats do if s.id == id do return s.title
+	return ""
 }

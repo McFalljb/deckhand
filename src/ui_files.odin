@@ -748,7 +748,7 @@ files_menu_at :: proc(path: string, at: [2]f32) {
 }
 
 // A Settings page file row's menu (the old Settings tab's): Open, New file/folder in prompts/ and
-// skills/, Rename and Move to Trash only inside prompts/, skills/, extensions/ and a project's .pi/
+// skills/, Rename and Move to Trash only inside prompts/, skills/, extensions/, themes/ and a project's .pi/
 // (settings_row_editable: never pi's own config files), Reveal, Copy path. Opens go to the session
 // the page was opened from (settings_page_session).
 @(private = "file")

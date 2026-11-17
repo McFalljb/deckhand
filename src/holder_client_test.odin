@@ -484,6 +484,41 @@ holder_adopt_codex_kind :: proc(t: ^testing.T) {
 	testing.expect_value(t, st.kind, core.Held_Kind.Codex)
 }
 
+// A plain Codex tab (an old Codex, codex.odin) keeps its mark across a relaunch: tokens.json says
+// it started plain, whatever its token trust and whatever codex is on disk now (none here), so a
+// prompt is still refused rather than queued for hooks it never had; and the record says so again
+// for the next relaunch. A Codex tab started with hooks is not marked.
+@(test)
+holder_adopt_codex_plain :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "pi\r\n"), fake_term(4, "codex\r\n"), fake_term(5, "codex\r\n")}, tails = {transmute([]u8)string("pi\r\n"), transmute([]u8)string("codex\r\n"), transmute([]u8)string("codex\r\n")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	binds[4] = {kind = .Codex, plain = {0, 160, 2}}
+	binds[5] = {kind = .Codex}
+	id1, id2 := "01a1d0d6-5353-7ff3-9308-ff91070ad541", "01a1d0d6-5353-7ff3-9308-ff91070ad542"
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"aaaa-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"codex","claude_session_id":"%s","held":4}},{{"kind":"codex","claude_session_id":"%s","held":5}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, id1, id2)
+	adopt_run(t, &f, text, binds)
+	s: ^core.Open_Session
+	for &x in state.open_sessions do if !x.home do s = &x
+	testing.expect(t, s != nil && len(s.tabs) == 3, "restored")
+	if s == nil || len(s.tabs) != 3 do return
+	plain, full := s.tabs[1].id, s.tabs[2].id
+	testing.expect(t, core.term_of(plain) != nil && core.term_of(full) != nil, "both adopted")
+	testing.expect_value(t, core.codex_plain_version(plain), "0.160.2")
+	testing.expect_value(t, core.codex_plain_version(full), "")
+	r := core.run_command(core.Claude_Prompt{tab_id = plain, text = "hello"}, {kind = .Control})
+	testing.expect_value(t, r.error, core.CODEX_PLAIN_REFUSAL)
+	st4, _ := core.socket_tokens_start_of(4)
+	st5, _ := core.socket_tokens_start_of(5)
+	testing.expect(t, st4.plain == {0, 160, 2} && st5.plain == {}, fmt.tprint("the records after the adoption:", st4, st5))
+	for tab in s.tabs do if x := core.term_of(tab.id); x != nil do x.pty.held, x.running = 0, false // never a RELEASE from a test
+}
+
 // No authenticated record (tokens.json removed, or failing its MAC): workspace.json alone never
 // decides what a live agent process is, so no held pi, Claude or Codex is adopted into an agent tab
 // (the path of a terminal tokens.json does not vouch for: not adopted, the tab starts afresh when

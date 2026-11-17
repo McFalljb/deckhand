@@ -90,6 +90,7 @@ Setting :: struct {
 	applies:  Setting_Applies,
 	row:      string, // the Settings rows it stands for (settings_file_rows' path; a prefix ends in ':')
 	atlas:    bool, // "Atlas" in its label is the agent's name (agent_name)
+	read_only: bool, // a List that only shows what is there: no command, no action, no buttons
 	ext:      string, // a pi extension of Deckhand's integration (set_pi_extension's name)
 }
 
@@ -113,6 +114,8 @@ SETTINGS := [?]Setting {
 	{id = "pi_default_flags", section = .Agents, card = "pi", label = "Default flags…", hint = "Before a session's own flags, in the pi sessions you start", keywords = "flags default model provider thinking command line arguments", kind = .Button, action = "pi_default_flags", command = "set_harness_flags"},
 	{id = "claude_status", section = .Agents, card = "Claude Code", label = "Claude Code", hint = "Its version and Deckhand's plugin", keywords = "claude install update version plugin checklist", kind = .Status, command = "setup_sheet", row = HARNESS_SETTINGS_ROW},
 	{id = "claude_accounts", section = .Agents, card = "Claude Code", label = "Add Claude account…", hint = "Another Claude Code config folder (CLAUDE_CONFIG_DIR)", keywords = "accounts config folder default rename remove scan", kind = .List, action = "claude_account_add", command = "add_claude_account", row = "deckhand:claude-account"},
+	{id = "claude_plugins", section = .Agents, card = "Claude Code", label = "Plugins", hint = "enabledPlugins in settings.json. Turn one on or off with /plugin in Claude Code; running tabs then offer Restart", keywords = "plugins marketplace enabledPlugins extensions", kind = .List, row = CLAUDE_PLUGIN_ROW, read_only = true},
+	{id = "claude_mcp", section = .Agents, card = "Claude Code", label = "MCP servers (user)", hint = "Names and transports only. Add or remove them with `claude mcp`", keywords = "mcp servers tools user scope", kind = .List, row = CLAUDE_MCP_ROW, read_only = true},
 	{id = "claude_skip_permissions", section = .Agents, card = "Claude Code", label = "Skip permissions in new tabs", hint = "Claude acts without asking. Tabs you start only, never an agent's.", keywords = "claude dangerously flags default permissions", kind = .Switch, action = "claude_skip_permissions", command = "set_claude_default_flags", row = CLAUDE_FLAGS_ROW},
 	{id = "claude_default_flags", section = .Agents, card = "Claude Code", label = "Default flags…", hint = "Before a tab's own flags, in the tabs you start", keywords = "claude flags default model permission mode mcp config command line arguments", kind = .Button, action = "claude_default_flags", command = "set_harness_flags"},
 	{id = "codex_status", section = .Agents, card = "Codex", label = "Codex", hint = "Its version", keywords = "codex openai install update version checklist", kind = .Status, command = "setup_sheet", row = HARNESS_SETTINGS_ROW},
@@ -166,6 +169,8 @@ SETTINGS_FILE_GROUPS := [?]Setting_File_Group {
 	{"claude", .Agents, "Claude Code"},
 	{"claude:", .Agents, "Claude Code"}, // one per account once there are several
 	{"claude-accounts", .Agents, "Claude Code"},
+	{"claude-plugin", .Agents, "Claude Code"},
+	{"claude-mcp", .Agents, "Claude Code"},
 	{"codex", .Agents, "Codex"},
 	{"codex:", .Agents, "Codex"}, // one per account once there are several
 	{"codex-accounts", .Agents, "Codex"},

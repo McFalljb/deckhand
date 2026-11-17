@@ -31,6 +31,7 @@ W="$ROOT/build/update"
 rm -rf "$W" build/shots/update
 mkdir -p "$W" build/shots/update
 odin build tools/update-sign -out:build/update-sign
+scripts/build-zstd.sh # the zstd decoder the core links (src/zstd)
 BIN="$W/deckhand-update-test"
 odin build src -out:"$BIN" -define:DECKHAND_UPDATE_TEST=true -minimum-os-version:14.0 &
 # the session holder and the relaunch helper (holder_bin_find: next to the app's binary)

@@ -14,6 +14,9 @@ package core
 //   MCP servers   the cwd's .mcp.json
 //   new folders   <config>/{agents,skills}/ and the cwd's .claude/{agents,skills}/ when they
 //                 appear (Claude Code watches only folders that existed at its start)
+//   plugins       `enabledPlugins` in <config>/settings.json and the cwd's
+//                 .claude/settings{,.local}.json (CLAUDE_RESTART_KEYS): the rest of those files
+//                 is live, so only that key's value is compared (restart_keys_digest)
 //   the plugin    Deckhand's own plugin (--plugin-dir): its manifest, hooks, skill, bin
 //
 // There is no /reload for those: the bar offers Restart (claude_restart_changed), the same
@@ -35,12 +38,15 @@ package core
 // Never read, watched or listed here: credentials, account state, transcripts, caches
 // (claude_credential: .credentials.json, .claude.json, everything in the config folder but its
 // config files). Only file times and sizes are looked at, never contents (an npm install's
-// package.json excepted, for its version). Transcripts are read elsewhere, for rows only:
-// claude_disk.odin (sessions found on disk; never credentials).
+// package.json excepted, for its version; and a settings file's CLAUDE_RESTART_KEYS, only once
+// its stamp changed). Transcripts are read elsewhere, for rows only: claude_disk.odin (sessions
+// found on disk; never credentials).
 
 import "base:runtime"
+import "core:encoding/json"
 import "core:fmt"
 import "core:hash"
+import jg "../jsonguard"
 import "core:os"
 import "core:path/filepath"
 import "core:slice"
@@ -145,6 +151,8 @@ under :: proc(p, dir: string) -> bool {return dir != "" && len(p) > len(dir) && 
 // claude_config_dirs (~/.claude and CLAUDE_CONFIG_DIR, each also where it links to), and any
 // folder that directly holds a .credentials.json or .claude.json (another profile's). A folder
 // that is HOME or above it (by any name) is never one: the names only (never all of HOME).
+// One reader looks into the account file on purpose: claude_lists.odin keeps the names (and
+// transport) of its top-level mcpServers for Settings, nothing else of it.
 // p: clean and absolute (settings_credential also checks where it links to, and hard links by
 // inode).
 claude_credential :: proc(p: string) -> bool {
@@ -715,6 +723,7 @@ Src_Kind :: enum u8 {
 	File, // its stamp
 	Folder, // the stamps of its files (a digest), and whether it is there
 	Exists, // only whether the folder is there
+	Keys, // a settings file: its stamp, then the digest of its CLAUDE_RESTART_KEYS' values
 }
 
 @(private = "file")
@@ -723,8 +732,9 @@ Src :: struct {
 	scope:  string, // owned
 	kind:   Src_Kind,
 	pk:     Path_Kind,
-	stamp:  Disk_Stamp,
-	digest: u64,
+	stamp:   Disk_Stamp,
+	digest:  u64,
+	keys_ok: bool, // .Keys: digest is of a file that parsed (one that does not keeps the last)
 }
 
 @(private = "file")
@@ -797,7 +807,19 @@ claude_reload_pending_count :: proc() -> int {return len(cw.pending)}
 // The editor saved a file (settings_after_save): one a running Claude session reads only at
 // start shows the bar at once; one it applies live, nothing.
 claude_reload_note_save :: proc(path: string) {
-	if claude_file_class(path) != .Restart do return
+	if claude_file_class(path) != .Restart {
+		// a live settings file: only a change of its CLAUDE_RESTART_KEYS (a watched one)
+		p, _ := filepath.clean(path, context.temp_allocator)
+		for &s in cw.srcs do if s.kind == .Keys && s.path == p {
+			if !keys_changed(&s) do return
+			pending_add(s.path, s.scope)
+			cw.due = time.tick_now()
+			cw.from_save = true
+			window_state_changed()
+			return
+		}
+		return
+	}
 	p, _ := filepath.clean(path, context.temp_allocator)
 	scope := ""
 	plugin := claude_plugin_dir()
@@ -909,6 +931,57 @@ folder_digest :: proc(dir: string) -> u64 {
 	return h
 }
 
+// The keys of a settings file a running Claude Code reads only at its start (the rest of the
+// file it applies live): plugins load when it starts.
+CLAUDE_RESTART_KEYS :: [?]string{"enabledPlugins"}
+@(private = "file")
+SETTINGS_READ_MAX :: 4 << 20 // a settings file larger than this is not looked into
+
+// The digest of a settings file's CLAUDE_RESTART_KEYS values (key order inside them not
+// counting); ok false: unreadable, too large or not a JSON object (the caller keeps the last).
+// Only those keys are kept; nothing of the file is stored or shown.
+@(private = "file")
+restart_keys_digest :: proc(path: string) -> (digest: u64, ok: bool) {
+	obj: json.Object // a missing file: none of the keys, as a file without them
+	if k, st := path_stat(path); k == .File {
+		if st.size > SETTINGS_READ_MAX do return 0, false
+		data, err := os.read_entire_file(path, context.temp_allocator)
+		if err != nil do return 0, false
+		v, jerr := jg.parse(data, .JSON, true, context.temp_allocator)
+		if jerr != nil do return 0, false
+		is: bool
+		if obj, is = v.(json.Object); !is do return 0, false
+	} else if k != .Missing do return 0, false
+	h: u64 = 0xcbf29ce484222325
+	for key in CLAUDE_RESTART_KEYS {
+		val, has := obj[key]
+		out, merr := json.marshal(val, {sort_maps_by_key = true}, context.temp_allocator)
+		if merr != nil do return 0, false
+		line := fmt.tprintf("%s=%v:%s\n", key, has, string(out))
+		h = hash.fnv64a(transmute([]u8)line, h)
+	}
+	return h, true
+}
+
+// A .Keys source looked at again: true when its restart keys changed since the last look that
+// parsed (a missing file has none).
+@(private = "file")
+keys_changed :: proc(s: ^Src) -> bool {
+	k, st := path_stat(s.path)
+	if k == s.pk && (k == .Missing || (st.mtime == s.stamp.mtime && st.size == s.stamp.size && st.inode == s.stamp.inode)) do return false
+	s.pk, s.stamp = k, st
+	d, ok := restart_keys_digest(s.path)
+	if !ok do return false // mid-edit or broken: Claude Code keeps what it had too
+	if !s.keys_ok {
+		// the first readable look (made while it did not parse): the baseline
+		s.digest, s.keys_ok = d, true
+		return false
+	}
+	if d == s.digest do return false
+	s.digest = d
+	return true
+}
+
 // One poll: the sources again if the tabs' folders changed, every source, claude's version.
 @(private = "file")
 claude_reload_poll :: proc() {
@@ -938,6 +1011,8 @@ claude_reload_poll :: proc() {
 			if k == s.pk && d == s.digest do continue
 			s.pk, s.digest = k, d
 			pending_add(s.path, s.scope, now)
+		case .Keys:
+			if keys_changed(&s) do pending_add(s.path, s.scope, now)
 		}
 	}
 	// claude's version on disk: found again now and then (PATH may change), looked at each poll
@@ -984,6 +1059,7 @@ claude_reload_build :: proc(cwds: []string) {
 			add(fmt.tprintf("%s/CLAUDE.md", cfg), sc, .File, ids)
 			for d in RESTART_FOLDERS do add(fmt.tprintf("%s/%s", cfg, d), sc, .Folder, ids)
 			for d in NEW_FOLDERS do add(fmt.tprintf("%s/%s", cfg, d), sc, .Exists, ids)
+			add(fmt.tprintf("%s/settings.json", cfg), sc, .Keys, ids)
 		}
 		if plugin := claude_plugin_dir(); plugin != "" do for f in PLUGIN_FILES do add(fmt.tprintf("%s/%s", plugin, f), "", .File, ids)
 		for c in cwds {
@@ -1000,11 +1076,12 @@ claude_reload_build :: proc(cwds: []string) {
 			add(fmt.tprintf("%s/.mcp.json", c), c, .File, ids)
 			for f in RESTART_FOLDERS do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Folder, ids)
 			for f in NEW_FOLDERS do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Exists, ids)
+			for f in ([]string{"settings.json", "settings.local.json"}) do add(fmt.tprintf("%s/.claude/%s", c, f), c, .Keys, ids)
 		}
 	}
 	for &s in cw.srcs {
 		for &o in old do if o.path == s.path && o.kind == s.kind {
-			s.pk, s.stamp, s.digest = o.pk, o.stamp, o.digest
+			s.pk, s.stamp, s.digest, s.keys_ok = o.pk, o.stamp, o.digest, o.keys_ok
 			break
 		}
 	}
@@ -1036,6 +1113,9 @@ add :: proc(path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 	case .Folder:
 		src.pk = path_kind(p)
 		if src.pk == .Dir do src.digest = folder_digest(p)
+	case .Keys:
+		src.pk, src.stamp = path_stat(p)
+		src.digest, src.keys_ok = restart_keys_digest(p)
 	}
 	append(&cw.srcs, src)
 }
@@ -1043,6 +1123,9 @@ add :: proc(path, scope: string, kind: Src_Kind, ids: []Cred_Id) {
 // For tests: the sources now (path → scope; folders end in "/").
 claude_reload_sources_for_test :: proc() -> map[string]string {
 	m := make(map[string]string, context.temp_allocator)
-	for s in cw.srcs do m[s.kind == .File ? s.path : strings.concatenate({s.path, "/"}, context.temp_allocator)] = s.scope
+	for s in cw.srcs {
+		k := s.kind == .File ? s.path : s.kind == .Keys ? strings.concatenate({s.path, "#keys"}, context.temp_allocator) : strings.concatenate({s.path, "/"}, context.temp_allocator)
+		m[k] = s.scope
+	}
 	return m
 }

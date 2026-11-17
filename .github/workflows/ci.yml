@@ -95,6 +95,7 @@ jobs:
       - name: Build the core and the session holder
         run: |
           mkdir -p build
+          scripts/build-zstd.sh # the zstd decoder the core links (src/zstd)
           odin build src/coremain -out:build/deckhand-core-serve -o:speed
           odin build src/holder -out:build/deckhand-core -o:speed
           odin build src/holder -out:build/deckhand-core-hooks -define:DECKHAND_TEST_HOOKS=true

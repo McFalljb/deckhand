@@ -388,6 +388,10 @@ Pi_Status_Update :: struct {
 	waiting:  bool,
 	question: bool,
 	blockers: []string,
+	// pi's model (a newer bridge; absent = not said: shown as none): its id, provider, thinking level
+	model:    string,
+	provider: string,
+	thinking: string,
 }
 
 // A pi tab's panels (docs/PROTOCOL.md §5). Only the tab's own bridge may
@@ -618,6 +622,7 @@ Command :: union {
 	Pi_Reload,
 	Pi_Restart,
 	Pi_Wait_Idle,
+	Pi_Rename, // pi_rename.odin
 	Panel_Set,
 	Panel_Remove,
 	Set_Panel_Collapsed,
@@ -1881,6 +1886,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		clear(&tab.blockers)
 		for b in c.blockers do append(&tab.blockers, strings.clone(b))
 		reload_status_changed(tab) // a reload or restart waiting for idle goes now (reload.odin)
+		pi_tab_model_set(tab, c) // its model, for the tab's tooltip
 		// unknown = the last bridge connection is gone: its panels go too
 		// (the bridge publishes them again after it reconnects)
 		if c.agent == .Unknown do tab_clear_panels(tab)
@@ -1956,6 +1962,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if !socket_bridge_send(c.tab_id, request_id, cmd) do return fail("no bridge connected for this tab"), ch
 		reload_sent(tab, request_id) // hot reload's bookkeeping (reload.odin)
 		return {ok = true, pending = true}, true
+	case Pi_Rename:
+		return pi_rename_apply(c, caller, request_id) // through the tab's bridge (pi_rename.odin)
 	case Pi_Wait_Idle:
 		_, tab := pi_tab(c.tab_id)
 		if r, bad := bridge_target(tab, caller); bad do return r, false
@@ -2848,6 +2856,7 @@ rescan_when_active :: proc() -> bool {
 
 @(private = "file")
 scan_worker :: proc(request_id: u64) {
+	claude_scan_on_worker = true // a Codex pass may run here (claude_disk.odin)
 	scan := new(Scan_Result)
 	scan_projects(scan)
 	inbox_submit(Rescan_Done{request_id = request_id, scan = scan}, {kind = .Internal})

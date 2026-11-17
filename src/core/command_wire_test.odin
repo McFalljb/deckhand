@@ -40,6 +40,11 @@ ui_command_fill :: proc(i, round: int) -> Command {
 		c.events = ev
 	case Browser_Click:
 		c.modifiers &= 1 << len(ACT_MOD_NAMES) - 1 // only the bits that have a name
+	case Pi_Status_Update:
+		// model words, cleaned where they are read (get_model_word): anything else is dropped there
+		c.model = fmt.tprintf("model-%d.%d", round, i)
+		c.provider = fmt.tprintf("prov_%d", round)
+		c.thinking = round == 0 ? "" : "high"
 	}
 	return cmd
 }

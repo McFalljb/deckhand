@@ -215,6 +215,60 @@ status_unseen_and_bell :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.tab_status_view(sh^).source, core.Status_Source.None)
 }
 
+// A pi tab's model from its bridge's pi.status (a newer bridge): on the tab, in its tooltip and the
+// snapshot; an older bridge (no model) or a lost connection shows none; only short words go.
+@(test)
+status_bridge_pi_model :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, _, a_pi, _ := as_reset()
+	defer as_done()
+	_, pt, _ := core.find_tab(a_pi)
+	me := core.Caller{kind = .Panel, tab_id = a_pi}
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle}, me) // an older bridge
+	testing.expect_value(t, core.claude_tab_tip(pt^), "")
+	c, err := core.parse_command(`{"type":"pi.status","agent":"idle","waiting":false,"model":"claude-sonnet-9","provider":"anthropic","thinking":"high"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	st := c.(core.Pi_Status_Update)
+	st.tab_id = a_pi
+	testing.expect(t, core.run_command(st, me).ok)
+	testing.expect_value(t, pt.kind.(core.Pi_Tab).model, "anthropic/claude-sonnet-9")
+	testing.expect_value(t, core.claude_tab_tip(pt^), "pi · model anthropic/claude-sonnet-9 · thinking high")
+	snap := core.run_command(core.Get_State{}, {kind = .UI}).data
+	testing.expect(t, strings.contains(snap, `"model":"anthropic/claude-sonnet-9"`), "in the snapshot")
+	// an id that already names its provider is not doubled; no thinking level: none said
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle, model = "openai/gpt-9", provider = "openai"}, me)
+	testing.expect_value(t, core.claude_tab_tip(pt^), "pi · model openai/gpt-9")
+	// not a model name: none
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle, model = "x\x1b[31m y", provider = "p"}, me)
+	testing.expect_value(t, core.claude_tab_tip(pt^), "")
+	// the connection gone (Deckhand's own unknown): none until it reports again
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Idle, model = "m1"}, me)
+	testing.expect_value(t, core.claude_tab_tip(pt^), "pi · model m1")
+	core.run_command(core.Pi_Status_Update{tab_id = a_pi, agent = .Unknown}, {kind = .Internal})
+	testing.expect_value(t, core.claude_tab_tip(pt^), "")
+}
+
+// pi.status's model, provider and thinking level are cleaned where they enter (parse_command): a
+// value that is not a model word is dropped there, so the state, the events and the log all see
+// the same cleaned value, never the raw one.
+@(test)
+status_bridge_pi_model_entry :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	c, err := core.parse_command(`{"type":"pi.status","agent":"idle","waiting":false,"model":"evil\u202e\u001b[31m","provider":"p\u2028q","thinking":"high\nlow"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	st := c.(core.Pi_Status_Update)
+	testing.expect(t, st.model == "" && st.provider == "" && st.thinking == "", fmt.tprint("dropped at entry:", st.model, st.provider, st.thinking))
+	for redact in ([]bool{false, true}) {
+		j := core.command_json(c, redact)
+		testing.expect(t, !strings.contains(j, "evil") && !strings.contains(j, "u202e") && !strings.contains(j, "\u2028") && !strings.contains(j, "high"), j)
+	}
+	ok, _ := core.parse_command(`{"type":"pi.status","agent":"idle","waiting":false,"model":"claude-sonnet-9","provider":"anthropic","thinking":"high"}`, context.temp_allocator)
+	j := core.command_json(ok, true)
+	testing.expect(t, strings.contains(j, `"model":"claude-sonnet-9"`) && strings.contains(j, `"provider":"anthropic"`) && strings.contains(j, `"thinking":"high"`), j)
+	long, _ := core.parse_command(fmt.tprintf(`{{"type":"pi.status","agent":"idle","waiting":false,"model":"%s"}}`, strings.repeat("m", 4096, context.temp_allocator)), context.temp_allocator)
+	testing.expect_value(t, long.(core.Pi_Status_Update).model, "")
+}
+
 @(test)
 status_bridge_precedence :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // State and `terms` outlive the test

@@ -1039,9 +1039,11 @@ link_message :: proc(text: string) -> (command: bool) {
 			log_ln("Deckhand: window.facts refused:", e)
 			return
 		}
+		was_active := link.has_facts && link.facts.active
 		wire_free(&link.facts, type_info_of(Window_Facts), heap)
 		link.facts, link.has_facts = f, true
 		hello_set(&f)
+		if f.active && !was_active do rescan_when_active() // sessions started outside Deckhand (commands.odin)
 		if link.sock != nil do link_layout_apply(&link.facts) // in process the layout writes them itself
 		if link.sock != nil do update_window_exe_set(f.exe) // the bundle a separate core's updates replace (update.odin)
 	case "window.tab_facts":

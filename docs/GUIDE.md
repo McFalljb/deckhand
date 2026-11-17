@@ -2296,8 +2296,8 @@ peeks at that session. **New session** offers what the window's picker does ther
 installed, once per account, the last used first; one starts at once). Over a Claude, Codex or
 pi tab, a strip shows the window's bars as text (held messages, hooks not running, an old
 version, Codex signed out, the hot-reload bars) with their buttons where a browser may use them
-(**Send now**, **Drop**, **Reload**, **Restart**, **Later**, copying the update command); their
-**Dismiss** and **Details** are the window's.
+(**Send now**, **Drop**, **Reload**, **Restart**, **Restart anyway**, **Later**, copying the
+update command); their **Dismiss** and **Details** are the window's.
 
 **Not in a browser:** browser tabs and app tabs (they show a note there; open them at the Mac),
 adding or removing machines, **Continue this conversation on <machine>**, the Settings page's

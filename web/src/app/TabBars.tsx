@@ -2,7 +2,7 @@
 // with the actions a browser may take. Text goes in as text nodes (JSX children), never as HTML.
 import { tabKind, type Tab } from "../state.ts";
 import { useApp } from "./ctx.ts";
-import { barsFor } from "./bars.ts";
+import { barPrimary, barsFor } from "./bars.ts";
 
 export function TabBars({ tab }: { tab: Tab }) {
   const app = useApp();
@@ -17,7 +17,7 @@ export function TabBars({ tab }: { tab: Tab }) {
           {b.actions.map((a, k) => (
             <button
               type="button"
-              class={"btn small" + (k === b.actions.length - 1 && a.command ? " primary" : "")}
+              class={"btn small" + (k === barPrimary(b) ? " primary" : "")}
               key={a.label}
               onClick={() => {
                 if (a.command) void app.run(a.command);

@@ -26,6 +26,13 @@ export function tabHarnessKey(t: Tab): string {
   return "";
 }
 
+// Which action is the bar's primary button: the last command (Restart, Reload; else Later), as the
+// native bar's bold one; never Restart anyway, which the core puts first. -1 = none.
+export function barPrimary(b: WebBar): number {
+  const k = b.actions.length - 1;
+  return k >= 0 && b.actions[k].command ? k : -1;
+}
+
 // The bars over tab t, its own first, then the ones for every tab of its harness.
 export function barsFor(store: Store, t: Tab): WebBar[] {
   const all: WebBar[] = store.sections.get("webbars") ?? [];

@@ -89,6 +89,7 @@ fx_ev :: proc(type: sapp.Event_Type, x, y: f32, mods: u32 = 0) {
 // A drag of the row at (fx, fy) to (tx, ty), released there.
 @(private = "file")
 fx_drag :: proc(fx, fy, tx, ty: f32) {
+	app.last_click = {} // a fresh press, never the second of a double-click (an earlier test's press at the same row)
 	fx_ev(.MOUSE_DOWN, fx, fy)
 	fx_lay()
 	fx_ev(.MOUSE_MOVE, fx, fy + 12, sapp.MODIFIER_LMB)

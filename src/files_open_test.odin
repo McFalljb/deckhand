@@ -285,3 +285,86 @@ files_session_saved_and_restored :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(state.open_sessions), 1)
 	testing.expect_value(t, fo_files(), 0)
 }
+
+// The tree follows what the user did last: a session shown (its folder) or a project selected in
+// the sidebar (that project's, the session on screen staying). Opening from the tree goes by the
+// file's project: a file of another project than the session on screen opens in that project's
+// Files session, which comes on screen; the agent session is not touched.
+@(test)
+files_tree_follows_selection_and_opens_by_project :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir, other := fo_setup()
+	defer fo_done(dir)
+	ui := core.Caller{kind = .UI}
+	a_proj, b_proj := state.projects[0].id, state.projects[1].id
+	// project A's agent session on screen, its pi running
+	a := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("a-1"), project_id = a_proj, cwd = strings.clone(dir)}
+	append(&a.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running})
+	a.active_tab = a.tabs[0].id
+	core.session_panes_init(&a)
+	append(&state.open_sessions, a)
+	aid := a.id
+	testing.expect(t, core.run_command(core.Focus_Session{session = aid}, ui).ok)
+	testing.expect_value(t, core.files_root(), dir)
+	testing.expect_value(t, core.files_tree_name(), "proj")
+	// select B in the sidebar: the tree shows B, A stays on screen
+	testing.expect(t, core.run_command(core.Select_Project{project_id = b_proj}, ui).ok)
+	testing.expect_value(t, state.current_session, aid)
+	testing.expect_value(t, core.files_root(), other)
+	testing.expect_value(t, core.files_tree_name(), "other")
+	// the active file is A's: not revealed in B's tree (no yank back), revealed in A's
+	testing.expect(t, !files_reveals(fmt.tprintf("%s/a.txt", dir), core.files_root()))
+	testing.expect(t, files_reveals(fmt.tprintf("%s/a.txt", dir), dir))
+	// a click on B's file: B's Files session, on screen; A untouched, its pi still running
+	files_open(fmt.tprintf("%s/o.txt", other), preview = true)
+	testing.expect_value(t, toast.text, "")
+	b := core.files_session_of(b_proj)
+	testing.expect(t, b != nil && state.current_session == b.id)
+	sa := core.find_session(aid)
+	testing.expect_value(t, len(sa.tabs), 1)
+	testing.expect_value(t, sa.tabs[0].status, core.Tab_Status.Running)
+	testing.expect_value(t, core.files_root(), other)
+	// A shown again: its folder
+	testing.expect(t, core.run_command(core.Focus_Session{session = aid}, ui).ok)
+	testing.expect_value(t, core.files_root(), dir)
+	// the tree's menu Open (no session named) of B's file with A on screen: B's Files session
+	testing.expect(t, core.run_command(core.Open_File{path = fmt.tprintf("%s/o.txt", other)}, ui).ok)
+	testing.expect_value(t, state.current_session, core.files_session_of(b_proj).id)
+	testing.expect_value(t, len(core.find_session(aid).tabs), 1)
+	// A's own file from the tree with A on screen: in A, as before
+	testing.expect(t, core.run_command(core.Focus_Session{session = aid}, ui).ok)
+	files_open(fmt.tprintf("%s/a.txt", dir))
+	testing.expect_value(t, len(core.find_session(aid).tabs), 2)
+	testing.expect_value(t, state.current_session, aid)
+	testing.expect(t, core.files_session_of(a_proj) == nil)
+	// an open that names A (a Markdown link in A, a script) keeps A, whatever the file's project
+	testing.expect(t, core.run_command(core.Open_File{path = fmt.tprintf("%s/o.txt", other), session = aid}, ui).ok)
+	testing.expect_value(t, len(core.find_session(aid).tabs), 3)
+	testing.expect(t, core.run_command(core.Open_File{path = fmt.tprintf("%s/c.txt", dir)}, {kind = .Script}).ok)
+	testing.expect_value(t, len(core.find_session(aid).tabs), 4)
+	// selecting A's own project while A is on screen: A's folder
+	testing.expect(t, core.run_command(core.Select_Project{project_id = b_proj}, ui).ok)
+	testing.expect(t, core.run_command(core.Select_Project{project_id = a_proj}, ui).ok)
+	testing.expect_value(t, core.files_root(), dir)
+}
+
+// A Files session made for a file the window never opened (no answer came) goes on the core's
+// tick once it has waited; one with its file stays.
+@(test)
+files_session_empty_is_swept :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir, _ := fo_setup()
+	defer fo_done(dir)
+	s := core.files_session_ensure(&state.projects[0])
+	sid := s.id
+	core.files_sessions_sweep() // made just now: kept (its answer may still come)
+	testing.expect(t, core.find_session(sid) != nil)
+	core.files_sessions_sweep(0)
+	testing.expect(t, core.find_session(sid) == nil)
+	// one whose file opened is never swept
+	files_open(fmt.tprintf("%s/a.txt", dir))
+	f := core.files_session_of(state.projects[0].id)
+	testing.expect(t, f != nil)
+	core.files_sessions_sweep(0)
+	testing.expect(t, core.files_session_of(state.projects[0].id) != nil)
+}

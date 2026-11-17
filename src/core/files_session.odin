@@ -15,6 +15,43 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:time"
+
+// Which the Files tree shows: what the user did last, showing a session (it shows that session's
+// folder) or selecting a project in the sidebar (that project's, while a session of another
+// project stays on screen). Seen from State as it changes (the current session and when it was
+// last shown, the selected project), by this process alone: not in State, not on the wire, not
+// saved; a relaunch starts on the session again.
+@(private = "file")
+files_follow: struct {
+	session:    u64,
+	shown_at:   i64,
+	project:    u64,
+	by_project: bool,
+}
+
+// True: the Files tree shows cs's folder (cs on screen); false: the selected project's.
+files_tree_follows_session :: proc(cs: ^Open_Session) -> bool {
+	f := &files_follow
+	if cs.id != f.session || cs.shown_at != f.shown_at {
+		f.session, f.shown_at, f.project, f.by_project = cs.id, cs.shown_at, state.selected_project, false
+	} else if state.selected_project != f.project {
+		f.project, f.by_project = state.selected_project, true
+	}
+	if !f.by_project do return true
+	p := find_project(state.selected_project)
+	if p == nil || p.machine != 0 || p.group != .Projects do return true
+	return cs.project_id == p.id // its own project: the session's folder (a worktree's checkout)
+}
+
+// The name the Files tab's header gives the folder it shows: its project's, as the sidebar names
+// it, else the folder's.
+files_tree_name :: proc() -> string {
+	base := files_base()
+	if base == "" do return ""
+	if p := file_project(strings.concatenate({base, "/x"}, context.temp_allocator)); p != nil do return project_display(p^)
+	return filepath.base(base)
+}
 
 // The user's open may make a project's Files session.
 files_session_may_create :: proc(caller: Caller) -> bool {
@@ -50,7 +87,32 @@ files_session_ensure :: proc(p: ^Project) -> ^Open_Session {
 	s := Open_Session{id = new_id(), agent = .Files, project_id = p.id, cwd = strings.clone(p.cwd)}
 	session_panes_init(&s) // one empty pane: the file's tab goes in it
 	append(&state.open_sessions, s)
+	files_made[s.id] = time.tick_now()
 	return &state.open_sessions[len(state.open_sessions) - 1]
+}
+
+// When each Files session was made, until its first tab came (files_sessions_sweep).
+@(private = "file")
+files_made: map[u64]time.Tick
+
+FILES_SWEEP_AFTER :: 30 * time.Second
+
+// A Files session made for a file the window never opened (its answer did not come: the window
+// went, or the request was dropped) closes: one left without tabs a while after it was made.
+// Run from the core's tick (core_loop.odin).
+files_sessions_sweep :: proc(after := FILES_SWEEP_AFTER) {
+	if len(files_made) == 0 do return
+	gone := make([dynamic]u64, context.temp_allocator)
+	for id, at in files_made {
+		s := find_session(id)
+		if s == nil || len(s.tabs) > 0 do append(&gone, id) // closed, or its file came: nothing to sweep
+		else if time.tick_since(at) >= after {
+			append(&gone, id)
+			files_session_close_if_empty(id, {kind = .Internal})
+			window_state_changed()
+		}
+	}
+	for id in gone do delete_key(&files_made, id)
 }
 
 // Why s cannot hold what (a terminal, a browser tab, …): "" = it can (not a Files session).

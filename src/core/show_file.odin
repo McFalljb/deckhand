@@ -71,7 +71,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	// the user's (this window, a paired browser's Files tree) with no session on screen, or a
 	// Files session's: by the file's project, in its Files session (made below, once the file
 	// passed every check; files_session.odin)
-	files := files_session_may_create(caller) && c.session == 0 && (s == nil || s.agent == .Files)
+	files := files_session_may_create(caller) && c.session == 0
 	if s == nil && !files {
 		if caller.kind == .Panel && c.session != 0 do return refuse("other_session", serr, "leave session out: the file opens next to your own tab"), false
 		return fail(serr), false

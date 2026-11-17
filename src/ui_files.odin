@@ -209,7 +209,7 @@ files_panel :: proc(row_w_: f32) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), 0, 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 	}) {
 		// the folder's name on the left (as the Sessions tab's project rows: a folder), the buttons on the right
-		name := root != "" ? filepath.base(core.files_base()) : "No folder" // the project's; the switcher below names the checkout
+		name := root != "" ? core.files_tree_name() : "No folder" // the project's, as the sidebar names it; the switcher below names the checkout
 		room := row_w - px(PAD_ROW + KIND_ICON + GAP_INLINE + GAP_GROUP) - f32(len(Files_Tool)) * px(FILES_TOOL + GAP_BUTTONS)
 		icon(.Folder, th.text_muted, KIND_ICON)
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
@@ -558,9 +558,12 @@ files_follow_active :: proc(root: string) {
 	if e == nil || e.view != .File || e.path == "" || root == "" do return
 	p := core.fs_real(e.path)
 	if p == core.files_ui.active_file do return
+	// only into the tree it is in: a tree of another project (selected in the sidebar) stays put,
+	// and the file is revealed once the tree shows its project again
+	if !files_reveals(p, root) do return
 	delete(core.files_ui.active_file)
 	core.files_ui.active_file = strings.clone(p)
-	if strings.has_prefix(p, strings.concatenate({root, "/"}, context.temp_allocator)) do ui_do(core.Files_Reveal{path = p})
+	ui_do(core.Files_Reveal{path = p})
 }
 
 // Scrolls so row i shows (centred when far).
@@ -936,10 +939,10 @@ files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := 
 		return
 	}
 	if !is_dir {
-		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path, session = files_session()}})
-		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, session = files_session(), preview = true}})
+		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path}}) // no session: by the file's project (files_open)
+		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, preview = true}})
 		append(items, core.Menu_Item{label = "Open to the side", files = .Open_Side})
-		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path, session = files_session()}})
+		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path}})
 		sep(items)
 	}
 	append(items, core.Menu_Item{label = "New file…", files = .New_File})
@@ -979,7 +982,7 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 		return true
 	case .Open_Side:
 		// open_file, then that tab in a new pane on the right (a pane holding only it shows it already)
-		r := ui_run(core.Open_File{path = path, session = files_session()})
+		r := ui_run(core.Open_File{path = path})
 		if !r.ok {
 			toast_show(r.error, true)
 			return false

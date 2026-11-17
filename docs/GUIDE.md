@@ -1422,8 +1422,10 @@ guide).
 
 ## The Files tab
 
-**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of the session on
-screen, else of the selected project. Press ⇧⌘E again to go back to Sessions.
+**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of what you picked
+last: the session you showed, or a project you selected in the Sessions tab (even while a session
+of another project stays on screen). The header names the project. Press ⇧⌘E again to go back to
+Sessions.
 
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
@@ -1436,11 +1438,11 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),
   Esc clears a selection of several, else gives the keyboard back. Typing letters jumps to the next
   row whose name starts with them (a pause of a second starts over); they never reach a terminal.
-- **Opening with no session on screen** opens the file in the project's **Files** session (listed
-  as "Files" under Open): file tabs only, no agent, one per project, back after a relaunch; it
-  closes with its last tab, and terminals, browser and agent tabs need a real session (New
-  session). A file of another project opens in that project's Files session. Any reason a file
-  does not open (sign-ins, too large, binary, gone) shows as a toast.
+- **Opening goes by the file's project**: in the session on screen when it is that project's,
+  else in the project's **Files** session, which comes on screen (listed as "Files" under Open):
+  file tabs only, no agent, one per project, back after a relaunch (one pane); it closes with its
+  last tab, and terminals, browser and agent tabs need a real session (New session). Any reason a
+  file does not open (sign-ins, too large, binary, gone) shows as a toast.
 - **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
 - **New file / New folder**: the name field opens as the first row of the folder (the selected
   folder, the selected file's, else the project's), opened and scrolled to; an error shows under

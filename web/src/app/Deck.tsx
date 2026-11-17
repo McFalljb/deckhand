@@ -122,8 +122,8 @@ function Card({ r }: { r: WebAttention }) {
       </div>
       {lines ? <div class={"card-body l" + lines + (need ? "" : " quiet")}>{words(v)}</div> : null}
       <div class="card-meta">
-        <HarnessIcon harness={harness} size={12} />
-        <span>{harness === "pi" ? "pi" : harness === "claude" ? "Claude Code" : "Codex"}</span>
+        {s.agent === "files" ? <Icon name="folder" size={12} /> : <HarnessIcon harness={harness} size={12} />}
+        <span>{s.agent === "files" ? "Files" : harness === "pi" ? "pi" : harness === "claude" ? "Claude Code" : "Codex"}</span>
         {s.machine ? <span class="mach">{store.machineName(s.machine)}</span> : null}
         <span class="spacer" />
         {tabs.length > 1 ? (

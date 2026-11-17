@@ -1171,15 +1171,16 @@ editor_command_tab :: proc(cmd: Command) -> u64 {
 // Where open_file and markdown_open open: the caller's own session (a tab-bound caller), else the
 // one on screen (Home has only its pi tab, so Home's control opens files in the one on screen),
 // and the file, absolute (a relative path: from the named session's folder, else the caller's).
-// The user's open (files_session_may_create) of a file in a project, with no session there or a
-// Files session of another project: files = that project, whose Files session it opens in (made
-// by the caller once it knows the window is there; files_session.odin). An agent session on
-// screen keeps what the user opens, as before.
+// The user's open (files_session_may_create) goes by the file's project: in the session on
+// screen when it is that project's (agent or Files), else (none on screen, another project's,
+// or a named Files session of another project) files = that project, whose Files session it
+// opens in (made by the caller once it knows the window is there; files_session.odin). An open
+// that names an agent session, and everyone else's, keep their session.
 @(private = "file")
 file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Open_Session, p: string, files: ^Project, err: string) {
 	s = session != 0 ? find_session(session) : caller_session(caller)
 	if s != nil && s.home && session == 0 do s = cur()
-	create := files_session_may_create(caller) && (s == nil || s.agent == .Files)
+	create := files_session_may_create(caller) && (s == nil || s.agent == .Files || session == 0)
 	if s == nil && !create {
 		if caller.kind == .UI do return nil, "", nil, no_session_for_file(path) // the user's, over a hub link
 		return nil, "", nil, "no open session to open the file in"

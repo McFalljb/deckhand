@@ -1,18 +1,20 @@
 package main
 
+import "core:strings"
 import "core"
 
-// A file row's open (a click, double-click, Enter, Space): open_file in the session on screen,
-// and any refusal (no session on screen, credentials, too large, binary, gone) as a toast; a
-// click must never seem to do nothing. The row menu's opens show theirs through menu_result.
+// A file row's open (a click, double-click, Enter, Space): open_file naming no session, so the
+// core opens it by the file's project (the session on screen when it is that project's, else the
+// project's Files session: core/files_session.odin), and any refusal (credentials, too large,
+// binary, gone, outside every project) as a toast; a click must never seem to do nothing. The
+// row menu's opens show theirs through menu_result.
 files_open :: proc(path: string, preview := false) {
-	r := ui_run(core.Open_File{path = path, session = files_open_session(), preview = preview})
+	r := ui_run(core.Open_File{path = path, preview = preview})
 	if !r.ok && r.error != "needs_confirmation" do toast_show(r.error != "" ? r.error : "The file did not open", true)
 }
 
-// The session on screen (Home's is none), as ui_files.odin's files_session.
-@(private = "file")
-files_open_session :: proc() -> u64 {
-	if cs := core.cur(); cs != nil && !cs.home do return cs.id
-	return 0
+// The editor's active file is revealed in the Files tree only while the tree shows its folder
+// (files_follow_active): never yanked back from a project the user is browsing.
+files_reveals :: proc(file, root: string) -> bool {
+	return root != "" && strings.has_prefix(file, strings.concatenate({root, "/"}, context.temp_allocator))
 }

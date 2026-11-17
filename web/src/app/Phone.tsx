@@ -18,6 +18,7 @@ import { agentName, AgentDrawer } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { storageGet, storageSet } from "../ui/dom.ts";
 import { TabBars } from "./TabBars.tsx";
+import { modeBadge } from "./harness.ts";
 
 const enc = new TextEncoder();
 
@@ -280,6 +281,7 @@ function PhoneStrip({ s, active }: { s: OpenSession; active: number }) {
         {tabs.map((t) => {
           const v = stripView(t);
           const h = tabHarness(t);
+          const mode = modeBadge(t.kind);
           return (
             <button type="button" role="tab" aria-selected={t.id === active ? "true" : "false"} class={"tab" + (t.id === active ? " on" : "")} onClick={() => {
                 app.wish(`ptab:${s.id}`, t.id);
@@ -288,6 +290,7 @@ function PhoneStrip({ s, active }: { s: OpenSession; active: number }) {
               {v.dot !== "none" ? <StatusMark mark={v.mark} progress={v.progress} /> : null}
               {h && h !== "shell" ? <HarnessIcon harness={h} size={13} /> : null}
               <span class="tab-title">{tabTitle(t)}</span>
+              {mode ? <span class={"tab-mode" + (mode.warn ? " warn" : "")}>{mode.label}</span> : null}
             </button>
           );
         })}

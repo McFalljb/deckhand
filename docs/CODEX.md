@@ -146,7 +146,15 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   the palette) and **New session with flags…** → **Codex with flags…** open the palette as a one-line field (the flags last used
   from that window), split as a shell splits words (quotes honoured, nothing expanded:
   `core.flags_split`), and send them as `args`; the row shows `codex_args_check`'s reason before
-  anything starts. A start on another machine takes no flags from here.
+  anything starts (also in a project's menu, and the picker's **With flags…**). A start on another
+  machine sends them as typed, checked and given that machine's own defaults there (CLAUDE.md §1).
+  The tab's badge (`claude_mode.odin`), in the warning colour, names how its start flags let Codex
+  act without asking, read as full access's rule reads them (`codex_access_choices`): **bypass**
+  (`--dangerously-bypass-approvals-and-sandbox`), **full access** (`-s`/`-c sandbox_mode`
+  `danger-full-access`, every spelling), **never asks** (`-a`/`-c approval_policy` `never`),
+  **approves for you** (`--approve-for-me`); never a safer-sounding one. Codex reports no mode:
+  a Codex tab with no badge is not known to be in the default mode (a mode changed inside Codex
+  or set in `config.toml` or a profile is not seen).
 - **Default Codex flags** (`set_harness_flags` with `"harness": "codex"`, Settings › Coding agents ›
   Codex › **Default flags…**, the palette's **Default Codex flags…**; `User_Here`; blank in a hub's
   or a browser's state stream): one line, checked by `codex_args_check` when set
@@ -430,7 +438,10 @@ Claude's accounts code with harness `.Codex` (`src/core/claude_accounts.odin`; d
   Claude's; `CODEX_VIEW_FILES`/`CODEX_VIEW_FOLDERS` (`hooks.json`, `hooks/`) read-only in the editor
   (`codex_view_only`); never a Create. A save is refused over a credentials or state file by any
   name (`settings_credential` on the path and on where it leads at save time), so nothing outside
-  the allowlist in a Codex home is written. `plugins/` stays Codex's (not listed, refused).
+  the allowlist in a Codex home is written. `plugins/` stays Codex's (not in the tree, refused);
+  **Plugins** (`codex_plugins.odin`) lists `plugins/cache/<marketplace>/<plugin>/<version>/` by
+  folder names only, read-only (`<plugin>@<marketplace>`, its versions): no file under `plugins/`
+  is opened or listed, and a symlink at any level is skipped.
 - Not checked without a real sign-in: that `codex login status` under an added home answers for
   that home, and that Codex's own sign-in screen in such a tab writes that home's `auth.json`.
 

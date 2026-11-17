@@ -12,7 +12,7 @@ assert_state codex_installed true
 # 1. + New session: the picker lists pi and Codex (Claude Code is not installed here); Codex (key 2)
 clickid new
 eventually
-assert_menurows pi|Codex
+assert_menurows pi|Codex|-|With flags…
 shot codex/picker
 key 2
 eventually

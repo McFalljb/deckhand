@@ -798,15 +798,18 @@ claude_accounts_picker :: proc(t: ^testing.T) {
 	defer core.harness_installed_probe[.Pi] = nil
 	menu_open(core.Menu_New_Session{project_id = pid}, {0, 0})
 	rows := menu_items()
-	testing.expect_value(t, len(rows), 3) // the note, then each account
-	if len(rows) == 3 {
+	testing.expect_value(t, len(rows), 5) // the note, then each account, then With flags… (ui_flags.odin)
+	if len(rows) == 5 {
 		testing.expect(t, rows[0].note)
 		testing.expect_value(t, rows[2].label, "Claude Code · Work")
+		testing.expect(t, rows[3].sep)
+		ns, _ := rows[4].picker.?
+		testing.expect(t, rows[4].label == "With flags…" && ns.flags && ns.project_id == pid, "With flags…: the flags picker")
 	}
 	// after one under Work, Work is the pick: first
 	testing.expect(t, core.run_command(core.New_Claude_Session{project_id = pid, account = "Work", harness = .Claude}, CA_UI).ok)
 	rows = menu_items()
-	testing.expect(t, len(rows) == 3 && rows[1].label == "Claude Code · Work", "the last used first")
+	testing.expect(t, len(rows) == 5 && rows[1].label == "Claude Code · Work", "the last used first")
 	// a pi or Claude tab's own view of the state has no account folders
 	testing.expect(t, strings.contains(core.state_json(), `"claude_accounts":[`))
 	tab := core.find_session(state.current_session).tabs[0].id

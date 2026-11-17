@@ -15,6 +15,19 @@ assert_state layout.left_tab files
 assert_files huge\nnode_modules\nsrc\n.gitignore\ndebug.log\nmain.c\nnew.txt\nREADME.md\n
 wait 500
 shot files/tree
+# ---- the header's eye: ignored rows leave the tree, then come back dimmed
+hover filestool 3
+eventually
+assert_tip Hide ignored files
+clickid filestool 3
+eventually
+assert_state files.hide_ignored true
+assert_files huge\nsrc\n.gitignore\nmain.c\nnew.txt\nREADME.md\n
+shot files/ignored-hidden
+clickid filestool 3
+eventually
+assert_state files.hide_ignored false
+assert_files huge\nnode_modules\nsrc\n.gitignore\ndebug.log\nmain.c\nnew.txt\nREADME.md\n
 # ---- expand a folder with a click; open a file: a preview tab (italic), the next replaces it
 clickid frow 2
 eventually

@@ -691,6 +691,7 @@ coremain/connect.odin  `deckhand-core-serve connect`: the far end of a machine's
 core/systemd_unit.odin, launch_linux.odin, proc_linux.odin  the Linux core: its systemd unit, launching, /proc
 core/lock_holder.odin  who holds a lock file when a second core is refused
 core/files.odin, fs_model.odin, ui_files.odin  the Files tab (and the Settings page's file row menu)
+files_drag_out*.odin  rows dragged out of the window (AppKit: native/dragout_macos.m)
 core/changes.odin, ui_changes.odin  the Changes tab
 core/settings_files.odin  Settings' files and rows: agents' settings files by an allowlist
 core/settings_registry.odin  every setting: its section, card, label, action and command

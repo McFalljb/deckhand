@@ -798,6 +798,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "files_collapse_all":  cmd = Files_Collapse_All{root = get_str(&r, "root")}
 	case "files_reveal":        cmd = Files_Reveal{path = get_str(&r, "path")}
 	case "set_files_filter":    cmd = Set_Files_Filter{text = get_str(&r, "text", optional = true)}
+	case "set_files_hide_ignored": cmd = Set_Files_Hide_Ignored{hide = get_bool(&r, "hide")}
 	case "list_worktrees":      cmd = List_Worktrees{path = get_str(&r, "path", optional = true)}
 	case "files_set_root":      cmd = Files_Set_Root{base = get_str(&r, "base", optional = true), path = get_str(&r, "path", optional = true)}
 	case "worktree_cleanup":    cmd = Worktree_Cleanup{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}

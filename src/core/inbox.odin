@@ -267,7 +267,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Jobs_Env:            return Jobs_Env{path = s(c.path, allocator), notes = s(c.notes, allocator), login = c.login}
 	case Job_List, Set_Job_Limits, Jobs_Sync, Jobs_Tick, Job_Run_Done:
 		return cmd
-	case Editor_State, Save_File, Goto_Line, Keep_Buffer, Diff_File, Set_Wrap, Keep_Tab, Set_Left_Tab:
+	case Editor_State, Save_File, Goto_Line, Keep_Buffer, Diff_File, Set_Wrap, Keep_Tab, Set_Left_Tab, Set_Files_Hide_Ignored:
 		return cmd
 	case Set_Terminal_Text_Size:
 		return cmd

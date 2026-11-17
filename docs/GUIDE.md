@@ -2313,7 +2313,7 @@ when you have not edited it, and asks when you have. In the Files tab the arrows
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
 Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
-shown; git letters and colours are the window's. The Settings page shows every setting; the
+shown; git letters and colours are the window's. ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it. The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
 installed, once per account with the project's own first, the last used agent first; one starts

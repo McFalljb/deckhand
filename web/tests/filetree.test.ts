@@ -3,7 +3,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { gitLetter, gitTone, isEditRow, moveSel, newTarget, parentsOf, relPath, rowKey, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
+import { dragText, dropDir, folderLabel, shellQuote, folderRows, gitLetter, gitTone, isEditRow, moveResult, movedPath, moveSel, newTarget, parentsOf, planMove, relPath, rowKey, stemEnd, treeRows, type Listing, type Row } from "../src/app/filetree.ts";
 
 const R = "/p";
 const listed = new Map<string, Listing>([
@@ -200,4 +200,102 @@ test("Delete trashes the picked rows (as the window's tree), else the focused ro
   assert.deepEqual(trashTargets(order, pickOne(R + "/beta"), R + "/beta"), P("beta"));
   assert.deepEqual(trashTargets(order, pickOne(""), R + "/beta"), P("beta"));
   assert.deepEqual(trashTargets(order, pickOne(""), ""), []);
+});
+
+test("move: where a drop goes (a folder row, a file row's folder, empty space the root)", () => {
+  assert.equal(dropDir(R, { path: R + "/src", dir: true }), R + "/src");
+  assert.equal(dropDir(R, { path: R + "/src/main.ts", dir: false }), R + "/src");
+  assert.equal(dropDir(R, { path: R + "/a.txt", dir: false }), R);
+  assert.equal(dropDir(R, null), R);
+});
+
+test("move: not into itself, nor where it already is, nor onto a name already there", () => {
+  const src = listed.get(R + "/src");
+  // into a folder
+  assert.deepEqual(planMove(R, [R + "/a.txt"], R + "/src", src), { moves: [{ from: R + "/a.txt", to: R + "/src/a.txt" }], why: "", noop: false });
+  // a folder into itself or anything inside it
+  assert.equal(planMove(R, [R + "/src"], R + "/src").why, "Can't move src into itself");
+  assert.equal(planMove(R, [R + "/src"], R + "/src/deep/er").why, "Can't move src into itself");
+  // a sibling whose name starts the same is not inside it
+  assert.equal(planMove(R, [R + "/src"], R + "/src2").why, "");
+  // its own folder
+  assert.equal(planMove(R, [R + "/src/main.ts"], R + "/src").why, "main.ts is already there");
+  // a name already in the folder (known from its listing; not known: the core says so)
+  assert.equal(planMove(R, [R + "/docs/main.ts"], R + "/src", src).why, "main.ts already exists in src/");
+  assert.equal(planMove(R, [R + "/docs/main.ts"], R + "/src").why, "");
+  assert.equal(planMove(R, [R + "/x/a.txt"], R, listed.get(R)).why, "a.txt already exists in p/");
+  // outside the project
+  assert.equal(planMove(R, [R + "/a.txt"], "/q").why, "That folder is outside the project");
+  assert.equal(planMove(R, [R + "/a.txt"], R + "x/y").why, "That folder is outside the project");
+  assert.equal(planMove(R, [], R).why, "Nothing to move");
+});
+
+test("move: several at once", () => {
+  // one already there stays; the rest move
+  assert.deepEqual(planMove(R, [R + "/a.txt", R + "/src/main.ts"], R).moves, [{ from: R + "/src/main.ts", to: R + "/main.ts" }]);
+  // all already there: not a target
+  assert.equal(planMove(R, [R + "/a.txt", R + "/b.txt"], R).why, "They are already there");
+  // one inside another picked folder goes with it
+  assert.deepEqual(planMove(R, [R + "/src/main.ts", R + "/src", R + "/a.txt"], R + "/docs").moves.map((m) => m.from), [R + "/src", R + "/a.txt"]);
+  // the same name twice
+  assert.equal(planMove(R, [R + "/src/x.ts", R + "/docs/x.ts"], R).why, "Two of them are named x.ts");
+  // any one into itself refuses the lot
+  assert.equal(planMove(R, [R + "/a.txt", R + "/src"], R + "/src/deep").why, "Can't move src into itself");
+});
+
+test("move: what it says, and paths following it", () => {
+  assert.equal(moveResult(R, R + "/src", [R + "/a.txt"]), "Moved a.txt to src/");
+  assert.equal(moveResult(R, R + "/src/deep", [R + "/a", R + "/b", R + "/c"]), "Moved 3 items to src/deep/");
+  assert.equal(moveResult(R, R, [R + "/src/a"]), "Moved a to p/");
+  assert.equal(moveResult(R, R + "/src", [R + "/a"], { from: R + "/b", error: "the new name already exists" }), "Moved a to src/. Could not move b: the new name already exists");
+  assert.equal(moveResult(R, R + "/src", [], { from: R + "/b", error: "no" }), "Could not move b: no");
+  assert.equal(folderLabel(R, R + "/a/b"), "a/b/");
+  assert.equal(movedPath(R + "/src/deep", R + "/src", R + "/lib/src"), R + "/lib/src/deep");
+  assert.equal(movedPath(R + "/src", R + "/src", R + "/lib/src"), R + "/lib/src");
+  assert.equal(movedPath(R + "/src2", R + "/src", R + "/lib/src"), R + "/src2");
+});
+
+test("move: the picker's folders (root first, folders only, open ones' folders under them)", () => {
+  const l = new Map<string, Listing>([
+    [R, { entries: [{ name: "src", kind: "dir" }, { name: "docs", kind: "dir" }, { name: "ln", kind: "symlink" }, { name: "a.txt", kind: "file" }], err: "" }],
+    [R + "/src", { entries: [{ name: "deep", kind: "dir" }, { name: "main.ts", kind: "file" }], err: "" }],
+    [R + "/docs", { entries: [{ name: "g.md", kind: "file" }], err: "" }],
+  ]);
+  const rows = folderRows(R, l, new Set([R + "/src", R + "/src/deep"]));
+  assert.deepEqual(rows.map((r) => [r.name, r.depth, r.open, r.state, r.kids]), [
+    ["p", 0, true, "listed", true],
+    ["src", 1, true, "listed", true],
+    ["deep", 2, true, "wait", true],
+    ["docs", 1, false, "listed", false],
+  ]);
+});
+
+test("drag text: shell-quoted paths, one space apart, never a newline", () => {
+  assert.equal(shellQuote("/p/a b.txt"), "'/p/a b.txt'");
+  assert.equal(shellQuote("/p/it's"), "'/p/it'\\''s'");
+  assert.equal(shellQuote("/p/$HOME `id` \"x\""), "'/p/$HOME `id` \"x\"'");
+  // control characters: ANSI-C quoting, escaped (a newline never reaches a terminal)
+  assert.equal(shellQuote("/p/a\nrm -rf ~"), "$'/p/a\\nrm -rf ~'");
+  assert.equal(shellQuote("/p/t\tq'\\\r\x1b"), "$'/p/t\\tq\\'\\\\\\r\\x1b'");
+  // a leading -: never read as an option
+  assert.equal(shellQuote("-rf"), "'./-rf'");
+  const t = dragText(["/p/a b", "/p/x\ny", "/p/c"]);
+  assert.equal(t, "'/p/a b' $'/p/x\\ny' '/p/c'");
+  assert.ok(!/[\n\r]/.test(t));
+});
+
+test("move: sources outside the tree's root refuse the lot; already there is a no-op (a slipped click)", () => {
+  assert.equal(planMove(R, ["/q/a.txt"], R + "/src").why, "That item is outside the project");
+  assert.equal(planMove(R, [R + "/a.txt", "/elsewhere/b"], R + "/src").why, "That item is outside the project");
+  assert.equal(planMove(R, [R], R + "/src").why, "That item is outside the project");
+  assert.equal(planMove(R, [R + "/a.txt"], R).noop, true);
+  assert.equal(planMove(R, [R + "/a.txt", R + "/b.txt"], R).noop, true);
+  assert.equal(planMove(R, [R + "/a.txt"], R + "/src").noop, false);
+  assert.equal(planMove(R, [R + "/src"], R + "/src").noop, false);
+});
+
+test("move: waiting for a confirmation says how many are not moved", () => {
+  assert.equal(moveResult(R, R + "/src", [R + "/a"], undefined, 2), "Moved a to src/. Waiting for confirmation; 2 not moved");
+  assert.equal(moveResult(R, R + "/src", [], undefined, 0), "Waiting for confirmation");
+  assert.equal(moveResult(R, R + "/src", [], undefined, 1), "Waiting for confirmation; 1 not moved");
 });

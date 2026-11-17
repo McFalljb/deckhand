@@ -241,3 +241,117 @@ export function trashTargets(order: string[], p: Pick, focus: string): string[] 
   if (p.paths.size > 1 || loose) return outermost(order, p.paths);
   return focus ? [focus] : [];
 }
+
+// ---- moving (rename_path into another folder; the core refuses what it refuses) ----
+
+const baseName = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+// The folder a drop goes into: a folder row itself, a file row's folder, empty space the root.
+export function dropDir(root: string, row: { path: string; dir: boolean } | null): string {
+  if (!row) return root;
+  return row.dir ? row.path : parentOf(row.path);
+}
+
+// A move into dir: the renames to make, or why not (why: one line naming the item). Sources inside
+// another source go with it; a source already in dir is left where it is (all of them: not a
+// target, noop: a drop there is a slipped click). Every source inside root (the tree shown now),
+// or none moves. listing: dir's entries when known (a name already there refuses the lot, before
+// anything moves; not known: the core refuses it when it gets there).
+export interface MovePlan {
+  moves: { from: string; to: string }[];
+  why: string;
+  noop?: boolean;
+}
+
+export function planMove(root: string, sources: string[], dir: string, listing?: Listing): MovePlan {
+  const no = (why: string, noop = false): MovePlan => ({ moves: [], why, noop });
+  if (!sources.length) return no("Nothing to move");
+  if (sources.some((x) => !x.startsWith(root + "/"))) return no("That item is outside the project");
+  if (dir !== root && !dir.startsWith(root + "/")) return no("That folder is outside the project");
+  const outer = [...new Set(sources)].sort((a, b) => a.length - b.length).filter((s, i, all) => !all.slice(0, i).some((o) => s.startsWith(o + "/")));
+  const have = listing && !listing.err ? new Set(listing.entries.map((e) => e.name)) : null;
+  const names = new Set<string>();
+  const moves: MovePlan["moves"] = [];
+  for (const s of sources.filter((x, i) => outer.includes(x) && sources.indexOf(x) === i)) {
+    const n = baseName(s);
+    if (dir === s || dir.startsWith(s + "/")) return no(`Can't move ${n} into itself`);
+    if (parentOf(s) === dir) continue;
+    if (names.has(n)) return no(`Two of them are named ${n}`);
+    names.add(n);
+    if (have?.has(n)) return no(`${n} already exists in ${folderLabel(root, dir)}`);
+    moves.push({ from: s, to: dir + "/" + n });
+  }
+  if (!moves.length) return no(sources.length > 1 ? "They are already there" : `${baseName(sources[0])} is already there`, true);
+  return { moves, why: "", noop: false };
+}
+
+// A folder as a move names it: "src/deep/", the root by its name ("proj/").
+export function folderLabel(root: string, dir: string): string {
+  return (dir === root ? baseName(root) : relPath(root, dir)) + "/";
+}
+
+// What a move says when it is done: "Moved a.txt to src/", "Moved 3 items to src/"; stopped at a
+// refusal: what moved, then the item refused and the core's words; stopped at a confirmation the
+// bar asks (waiting: how many after it were not moved), so it says.
+export function moveResult(root: string, dir: string, done: string[], failed?: { from: string; error: string }, waiting?: number): string {
+  const to = folderLabel(root, dir);
+  const moved = done.length === 1 ? `Moved ${baseName(done[0])} to ${to}` : `Moved ${done.length} items to ${to}`;
+  if (!failed && waiting === undefined) return moved;
+  const why = failed ? `Could not move ${baseName(failed.from)}: ${failed.error}` : "Waiting for confirmation" + (waiting ? `; ${waiting} not moved` : "");
+  return done.length ? `${moved}. ${why}` : why;
+}
+
+// A path for a shell, as the window's tree pastes it (shell_quote, src/ui_sidebar.odin): 'path',
+// a ' inside as '\''; a name with a control character (a newline) ANSI-C quoted with it escaped,
+// so a drop on a terminal never types a line break; a leading - made ./- (never an option).
+export function shellQuote(path: string): string {
+  const p = path.startsWith("-") ? "./" + path : path;
+  if (!/[\x00-\x1f\x7f]/.test(p)) return "'" + p.replaceAll("'", "'\\''") + "'";
+  const esc: Record<string, string> = { "\n": "\\n", "\t": "\\t", "\r": "\\r", "'": "\\'", "\\": "\\\\" };
+  return "$'" + p.replace(/[\x00-\x1f\x7f'\\]/g, (c) => esc[c] ?? "\\x" + c.charCodeAt(0).toString(16).padStart(2, "0")) + "'";
+}
+
+// A drag's text/plain: its paths shell-quoted, a space apart (no newline).
+export const dragText = (paths: string[]): string => paths.map(shellQuote).join(" ");
+
+// A path after from moved to to (at or under from: follows it; else unchanged).
+export function movedPath(path: string, from: string, to: string): string {
+  return path === from || path.startsWith(from + "/") ? to + path.slice(from.length) : path;
+}
+
+// The Move to… picker's rows: the root first, then folders only (symlinks left out), an open
+// folder's folders under it. wait: opened, not listed yet; err: cannot be listed.
+export interface FolderRow {
+  path: string;
+  name: string;
+  depth: number;
+  open: boolean;
+  state: "listed" | "wait" | "err";
+  kids: boolean; // has folders inside (when listed), or not known yet
+}
+
+export function folderRows(root: string, listed: Map<string, Listing>, open: Set<string>): FolderRow[] {
+  const rows: FolderRow[] = [];
+  const state = (d: string): FolderRow["state"] => {
+    const l = listed.get(d);
+    return !l ? "wait" : l.err ? "err" : "listed";
+  };
+  const kids = (d: string): boolean => {
+    const l = listed.get(d);
+    return !l || (!l.err && l.entries.some((e) => e.kind === "dir"));
+  };
+  const walk = (dir: string, depth: number) => {
+    const l = listed.get(dir);
+    if (!l || l.err) return;
+    for (const e of l.entries) {
+      if (e.kind !== "dir") continue;
+      const path = dir + "/" + e.name;
+      const on = open.has(path);
+      rows.push({ path, name: e.name, depth, open: on, state: state(path), kids: kids(path) });
+      if (on) walk(path, depth + 1);
+    }
+  };
+  rows.push({ path: root, name: baseName(root), depth: 0, open: true, state: state(root), kids: true });
+  walk(root, 1);
+  return rows;
+}

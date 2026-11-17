@@ -816,6 +816,28 @@ a { color: inherit; }
 .code-edit { flex: 1; min-height: 0; display: flex; font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; }
 .code-gutter { flex: none; overflow: hidden; padding: 8px 10px 8px 12px; color: var(--line-number); text-align: right; white-space: pre; user-select: none; border-right: 1px solid var(--border); }
 .code-text { flex: 1; min-width: 0; resize: none; border: 0; outline: none; margin: 0; padding: 8px 12px; background: transparent; color: var(--text); font: inherit; line-height: inherit; white-space: pre; overflow: auto; tab-size: 4; }
+/* syntax colours (Code.tsx): the textarea's text transparent over a layer painting it in colour */
+.code-main { flex: 1; min-width: 0; position: relative; display: flex; }
+.code-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.code-paint { margin: 0; padding: 8px 12px; font: inherit; line-height: inherit; white-space: pre; tab-size: 4; color: var(--syn-plain); will-change: transform; }
+.code-line { height: 18px; }
+.code-text.painted { position: relative; color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); }
+.code-text.painted::selection { background: var(--selection); }
+.sy-comment { color: var(--syn-comment); }
+.sy-keyword { color: var(--syn-keyword); }
+.sy-string { color: var(--syn-string); }
+.sy-escape { color: var(--syn-escape); }
+.sy-number { color: var(--syn-number); }
+.sy-constant { color: var(--syn-constant); }
+.sy-function { color: var(--syn-function); }
+.sy-type { color: var(--syn-type); }
+.sy-property { color: var(--syn-property); }
+.sy-attribute { color: var(--syn-attribute); }
+.sy-tag { color: var(--syn-tag); }
+.sy-operator { color: var(--syn-operator); }
+.sy-punctuation { color: var(--syn-punctuation); }
+.sy-heading { color: var(--syn-heading); }
+.sy-link { color: var(--syn-link); }
 .md-doc { flex: 1; min-height: 0; overflow: auto; }
 .md-body { max-width: 760px; margin: 0 auto; padding: 24px 28px 48px; color: var(--text); line-height: 1.6; font-size: 15px; overflow-wrap: anywhere; }
 .md-body h1, .md-body h2 { border-bottom: 1px solid var(--border); padding-bottom: 6px; }

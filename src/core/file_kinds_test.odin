@@ -21,8 +21,28 @@ file_kind_mapping :: proc(t: ^testing.T) {
 		{"", false, .File},
 		{"main.odin", false, .Code},
 		{"App.TSX", false, .Code},
-		{"Makefile", false, .Code},
-		{"Dockerfile", false, .Code},
+		{"Makefile", false, .Config},
+		{"GNUmakefile", false, .Config},
+		{"rules.mk", false, .Config},
+		{"Dockerfile", false, .Config},
+		{"Dockerfile.dev", false, .Config},
+		{"Containerfile.prod", false, .Config},
+		{"justfile", false, .Config},
+		{"Procfile", false, .Config},
+		{"flake.nix", false, .Config},
+		{"poetry.lock", false, .Package},
+		{"package-lock.json", false, .Package},
+		{"yarn.lock", false, .Package},
+		{"pnpm-lock.yaml", false, .Package},
+		{"CONTRIBUTING.md", false, .Doc},
+		{"CONTRIBUTING", false, .Doc},
+		{"README", false, .Doc},
+		{"LICENSE.txt", false, .Doc},
+		{"license.json", false, .Config}, // NAME.ext: the extension decides
+		{"spec.docx", false, .Doc},
+		{"old.doc", false, .Doc},
+		{"guide.rst", false, .Doc},
+		{"x.env", false, .Env},
 		{"README.md", false, .Doc},
 		{"notes.txt", false, .Doc},
 		{"LICENSE", false, .Doc},
@@ -50,7 +70,11 @@ file_kind_mapping :: proc(t: ^testing.T) {
 		{"AGENTS.md", false, .Agent}, // over .md
 		{"CLAUDE.md", false, .Agent},
 		{"claude.md", false, .Agent}, // any case
-		{"CLAUDE.local.md", false, .Agent},
+		{"AGENTS.override.md", false, .Agent},
+		{"agents.OVERRIDE.md", false, .Agent},
+		{"agent.md", false, .Doc}, // only AGENTS.md, CLAUDE.md, AGENTS.override.md
+		{"CLAUDE.local.md", false, .Doc},
+		{"GEMINI.md", false, .Doc},
 		{".hidden", false, .File}, // a dotfile has no extension
 		{"trailing.", false, .File},
 	}

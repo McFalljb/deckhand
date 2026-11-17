@@ -4,16 +4,19 @@ package core
 // shapes). The one table: the web client's tree mirrors FILE_KIND_NAMES and FILE_KIND_EXTS as
 // they are (web/src/app), so change both together. A name is looked up as written (any case):
 // first the whole name (FILE_KIND_NAMES), then `.env` and `.env.*`, then the part after the last
-// dot (FILE_KIND_EXTS; a dotfile's leading dot does not start one), else a plain file.
+// dot (FILE_KIND_EXTS; a dotfile's leading dot does not start one), else a plain file. Names that
+// start with FILE_KIND_PREFIXES (Dockerfile.dev) come after the whole names, before .env.
+// README, LICENSE and the like are prose only as the whole name or NAME.<a prose extension>
+// (license.json is config): the extension table decides those.
 
 import "core:strings"
 
 File_Kind :: enum u8 {
 	File, // anything else
 	Folder,
-	Code, // source files, build scripts
+	Code, // source files
 	Doc, // Markdown and other prose
-	Config, // JSON, YAML, TOML, INI...
+	Config, // JSON, YAML, TOML, INI..., build and container files
 	Image,
 	Shell, // shell scripts and rc files
 	Package, // package manifests and lock files
@@ -32,10 +35,8 @@ File_Kind_Entry :: struct {
 FILE_KIND_NAMES := [?]File_Kind_Entry {
 	// agent instructions
 	{"agents.md", .Agent},
-	{"agent.md", .Agent},
+	{"agents.override.md", .Agent},
 	{"claude.md", .Agent},
-	{"claude.local.md", .Agent},
-	{"gemini.md", .Agent},
 	// git
 	{".gitignore", .Git},
 	{".gitattributes", .Git},
@@ -49,6 +50,16 @@ FILE_KIND_NAMES := [?]File_Kind_Entry {
 	{"npm-shrinkwrap.json", .Package},
 	{"yarn.lock", .Package},
 	{"pnpm-lock.yaml", .Package},
+	{"cargo.lock", .Package},
+	{"poetry.lock", .Package},
+	{"gemfile.lock", .Package},
+	{"composer.lock", .Package},
+	{"pipfile.lock", .Package},
+	{"podfile.lock", .Package},
+	{"mix.lock", .Package},
+	{"flake.lock", .Package},
+	{"uv.lock", .Package},
+	{"deno.lock", .Package},
 	{"pnpm-workspace.yaml", .Package},
 	{"bun.lockb", .Package},
 	{"deno.json", .Package},
@@ -66,20 +77,20 @@ FILE_KIND_NAMES := [?]File_Kind_Entry {
 	{"package.resolved", .Package},
 	{"mix.exs", .Package},
 	{"build.zig.zon", .Package},
-	// build files: code
-	{"makefile", .Code},
-	{"gnumakefile", .Code},
-	{"dockerfile", .Code},
-	{"containerfile", .Code},
-	{"justfile", .Code},
-	{"cmakelists.txt", .Code},
-	{"rakefile", .Code},
+	// build, container and process files: config
+	{"makefile", .Config},
+	{"gnumakefile", .Config},
+	{"justfile", .Config},
+	{"procfile", .Config},
+	{"cmakelists.txt", .Config},
+	{"rakefile", .Config},
 	// prose without an extension
 	{"readme", .Doc},
 	{"license", .Doc},
 	{"licence", .Doc},
 	{"copying", .Doc},
 	{"changelog", .Doc},
+	{"contributing", .Doc},
 	{"authors", .Doc},
 	{"notice", .Doc},
 	// config dotfiles
@@ -100,6 +111,12 @@ FILE_KIND_NAMES := [?]File_Kind_Entry {
 	{".envrc", .Shell},
 }
 
+// Name starts (lowercase): Dockerfile, Dockerfile.dev, Containerfile.prod.
+FILE_KIND_PREFIXES := [?]File_Kind_Entry {
+	{"dockerfile", .Config},
+	{"containerfile", .Config},
+}
+
 // Extensions (lowercase, no dot).
 FILE_KIND_EXTS := [?]File_Kind_Entry {
 	// code
@@ -113,14 +130,18 @@ FILE_KIND_EXTS := [?]File_Kind_Entry {
 	{"svelte", .Code}, {"css", .Code}, {"scss", .Code}, {"sass", .Code}, {"less", .Code},
 	{"html", .Code}, {"htm", .Code}, {"sql", .Code}, {"glsl", .Code}, {"hlsl", .Code},
 	{"metal", .Code}, {"wgsl", .Code}, {"vim", .Code}, {"el", .Code}, {"nim", .Code}, {"jl", .Code},
-	{"asm", .Code}, {"s", .Code}, {"mk", .Code}, {"cmake", .Code}, {"gradle", .Code},
+	{"asm", .Code}, {"s", .Code},
 	// prose
 	{"md", .Doc}, {"markdown", .Doc}, {"mdx", .Doc}, {"txt", .Doc}, {"rst", .Doc}, {"adoc", .Doc},
-	{"org", .Doc}, {"tex", .Doc}, {"rtf", .Doc}, {"pdf", .Doc},
+	{"org", .Doc}, {"tex", .Doc}, {"rtf", .Doc}, {"pdf", .Doc}, {"doc", .Doc}, {"docx", .Doc},
+	{"odt", .Doc},
 	// config
 	{"json", .Config}, {"jsonc", .Config}, {"json5", .Config}, {"yaml", .Config}, {"yml", .Config},
 	{"toml", .Config}, {"ini", .Config}, {"cfg", .Config}, {"conf", .Config}, {"xml", .Config},
-	{"plist", .Config}, {"properties", .Config},
+	{"plist", .Config}, {"properties", .Config}, {"nix", .Config}, {"mk", .Config}, {"cmake", .Config},
+	{"gradle", .Config},
+	// env files (x.env; .env and .env.* by name)
+	{"env", .Env},
 	// images
 	{"png", .Image}, {"jpg", .Image}, {"jpeg", .Image}, {"gif", .Image}, {"webp", .Image},
 	{"svg", .Image}, {"ico", .Image}, {"icns", .Image}, {"bmp", .Image}, {"tif", .Image},
@@ -147,6 +168,7 @@ file_kind :: proc(name: string, is_dir: bool) -> File_Kind {
 	if name == "" do return .File
 	lower := strings.to_lower(name, context.temp_allocator)
 	for e in FILE_KIND_NAMES do if e.key == lower do return e.kind
+	for e in FILE_KIND_PREFIXES do if strings.has_prefix(lower, e.key) do return e.kind
 	if lower == ".env" || strings.has_prefix(lower, ".env.") do return .Env
 	dot := strings.last_index_byte(lower, '.')
 	if dot <= 0 || dot == len(lower) - 1 do return .File // none, a dotfile's own dot, or a trailing one

@@ -579,6 +579,23 @@ files_sel_drop_hidden :: proc(v: ^Files_View, root: string, hidden: map[string]b
 	return changed
 }
 
+// Whether path is in the tree at root but hidden: ignored rows are hidden and it, or a folder above
+// it, is listed as ignored (by the listings cached now). The root never is.
+files_path_hidden :: proc(root, path: string) -> bool {
+	if !state.files.hide_ignored || path == "" || path == root || !within(path, root) do return false
+	for q := path; len(q) > len(root); q = filepath.dir(q) {
+		d := files_cache[filepath.dir(q)]
+		if d == nil do continue
+		if d.ignored do return true // listed inside an ignored folder
+		name := filepath.base(q)
+		for e in d.entries do if e.name == name {
+			if e.ignored do return true
+			break
+		}
+	}
+	return false
+}
+
 // Esc: the cursor's row alone. False: it was already (Esc then gives the keyboard back).
 files_sel_collapse :: proc(v: ^Files_View) -> bool {
 	if len(v.selected) <= 1 do return false
@@ -675,7 +692,13 @@ files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, 
 			continue
 		}
 		if len(v.rows) >= FILES_ROWS_MAX || shown >= FILES_DIR_MAX {
-			append(&v.rows, Files_Row{path = strings.clone(dir, a), depth = depth, more = len(d.entries) - i})
+			// "N more…": the entries left that would show (hidden ignored ones are not counted)
+			more := 0
+			for x in d.entries[i:] {
+				if x.ignored && walk_hide do walk_hidden[strings.concatenate({dir, "/", x.name}, context.temp_allocator)] = true
+				else do more += 1
+			}
+			append(&v.rows, Files_Row{path = strings.clone(dir, a), depth = depth, more = more})
 			return
 		}
 		full := strings.concatenate({dir, "/", e.name}, a)

@@ -268,6 +268,9 @@ files_panel :: proc(row_w_: f32) {
 	}
 	// a new name's folder that is no longer in this tree (another session or checkout shows): it ends
 	if (fu.edit == .New_File || fu.edit == .New_Folder) && !core.within(fu.target, root) do files_cancel_edit()
+	// a name field whose row or folder is hidden (ignored rows hidden meanwhile) ends: Enter never
+	// renames a row the user cannot see, nor creates inside a hidden folder
+	if fu.edit != .None && core.files_path_hidden(root, fu.target) do files_cancel_edit()
 	rows := core.tree_rows()
 	// New file / New folder: the name field is a row of the tree (its error one more), the first
 	// in the folder it goes in

@@ -354,7 +354,7 @@ files_drag_hide_ignored_cancels :: proc(t: ^testing.T) {
 	fd_ev(.MOUSE_DOWN, ax, ay)
 	fd_ev(.MOUSE_MOVE, ax, ay + 30, sapp.MODIFIER_LMB)
 	when core.TEST_HOOKS do testing.expect(t, files_dragging(), "dragging")
-	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .Script}).ok)
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI}).ok) // the palette, say
 	files_drag_tick()
 	when core.TEST_HOOKS do testing.expect(t, !files_dragging(), "the drag ended")
 	_ = ui_layout(FD_W, FD_H)
@@ -362,5 +362,53 @@ files_drag_hide_ignored_cancels :: proc(t: ^testing.T) {
 	fd_ev(.MOUSE_MOVE, lx, ly, sapp.MODIFIER_LMB)
 	fd_ev(.MOUSE_UP, lx, ly)
 	testing.expect(t, fd_exists(dir, "a.txt") && !fd_exists(dir, "lib/a.txt"), "nothing moved")
+	os.remove_all(dir)
+}
+
+// A rename or new-name field whose row or folder is hidden (ignored rows hidden meanwhile) ends:
+// Enter never renames a file the user cannot see, or creates inside a hidden folder.
+@(test)
+files_hide_ignored_ends_name_edits :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	defer pk_reset()
+	defer state.files.hide_ignored = false
+	dir := fd_setup()
+	if _, ok := core.git_run(dir, "init", "-q"); !ok do return
+	_ = os.write_entire_file(strings.concatenate({dir, "/.gitignore"}, context.temp_allocator), transmute([]u8)string("build/\n*.log\n"))
+	fd_write(dir, "a.txt")
+	fd_write(dir, "debug.log")
+	fd_write(dir, "build/out.bin")
+	ui := core.Caller{kind = .UI}
+	testing.expect(t, core.run_command(core.Files_Expand{path = "build", expanded = true}, ui).ok)
+	_ = ui_layout(FD_W, FD_H)
+	// rename armed on an ignored file, then hidden
+	files_begin_edit(.Rename, strings.concatenate({dir, "/debug.log"}, context.temp_allocator), "debug.log")
+	core.inbox_drain()
+	tf_set(&files_name_field, "moved.log")
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, ui).ok)
+	_ = ui_layout(FD_W, FD_H)
+	files_commit_edit() // Enter
+	core.inbox_drain()
+	testing.expect(t, fd_exists(dir, "debug.log") && !fd_exists(dir, "moved.log"), "not renamed")
+	// a new file's field in an ignored folder, then hidden
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = false}, ui).ok)
+	_ = ui_layout(FD_W, FD_H)
+	files_begin_edit(.New_File, strings.concatenate({dir, "/build"}, context.temp_allocator), "")
+	core.inbox_drain()
+	tf_set(&files_name_field, "new.txt")
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, ui).ok)
+	_ = ui_layout(FD_W, FD_H)
+	files_commit_edit()
+	core.inbox_drain()
+	testing.expect(t, !fd_exists(dir, "build/new.txt"), "not created")
+	// a shown row's rename still works
+	files_begin_edit(.Rename, strings.concatenate({dir, "/a.txt"}, context.temp_allocator), "a.txt")
+	core.inbox_drain()
+	tf_set(&files_name_field, "b.txt")
+	_ = ui_layout(FD_W, FD_H)
+	files_commit_edit()
+	core.inbox_drain()
+	testing.expect(t, fd_exists(dir, "b.txt"), "renamed")
 	os.remove_all(dir)
 }

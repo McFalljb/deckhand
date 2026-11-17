@@ -772,12 +772,35 @@ files_hide_ignored_rows_and_selection :: proc(t: ^testing.T) {
 	// shown again: dimmed rows back, the folder still open
 	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = false}, {kind = .UI}).ok)
 	testing.expect_value(t, tree(), "build/\n  out.bin\n.gitignore\na.txt\ndebug.log\n")
-	// over the wire too
-	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .Script}).ok)
-	testing.expect(t, state.files.hide_ignored)
+	// the window's own preference: scripts, agents and browsers are refused
+	testing.expect(t, !core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .Script}).ok, "a script")
+	testing.expect(t, !core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .Control}).ok, "a control caller")
+	testing.expect(t, !core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI, web = true}).ok, "a browser")
+	testing.expect(t, !state.files.hide_ignored)
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI}).ok)
 	// and restored from the saved workspace
 	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = false}, {kind = .UI}).ok)
 	testing.expect_value(t, core.workspace_restore(saved), "")
 	testing.expect(t, state.files.hide_ignored, "restored")
 	state.files.hide_ignored = false
+}
+
+// "N more…" counts only rows that would show: hidden ignored entries are not in it.
+@(test)
+files_hide_ignored_more_count :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	if _, ok := core.git_run(dir, "init", "-q"); !ok do return
+	defer state.files.hide_ignored = false
+	fwrite(dir, ".gitignore", "*.log\n")
+	for i in 0 ..< core.FILES_DIR_MAX + 5 do fwrite(dir, fmt.tprintf("big/f%05d.txt", i), "")
+	for i in 0 ..< 7 do fwrite(dir, fmt.tprintf("big/z%d.log", i), "")
+	testing.expect(t, core.run_command(core.Files_Expand{path = "big", expanded = true}, {kind = .UI}).ok)
+	more :: proc(rows: []core.Files_Row) -> int {
+		for r in rows do if r.more > 0 do return r.more
+		return 0
+	}
+	testing.expect_value(t, more(core.files_rows(dir)), 5 + 7) // shown: the .log files are rows
+	testing.expect(t, core.run_command(core.Set_Files_Hide_Ignored{hide = true}, {kind = .UI}).ok)
+	testing.expect_value(t, more(core.files_rows(dir)), 5)
 }

@@ -734,9 +734,9 @@ is waiting for you).
 - **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
-- **New sessions** started outside Deckhand (pi or Claude Code in a terminal) show when you come
-  back to the window, or a paired browser connects: Deckhand looks again then, at most once every
-  3 minutes. To look now, use the gear's "Rescan sessions".
+- **New sessions** started outside Deckhand (pi, Claude Code or Codex in a terminal, Codex
+  Desktop) show when you come back to the window, or a paired browser connects: Deckhand looks
+  again then, at most once every 3 minutes. To look now, use the gear's "Rescan sessions".
 
 ### Chats settings
 
@@ -1230,15 +1230,15 @@ older one from 0.157.0 runs as a plain terminal tab (below).
   message) appears then. **Resume** from the row continues it (`codex resume`); a session that was
   open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
   title only; Codex keeps its own. Codex conversations you ran outside Deckhand in the project's
-  folder are listed too (from `~/.codex/sessions/`, however old; read, never changed), titled
+  folder are listed too (from `~/.codex/sessions/` and each Codex account's, however old, the
+  ones Codex Desktop compressed too; read, never changed), titled
   with the name Codex gave the thread (its `session_index.jsonl`), else "Untitled Codex session"
   with their date: a click resumes one. The first look reads each conversation's first line once,
   in the background; Deckhand remembers what it read, so later launches read only new ones. Only
   conversations you had with Codex (in a terminal or Codex Desktop) count, never `codex exec`
-  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude Code's do (never your home
-  folder itself); **Rescan
-  sessions** looks again and drops one no conversation records any more (unless you added or
-  named it).
+  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude
+  Code's do (never your home folder itself); **Rescan sessions** looks again and drops one no
+  conversation records any more (unless you added or named it).
 - **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when
   Codex is idle and you have typed nothing), and **Send and close**; Changes' button reads **Ask
   Codex to review**.
@@ -1581,7 +1581,7 @@ installed; Claude Code's files once it has been used.
 
 **pi.** Its files: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),
 `modes.json`, `keybindings.json`, `mcp.json`, your global instructions file (`AGENTS.md` or
-similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills` and `extensions`.
+similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills`, `extensions` and `themes`.
 Only these: never sessions, logs or sign-ins. Each pi extension's config file and folder, when it
 has one, are here too.
 
@@ -2892,7 +2892,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Text size: Small, Text size: Medium, Text size: Default, Text size: Large |  | the chrome's text size |
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
-| Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts) |
+| Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts, Codex's rollouts) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |

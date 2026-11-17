@@ -217,9 +217,13 @@ tab's bar explains. The details: [CODEX.md](CODEX.md).
 ## 6. The harness manifest
 
 One data table, `HARNESS_MANIFEST` in
-[`src/core/harness_manifest.odin`](../src/core/harness_manifest.odin), one row per item; a new harness adds
-rows (and its `Harness` value), not code paths. The setup sheet's first step and Settings →
-Coding agents draw it (`src/ui_harness.odin`). Setup reads the user's harness config and never
+[`src/core/harness_manifest.odin`](../src/core/harness_manifest.odin), one row per item. It
+covers the checklist only: a new harness adds its rows and its `Harness` value here, and code of
+its own elsewhere (its tab and how it starts, its integration, its flag rule, its sessions found
+on disk). Some of those places are an exhaustive `switch` on `Harness`, so the compiler names
+them (`harness_version_of`, `harness_args_check`, `disk_files`, `disk_first_line`); others are
+not (Claude Code and Codex share the Claude tab kind, `Claude_Tab.codex`; pi has `Pi_Tab`). The
+setup sheet's first step and Settings → Coding agents draw it (`src/ui_harness.odin`). Setup reads the user's harness config and never
 writes it.
 
 **A row** (`Harness_Row`): `harness`; `id` (stable: the state snapshot, Settings rows, the

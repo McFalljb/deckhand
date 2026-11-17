@@ -188,10 +188,15 @@ the selected project and Chats. **Codex's files are read only, never written.**
   account's `<home>/sessions` (§6a), every `YYYY/MM/DD/` folder, newest first (no age or count
   limit; hard ceilings against a broken folder: 20,000 folders walked and 50,000 files a home,
   `CODEX_DISK_DIRS_MAX`, `CODEX_DISK_FILES_MAX`),
-  regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
+  regular files named `rollout-<time>-<uuid>.jsonl` or `.jsonl.zst` (Codex Desktop compresses older
+  rollouts with zstd; when both are there, the plain one) only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
   (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set or a home they added,
   never the real home's `~/.codex`.
-- **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
+- **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped;
+  of a `.zst`, only what decodes it, `codex_zst_first_line` with the vendored zstd decoder,
+  `src/zstd`: at most 256 KB of it read, decoded no further than its first newline or the 64 KB
+  line cap, a frame window of at most 8 MiB; a decode error, a truncated file or a cap reached
+  without a newline skips the file, `CODEX_ZST_*`),
   once per file ever, never on the main thread (`codex_pass`, `codex_disk.odin`). The scan asks
   for a pass (`codex_disk_refresh`: one at a time, at most one per 10 s) and shows the cache
   (`codex_disk_found`); the pass lists every home, drops the entries of files gone, reads the

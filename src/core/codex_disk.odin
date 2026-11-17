@@ -5,10 +5,12 @@ package core
 //
 //   - Where: each Codex account's <home>/sessions/YYYY/MM/DD folders, all of them (newest first,
 //     up to the hard ceilings CODEX_DISK_DIRS_MAX folders and CODEX_DISK_FILES_MAX files a home:
-//     only a broken folder reaches them); regular files named rollout-<time>-<uuid>.jsonl only,
-//     the id from the name (codex_disk_files).
+//     only a broken folder reaches them); regular files named rollout-<time>-<uuid>.jsonl or
+//     .jsonl.zst (Codex Desktop compresses older ones) only, the id from the name, the plain file
+//     when both are there (codex_disk_files).
 //   - What: the first line only (session_meta: its id, cwd and source), at most
-//     CODEX_DISK_LINE_MAX (codex_first_line), once per file ever: the meta cache (path, size,
+//     CODEX_DISK_LINE_MAX (codex_first_line; of a .zst, only as much as decodes it, within the
+//     CODEX_ZST_* caps: codex_zst_first_line), once per file ever: the meta cache (path, size,
 //     mtime -> id, cwd, source, account, created) is saved in the data dir (CODEX_CACHE_FILE), so
 //     a launch reads only new or changed rollouts. All of it on a worker (codex_pass): the main
 //     thread only filters the cache (codex_disk_found).
@@ -33,11 +35,18 @@ import "core:sync"
 import "core:sys/posix"
 import "core:thread"
 import "core:time"
+import "../zstd"
 
 CODEX_DISK_DIRS_MAX :: 20_000 // folders walked a home (years, months, days): a hard ceiling
 CODEX_DISK_FILES_MAX :: 50_000 // rollouts listed a home, newest first: a hard ceiling
 CODEX_DISK_LINE_MAX :: 64 * 1024 // a rollout's first line (session_meta, ~25 KB); longer: skipped
 CODEX_CWD_MAX :: 1024 // a rollout's cwd; longer (or with a NUL): skipped, never walked
+// a compressed rollout (.jsonl.zst, codex_zst_first_line): measured, its first line is at most ~49 KB
+// and decodes from its first 128 KB; past either cap without a newline it is skipped
+CODEX_ZST_IN_MAX :: 256 * 1024 // compressed bytes read, at most
+CODEX_ZST_OUT_MAX :: 256 * 1024 // decoded bytes, at most (the line itself: CODEX_DISK_LINE_MAX)
+CODEX_ZST_READ :: 32 * 1024 // compressed bytes read at a time
+CODEX_ZST_WINDOW_LOG_MAX :: 23 // 8 MiB: zstd -19 and every lower level; a larger window is refused
 
 // A harness's conversation file found on disk: its id (from its name), path, dates and the home
 // (account folder) it is in. Temp.
@@ -94,11 +103,12 @@ disk_first_line :: proc(h: Harness, path: string) -> (cwd, source: string, skip:
 
 // ---- Codex's conversations (~/.codex/sessions; codex.odin) ----
 
-// A rollout's session_meta (its first line, at most CODEX_DISK_LINE_MAX, never more of the file):
-// the cwd it ran in and its source (how it was started: "cli", "vscode", "exec"; cut to
+// A rollout's session_meta (its first line, at most CODEX_DISK_LINE_MAX, never more of the file;
+// of a compressed one, .jsonl.zst, only what decodes it: codex_zst_first_line): the cwd it ran in and its source (how it was started: "cli", "vscode", "exec"; cut to
 // CODEX_SOURCE_MAX). skip: not a conversation to list (no session_meta, an id that is not the
-// file's, a subagent's or another non-string source). Never written to; nothing in it reaches a
-// shell or the screen (the cwd is only compared with the project's folder). Any thread.
+// file's, a subagent's or another non-string source; a .zst that does not decode within its
+// caps). Never written to; nothing in it reaches a shell or the screen (the cwd is only compared
+// with the project's folder). Any thread.
 codex_first_line :: proc(path: string) -> (cwd, source: string, skip: bool) {
 	skip = true
 	// never a FIFO or a link swapped in since the listing (open would block, or go elsewhere)
@@ -107,12 +117,20 @@ codex_first_line :: proc(path: string) -> (cwd, source: string, skip: bool) {
 	defer posix.close(fd)
 	st: posix.stat_t
 	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return
-	buf := make([]u8, CODEX_DISK_LINE_MAX, context.temp_allocator)
-	got := int(posix.pread(fd, raw_data(buf), len(buf), 0))
-	sync.atomic_add(&claude_disk_bytes_read, i64(max(got, 0)))
-	nl := strings.index_byte(string(buf[:max(got, 0)]), '\n')
-	if nl < 2 do return
-	line := string(buf[:nl])
+	name, zst := codex_rollout_stem(filepath.base(path))
+	line: string
+	if zst {
+		ok: bool
+		if line, _, ok = codex_zst_first_line(fd); !ok do return
+	} else {
+		buf := make([]u8, CODEX_DISK_LINE_MAX, context.temp_allocator)
+		got := int(posix.pread(fd, raw_data(buf), len(buf), 0))
+		sync.atomic_add(&claude_disk_bytes_read, i64(max(got, 0)))
+		nl := strings.index_byte(string(buf[:max(got, 0)]), '\n')
+		if nl < 0 do return
+		line = string(buf[:nl])
+	}
+	if len(line) < 2 do return
 	if line[0] != '{' || !json_depth_ok(line) do return
 	v, perr := jg.parse(transmute([]u8)line, .JSON, false, context.temp_allocator)
 	if perr != nil do return
@@ -123,10 +141,53 @@ codex_first_line :: proc(path: string) -> (cwd, source: string, skip: bool) {
 	c, _ := pl["cwd"].(json.String)
 	src, src_ok := pl["source"].(json.String)
 	if !src_ok do return // a subagent's ({"subagent": …})
-	name := strings.trim_suffix(filepath.base(path), ".jsonl")
 	if !codex_id_ok(string(id)) || !strings.has_suffix(name, string(id)) || !filepath.is_abs(string(c)) do return
 	if len(c) > CODEX_CWD_MAX || strings.index_byte(string(c), 0) >= 0 do return
 	return string(c), cut_utf8(string(src), CODEX_SOURCE_MAX), false
+}
+
+// A rollout file name without its extension, and whether it is compressed: "x.jsonl" -> "x", false;
+// "x.jsonl.zst" (Codex Desktop compresses older rollouts with zstd) -> "x", true; anything else "".
+codex_rollout_stem :: proc(name: string) -> (stem: string, zst: bool) {
+	if strings.has_suffix(name, ".jsonl") do return strings.trim_suffix(name, ".jsonl"), false
+	if strings.has_suffix(name, ".jsonl.zst") do return strings.trim_suffix(name, ".jsonl.zst"), true
+	return "", false
+}
+
+// The first line (no newline) of a zstd-compressed rollout open at fd, decoded with the vendored
+// decoder (src/zstd) as far as its first newline and no further. These files are not Deckhand's:
+// at most CODEX_ZST_IN_MAX compressed bytes are read (CODEX_ZST_READ at a time), decoding stops at
+// min(CODEX_ZST_OUT_MAX, CODEX_DISK_LINE_MAX) bytes without a newline, and a frame asking for a
+// window over 2^CODEX_ZST_WINDOW_LOG_MAX is refused before zstd allocates it; any of those, a
+// decode error or the end of the file first: ok false. decoded: the bytes decoded (tests). Any thread.
+codex_zst_first_line :: proc(fd: posix.FD) -> (line: string, decoded: int, ok: bool) {
+	d := zstd.dctx_create()
+	if d == nil do return
+	defer zstd.dctx_free(d)
+	if zstd.is_error(zstd.dctx_set_parameter(d, zstd.D_WINDOW_LOG_MAX, CODEX_ZST_WINDOW_LOG_MAX)) != 0 do return
+	out := make([]u8, min(CODEX_ZST_OUT_MAX, CODEX_DISK_LINE_MAX), context.temp_allocator)
+	in_buf := make([]u8, CODEX_ZST_READ, context.temp_allocator)
+	read := 0
+	for read < CODEX_ZST_IN_MAX {
+		got := int(posix.pread(fd, raw_data(in_buf), uint(min(CODEX_ZST_READ, CODEX_ZST_IN_MAX - read)), posix.off_t(read)))
+		if got <= 0 do return // the end (truncated: no newline yet) or an error
+		read += got
+		sync.atomic_add(&claude_disk_bytes_read, i64(got))
+		input := zstd.In_Buffer{raw_data(in_buf), uint(got), 0}
+		for input.pos < input.size {
+			output := zstd.Out_Buffer{raw_data(out), uint(len(out)), uint(decoded)}
+			before_in, before_out := input.pos, output.pos
+			r := zstd.decompress_stream(d, &output, &input)
+			if zstd.is_error(r) != 0 do return
+			if nl := strings.index_byte(string(out[decoded:output.pos]), '\n'); nl >= 0 {
+				return string(out[:decoded + nl]), int(output.pos), true
+			}
+			decoded = int(output.pos)
+			if decoded == len(out) do return // the caps, and no newline
+			if input.pos == before_in && output.pos == before_out do return // no progress: never spin
+		}
+	}
+	return
 }
 
 // A Codex home's sessions folder ("" = none; in tests and test mode never the developer's own
@@ -172,6 +233,7 @@ codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 		slice.sort_by(list[:], proc(a, b: os.File_Info) -> bool {return a.name > b.name})
 		return list[:]
 	}
+	seen := make(map[string]int, allocator = context.temp_allocator) // id -> its index in out
 	dirs := 0
 	for y in numbered(root) {
 		if dirs >= CODEX_DISK_DIRS_MAX do return
@@ -187,13 +249,20 @@ codex_disk_files_in :: proc(all: ^[dynamic]Disk_File, home, root: string) {
 				slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {return a.name > b.name})
 				for e in entries {
 					if len(out) >= CODEX_DISK_FILES_MAX do break
-					if e.type != .Regular || !strings.has_prefix(e.name, "rollout-") || !strings.has_suffix(e.name, ".jsonl") do continue
-					name := strings.trim_suffix(e.name, ".jsonl")
-					if len(name) < 37 || name[len(name) - 37] != '-' do continue
+					if e.type != .Regular || !strings.has_prefix(e.name, "rollout-") do continue
+					name, zst := codex_rollout_stem(e.name)
+					if name == "" || len(name) < 37 || name[len(name) - 37] != '-' do continue
 					id := name[len(name) - 36:]
 					if !codex_id_ok(id) do continue
 					created := e.creation_time != {} ? e.creation_time : e.modification_time
-					append(&out, Disk_File{id = id, path = e.fullpath, account = home, size = e.size, modified = e.modification_time, created = created})
+					f := Disk_File{id = id, path = e.fullpath, account = home, size = e.size, modified = e.modification_time, created = created}
+					// one row an id: the plain file when Codex has left both (it compresses a copy)
+					if i, dup := seen[id]; dup {
+						if !zst && strings.has_suffix(out[i].path, ".zst") do out[i] = f
+						continue
+					}
+					seen[id] = len(out)
+					append(&out, f)
 				}
 			}
 		}

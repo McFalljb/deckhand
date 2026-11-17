@@ -200,7 +200,13 @@ serve_platform :: proc() -> bool {
 			if core.window_attached() && !core.window_link_hub() && !core.window_link_web() do core.window_notify(title, body, front = true)
 			else if !core.autotest_active do dh_core_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator)) // the core is never in front
 		},
-		trash = proc(path: string) -> bool {return dh_core_trash(strings.clone_to_cstring(path, context.temp_allocator)) == 1},
+		trash = proc(path: string) -> bool {
+			buf: [4096]u8
+			if dh_core_trash(strings.clone_to_cstring(path, context.temp_allocator), raw_data(buf[:]), c.int(len(buf))) != 1 do return false
+			// where the Trash put it, for restore_path (Linux: trash_xdg set it already)
+			if buf[0] != 0 do core.fs_trash_where = strings.clone(string(cstring(raw_data(buf[:]))), context.temp_allocator)
+			return true
+		},
 		activity = proc(on: bool) {dh_core_activity(on ? 1 : 0)},
 		core_timer = proc(every: time.Duration, fire: proc()) {
 			loop.every, loop.fire = every, fire

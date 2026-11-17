@@ -16,7 +16,8 @@ import "../core"
 
 dh_core_activity :: proc(on: c.int) {}
 // The XDG home trash; why it failed goes to fs_delete (core.fs_trash_why)
-dh_core_trash :: proc(path: cstring) -> c.int {
+// where_ is unused: trash_xdg sets core.fs_trash_where itself.
+dh_core_trash :: proc(path: cstring, where_: [^]u8, where_len: c.int) -> c.int {
 	why := core.trash_xdg(string(path))
 	core.fs_trash_why = why
 	return why == "" ? 1 : 0

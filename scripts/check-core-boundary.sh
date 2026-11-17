@@ -2,14 +2,15 @@
 # The core and the holder link no window code (docs/plans/background-core.md §10.2, "How the
 # compiler enforces the boundary"). Odin already refuses a core file that uses a window name (no
 # import cycles, `package main` can't be imported); this catches what it can't. Fails if a file
-# in src/core/ or src/holder/, or in the pure packages they import (src/ghostty, src/jsonguard,
-# src/trust, src/corewire, src/updatesig, src/holderwire), tests too:
+# in src/core/ or src/holder/, or in the pure packages they import (src/ghostty, src/zstd,
+# src/jsonguard, src/trust, src/corewire, src/updatesig, src/holderwire), tests too:
 #   - imports anything but base:*, core:* (not core:sys/darwin/Foundation, the Obj-C bindings),
-#     and the pure packages beside it: the core ../ghostty, ../holderwire, ../updatesig,
+#     and the pure packages beside it: the core ../ghostty, ../zstd, ../holderwire, ../updatesig,
 #     ../jsonguard, ../trust, ../corewire; the holder ../holderwire, ../trust and ../jsonguard;
 #     holderwire ../jsonguard; the others none;
 #   - has a foreign import other than system: libraries (so no build/dh_*.a, the Obj-C shims;
-#     ghostty may link its vendored vendor/libghostty-vt);
+#     ghostty may link its vendored vendor/libghostty-vt, zstd the decoder scripts/build-zstd.sh
+#     builds from vendor/zstd, build/zstd/libzstddec.a);
 #   - names a dh_ symbol in a foreign block (the shims' prefix);
 #   - uses intrinsics.objc_* (under any import name) or an objc_* attribute (on one line or
 #     across several).
@@ -75,9 +76,10 @@ check_dir() { # folder, allowed relative imports, allowed non-system foreign imp
 }
 
 out=$(
-  check_dir src/core "../ghostty ../holderwire ../updatesig ../jsonguard ../trust ../corewire"
+  check_dir src/core "../ghostty ../zstd ../holderwire ../updatesig ../jsonguard ../trust ../corewire"
   check_dir src/holder "../holderwire ../trust ../jsonguard"
   check_dir src/ghostty "" "../../vendor/libghostty-vt/*"
+  check_dir src/zstd "" "../../build/zstd/libzstddec.a"
   check_dir src/jsonguard ""
   check_dir src/trust ""
   check_dir src/corewire ""

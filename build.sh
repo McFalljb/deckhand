@@ -19,7 +19,8 @@
 # (-define:DECKHAND_TEST_HOOKS=false, src/core/test_hooks.odin): no test mode, no DECKHAND_* overrides,
 # no --print-token. Scenes need the hooks: build again without it before running them.
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
-# comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
+# comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh). The zstd decoder the
+# core links (src/zstd) is compiled from vendor/zstd/ into build/zstd/ (scripts/build-zstd.sh).
 set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
@@ -51,6 +52,9 @@ if [ ! -f vendor/sokol-odin/sokol/app/app.odin ]; then
 fi
 
 mkdir -p build
+
+# the zstd decoder (vendor/zstd/zstddeclib.c) the core links, for MACOS_MIN: build/zstd/libzstddec.a
+scripts/build-zstd.sh
 
 # sokol C libraries (only the modules we use), built once into the sokol-odin tree
 # where its Odin bindings expect them.

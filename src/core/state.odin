@@ -346,6 +346,7 @@ Settings :: struct {
 	codex_accounts:        [dynamic]Claude_Account_Setting,
 	codex_account_last:    string,
 	codex_account_default: string,
+	harness_flags: [Harness]string, // the user's default flags per harness, one line as typed (harness_flags.odin; user-only, this Mac's)
 }
 
 // Left column sections, each sorted on its own.

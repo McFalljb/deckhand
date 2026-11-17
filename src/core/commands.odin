@@ -41,6 +41,7 @@ Open_Session_Cmd :: struct {
 }
 New_Chat :: struct {
 	project_id: u64,
+	args:       []string, // pi's extra flags (pi_args_check); the user's (and scripts') only
 }
 Focus_Session :: struct {
 	session: u64, // open session id
@@ -561,6 +562,7 @@ Command :: union {
 	Setup_Sheet,
 	Set_Chats_Readonly,
 	Set_Claude_Default_Flags,
+	Set_Harness_Flags, // harness_flags.odin
 	Set_Pi_Extension, // pi_integration.odin
 	Set_Agent_Name,
 	Set_Agent_Model,
@@ -1149,14 +1151,18 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case New_Chat:
 		p := find_project(c.project_id)
 		if p == nil do return fail("no such project"), false
-		return open_new_session(p^, new_uuid(), "")
+		// pi's flags (harness_flags.odin): the user's own, then the defaults at the user's start
+		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail("only the user sets pi's flags"), false
+		if e := pi_args_check(c.args); e != "" do return fail(e), false
+		return open_new_session(p^, new_uuid(), "", extra = caller.kind == .UI ? harness_with_defaults(.Pi, c.args) : c.args)
 	case Worktree_Session:
 		p := find_project(c.project_id)
 		at, err := wt_session_check(p, c.path, listed = true)
 		if err != "" do return fail(err), false
-		if at == fs_real(p.cwd) do return open_new_session(p^, new_uuid(), "")
+		extra := caller.kind == .UI ? harness_with_defaults(.Pi, nil) : nil // the user's: pi's default flags
+		if at == fs_real(p.cwd) do return open_new_session(p^, new_uuid(), "", extra = extra)
 		// kept with the project's sessions (its store), running in the checkout
-		return open_new_session(p^, new_uuid(), "", cwd = at, session_dir = p.dir != "" ? p.dir : pi_store_dir(p.cwd))
+		return open_new_session(p^, new_uuid(), "", cwd = at, session_dir = p.dir != "" ? p.dir : pi_store_dir(p.cwd), extra = extra)
 	case Focus_Session:
 		s := find_session(c.session)
 		if s == nil do return fail("no such session"), false
@@ -1603,6 +1609,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		on^ = c.skip_permissions
 		settings_gen += 1 // the Settings tab's row
 		return {ok = true}, true
+	case Set_Harness_Flags:
+		return harness_flags_apply(c) // harness_flags.odin
 	case Set_Agent_Name:
 		name := strings.clone(cut_utf8(strings.trim_space(one_line(c.name, context.temp_allocator)), AGENT_NAME_MAX))
 		if name == state.settings.agent_name {
@@ -2106,7 +2114,7 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 	}
 	if rt.kind == .Claude {
 		if rt.claude_id != "" && !(rt.codex ? codex_id_ok(rt.claude_id) : claude_id_ok(rt.claude_id)) do return 0
-		if claude_args_check(rt.args) != "" || (rt.codex && len(rt.args) > 0) do return 0
+		if (rt.codex ? codex_args_check(rt.args) : claude_args_check(rt.args)) != "" do return 0
 		args := make([]string, len(rt.args))
 		for a, i in rt.args do args[i] = strings.clone(a)
 		// its account: an absolute folder; checked again at its start (claude_start: configured only)
@@ -2598,7 +2606,8 @@ find_session_file :: proc(p: Project, pi_session_id: string, session_dir := "") 
 
 // path = "" starts a new chat with `pi --session-id <id>`, so Deckhand knows
 // which file it will be; otherwise resumes the file.
-open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "", fork := "") -> (Result, bool) {
+// extra: pi's flags for this start (the user's, harness_flags.odin), after Deckhand's.
+open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "", fork := "", extra: []string = nil) -> (Result, bool) {
 	tab := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi"}
 	// the bridge in this pi finds Deckhand with these (token = this tab, panel)
 	env := socket_pi_env({kind = .Panel, tab_id = tab.id})
@@ -2608,7 +2617,7 @@ open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd :=
 		os.make_directory_all(p.cwd) // made on the first chat, with its instructions (folders.odin)
 		chats_instructions_ensure(date_stamp())
 	}
-	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env, fork = fork) {
+	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env, extra, fork = fork) {
 		socket_forget_tab(tab.id)
 		drop_term(tab.id)
 		return fail("could not start pi"), false

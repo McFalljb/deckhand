@@ -65,11 +65,11 @@ ACTIONS := [?]Action {
 	{id = "new_chat", label = "New chat", keys = "⌘N", make = proc() -> (core.Command, bool) {
 		c := core.chats_project()
 		if c == nil do return nil, false
-		return core.New_Chat{c.id}, true
+		return core.New_Chat{project_id = c.id}, true
 	}, ui = proc() {if c := core.chats_project(); c != nil do new_session_ui(c.id)}},
 	{id = "new_session", label = "New session", keys = "⇧⌘N", make = proc() -> (core.Command, bool) {
 		if core.find_project(state.selected_project) == nil do return nil, false
-		return core.New_Chat{state.selected_project}, true
+		return core.New_Chat{project_id = state.selected_project}, true
 	}, ui = proc() {new_session_ui(state.selected_project)}, detail = proc() -> string {
 		p := core.find_project(state.selected_project)
 		return p != nil ? fmt.tprintf("in %s", core.project_name(p^)) : ""
@@ -87,6 +87,16 @@ ACTIONS := [?]Action {
 	{id = "claude_skip_permissions", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
 	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "Claude Code · on: --dangerously-skip-permissions in the tabs you start" : "Claude Code · off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
+	// Default flags… per harness (Settings › Coding agents; ui_flags.odin): the page's field
+	{id = "claude_default_flags", make = proc() -> (core.Command, bool) {
+		return core.Set_Harness_Flags{harness = .Claude, flags = state.settings.harness_flags[.Claude]}, true
+	}, ui = proc() {settings_page_flags_edit(.Claude)}, detail = proc() -> string {return flags_default_hint(.Claude)}},
+	{id = "codex_default_flags", make = proc() -> (core.Command, bool) {
+		return core.Set_Harness_Flags{harness = .Codex, flags = state.settings.harness_flags[.Codex]}, true
+	}, ui = proc() {settings_page_flags_edit(.Codex)}, detail = proc() -> string {return flags_default_hint(.Codex)}},
+	{id = "pi_default_flags", make = proc() -> (core.Command, bool) {
+		return core.Set_Harness_Flags{harness = .Pi, flags = state.settings.harness_flags[.Pi]}, true
+	}, ui = proc() {settings_page_flags_edit(.Pi)}, detail = proc() -> string {return flags_default_hint(.Pi)}},
 	{id = "codex_full_access", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.codex_full_access, codex = true}, true
 	}, detail = proc() -> string {return state.settings.codex_full_access ? "Codex · on: --dangerously-bypass-approvals-and-sandbox in the tabs you start" : "Codex · off"}, done = proc() -> string {return turns("Codex full access", state.settings.codex_full_access)}},
@@ -134,6 +144,21 @@ ACTIONS := [?]Action {
 		if cs.machine != 0 && !core.codex_offered(cs.id) do return nil, false // another machine's: its Codex (harness.odin)
 		return core.New_Claude_Tab{session = cs.id, codex = true}, true
 	}},
+	// the same starts with the user's flags first (ui_flags.odin): the palette asks for them
+	{id = "new_claude_tab_flags", label = "New Claude tab with flags…", make = proc() -> (core.Command, bool) {
+		cs := core.cur()
+		if cs == nil || cs.home || cs.missing || cs.machine != 0 do return nil, false
+		return core.New_Claude_Tab{session = cs.id}, true
+	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id})}},
+	{id = "new_codex_tab_flags", label = "New Codex tab with flags…", make = proc() -> (core.Command, bool) {
+		cs := core.cur()
+		if cs == nil || cs.home || cs.missing || cs.machine != 0 || !core.codex_installed() do return nil, false
+		return core.New_Claude_Tab{session = cs.id, codex = true}, true
+	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id, codex = true})}},
+	{id = "new_session_flags", label = "New session with flags…", make = proc() -> (core.Command, bool) {
+		if core.find_project(state.selected_project) == nil || !flags_picker_any(state.selected_project) do return nil, false
+		return core.New_Chat{project_id = state.selected_project}, true
+	}, ui = proc() {new_session_ui(state.selected_project, flags = true)}},
 	{id = "claude_held_send", label = "Claude: send the waiting message now", make = proc() -> (core.Command, bool) {
 		t := core.active_tab()
 		if t == nil do return nil, false

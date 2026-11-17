@@ -1534,7 +1534,7 @@ launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 	if pid == 0 || core.find_project(pid) == nil do return nil // never the project that happened to be selected
 	if claude do return core.New_Claude_Session{project_id = pid}
 	if !core.pi_installed() && core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code alone (harness.odin)
-	return core.New_Chat{pid}
+	return core.New_Chat{project_id = pid}
 }
 
 // Test mode's backing scale from DECKHAND_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty

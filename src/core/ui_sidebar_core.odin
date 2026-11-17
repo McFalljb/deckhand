@@ -18,4 +18,5 @@ Menu_Item :: struct {
 	icon:   Icon, // drawn before the label (the harness picker's)
 	picker: Maybe(Menu_New_Session), // opens the harness picker for this place (harness.odin)
 	peek:   u64, // peeks at this open session (the window's ui_peek.odin)
+	flags:  bool, // cmd (a harness start): the window asks for its flags first (ui_flags.odin)
 }

@@ -1121,6 +1121,31 @@ you show it, and your Restart. It is never stored with a tab, so once you turn i
 those get it any more. Tabs and sessions that Atlas, a pi tab, a Claude tab or an app opens or
 restarts never get it.
 
+**Flags for a tab.** To start Claude Code, Codex or pi with command-line flags of your own (a
+model, a permission mode, `--mcp-config`, Codex's `-m`, `-s`, `-a`, `-p`, `--search`, pi's
+`--model` or `--thinking`), use **New Claude tab with flags…** or **New Codex tab with flags…**
+(the tab strip's **+**, a project's **…** menu, the palette) or **New session with flags…** (the
+**+**, a project's **…** menu, the palette, and **With flags…** at the bottom of the New session
+picker, which then lists **pi with flags…**, **Claude Code with flags…**, **Codex with flags…**).
+A one-line field opens, filled with the flags you last used for that agent in this window; type
+them as on a command line (quotes work, `"be brief"` is one word; nothing is expanded: no `$VAR`,
+`~` or globs) and press Enter. Each agent's own rule applies: flags Deckhand sets itself, or that
+pick another session, print instead of opening the agent's screen, or would turn off Deckhand's
+hooks or tools are refused, and the field's row says why before anything starts. Claude and Codex
+tabs keep their flags (a resume, a restore and your Restart use them again); a pi session uses them
+when it starts (pi itself remembers the session's model when it resumes). These flags are yours
+only: Atlas, scripts and apps cannot pass them, and a tab another machine runs takes flags there.
+
+**Default flags.** Settings › Coding agents has **Default Claude Code flags…**, **Default Codex
+flags…** and **Default pi flags…** (also in the palette): one line each, checked by the same rule
+when you save it. They go before a tab's own flags each time you start that agent yourself (for
+Claude Code and Codex: a new tab, session or chat, your resume, a restored tab you show, your
+Restart; for pi: a new session), and a default the tab's own flags name too is left out, so
+`--model opus` on a tab beats a default `--model sonnet`. Like **Skip permissions in new tabs**
+they are never stored with a tab and never reach a tab Atlas, a script, a pi tab or an app starts.
+Only you, at this Mac, can change them: not an agent, a script, another machine or a paired
+browser.
+
 **Without Claude Code.** Deckhand works the same without it: **New session** and **New chat**
 start pi at once (no picker), and the Claude-only menu rows (**New Claude tab**) are not shown.
 The palette's and the menu bar's **New Claude tab** read "… — Claude Code not installed", and
@@ -1213,10 +1238,16 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   you start Codex yourself (a new tab or session, your resume, a restored tab you show, your
   Restart), never to a tab Atlas, a script or an app starts, and not to a tab whose own flags pick
   a sandbox or approval mode.
-- **Extra flags** on a tab (yours only, as for Claude) are checked against Codex's own: flags that
-  would change Deckhand's hooks or tools, the tab's folder, Codex features or profiles (set those in
-  your `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …)
-  are refused, with why.
+- **Extra flags** on a tab (yours only, as for Claude: **New Codex tab with flags…**, **Default
+  Codex flags…**, see [Flags for a tab](#claude-code-tabs)) are checked against Codex's own: flags
+  that would change Deckhand's hooks or tools, the tab's folder or Codex features (set those in your
+  `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …) are
+  refused, with why. A profile is allowed by its plain name (`-p work`: Codex reads
+  `<Codex home>/work.config.toml` over your config; Deckhand's own settings still come last); a
+  profile can turn hooks off or bring hooks of its own, which Codex asks you to review, as in
+  `config.toml`.
+- **"Update available"**: at start, Codex shows its own update prompt in the tab until you update it
+  or skip that version; answer it there.
 - **On another machine**: **+ New session** under one of its projects (or **New Codex tab** in its
   menu) starts Codex there, with that machine's own Codex, settings and sign-in (its own **Full
   access in new Codex tabs**, never this Mac's); its Codex rows open there too. It needs Deckhand
@@ -1471,7 +1502,7 @@ buttons), with a search box on top.
   the settings that bound what other machines and agents may do here: **Allow other machines to
   connect**, **Machines over SSH** and your machines list, the pi extensions, and the default
   flags (Claude Code's **Skip permissions in new tabs**, Codex's **Full access in new Codex
-  tabs**); your notifications too. **Next start** and **Next launch** badges say when a change
+  tabs**, and each agent's **Default … flags…**); your notifications too. **Next start** and **Next launch** badges say when a change
   takes effect.
 - **Deckhand writes only its own settings.** pi's, Claude Code's and Codex's config are files:
   under a card, **Advanced: open the file** lists them. Click one to open it in an ordinary
@@ -2729,6 +2760,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New browser tab |  | a web page in the session on screen (its address field takes the keyboard) |
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen, with Deckhand's plugin |
 | New Codex tab |  | Codex in the session on screen, with Deckhand's hooks and tools ([Codex tabs](#codex-tabs)) |
+| New Claude tab with flags…, New Codex tab with flags… |  | the same, with flags you type on one line first ([Flags for a tab](#claude-code-tabs)) |
+| New session with flags… |  | a new session in the selected project, picking the agent, with flags you type first |
+| Default Claude Code flags…, Default Codex flags…, Default pi flags… |  | the flags that go before a tab's own in every start of that agent you make (Settings › Coding agents; only you, at this Mac) |
 | Skip permissions in new tabs |  | on or off: your new Claude tabs start with `--dangerously-skip-permissions` (asks first when turned on) |
 | Full access in new Codex tabs |  | on or off: your new Codex tabs start with `--dangerously-bypass-approvals-and-sandbox` (asks first when turned on) |
 | Add Claude account… |  | add a Claude Code config folder as an account (a folder picker) |

@@ -175,6 +175,7 @@ Menu_New_Session :: struct {
 	cwd:        string,
 	run:        string,
 	folder:     string,
+	flags:      bool, // "New session with flags…": each harness's row asks for its flags (ui_flags.odin)
 }
 
 // Which harness a picker row's command starts.

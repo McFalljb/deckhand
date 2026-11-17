@@ -29,5 +29,17 @@ jobs:
         run: |
           cat /etc/profile
           for f in /etc/profile.d/*.sh; do echo "=== $f"; grep -v '^\s*#' "$f" | head -40; done
-      - name: Diag
-        run: DIAG_N=60 python3 tests/i160-diag.py build/deckhand-core-serve
+      - name: Trace the foreground while a shell starts
+        run: |
+          tail -5 /etc/profile.d/Z99-cloud-locale-test.sh
+          DIAG_TRACE=1 DIAG_N=10 python3 tests/i160-diag.py build/deckhand-core-serve
+      - name: Diag, no wait (keeps the .profile marker, types at once)
+        run: |
+          sed -i 's/^        write_ready_profile(self.home)$/        pass/' tests/linux-holder-smoke.py
+          DIAG_N=100 python3 tests/i160-diag.py build/deckhand-core-serve || true
+          git checkout tests/linux-holder-smoke.py
+      - name: Diag, waiting for the shell's ~/.profile
+        run: DIAG_READY=1 DIAG_N=150 python3 tests/i160-diag.py build/deckhand-core-serve
+      - name: The smoke tests, 15 times each
+        run: |
+          for i in $(seq 15); do python3 tests/linux-holder-smoke.py build/deckhand-core-serve; python3 tests/linux-core-smoke.py build/deckhand-core-serve; done

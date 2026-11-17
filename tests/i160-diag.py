@@ -23,6 +23,33 @@ def tab_pid(link, tab):
     return None
 
 
+def trace_fg(pid, ms=400):
+    """Which process groups take the terminal while the new shell starts (/proc tpgid)."""
+    seen = []
+    end = time.time() + ms / 1000
+    while time.time() < end:
+        try:
+            tpgid = int(open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[5])
+        except (OSError, ValueError, IndexError):
+            break
+        if tpgid != pid and tpgid > 0:
+            cmds = []
+            for d in os.listdir("/proc"):
+                if not d.isdigit():
+                    continue
+                try:
+                    st = open(f"/proc/{d}/stat").read().rsplit(")", 1)[1].split()
+                    if int(st[2]) == tpgid:
+                        cmds.append(open(f"/proc/{d}/cmdline").read().replace("\0", " ").strip())
+                except (OSError, ValueError, IndexError):
+                    pass
+            entry = (tpgid, tuple(sorted(cmds)))
+            if entry not in seen:
+                seen.append(entry)
+        time.sleep(0.0005)
+    return seen
+
+
 def main():
     n = int(os.environ.get("DIAG_N", "40"))
     print("== /etc/profile.d:", sorted(os.listdir("/etc/profile.d")))
@@ -36,6 +63,11 @@ def main():
         session = st["open_sessions"][0]["id"]
         for i in range(n):
             tab = link.ok({"type": "new_shell_tab", "session": session})["created_id"]
+            if os.environ.get("DIAG_READY") == "1":
+                smoke.wait_shell_ready(link, tab, dirs.home)
+            if os.environ.get("DIAG_TRACE") == "1":
+                print(f"tab {tab}: foreground groups while starting: {trace_fg(tab_pid(link, tab))}")
+                continue
             t0 = time.time()
             r = None
             for _ in range(50):
@@ -53,6 +85,8 @@ def main():
             sess = [l for l in ps2.splitlines() if l.split()[3:4] == [str(pid)]]
             print(f"tab {tab}: REFUSED after {dt*1000:.0f} ms: {r['result'].get('error')}\n  shell pid {pid}\n" + "\n".join("  " + l for l in sess))
         print(f"== {busy}/{n} refused")
+        if busy and os.environ.get("DIAG_READY") == "1":
+            sys.exit(1)
     finally:
         core.p.kill()
         subprocess.run(["pkill", "-9", "-f", f"deckhand-core-serve serve --run {dirs.run}"])

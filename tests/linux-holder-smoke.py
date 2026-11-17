@@ -84,6 +84,7 @@ class Dirs:
         # keep_sessions on: test mode's default is off (commands.odin keep_sessions_default)
         with open(f"{self.data}/workspace.json", "w") as f:
             json.dump({"v": 1, "settings": {"keep_sessions": True}}, f)
+        write_ready_profile(self.home)
         self.env = {
             "HOME": self.home,
             "SHELL": "/bin/sh",
@@ -165,6 +166,24 @@ class Link:
         self.s.close()
 
 
+def write_ready_profile(home):
+    """A login shell reads ~/.profile last, after /etc/profile and /etc/profile.d: the line marks
+    the shell's login scripts done (ready-<its pid>), so it is at its prompt. Until then
+    send_text is refused, rightly: on Ubuntu, /etc/profile.d/Z99-cloud-locale-test.sh runs
+    `locale | locale_warn`, a foreground job with the terminal (#160)."""
+    with open(f"{home}/.profile", "w") as f:
+        f.write(': > "$HOME/ready-$$"\n')
+
+
+def wait_shell_ready(link, tab, home):
+    """Waits for tab's shell to finish its login scripts (write_ready_profile)."""
+    def ready():
+        st = link.ok({"type": "get_state"})["data"]
+        pid = next((t.get("pid") for s in st.get("open_sessions", []) for t in s["tabs"] if t.get("id") == tab), None)
+        return pid and os.path.exists(f"{home}/ready-{pid}")
+    wait_for(f"tab {tab}'s shell at its prompt (~/.profile ran)", ready)
+
+
 def token_in(text):
     m = None
     for m in TOKEN_RE.finditer(text):
@@ -188,6 +207,7 @@ def open_shell(link, home):
     st = link.ok({"type": "get_state"})["data"]
     session = st["open_sessions"][0]["id"]
     tab = link.ok({"type": "new_shell_tab", "session": session})["created_id"]
+    wait_shell_ready(link, tab, home)
     link.send_text(tab, f"echo $$ > {pid_file}.tmp && mv {pid_file}.tmp {pid_file}\r")
     pid = int(wait_for("shell pid file", lambda: os.path.exists(pid_file) and open(pid_file).read().strip()))
     return tab, pid

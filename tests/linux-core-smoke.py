@@ -30,6 +30,11 @@ def main():
     d = tempfile.mkdtemp(prefix="dh-smoke-")
     home = f"{d}/home"
     os.makedirs(home)
+    # a login shell reads ~/.profile last: ready-<its pid> says its login scripts are done and it
+    # is at its prompt. Before that send_text is refused, rightly (a program has the terminal: on
+    # Ubuntu, /etc/profile.d/Z99-cloud-locale-test.sh's `locale | locale_warn`; #160)
+    with open(f"{home}/.profile", "w") as f:
+        f.write(': > "$HOME/ready-$$"\n')
     # pi's stand-in: the session's first tab runs it
     env = dict(os.environ, HOME=home, DECKHAND_SCRIPT="smoke", DECKHAND_CMD="sleep 60")
     if DEFAULT_DIRS:
@@ -77,6 +82,15 @@ def main():
         assert r["result"]["ok"], r
         mark = f"{home}/pty-ok"
         tab = r["result"]["created_id"]
+        deadline = time.time() + 15
+        while time.time() < deadline:
+            st = ask({"id": "g", "v": 1, "type": "command", "command": {"type": "get_state"}})["result"]["data"]
+            pid = next((t.get("pid") for x in st.get("open_sessions", []) for t in x["tabs"] if t.get("id") == tab), None)
+            if pid and os.path.exists(f"{home}/ready-{pid}"):
+                break
+            time.sleep(0.1)
+        else:
+            raise AssertionError("the shell tab's shell never reached its prompt (~/.profile did not run)")
         for _ in range(25):  # a held terminal is "not known yet" until the holder's first FOREGROUND answer
             r = ask({"id": "x", "v": 1, "type": "command", "command": {"type": "send_text", "tab_id": tab, "text": f"echo ok > {mark}\r"}})
             if r["result"]["ok"] or "not known yet" not in r["result"].get("error", ""):

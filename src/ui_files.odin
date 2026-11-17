@@ -963,6 +963,10 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 				if sapp.isvalid() do set_hover(nil, false) // no hover under a drag (no window: tests)
 			}
 			if fu.dragging {
+				if files_drag_out(e.mouse_x, e.mouse_y, fu.drag_root, fu.drag_paths[:]) { 	// out of the window: the system's drag (files_drag_out.odin)
+					files_drag_cancel()
+					return true
+				}
 				files_drag_update(e.mouse_x, e.mouse_y)
 				return true
 			}

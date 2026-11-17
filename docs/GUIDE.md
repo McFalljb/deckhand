@@ -1456,6 +1456,9 @@ screen, else of the selected project. Press ⇧⌘E again to go back to Sessions
   moves either if the target has an item with the same name; a toast says so. If a move is
   refused part-way (a terminal working in that folder, for example), the toast names the item;
   what already moved stays moved.
+- **To copy files to another app** (macOS), drag rows out of the window: Finder copies them (never
+  moves them), a terminal gets their paths, other apps get the files. Credential files, and folders
+  holding one (or too large to check), stay behind.
 - **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
   (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
   shown, ⌘⌫ moves the selection to the Trash (one confirmation: how many folders and files, the first five names, folders first),

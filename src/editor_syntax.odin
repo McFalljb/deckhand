@@ -115,6 +115,15 @@ foreign tslib {
 	tree_sitter_bash :: proc() -> TS_Language ---
 	tree_sitter_yaml :: proc() -> TS_Language ---
 	tree_sitter_toml :: proc() -> TS_Language ---
+	tree_sitter_cpp :: proc() -> TS_Language ---
+	tree_sitter_objc :: proc() -> TS_Language ---
+	tree_sitter_html :: proc() -> TS_Language ---
+	tree_sitter_css :: proc() -> TS_Language ---
+	tree_sitter_lua :: proc() -> TS_Language ---
+	tree_sitter_zig :: proc() -> TS_Language ---
+	tree_sitter_make :: proc() -> TS_Language ---
+	tree_sitter_dockerfile :: proc() -> TS_Language ---
+	tree_sitter_ini :: proc() -> TS_Language ---
 }
 
 // ---- languages ----
@@ -123,6 +132,8 @@ foreign tslib {
 Q_JS :: #load("../vendor/tree-sitter/grammars/javascript/queries/highlights.scm", string)
 @(private = "file")
 Q_JSX :: #load("../vendor/tree-sitter/grammars/javascript/queries/highlights-jsx.scm", string)
+@(private = "file")
+Q_C :: #load("../vendor/tree-sitter/grammars/c/queries/highlights.scm", string)
 @(private = "file")
 Q_TS :: #load("../vendor/tree-sitter/grammars/typescript/queries/highlights.scm", string)
 
@@ -158,7 +169,7 @@ Language :: struct {
 }
 
 LANGUAGES := [?]Language {
-	{name = "c", exts = {".c", ".h"}, ts = tree_sitter_c, queries = {#load("../vendor/tree-sitter/grammars/c/queries/highlights.scm", string)}, comment = "//"},
+	{name = "c", exts = {".c", ".h"}, ts = tree_sitter_c, queries = {Q_C}, comment = "//"},
 	{name = "odin", exts = {".odin"}, ts = tree_sitter_odin, queries = {#load("../vendor/tree-sitter/grammars/odin/queries/highlights.scm", string)}, comment = "//"},
 	{name = "javascript", exts = {".js", ".mjs", ".cjs", ".jsx"}, ts = tree_sitter_javascript, queries = {Q_JS, Q_JSX}, comment = "//"},
 	{name = "typescript", exts = {".ts", ".mts", ".cts"}, ts = tree_sitter_typescript, queries = {Q_JS, Q_TS}, comment = "//"},
@@ -171,6 +182,16 @@ LANGUAGES := [?]Language {
 	{name = "shell", exts = {".sh", ".bash", ".zsh", ".bashrc", ".zshrc", ".profile", ".zprofile", ".envrc"}, ts = tree_sitter_bash, queries = {#load("../vendor/tree-sitter/grammars/bash/queries/highlights.scm", string)}, comment = "#"},
 	{name = "yaml", exts = {".yml", ".yaml"}, ts = tree_sitter_yaml, queries = {#load("../vendor/tree-sitter/grammars/yaml/queries/highlights.scm", string)}, comment = "#"},
 	{name = "toml", exts = {".toml"}, ts = tree_sitter_toml, queries = {#load("../vendor/tree-sitter/grammars/toml/queries/highlights.scm", string)}, comment = "#"},
+	// cpp's and objc's queries extend C's (their grammars extend C's)
+	{name = "cpp", exts = {".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++", ".ipp", ".inl"}, ts = tree_sitter_cpp, queries = {Q_C, #load("../vendor/tree-sitter/grammars/cpp/queries/highlights.scm", string)}, comment = "//"},
+	{name = "objc", exts = {".m", ".mm"}, ts = tree_sitter_objc, queries = {Q_C, #load("../vendor/tree-sitter/grammars/objc/queries/highlights.scm", string)}, comment = "//"},
+	{name = "html", exts = {".html", ".htm", ".xhtml"}, ts = tree_sitter_html, queries = {#load("../vendor/tree-sitter/grammars/html/queries/highlights.scm", string)}, block = {"<!-- ", " -->"}},
+	{name = "css", exts = {".css"}, ts = tree_sitter_css, queries = {#load("../vendor/tree-sitter/grammars/css/queries/highlights.scm", string)}, block = {"/* ", " */"}},
+	{name = "lua", exts = {".lua"}, ts = tree_sitter_lua, queries = {#load("../vendor/tree-sitter/grammars/lua/queries/highlights.scm", string)}, comment = "--"},
+	{name = "zig", exts = {".zig", ".zon"}, ts = tree_sitter_zig, queries = {#load("../vendor/tree-sitter/grammars/zig/queries/highlights.scm", string)}, comment = "//"},
+	{name = "make", exts = {"makefile", "gnumakefile", ".mk", ".mak"}, ts = tree_sitter_make, queries = {#load("../vendor/tree-sitter/grammars/make/queries/highlights.scm", string)}, comment = "#"},
+	{name = "dockerfile", exts = {"dockerfile", "containerfile", ".dockerfile"}, ts = tree_sitter_dockerfile, queries = {#load("../vendor/tree-sitter/grammars/dockerfile/queries/highlights.scm", string)}, comment = "#"},
+	{name = "ini", exts = {".ini", ".editorconfig", ".gitconfig"}, ts = tree_sitter_ini, queries = {#load("../vendor/tree-sitter/grammars/ini/queries/highlights.scm", string)}, comment = ";"},
 }
 
 // The language for a path (by extension or file name), or nil = plain text.
@@ -181,6 +202,9 @@ language_for_path :: proc(path: string) -> ^Language {
 	for &l in LANGUAGES do for e in l.exts {
 		if e == ext || e == name do return &l
 	}
+	// Dockerfile.dev, Makefile.local
+	if strings.has_prefix(name, "dockerfile.") || strings.has_prefix(name, "containerfile.") do return language_by_name("dockerfile")
+	if strings.has_prefix(name, "makefile.") do return language_by_name("make")
 	return nil
 }
 

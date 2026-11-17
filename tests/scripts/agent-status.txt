@@ -163,7 +163,7 @@ assert_rows sessions Which unit should the search index use,Import recipes from 
 # the project row's menu sorts its sessions: "Sessions by attention"
 rclickid proj 0
 eventually
-assert_menurows Pin|New session|New Claude tab|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Pin|New session|New session with flags…|New Claude tab|New Claude tab with flags…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 shot agent-status/sessions-sort-menu
 clickmenu Sessions by attention
 eventually

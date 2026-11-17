@@ -880,15 +880,15 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "claude_wait_idle":    cmd = Claude_Wait_Idle{tab_id = get_u64(&r, "tab_id"), timeout_ms = opt_u64(&r, "timeout_ms"), prompt_id = opt_u64(&r, "prompt_id")}
 	case "claude_prompt":       cmd = Claude_Prompt{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text")}
 	case "claude_held":         cmd = Claude_Held_Op{tab_id = get_u64(&r, "tab_id"), op = get_str(&r, "op")}
-	case "claude.session":      cmd = Claude_Session_Report{tab_id = opt_u64(&r, "tab_id"), session_id = get_str(&r, "session_id"), cwd = get_str(&r, "cwd", optional = true), source = get_str(&r, "source", optional = true), transcript_path = get_str(&r, "transcript_path", optional = true), model = get_str(&r, "model", optional = true)}
+	case "claude.session":      cmd = Claude_Session_Report{tab_id = opt_u64(&r, "tab_id"), session_id = get_str(&r, "session_id"), cwd = get_str(&r, "cwd", optional = true), source = get_str(&r, "source", optional = true), transcript_path = get_str(&r, "transcript_path", optional = true), model = get_str(&r, "model", optional = true), permission_mode = get_str(&r, "permission_mode", optional = true)}
 	case "claude.readonly_ack": cmd = Claude_Readonly_Ack{tab_id = opt_u64(&r, "tab_id"), nonce = get_str(&r, "nonce")}
-	case "claude.turn":         cmd = Claude_Turn_Report{tab_id = opt_u64(&r, "tab_id"), state = get_str(&r, "state"), title = get_str(&r, "title", optional = true), question = opt_bool(&r, "question").? or_else false, idle_prompt = opt_bool(&r, "idle_prompt").? or_else false}
+	case "claude.turn":         cmd = Claude_Turn_Report{tab_id = opt_u64(&r, "tab_id"), state = get_str(&r, "state"), title = get_str(&r, "title", optional = true), question = opt_bool(&r, "question").? or_else false, idle_prompt = opt_bool(&r, "idle_prompt").? or_else false, permission_mode = get_str(&r, "permission_mode", optional = true)}
 	case "claude.comments":     cmd = Claude_Comments{tab_id = opt_u64(&r, "tab_id"), max = int(min(opt_u64(&r, "max"), 1 << 20))}
 	case "claude.attached":     cmd = Claude_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
 	case "claude_restart":      cmd = Claude_Restart{tab_id = get_u64(&r, "tab_id"), pick_model = opt_bool(&r, "pick_model").? or_else false}
-	case "claude_restart_changed": cmd = Claude_Restart_Changed{update = opt_bool(&r, "update").? or_else false, all = opt_bool(&r, "all").? or_else false, confirm = get_str(&r, "confirm", optional = true)}
+	case "claude_restart_changed": cmd = Claude_Restart_Changed{update = opt_bool(&r, "update").? or_else false, all = opt_bool(&r, "all").? or_else false, confirm = get_str(&r, "confirm", optional = true), harness = harness_claude_tab(&r)}
 	case "claude_restart_anyway": cmd = Claude_Restart_Anyway{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true)}
-	case "claude_reload_later": cmd = Claude_Reload_Later{update = opt_bool(&r, "update").? or_else false}
+	case "claude_reload_later": cmd = Claude_Reload_Later{update = opt_bool(&r, "update").? or_else false, harness = harness_claude_tab(&r)}
 	case "claude.todos":        cmd = Claude_Todos{tab_id = opt_u64(&r, "tab_id"), todos = get_todos(&r, "todos"), agent_id = get_str(&r, "agent_id", optional = true), seq = opt_u64(&r, "seq")}
 	case "claude.task":         cmd = Claude_Task{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), task_id = get_str(&r, "task_id"), subject = get_str(&r, "subject", optional = true), active_form = get_str(&r, "active_form", optional = true), status = get_str(&r, "status", optional = true), seq = opt_u64(&r, "seq")}
 	case "claude.model":        cmd = Claude_Model_Report{tab_id = opt_u64(&r, "tab_id"), model = get_str(&r, "model")}

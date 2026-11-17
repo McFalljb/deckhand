@@ -148,12 +148,12 @@ ACTIONS := [?]Action {
 	// the same starts with the user's flags first (ui_flags.odin): the palette asks for them
 	{id = "new_claude_tab_flags", label = "New Claude tab with flags…", make = proc() -> (core.Command, bool) {
 		cs := core.cur()
-		if cs == nil || cs.home || cs.missing || cs.machine != 0 || !core.claude_installed() do return nil, false
+		if cs == nil || cs.home || cs.missing || !core.claude_offered(cs.id) do return nil, false // another machine's: its Claude Code (harness.odin)
 		return core.New_Claude_Tab{session = cs.id, harness = .Claude}, true
 	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id, harness = .Claude})}},
 	{id = "new_codex_tab_flags", label = "New Codex tab with flags…", make = proc() -> (core.Command, bool) {
 		cs := core.cur()
-		if cs == nil || cs.home || cs.missing || cs.machine != 0 || !core.codex_installed() do return nil, false
+		if cs == nil || cs.home || cs.missing || !core.codex_offered(cs.id) do return nil, false // another machine's: its Codex (harness.odin)
 		return core.New_Claude_Tab{session = cs.id, harness = .Codex}, true
 	}, ui = proc() {if cs := core.cur(); cs != nil do flags_open(core.New_Claude_Tab{session = cs.id, harness = .Codex})}},
 	{id = "new_session_flags", label = "New session with flags…", make = proc() -> (core.Command, bool) {

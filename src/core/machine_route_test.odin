@@ -861,4 +861,51 @@ remote_no_harness_text :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(machine_no_harness_note(3), "No coding agent is installed"), machine_no_harness_note(3))
 }
 
+// Flags the user typed at this window for a start on another machine (ui_flags.odin): forwarded as
+// the start's args, as typed, as the user's (on_behalf ui), never checked here and never with this
+// Mac's default flags (that core checks them by its own rule and adds its own); refused here,
+// nothing sent, to a core whose version says it would drop a pi session's (before 0.7.0).
+@(test)
+route_flags :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sid, _ := rt_begin()
+	defer rt_end_test()
+	pid, _ := id_pack(3, 5)
+	state.machines[0].codex = true
+	state.machines[0].version = strings.clone("0.7.1")
+	// this Mac's defaults, which never go there
+	state.settings.harness_flags[.Claude] = strings.clone("--model this-macs-default")
+	state.settings.harness_flags[.Pi] = strings.clone("--offline")
+	state.settings.claude_skip_permissions = true
+	for c, i in ([]Command{New_Claude_Tab{session = sid, args = {"--model", "opus", "--resume", "x"}, harness = .Claude}, New_Claude_Session{project_id = pid, args = {"-s", "read-only"}, harness = .Codex}, New_Chat{project_id = pid, args = {"--thinking", "high"}}}) {
+		n := len(machine_test_links.texts)
+		r := run_command(c, {kind = .UI}, u64(10 + i))
+		testing.expectf(t, r.ok && r.pending, "%s: %s", command_type(c), r.error) // --resume: that core's to refuse, not this one's
+		testing.expect_value(t, len(machine_test_links.texts), n + 1)
+		sent := rt_last_text()
+		testing.expect(t, strings.contains(sent, `"on_behalf":{"kind":"ui"}`), sent)
+		for never in ([]string{"this-macs-default", "--offline", "--dangerously-skip-permissions", "dangerously"}) do testing.expectf(t, !strings.contains(sent, never), "%s sent: %s", never, sent)
+		want := i == 0 ? `"args":["--model","opus","--resume","x"]` : i == 1 ? `"args":["-s","read-only"]` : `"args":["--thinking","high"]`
+		testing.expectf(t, strings.contains(sent, want), "%s in %s", want, sent)
+	}
+	// an older core (0.6.x) would start a pi session without them: refused here, nothing sent
+	delete(state.machines[0].version)
+	state.machines[0].version = strings.clone("0.6.0")
+	n := len(machine_test_links.texts)
+	for c in ([]Command{New_Chat{project_id = pid, args = {"--thinking", "high"}}, New_Claude_Tab{session = sid, args = {"--model", "opus"}, harness = .Claude}, New_Claude_Session{project_id = pid, args = {"-m", "o3"}, harness = .Codex}}) {
+		r := run_command(c, {kind = .UI}, 20)
+		testing.expectf(t, !r.ok && !r.pending && strings.contains(r.error, "too old to take flags"), "%s: %s", command_type(c), r.error)
+	}
+	testing.expect_value(t, len(machine_test_links.texts), n)
+	// without flags it goes as ever
+	r := run_command(New_Chat{project_id = pid}, {kind = .UI}, 21)
+	testing.expect(t, r.ok && r.pending, r.error)
+	// a development build there (no version): let through
+	delete(state.machines[0].version)
+	state.machines[0].version = ""
+	testing.expect(t, machine_takes_flags(3), "a development build")
+	testing.expect(t, !machine_takes_flags(4), "no such machine")
+	state.settings.claude_skip_permissions = false
+}
+
 } // when TEST_HOOKS

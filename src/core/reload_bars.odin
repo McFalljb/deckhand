@@ -96,12 +96,15 @@ reload_message :: proc(restart: bool) -> (msg: string, can: bool) {
 	return fmt.tprintf("%s — new pi tabs use it", head), false
 }
 
-// The running Claude tabs a bar is about (update: the update bar).
-claude_reload_counts :: proc(update: bool) -> (n: Reload_Counts) {
+// The running Claude tabs a bar is about (update: the update bar; harness .Codex: the Codex bar,
+// which has no update bar).
+claude_reload_counts :: proc(update: bool, harness := Harness.Claude) -> (n: Reload_Counts) {
+	codex := harness_is_codex(harness)
+	if codex && update do return
 	for &s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's tabs are its core's
 		for &t in s.tabs {
-			if _, is := t.kind.(Claude_Tab); !is do continue
+			if ct, is := t.kind.(Claude_Tab); !is || t.machine != 0 || harness_is_codex(ct.harness) != codex do continue
 			if t.status == .Exited && restart_waiting(t.id) && strings.has_prefix(t.reload.note, "restarting") {
 				n.reloading += 1
 				continue
@@ -122,7 +125,13 @@ claude_reload_counts :: proc(update: bool) -> (n: Reload_Counts) {
 	return
 }
 
-claude_bar_shows :: proc(update: bool) -> bool {
+claude_bar_shows :: proc(update: bool, harness := Harness.Claude) -> bool {
+	if harness_is_codex(harness) {
+		info := state.reload.codex
+		if update || info.dismissed do return false
+		n := claude_reload_counts(false, .Codex)
+		return n.idle + n.busy + n.no_bridge + n.queued + n.reloading > 0 || info.from_save
+	}
 	info := state.reload.claude
 	if update {
 		if info.update_dismissed || info.ident == "" do return false
@@ -138,7 +147,7 @@ claude_reload_silent_tab :: proc(update: bool) -> (tab: ^Tab, why: string) {
 	for &s in state.open_sessions {
 		if s.home do continue
 		for &t in s.tabs {
-			if _, is := t.kind.(Claude_Tab); !is || t.status != .Running || t.reload.queued != .Restart do continue
+			if ct, is := t.kind.(Claude_Tab); !is || harness_is_codex(ct.harness) || t.status != .Running || t.reload.queued != .Restart do continue
 			if update ? !claude_reload_outdated(&t) : !t.reload.stale do continue
 			i := strings.index(t.reload.note, CLAUDE_SILENT_NOTE)
 			if i < 0 do continue
@@ -149,7 +158,8 @@ claude_reload_silent_tab :: proc(update: bool) -> (tab: ^Tab, why: string) {
 }
 
 // The bar's text, and whether its Restart button shows.
-claude_reload_message :: proc(update: bool) -> (msg: string, can: bool) {
+claude_reload_message :: proc(update: bool, harness := Harness.Claude) -> (msg: string, can: bool) {
+	if harness_is_codex(harness) do return codex_reload_message()
 	n := claude_reload_counts(update)
 	head := "Claude Code settings changed"
 	if update do head = fmt.tprintf("Claude Code updated to %s", claude_version_label(state.reload.claude.version))
@@ -173,4 +183,28 @@ claude_reload_message :: proc(update: bool) -> (msg: string, can: bool) {
 		return fmt.tprintf("%s — %d Claude %s never reported its conversation: restart by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
 	}
 	return fmt.tprintf("%s — new Claude tabs use it", head), false
+}
+
+// The Codex bar's text (changed Codex files a running Codex reads only at start), and whether its
+// Restart button shows.
+codex_reload_message :: proc() -> (msg: string, can: bool) {
+	n := claude_reload_counts(false, .Codex)
+	head := "Codex settings changed"
+	switch {
+	case n.idle > 0:
+		msg = fmt.tprintf("%s — Restart %d idle Codex %s", head, n.idle, tabs_word(n.idle))
+		if n.busy > 0 do msg = fmt.tprintf("%s · %d busy when idle", msg, n.busy)
+		return msg, true
+	case n.busy > 0:
+		return fmt.tprintf("%s — %d busy Codex %s restart when idle", head, n.busy, tabs_word(n.busy)), true
+	case n.queued > 0:
+		return fmt.tprintf("Restarting Codex — %d %s wait until idle", n.queued, tabs_word(n.queued)), false
+	case n.reloading > 0:
+		return fmt.tprintf("Restarting %d Codex %s…", n.reloading, tabs_word(n.reloading)), false
+	case n.no_bridge > 0:
+		// no conversation yet (SessionStart comes with the first prompt), or hooks not running
+		one := n.no_bridge == 1
+		return fmt.tprintf("%s — %d Codex %s %s no conversation yet: new settings apply when you restart %s", head, n.no_bridge, tabs_word(n.no_bridge), one ? "has" : "have", one ? "it" : "them"), false
+	}
+	return fmt.tprintf("%s — new Codex tabs use it", head), false
 }

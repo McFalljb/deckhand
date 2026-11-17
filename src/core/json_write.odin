@@ -1242,6 +1242,7 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		kv_str(&w, "type", command_type(cmd))
 		if c.update do kv_bool(&w, "update", true)
 		if c.all do kv_bool(&w, "all", true)
+		if harness_is_codex(c.harness) do kv_str(&w, "harness", "codex")
 		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
 		obj_end(&w)
 		return

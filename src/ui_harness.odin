@@ -406,6 +406,11 @@ new_session_menu_items :: proc(t: core.Menu_New_Session, items: ^[dynamic]core.M
 	}
 	append(items, core.Menu_Item{label = what, note = true})
 	append(items, ..core.new_session_choices(p, t.cwd))
+	// the same with flags typed first (ui_flags.odin): the picker again, its flags rows
+	if flags_picker_any(p.id, t.cwd) {
+		append(items, core.Menu_Item{sep = true})
+		append(items, core.Menu_Item{label = "With flags…", picker = core.Menu_New_Session{project_id = p.id, cwd = t.cwd, run = t.run, folder = t.folder, flags = true}})
+	}
 }
 
 // Where the picker opens without a click (a shortcut, the palette, the menu bar): under the top
@@ -430,10 +435,11 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil, flags := fa
 		rows := make([dynamic]core.Menu_Item, context.temp_allocator)
 		flags_picker_items(p, cwd, &rows)
 		switch len(rows) {
-		case 0: toast_show(core.id_machine(pid) != 0 ? "Flags are set on that machine's own Deckhand" : core.NO_HARNESS, err = true)
+		case 0: toast_show(core.id_machine(pid) != 0 ? core.machine_no_harness_note(core.id_machine(pid)) : core.NO_HARNESS, err = true)
 		case 1: flags_open(rows[0].cmd)
 		case:
-			menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd, flags = true}, at.? or_else new_session_anchor())
+			run, folder := handoff_picker_identity(p^) // another machine's: what a choice checks again (ui_handoff.odin)
+			menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd, run = run, folder = folder, flags = true}, at.? or_else new_session_anchor())
 			for it, i in menu_items() do if !it.note && !it.sep {
 				menu.selected = i
 				break

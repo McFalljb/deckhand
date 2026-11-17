@@ -146,7 +146,7 @@ assert_state open_sessions.0.tabs.# 2
 menu new_chat
 eventually
 # pi and Claude Code installed: the harness picker (harness.odin); pi
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 key 1
 eventually
 assert_state open_sessions.# 2

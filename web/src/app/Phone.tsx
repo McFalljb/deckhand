@@ -112,7 +112,11 @@ export function PhoneSession({ id }: { id: number }) {
     setMods({ ctrl: false, alt: false });
     return applyMods(b, m);
   };
-  const input = (b: Uint8Array) => term.current?.stream.input(b);
+  // a key-bar key: any word the phone keyboard is composing ends first (never sent again after it)
+  const input = (b: Uint8Array) => {
+    term.current?.view.resetField();
+    term.current?.stream.input(b);
+  };
   const key = (seq: string) => input(withMods(enc.encode(seq)));
   const arrow = (d: "A" | "B" | "C" | "D") => {
     const m = modsRef.current;
@@ -174,7 +178,8 @@ export function PhoneSession({ id }: { id: number }) {
               tabId={tab.id}
               attachable={tab.status !== "not_started"}
               focused
-              keyboard={raw && !covering(app.overlay)}
+              keyboard={raw && !covering(app.overlay, !!app.store.homeOpen)}
+              armed={() => modsRef.current.ctrl || modsRef.current.alt}
               onInput={withMods}
               handleRef={(h) => (term.current = h)}
             />

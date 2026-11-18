@@ -2461,7 +2461,8 @@ Below 760 pixels wide the page is the phone's: the left column full width (or th
 session one tab at a time. Under a terminal: a key bar (Esc, Tab, Ctrl and Alt that stay down
 for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you). Tap the
 terminal to type: each key goes straight in, as on a desktop (a menu, a sheet or another tab
-stops the typing until you tap again). The keyboard button switches to a text field instead, for
+stops the typing until you tap again); the phone's keyboard may learn the words typed there, as
+in any text field. The keyboard button switches to a text field instead, for
 dictation, autocorrect, a long message, or a long-press Paste, sent with Enter. Drag a terminal
 up or down to scroll it as the mouse wheel would: its scrollback, or inside a full-screen program
 (less, an agent) what the wheel sends there. A long press on a Deck card peeks at that session;

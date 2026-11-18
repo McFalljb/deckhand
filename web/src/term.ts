@@ -52,6 +52,13 @@ export interface TermView {
   onInput(fn: (bytes: Uint8Array) => void): void;
   // a touch scroll's wheel reports (not typing: no sticky modifiers)
   onScrollInput(fn: (bytes: Uint8Array) => void): void;
+  // a phone field's bytes that are not one typed character (keys, a word's correction, a paste):
+  // no sticky modifiers
+  onPlainInput(fn: (bytes: Uint8Array) => void): void;
+  // the key bar's Ctrl or Alt is down for the next typed character
+  onArmed(fn: () => boolean): void;
+  // the key bar is about to send a key: the phone field's composition ends, the field empties
+  resetField(): void;
   onLink(fn: (url: string) => void): void;
   dispose(): void;
 }
@@ -93,6 +100,9 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
 
   let inputFn: ((b: Uint8Array) => void) | null = null;
   let scrollFn: ((b: Uint8Array) => void) | null = null;
+  let plainFn: ((b: Uint8Array) => void) | null = null;
+  let armedFn: () => boolean = () => false;
+  let plainOut = false; // a phone field's paste is being written (its output: plainFn)
   let scrollReports = false;
   const touchWheel = new WheelWindow(); // a touch scroll's wheel events being handled: output to scrollFn
   let touch: TouchScrolling | null = null;
@@ -125,12 +135,12 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     term.onData((d) => {
       // focus reports go as FOCUS frames (the core reports them if the program asked)
       if (d === "\x1b[I" || d === "\x1b[O") return;
-      (touchWheel.active ? scrollFn : inputFn)?.(enc.encode(d));
+      (touchWheel.active ? scrollFn : plainOut ? plainFn : inputFn)?.(enc.encode(d));
     }),
     term.onBinary((d) => {
       const b = new Uint8Array(d.length);
       for (let i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 0xff;
-      (touchWheel.active ? scrollFn : inputFn)?.(b);
+      (touchWheel.active ? scrollFn : plainOut ? plainFn : inputFn)?.(b);
     }),
   );
 
@@ -202,17 +212,36 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     const w = sr.width / term.cols;
     return { left: sr.left - hr.left + b.cursorX * w, top: sr.top - hr.top + row * h, height: h };
   };
-  // the keyboard opened or closed (the visible height changed): the cursor's line back in view
-  const keepInView = () => {
+  // the keyboard opened or closed (the visible height changed by a keyboard's worth, not a pinch
+  // or a scroll): the cursor's line back in view
+  let vvH = window.visualViewport?.height ?? 0;
+  const keepInView = (e?: Event) => {
+    const h = window.visualViewport?.height ?? 0;
+    const opened = e?.type === "focus";
+    if (!opened && Math.abs(h - vvH) < 120) return;
+    vvH = h;
     if (!field?.focused()) return;
     term.scrollToBottom();
     field.place();
   };
+  const pastePlain = (text: string) => {
+    const was = term.options.disableStdin;
+    term.options.disableStdin = false;
+    plainOut = true;
+    try {
+      term.paste(text); // bracketed when the program asked
+    } finally {
+      plainOut = false;
+      term.options.disableStdin = was;
+    }
+  };
   const ensureField = (): TermField | null => {
     if (field || !host) return field;
     field = createTermField(host, {
-      send: (text) => fieldOn && inputFn?.(enc.encode(text)),
-      paste: (text) => fieldOn && view.paste(text),
+      typed: (ch) => fieldOn && inputFn?.(enc.encode(ch)),
+      send: (text) => fieldOn && plainFn?.(enc.encode(text)),
+      paste: (text) => fieldOn && pastePlain(text),
+      armed: () => armedFn(),
       appCursor: () => term.modes.applicationCursorKeysMode,
       cursorAt,
     });
@@ -324,6 +353,15 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     },
     onScrollInput(fn) {
       scrollFn = fn;
+    },
+    onPlainInput(fn) {
+      plainFn = fn;
+    },
+    onArmed(fn) {
+      armedFn = fn;
+    },
+    resetField() {
+      field?.resetField();
     },
     onLink(fn) {
       linkFn = fn;

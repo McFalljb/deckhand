@@ -811,11 +811,15 @@ open_session_is_chat :: proc(s: ^Open_Session) -> bool {
 }
 
 // A project's short name for rows, tabs and the palette: its own name, else
-// its folder's name; the ~ path when another project has the same folder name.
+// its folder's name; the ~ path when another shown project has the same folder
+// name (a hidden row, such as one whose folder is gone, is no clash).
 project_display :: proc(p: Project) -> string {
 	if p.name != "" do return p.name
 	base := filepath.base(p.cwd)
-	for q in state.projects do if q.group == .Projects && q.id != p.id && q.name == "" && filepath.base(q.cwd) == base do return p.label
+	for q in state.projects {
+		if q.group != .Projects || q.id == p.id || q.name != "" || filepath.base(q.cwd) != base do continue
+		if project_hide_reason(q) == .None do return p.label
+	}
 	return base
 }
 

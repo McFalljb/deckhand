@@ -548,3 +548,15 @@ tidy_temp_roots_env :: proc(t: ^testing.T) {
 	testing.expectf(t, len(roots) == 2 && roots[0] == "/pd-a" && roots[1] == "/pd-b", "roots %v", roots)
 	testing.expect(t, !core.is_temp_path("/Users/x/proj", roots), "an empty piece is no root")
 }
+
+// A project keeps its short name while the only other project with the same folder name is hidden
+// (its folder is gone); the path comes back when that one is shown.
+@(test)
+tidy_name_ignores_hidden :: proc(t: ^testing.T) {
+	context.allocator = tt_reset()
+	append(&state.projects, core.Project{id = 1, group = .Projects, cwd = "/w/projects/app", label = "~/projects/app"})
+	append(&state.projects, core.Project{id = 2, group = .Projects, cwd = "/w/projects/tmp/app", label = "~/projects/tmp/app", missing = true})
+	testing.expect_value(t, core.project_display(state.projects[0]), "app")
+	state.projects[1].missing = false
+	testing.expect_value(t, core.project_display(state.projects[0]), "~/projects/app")
+}

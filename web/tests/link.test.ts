@@ -29,7 +29,7 @@ g.localStorage = { getItem: () => "a".repeat(64), setItem: () => {}, removeItem:
 g.fetch = async () => ({ ok: true, status: 200, json: async () => ({ paired: true }) });
 
 const { Link } = await import("../src/link.ts");
-const { jsonFrame } = await import("../src/wire.ts");
+const { jsonFrame, encodeFrame, Kind } = await import("../src/wire.ts");
 
 function deliver(ws: FakeSocket, msg: object) {
   const f = jsonFrame(msg);
@@ -69,4 +69,30 @@ test("redial: fast only after a link that got its state and stayed up; else the 
   } finally {
     Date.now = realNow;
   }
+});
+
+// A Take back (or any redial) is a new socket: a terminal channel is the old socket's only. The
+// link counts its sockets (termstream.ts: a stream attached on an older one is not attached, and
+// attaches again: a fresh snapshot and this page's grid) and forgets the old socket's channels (a
+// channel number on the new one is another stream's).
+test("a new socket: the serial moves on and the old socket's channels are forgotten", () => {
+  const link = new Link({ up: () => {}, status: () => {} } as any);
+  link.start();
+  helloOk(sockets.at(-1)!);
+  deliver(sockets.at(-1)!, { type: "state.full", version: 1, state: {} });
+  const first = link.serial;
+  let old = 0;
+  link.onChannel(3, () => old++);
+  const frame = (ch: number) => {
+    const f = encodeFrame(ch, Kind.Data, new Uint8Array([0x41]));
+    sockets.at(-1)!.onmessage!({ data: f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength) as ArrayBuffer });
+  };
+  frame(3);
+  assert.equal(old, 1);
+  // displaced, then Take back
+  link.takeBack();
+  helloOk(sockets.at(-1)!);
+  assert.ok(link.serial > first, "a new socket");
+  frame(3); // channel 3 on the new socket: not the old stream's
+  assert.equal(old, 1);
 });

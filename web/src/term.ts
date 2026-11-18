@@ -8,6 +8,7 @@
 import { Terminal, type IDisposable, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { TERM_LOOKS, type TermColors } from "./theme.gen.ts";
+import { installTouchScroll } from "./termtouch.ts";
 
 // The terminal colours of the page's look (data-look on <html>, set from the user's setting).
 function colors(light: boolean): TermColors {
@@ -34,6 +35,8 @@ export interface TermView {
   blur(): void;
   // raw keys: the terminal takes the keyboard itself (else the text field under it does)
   setKeyboard(on: boolean): void;
+  // a touch scroll may send what the wheel would (mouse reports, arrows): this pane is the one typed into
+  setScrollReports(on: boolean): void;
   // the rows on screen as text (Copy, where selecting is awkward)
   screenText(): string;
   // pasted text, bracketed when the program asked for it, out through onInput
@@ -42,6 +45,8 @@ export interface TermView {
   setLight(light: boolean): void;
   setFontSize(px: number): void;
   onInput(fn: (bytes: Uint8Array) => void): void;
+  // a touch scroll's wheel reports (not typing: no sticky modifiers)
+  onScrollInput(fn: (bytes: Uint8Array) => void): void;
   onLink(fn: (url: string) => void): void;
   dispose(): void;
 }
@@ -82,6 +87,10 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
   term.loadAddon(fit);
 
   let inputFn: ((b: Uint8Array) => void) | null = null;
+  let scrollFn: ((b: Uint8Array) => void) | null = null;
+  let scrollReports = false;
+  let touchWheel = false; // a touch scroll's wheel events are being handled (their output: scrollFn)
+  let untouch: (() => void) | null = null;
   let linkFn: ((url: string) => void) | null = null;
   const subs: IDisposable[] = [];
 
@@ -111,12 +120,12 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     term.onData((d) => {
       // focus reports go as FOCUS frames (the core reports them if the program asked)
       if (d === "\x1b[I" || d === "\x1b[O") return;
-      inputFn?.(enc.encode(d));
+      (touchWheel ? scrollFn : inputFn)?.(enc.encode(d));
     }),
     term.onBinary((d) => {
       const b = new Uint8Array(d.length);
       for (let i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 0xff;
-      inputFn?.(b);
+      (touchWheel ? scrollFn : inputFn)?.(b);
     }),
   );
 
@@ -140,10 +149,46 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     }),
   );
 
+  const cellH = () => {
+    const h = (term as any)._core?._renderService?.dimensions?.css?.cell?.height;
+    return h || (term.element ? term.element.clientHeight / term.rows : 0);
+  };
+  // A touch scroll's lines, as the wheel does them here: the scrollback on the normal screen when
+  // the program does not take the wheel; else xterm.js's own wheel handling (a mouse report at the
+  // cell under the finger, or arrow keys on the alternate screen), one line-wheel event a line, sent
+  // only from the pane typed into (the wheel's own rule: xterm.js drops them without stdin).
+  const touchLines = (lines: number, x: number, y: number) => {
+    const m = term.modes.mouseTrackingMode;
+    const wheelReported = m === "vt200" || m === "drag" || m === "any";
+    if (!wheelReported && term.buffer.active.type === "normal") {
+      term.scrollLines(lines);
+      return;
+    }
+    const el = term.element;
+    const screen = el?.querySelector(".xterm-screen");
+    if (!scrollReports || !el || !screen) return;
+    const r = screen.getBoundingClientRect();
+    const cx = Math.min(Math.max(x, r.left + 1), r.right - 1);
+    const cy = Math.min(Math.max(y, r.top + 1), r.bottom - 1);
+    const was = term.options.disableStdin;
+    term.options.disableStdin = false;
+    touchWheel = true;
+    try {
+      const n = Math.min(Math.abs(lines), term.rows);
+      for (let i = 0; i < n; i++) {
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: Math.sign(lines), deltaMode: WheelEvent.DOM_DELTA_LINE, clientX: cx, clientY: cy, cancelable: true }));
+      }
+    } finally {
+      touchWheel = false;
+      term.options.disableStdin = was;
+    }
+  };
+
   return {
     mount(el) {
       term.open(el);
       if (term.textarea && term.options.disableStdin) term.textarea.inputMode = "none";
+      if (term.element && !untouch) untouch = installTouchScroll(term.element, { cellH, scroll: touchLines });
     },
     reset() {
       term.reset();
@@ -179,6 +224,9 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       if (on) term.focus();
       else term.blur();
     },
+    setScrollReports(on) {
+      scrollReports = on;
+    },
     screenText() {
       const b = term.buffer.active;
       const lines: string[] = [];
@@ -204,10 +252,14 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     onInput(fn) {
       inputFn = fn;
     },
+    onScrollInput(fn) {
+      scrollFn = fn;
+    },
     onLink(fn) {
       linkFn = fn;
     },
     dispose() {
+      untouch?.();
       for (const s of subs) s.dispose();
       term.dispose();
     },

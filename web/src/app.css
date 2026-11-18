@@ -446,6 +446,8 @@ a { color: inherit; }
 .term-host { position: absolute; inset: 0; background: var(--bg-app); }
 .term { position: absolute; inset: 8px 4px 4px 12px; }
 .term-fill { position: absolute; inset: 0; }
+/* a drag on a terminal is its own scroll (termtouch.ts), never the page's; a pinch stays the page's */
+.term-fill .xterm { touch-action: pinch-zoom; overscroll-behavior: contain; }
 .term-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--text-secondary); background: var(--bg-app); text-align: center; }
 .exited-bar {
   position: absolute;

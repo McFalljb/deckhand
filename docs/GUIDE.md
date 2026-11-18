@@ -2461,7 +2461,9 @@ Below 760 pixels wide the page is the phone's: the left column full width (or th
 session one tab at a time. Under a terminal: a key bar (Esc, Tab, Ctrl and Alt that stay down
 for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you) and a
 text field that takes dictation and autocorrect, sent with Enter. The keyboard button switches
-to raw keys, sent to the terminal as you type. A long press on a Deck card peeks at that session;
+to raw keys, sent to the terminal as you type. Drag a terminal up or down to scroll it as the
+mouse wheel would: its scrollback, or inside a full-screen program (less, an agent) what the wheel
+sends there. A long press on a Deck card peeks at that session;
 on a row of the Files view (the folder button) it opens that row's menu as a sheet.
 
 ### From a terminal (Linux)

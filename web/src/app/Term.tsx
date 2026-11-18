@@ -140,6 +140,9 @@ export function TermPane(props: {
     if (!t) return;
     if (props.focused) focusedHandle = t;
     t.view.setKeyboard(props.focused && props.keyboard);
+    // a touch scroll in a TUI sends what the wheel would only into the pane typed into (the phone's
+    // one tab takes its text field's typing even when its keys do not go straight in)
+    t.view.setScrollReports(props.focused);
   }, [props.focused, props.keyboard, props.tabId]);
 
   useEffect(() => {
@@ -178,6 +181,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   const stream = new TermStream(app.link, view);
   const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {} };
   view.onInput((b) => held.input(b));
+  view.onScrollInput((b) => held.stream.input(b)); // only while shown: kept ones have reports off
   view.onLink((url) => app.setOverlay({ link: url }));
   stream.events((e) => {
     held.note = e.kind === "error" ? "No terminal for this tab yet." : e.kind === "closed" ? "This tab's terminal closed." : "";
@@ -189,6 +193,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
 
 function keepTerm(held: Held, phone: boolean): void {
   held.view.setKeyboard(false);
+  held.view.setScrollReports(false);
   held.stream.focus(false);
   const tab = held.stream.tabId;
   const old = kept.get(tab);

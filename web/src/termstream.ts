@@ -14,6 +14,7 @@
 import { decodeSnapshot, Kind, text, u32le, type Frame } from "./wire.ts";
 import type { Link } from "./link.ts";
 import type { Fit, TermView } from "./term.ts";
+import { shouldReclaim, type Interaction } from "./termfit.ts";
 
 const SNAPSHOT_MAX = 256 * 1024;
 const CREDIT_BATCH = 32 * 1024;
@@ -31,7 +32,9 @@ export class TermStream {
   private creditTimer = 0;
   private fitTimer = 0;
   private sentFit: Fit | null = null;
+  private sentAt = 0; // when (ms)
   private fitRetries = 0;
+  private serial = 0; // the link's socket the channel is on (link.ts)
   private onEvent: (e: StreamEvent) => void = () => {};
   private off: (() => void)[];
 
@@ -60,7 +63,7 @@ export class TermStream {
   }
 
   attach(tabId: number): void {
-    if (this.tabId === tabId && (this.channel || this.attachId)) return;
+    if (this.tabId === tabId && (this.attached || this.attachId)) return;
     this.detach();
     this.tabId = tabId;
     this.view.reset();
@@ -76,26 +79,46 @@ export class TermStream {
   }
 
   detach(): void {
-    if (this.channel) this.link.sendJson({ type: "term.detach", channel: this.channel });
-    if (this.channel) this.focus(false);
+    if (this.attached) this.link.sendJson({ type: "term.detach", channel: this.channel });
+    if (this.attached) this.focus(false);
     this.dropChannel();
     this.tabId = 0;
     this.sentFit = null;
   }
 
+  // on the link's socket now: a channel from before a reconnect (a Take back while the pane was
+  // not shown, its terminal kept) is gone, and its number may be another stream's now
   get attached(): boolean {
-    return this.channel !== 0;
+    return this.channel !== 0 && this.serial === this.link.serial;
+  }
+
+  // What the user typed here (either typing mode, the key bar, a paste): this page's grid first if
+  // another client sized the terminal meanwhile (termfit.ts), then the bytes.
+  typed(b: Uint8Array, wheel = false): void {
+    if (b.length > 0) this.reclaim(wheel ? "scroll" : "key", true);
+    this.input(b);
+  }
+
+  // The user used this terminal here (kind); mayType: they can type into it here. Asks for this
+  // page's grid again when the terminal has another client's (termfit.ts's rule).
+  reclaim(kind: Interaction, mayType: boolean): void {
+    if (this.look || !this.tabId || !this.attached) return;
+    const now = Date.now();
+    if (!shouldReclaim(this.view.fit(), this.view.size(), kind, mayType, this.sentFit, this.sentAt, now)) return;
+    window.clearTimeout(this.fitTimer);
+    this.sentFit = null;
+    this.sendFit();
   }
 
   input(b: Uint8Array): void {
     if (this.look) return;
-    if (!this.channel || b.length === 0) return;
+    if (!this.attached || b.length === 0) return;
     this.link.sendFrame(this.channel, Kind.Data, b);
   }
 
   focus(gained: boolean): void {
     if (this.look) return;
-    if (this.channel) this.link.sendFrame(this.channel, Kind.Focus, new Uint8Array([gained ? 1 : 0]));
+    if (this.attached) this.link.sendFrame(this.channel, Kind.Focus, new Uint8Array([gained ? 1 : 0]));
   }
 
   // The element's size changed: ask the core for the grid it fits (the core alone resizes).
@@ -124,7 +147,7 @@ export class TermStream {
   }
 
   private sendFit(): void {
-    if (!this.tabId || !this.channel) return;
+    if (!this.tabId || !this.attached) return;
     const f = this.view.fit();
     if (!f) {
       // not measurable yet (the renderer has no cell size before its first paint): again shortly
@@ -135,6 +158,7 @@ export class TermStream {
     const s = this.sentFit;
     if (s && s.cols === f.cols && s.rows === f.rows) return;
     this.sentFit = f;
+    this.sentAt = Date.now();
     this.link.sendJson({ type: "term.resize", tab_id: this.tabId, cols: f.cols, rows: f.rows, cell_w: f.cellW, cell_h: f.cellH });
   }
 
@@ -147,6 +171,7 @@ export class TermStream {
     }
     this.channel = Number(m.channel) || 0;
     if (!this.channel) return;
+    this.serial = this.link.serial;
     this.link.onChannel(this.channel, (f) => this.onFrame(f));
     this.focus(true);
     this.refit(true);
@@ -195,7 +220,7 @@ export class TermStream {
   }
 
   private addCredit(n: number): void {
-    if (!this.channel) return;
+    if (!this.attached) return;
     this.credit += n;
     if (this.credit >= CREDIT_BATCH) {
       this.flushCredit();
@@ -207,12 +232,12 @@ export class TermStream {
   private flushCredit(): void {
     window.clearTimeout(this.creditTimer);
     this.creditTimer = 0;
-    if (this.channel && this.credit > 0) this.link.sendFrame(this.channel, Kind.Credit, u32le(this.credit));
+    if (this.attached && this.credit > 0) this.link.sendFrame(this.channel, Kind.Credit, u32le(this.credit));
     this.credit = 0;
   }
 
   private dropChannel(): void {
-    if (this.channel) this.link.onChannel(this.channel, null);
+    if (this.channel && this.serial === this.link.serial) this.link.onChannel(this.channel, null);
     window.clearTimeout(this.creditTimer);
     this.creditTimer = 0;
     this.credit = 0;

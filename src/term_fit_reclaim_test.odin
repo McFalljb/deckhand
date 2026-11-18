@@ -51,12 +51,27 @@ term_fit_reclaimed_after_another_client_resized :: proc(t: ^testing.T) {
 	term_fit_rect(tab, 0, 0, w, h)
 	testing.expect(t, term_fits[tab].resized == asked, "not asked again while nobody uses this window")
 
+	// this window's ask is long done (a RESIZE now is another client's)
+	(&term_fits[tab]).resized = time.tick_add(time.tick_now(), -2 * RECLAIM_IN_FLIGHT)
+	asked = term_fits[tab].resized
+
+	// a scroll in the window (reading back) never takes the size back
+	sc := sapp.Event{type = .MOUSE_SCROLL, scroll_y = -1, mouse_x = -100, mouse_y = -100}
+	event(&sc)
+	testing.expect_value(t, term_fits[tab].cols, u16(40))
+
 	// the user comes back to the window: its pane's grid is asked for again at the next layout
 	e := sapp.Event{type = .FOCUSED}
 	event(&e)
 	testing.expect_value(t, term_fits[tab].cols, u16(0))
 	term_fit_rect(tab, 0, 0, w, h)
 	testing.expect(t, term_fits[tab].resized != asked, "asked again")
+	testing.expect_value(t, term_fits[tab].cols, u16(40))
+
+	// another client's RESIZE while this ask is on its way (its answer not here yet): the next
+	// key does not ask a second time
+	term_view_frame(cw.Frame{channel = v.channel, kind = u8(cw.Kind.Resize), payload = transmute([]u8)resize})
+	term_fits_reclaim()
 	testing.expect_value(t, term_fits[tab].cols, u16(40))
 
 	// its own resize coming back (the grid it asked for): nothing to ask again

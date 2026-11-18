@@ -115,7 +115,7 @@ export function PhoneSession({ id }: { id: number }) {
   // a key-bar key: any word the phone keyboard is composing ends first (never sent again after it)
   const input = (b: Uint8Array) => {
     term.current?.view.resetField();
-    term.current?.stream.input(b);
+    term.current?.stream.typed(b); // the key bar: typing (termfit.ts)
   };
   const key = (seq: string) => input(withMods(enc.encode(seq)));
   const arrow = (d: "A" | "B" | "C" | "D") => {

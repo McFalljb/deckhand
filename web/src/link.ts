@@ -68,6 +68,9 @@ export class Link {
   private waiting = new Map<string, { resolve: (r: Result) => void; timer: number }>();
   private finishing = new Map<number, (r: Result) => void>();
   private channels = new Map<number, (f: Frame) => void>();
+  // each socket's number: a terminal channel is that socket's only (a channel number on the next
+  // one is another stream's); termstream.ts attaches again on a new one
+  serial = 0;
   private jsonHandlers = new Map<string, Set<(m: any) => void>>();
   private retryMs = RECONNECT_MIN;
   private upAt = 0; // when this connection's state.full came (0: not yet)
@@ -154,6 +157,8 @@ export class Link {
     window.clearTimeout(this.retryTimer);
     this.retryTimer = 0;
     this.dropSocket();
+    this.serial++;
+    this.channels.clear(); // the old socket's streams went with it
     this.setStatus(this.store.ready ? { kind: "reconnecting", why: "" } : { kind: "connecting" });
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     let ws: WebSocket;

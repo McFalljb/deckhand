@@ -90,15 +90,22 @@ export function TermPane(props: {
   latest.current = props;
   const light = document.documentElement.dataset.light === "1";
   const look = document.documentElement.dataset.look ?? "";
+  // the user can type into this terminal here: the pane typed into, nothing over it (as typing)
+  const covered = covering(app.overlay, !!app.store.homeOpen);
+  const coveredRef = useRef(covered);
+  coveredRef.current = covered;
+  const mayType = () => latest.current.focused && !coveredRef.current;
 
   // into this pane: a kept one (no snapshot: what it had is still there), else a new copy
   const show = (held: Held) => {
     h.current = held;
+    // typed here: this page's grid first if another client sized it (termfit.ts); xterm.js's own
+    // wheel arrows (a TUI on the alternate screen) are a scroll, not typing
     held.input = (b) => {
       const f = latest.current.onInput;
-      held.stream.input(f ? f(b) : b);
+      held.stream.typed(f ? f(b) : b, Date.now() - held.wheelAt < WHEEL_ARROWS_MS);
     };
-    held.plain = (b) => held.stream.input(b);
+    held.plain = (b) => held.stream.typed(b);
     held.armed = () => !!latest.current.armed?.();
     held.disarm = () => latest.current.disarm?.();
     held.onNote = setNote;
@@ -132,11 +139,21 @@ export function TermPane(props: {
   useEffect(() => {
     const ro = new ResizeObserver(() => h.current?.stream.refit());
     ro.observe(box.current!);
-    const vis = () => h.current?.stream.focus(document.visibilityState === "visible");
+    // the user came back to this page (shown again, or its window to the front) with this tab in
+    // the pane they type into: its grid, if another client sized it meanwhile (termfit.ts)
+    const back = (kind: "visible" | "focus") => h.current?.stream.reclaim(kind, mayType());
+    const vis = () => {
+      const on = document.visibilityState === "visible";
+      h.current?.stream.focus(on);
+      if (on) back("visible");
+    };
+    const win = () => back("focus");
     document.addEventListener("visibilitychange", vis);
+    window.addEventListener("focus", win);
     return () => {
       ro.disconnect();
       document.removeEventListener("visibilitychange", vis);
+      window.removeEventListener("focus", win);
       hide(true); // Deck, Settings, another session: kept for coming back
     };
   }, []);
@@ -198,7 +215,13 @@ export function TermPane(props: {
   }, [light, look]);
 
   return (
-    <div class="term-host" onMouseDown={() => latest.current.onFocus?.()}>
+    <div
+      class="term-host"
+      onMouseDown={() => latest.current.onFocus?.()}
+      // a click or a tap (a touch scroll is no click): the pane becomes the one typed into, so the
+      // grid is this page's again if another client sized it (termfit.ts)
+      onClick={() => h.current?.stream.reclaim("tap", !coveredRef.current)}
+    >
       <div class="term" ref={box} />
       {note ? <div class="term-note">{note}</div> : null}
     </div>
@@ -219,7 +242,11 @@ interface Held extends TermHandle {
   plain: (b: Uint8Array) => void;
   armed: () => boolean;
   disarm: () => void;
+  wheelAt: number; // the last wheel over it (ms): xterm.js's wheel arrows are no typing
 }
+
+// xterm.js turns a wheel into arrow keys on the alternate screen, through onData, in the same task
+const WHEEL_ARROWS_MS = 200;
 
 const KEEP_DESKTOP = 6;
 const KEEP_PHONE = 3;
@@ -230,7 +257,8 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   el.className = "term-fill";
   const view = createTerm({ light: document.documentElement.dataset.light === "1", fontSize: termFontSize(phone) });
   const stream = new TermStream(app.link, view);
-  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {}, plain: () => {}, armed: () => false, disarm: () => {} };
+  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {}, plain: () => {}, armed: () => false, disarm: () => {}, wheelAt: 0 };
+  el.addEventListener("wheel", () => (held.wheelAt = Date.now()), { capture: true, passive: true });
   view.onInput((b) => held.input(b));
   view.onPlainInput((b) => held.plain(b));
   view.onArmed(() => held.armed());

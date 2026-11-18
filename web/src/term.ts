@@ -32,6 +32,8 @@ export interface TermView {
   write(data: Uint8Array, done?: () => void): void;
   // the grid the element fits now (the core is asked for it; the copy does not change)
   fit(): Fit | null;
+  // the grid the copy has now: the core's last RESIZE (another client's ask, maybe)
+  size(): { cols: number; rows: number };
   scrollToBottom(): void;
   focus(): void;
   blur(): void;
@@ -289,6 +291,9 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       const cellW = dims?.width || (el ? el.clientWidth / d.cols : 8);
       const cellH = dims?.height || (el ? el.clientHeight / d.rows : 16);
       return { cols: Math.min(d.cols, 500), rows: Math.min(d.rows, 500), cellW, cellH };
+    },
+    size() {
+      return { cols: term.cols, rows: term.rows };
     },
     scrollToBottom() {
       term.scrollToBottom();

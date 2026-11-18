@@ -677,8 +677,9 @@ event :: proc(e: ^sapp.Event) {
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
 	if e.type == .MOUSE_DOWN || e.type == .KEY_DOWN || e.type == .MOUSE_SCROLL do tip_dismiss()
-	// the user is here: a terminal another client resized takes this window's grid again (term_view_stream.odin)
-	if e.type == .MOUSE_DOWN || e.type == .KEY_DOWN || e.type == .MOUSE_SCROLL || e.type == .FOCUSED do term_fits_reclaim()
+	// the user is here (not a scroll: reading back never reflows another client's): a terminal another
+	// client resized takes this window's grid again (term_view_stream.odin)
+	if e.type == .MOUSE_DOWN || e.type == .KEY_DOWN || e.type == .FOCUSED do term_fits_reclaim()
 	only_cmd := e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) == sapp.MODIFIER_SUPER
 	// a key's repeats after an overlay or sheet opened or closed go nowhere: the key that opened
 	// or closed it (Esc, Enter, ⌘W), one held in the terminal under it (ui_bell.odin)

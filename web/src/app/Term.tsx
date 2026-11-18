@@ -6,6 +6,7 @@ import { createTerm, type Fit, type TermView } from "../term.ts";
 import { TermStream } from "../termstream.ts";
 import { useApp } from "./ctx.ts";
 import { storageGet, storageSet } from "../ui/dom.ts";
+import { barsFor } from "./bars.ts";
 
 export interface TermHandle {
   view: TermView;
@@ -142,6 +143,22 @@ export function TermPane(props: {
     t.view.setKeyboard(props.focused && props.keyboard);
   }, [props.focused, props.keyboard, props.tabId]);
 
+  // a touch scroll in a TUI sends what the wheel would only into the pane typed into (the phone's
+  // one tab takes its text field's typing even when its keys do not go straight in), and not while
+  // a menu, sheet or the palette is over it (a coast stops)
+  const o = app.overlay;
+  const covered = !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek);
+  const reports = props.focused && !covered;
+  useEffect(() => {
+    h.current?.view.setScrollReports(reports);
+  }, [reports, props.tabId]);
+  // a bar that asks something (a permission) comes up over the tab: a coast stops there
+  const found = app.store.tab(props.tabId);
+  const bars = found ? barsFor(app.store, found.tab).length : 0;
+  useEffect(() => {
+    if (bars) h.current?.view.stopScroll();
+  }, [bars]);
+
   useEffect(() => {
     h.current?.view.setLight(light);
   }, [light, look]);
@@ -178,6 +195,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   const stream = new TermStream(app.link, view);
   const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {} };
   view.onInput((b) => held.input(b));
+  view.onScrollInput((b) => held.stream.input(b)); // only while shown: kept ones have reports off
   view.onLink((url) => app.setOverlay({ link: url }));
   stream.events((e) => {
     held.note = e.kind === "error" ? "No terminal for this tab yet." : e.kind === "closed" ? "This tab's terminal closed." : "";
@@ -189,6 +207,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
 
 function keepTerm(held: Held, phone: boolean): void {
   held.view.setKeyboard(false);
+  held.view.setScrollReports(false);
   held.stream.focus(false);
   const tab = held.stream.tabId;
   const old = kept.get(tab);

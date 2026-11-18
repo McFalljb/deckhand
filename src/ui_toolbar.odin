@@ -669,8 +669,7 @@ settings_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL: // the list, when taller than the window
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 		app.redraw = true
 		return true
 	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_UP:
@@ -796,8 +795,7 @@ shortcuts_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL:
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 		app.redraw = true
 		return true
 	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_UP:

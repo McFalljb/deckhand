@@ -1018,8 +1018,7 @@ event :: proc(e: ^sapp.Event) {
 		set_hover(nil, false)
 	case .MOUSE_SCROLL:
 		if over_sidebar(e.mouse_x) || over_right_column(e.mouse_x) {
-			clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-			clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+			chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 			app.redraw = true
 		} else if mt != nil {
 			term_scroll(mt, e)

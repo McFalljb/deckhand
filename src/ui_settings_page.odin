@@ -421,8 +421,7 @@ settings_page_event :: proc(e: ^sapp.Event) -> bool {
 		}
 	case .MOUSE_SCROLL:
 		if !inside(clay.ID("spage"), e.mouse_x, e.mouse_y) || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return false
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 		app.redraw = true
 		return true
 	}

@@ -14,6 +14,7 @@ const MIN_COAST = 0.3; // px/ms to start coasting
 const STOP_COAST = 0.03; // px/ms: stopped
 const MAX_COAST = 6; // px/ms
 const DECAY = 0.95; // speed kept each 16 ms frame
+const SWALLOW_MS = 100; // a touch stopping a coast that moved a line this recently is not a tap
 
 export type MoveState = "pending" | "scroll" | "ignored";
 
@@ -26,6 +27,7 @@ export class TouchScroll {
   private samples: { t: number; y: number }[] = [];
   private v = 0; // coast speed, px/ms in the finger's direction (down is +)
   private tCoast = 0;
+  private tLine = -Infinity; // when the coast last moved a line
 
   get scrolling(): boolean {
     return this.state === "scroll";
@@ -34,9 +36,9 @@ export class TouchScroll {
     return this.v !== 0;
   }
 
-  // A finger lands. True when it stopped a coast (its tap is not a tap).
+  // A finger lands. True when it stopped a coast that was visibly moving (its tap is not a tap).
   start(x: number, y: number, t: number): boolean {
-    const was = this.coasting;
+    const was = this.coasting && t - this.tLine <= SWALLOW_MS;
     this.v = 0;
     this.x0 = x;
     this.y0 = y;
@@ -82,6 +84,7 @@ export class TouchScroll {
     if (!isFinite(v) || Math.abs(v) < MIN_COAST) return false;
     this.v = Math.max(-MAX_COAST, Math.min(MAX_COAST, v));
     this.tCoast = t;
+    this.tLine = t;
     return true;
   }
 
@@ -93,9 +96,12 @@ export class TouchScroll {
     const px = this.v * dt;
     this.v *= Math.pow(DECAY, dt / 16);
     if (Math.abs(this.v) < STOP_COAST) this.v = 0;
-    return this.take(-px, cellH);
+    const lines = this.take(-px, cellH);
+    if (lines) this.tLine = t;
+    return lines;
   }
 
+  // the gesture or coast is over (it reached the end, the page hid, the pane lost the keyboard)
   stop(): void {
     this.v = 0;
     this.state = "idle";

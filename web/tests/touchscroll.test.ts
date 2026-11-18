@@ -105,3 +105,28 @@ test("an unusable cell height scrolls nothing", () => {
   assert.equal(s.move(0, 200, 20, 0).lines, 0);
   assert.equal(s.move(0, 300, 30, NaN).lines, 0);
 });
+
+test("a touch that stops a coast is swallowed only if the coast moved a line in the last 100 ms", () => {
+  const flick = (s: TouchScroll) => {
+    s.start(0, 500, 0);
+    let y = 500;
+    for (let t = 16; t <= 96; t += 16) s.move(0, (y -= 32), t, CELL);
+    assert.equal(s.end(100), true);
+  };
+  const s = new TouchScroll();
+  flick(s);
+  let t = 100;
+  while (s.step((t += 16), CELL) === 0 && t < 400);
+  assert.equal(s.start(0, 0, t + 50), true, "moving: the tap stops it, and is not a tap");
+
+  flick(s);
+  t = 100;
+  s.step((t += 16), CELL);
+  s.stop(); // the scrollback's end: nothing moves any more
+  assert.equal(s.coasting, false);
+  assert.equal(s.start(0, 0, t + 20), false, "stopped at the end: the next tap is a tap");
+
+  flick(s);
+  // still coasting, but its last line went long ago (slowing to a stop)
+  assert.equal(s.start(0, 0, 100 + 500), false);
+});

@@ -8,7 +8,8 @@
 import { Terminal, type IDisposable, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { TERM_LOOKS, type TermColors } from "./theme.gen.ts";
-import { installTouchScroll } from "./termtouch.ts";
+import { installTouchScroll, type TouchScrolling } from "./termtouch.ts";
+import { routeCoasts, touchRoute, WheelWindow } from "./touchroute.ts";
 
 // The terminal colours of the page's look (data-look on <html>, set from the user's setting).
 function colors(light: boolean): TermColors {
@@ -37,6 +38,8 @@ export interface TermView {
   setKeyboard(on: boolean): void;
   // a touch scroll may send what the wheel would (mouse reports, arrows): this pane is the one typed into
   setScrollReports(on: boolean): void;
+  // a touch scroll's coast ends now
+  stopScroll(): void;
   // the rows on screen as text (Copy, where selecting is awkward)
   screenText(): string;
   // pasted text, bracketed when the program asked for it, out through onInput
@@ -89,8 +92,8 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
   let inputFn: ((b: Uint8Array) => void) | null = null;
   let scrollFn: ((b: Uint8Array) => void) | null = null;
   let scrollReports = false;
-  let touchWheel = false; // a touch scroll's wheel events are being handled (their output: scrollFn)
-  let untouch: (() => void) | null = null;
+  const touchWheel = new WheelWindow(); // a touch scroll's wheel events being handled: output to scrollFn
+  let touch: TouchScrolling | null = null;
   let linkFn: ((url: string) => void) | null = null;
   const subs: IDisposable[] = [];
 
@@ -120,12 +123,12 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     term.onData((d) => {
       // focus reports go as FOCUS frames (the core reports them if the program asked)
       if (d === "\x1b[I" || d === "\x1b[O") return;
-      (touchWheel ? scrollFn : inputFn)?.(enc.encode(d));
+      (touchWheel.active ? scrollFn : inputFn)?.(enc.encode(d));
     }),
     term.onBinary((d) => {
       const b = new Uint8Array(d.length);
       for (let i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 0xff;
-      (touchWheel ? scrollFn : inputFn)?.(b);
+      (touchWheel.active ? scrollFn : inputFn)?.(b);
     }),
   );
 
@@ -153,42 +156,39 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     const h = (term as any)._core?._renderService?.dimensions?.css?.cell?.height;
     return h || (term.element ? term.element.clientHeight / term.rows : 0);
   };
-  // A touch scroll's lines, as the wheel does them here: the scrollback on the normal screen when
-  // the program does not take the wheel; else xterm.js's own wheel handling (a mouse report at the
-  // cell under the finger, or arrow keys on the alternate screen), one line-wheel event a line, sent
-  // only from the pane typed into (the wheel's own rule: xterm.js drops them without stdin).
-  const touchLines = (lines: number, x: number, y: number) => {
-    const m = term.modes.mouseTrackingMode;
-    const wheelReported = m === "vt200" || m === "drag" || m === "any";
-    if (!wheelReported && term.buffer.active.type === "normal") {
+  // A touch scroll's lines, as the wheel does them here (touchroute.ts): the scrollback, or
+  // xterm.js's own wheel handling (a mouse report at the cell under the finger, or arrow keys on the
+  // alternate screen), one line-wheel event a line, sent only from the pane typed into (the wheel's
+  // own rule: xterm.js drops them without stdin). False: nothing moved or was sent.
+  const route = () => touchRoute(term.modes.mouseTrackingMode, term.buffer.active.type, scrollReports);
+  const touchLines = (lines: number, x: number, y: number): boolean => {
+    const r0 = route();
+    if (r0 === "scrollback") {
+      const before = term.buffer.active.viewportY;
       term.scrollLines(lines);
-      return;
+      return term.buffer.active.viewportY !== before;
     }
     const el = term.element;
     const screen = el?.querySelector(".xterm-screen");
-    if (!scrollReports || !el || !screen) return;
+    if (r0 === "none" || !el || !screen) return false;
     const r = screen.getBoundingClientRect();
     const cx = Math.min(Math.max(x, r.left + 1), r.right - 1);
     const cy = Math.min(Math.max(y, r.top + 1), r.bottom - 1);
-    const was = term.options.disableStdin;
-    term.options.disableStdin = false;
-    touchWheel = true;
-    try {
+    const stdin = { disabled: () => !!term.options.disableStdin, setDisabled: (v: boolean) => void (term.options.disableStdin = v) };
+    touchWheel.run(stdin, () => {
       const n = Math.min(Math.abs(lines), term.rows);
       for (let i = 0; i < n; i++) {
         el.dispatchEvent(new WheelEvent("wheel", { deltaY: Math.sign(lines), deltaMode: WheelEvent.DOM_DELTA_LINE, clientX: cx, clientY: cy, cancelable: true }));
       }
-    } finally {
-      touchWheel = false;
-      term.options.disableStdin = was;
-    }
+    });
+    return true;
   };
 
   return {
     mount(el) {
       term.open(el);
       if (term.textarea && term.options.disableStdin) term.textarea.inputMode = "none";
-      if (term.element && !untouch) untouch = installTouchScroll(term.element, { cellH, scroll: touchLines });
+      if (term.element && !touch) touch = installTouchScroll(term.element, { cellH, scroll: touchLines, coasts: () => routeCoasts(route()) });
     },
     reset() {
       term.reset();
@@ -218,13 +218,18 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       term.blur();
     },
     setKeyboard(on) {
+      touch?.stop();
       term.options.disableStdin = !on;
       // off: a tap on the terminal must not bring up a phone's keyboard for input it drops
       if (term.textarea) term.textarea.inputMode = on ? "text" : "none";
       if (on) term.focus();
       else term.blur();
     },
+    stopScroll() {
+      touch?.stop();
+    },
     setScrollReports(on) {
+      if (!on) touch?.stop();
       scrollReports = on;
     },
     screenText() {
@@ -259,7 +264,7 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       linkFn = fn;
     },
     dispose() {
-      untouch?.();
+      touch?.dispose();
       for (const s of subs) s.dispose();
       term.dispose();
     },

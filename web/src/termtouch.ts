@@ -4,18 +4,29 @@
 //
 // Only one finger, and only once it has gone a few px mostly up or down: a tap still focuses (and
 // brings up the keyboard), a sideways swipe and a pinch are left to the page. Once it scrolls the
-// touch is the scroll's alone: no page scroll or pull-to-refresh, no mouse events, no click. A new
-// touch stops a coast, and that touch's tap is not a tap. Mouse, trackpad and wheel are untouched.
+// touch is the scroll's alone: no page scroll or pull-to-refresh, no mouse events, no click. A flick
+// coasts only where the terminal says it may (the scrollback, wheel reports; never arrow keys), and
+// stops at the scrollback's end, when the page hides, and on stop() (the pane lost the keyboard, a
+// sheet opened). A new touch stops a coast; while the coast was still moving, that touch's tap is
+// not a tap. Mouse, trackpad and wheel are untouched.
 
 import { TouchScroll } from "./touchscroll.ts";
 
 export interface TouchScrollOps {
   cellH(): number;
-  // wheel lines (+: toward the newest output) at the point the finger is (client px)
-  scroll(lines: number, x: number, y: number): void;
+  // wheel lines (+: toward the newest output) at the point the finger is (client px); false:
+  // nothing moved (the scrollback's end, nothing sent)
+  scroll(lines: number, x: number, y: number): boolean;
+  // a flick may coast on from here (not when the lines are keystrokes)
+  coasts(): boolean;
 }
 
-export function installTouchScroll(el: HTMLElement, ops: TouchScrollOps): () => void {
+export interface TouchScrolling {
+  stop(): void; // any coast ends now
+  dispose(): void;
+}
+
+export function installTouchScroll(el: HTMLElement, ops: TouchScrollOps): TouchScrolling {
   const s = new TouchScroll();
   let id = -1; // the finger followed
   let at = { x: 0, y: 0 };
@@ -29,7 +40,7 @@ export function installTouchScroll(el: HTMLElement, ops: TouchScrollOps): () => 
   const coast = (t: number) => {
     frame = 0;
     const n = s.step(t, ops.cellH());
-    if (n) ops.scroll(n, at.x, at.y);
+    if (n && !ops.scroll(n, at.x, at.y)) s.stop(); // at the end: over, not coasting on unseen
     if (s.coasting) frame = requestAnimationFrame(coast);
   };
   const find = (list: TouchList) => {
@@ -65,7 +76,10 @@ export function installTouchScroll(el: HTMLElement, ops: TouchScrollOps): () => 
     const scrolled = s.scrolling;
     if ((scrolled || swallow) && e.cancelable) e.preventDefault(); // no mouse events, no click
     swallow = false;
-    if (s.end(performance.now())) frame = requestAnimationFrame(coast); // rAF's time is performance.now's
+    if (s.end(performance.now())) {
+      if (ops.coasts()) frame = requestAnimationFrame(coast); // rAF's time is performance.now's
+      else s.stop(); // keystrokes: only while the finger moves
+    }
   };
   const cancel = (e: TouchEvent) => {
     if (id < 0 || !find(e.changedTouches)) return;
@@ -74,15 +88,29 @@ export function installTouchScroll(el: HTMLElement, ops: TouchScrollOps): () => 
     s.stop();
   };
 
+  const stop = () => {
+    stopCoast();
+    s.stop();
+    id = -1;
+    swallow = false;
+  };
+  const hidden = () => {
+    if (document.visibilityState !== "visible") stop();
+  };
+  document.addEventListener("visibilitychange", hidden);
   el.addEventListener("touchstart", start, { passive: true });
   el.addEventListener("touchmove", move, { passive: false });
   el.addEventListener("touchend", end, { passive: false });
   el.addEventListener("touchcancel", cancel, { passive: true });
-  return () => {
-    stopCoast();
-    el.removeEventListener("touchstart", start);
-    el.removeEventListener("touchmove", move);
-    el.removeEventListener("touchend", end);
-    el.removeEventListener("touchcancel", cancel);
+  return {
+    stop,
+    dispose() {
+      stop();
+      document.removeEventListener("visibilitychange", hidden);
+      el.removeEventListener("touchstart", start);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", end);
+      el.removeEventListener("touchcancel", cancel);
+    },
   };
 }

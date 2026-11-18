@@ -57,6 +57,8 @@ export interface TermView {
   onPlainInput(fn: (bytes: Uint8Array) => void): void;
   // the key bar's Ctrl or Alt is down for the next typed character
   onArmed(fn: () => boolean): void;
+  // let them go (a chunk, a paste or a Backspace was sent, not one typed character)
+  onDisarm(fn: () => void): void;
   // the key bar is about to send a key: the phone field's composition ends, the field empties
   resetField(): void;
   onLink(fn: (url: string) => void): void;
@@ -102,6 +104,7 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
   let scrollFn: ((b: Uint8Array) => void) | null = null;
   let plainFn: ((b: Uint8Array) => void) | null = null;
   let armedFn: () => boolean = () => false;
+  let disarmFn: () => void = () => {};
   let plainOut = false; // a phone field's paste is being written (its output: plainFn)
   let scrollReports = false;
   const touchWheel = new WheelWindow(); // a touch scroll's wheel events being handled: output to scrollFn
@@ -242,10 +245,11 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       send: (text) => fieldOn && plainFn?.(enc.encode(text)),
       paste: (text) => fieldOn && pastePlain(text),
       armed: () => armedFn(),
+      disarm: () => disarmFn(),
+      focused: () => keepInView(new Event("focus")),
       appCursor: () => term.modes.applicationCursorKeysMode,
       cursorAt,
     });
-    field.el.addEventListener("focus", keepInView);
     // a tap on the terminal: xterm.js focuses its own textarea on mousedown; the field takes it
     // back at once (still the tap's own handler: a phone brings its keyboard up)
     host.addEventListener("focusin", redirect, true);
@@ -359,6 +363,9 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     },
     onArmed(fn) {
       armedFn = fn;
+    },
+    onDisarm(fn) {
+      disarmFn = fn;
     },
     resetField() {
       field?.resetField();

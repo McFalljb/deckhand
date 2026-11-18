@@ -180,6 +180,7 @@ export function PhoneSession({ id }: { id: number }) {
               focused
               keyboard={raw && !covering(app.overlay, !!app.store.homeOpen)}
               armed={() => modsRef.current.ctrl || modsRef.current.alt}
+              disarm={() => (modsRef.current.ctrl || modsRef.current.alt) && setMods({ ctrl: false, alt: false })}
               onInput={withMods}
               handleRef={(h) => (term.current = h)}
             />

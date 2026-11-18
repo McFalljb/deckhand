@@ -20,17 +20,17 @@ test("a typed character is taken in beforeinput: cancelled, sent as typed (stick
 
 test("a short chunk (a suggestion) goes as it is, not as one typed character (mods stay armed)", () => {
   const m = new PhoneTyping();
-  assert.deepEqual(m.beforeInput("insertText", "hello ", P, 0), { cancel: true, send: "hello " });
+  assert.deepEqual(m.beforeInput("insertText", "hello ", P, 0), { cancel: true, send: "hello ", disarm: true });
 });
 
 test("text that is not typing (a line break in it, or long) goes as a paste, never run line by line", () => {
   const m = new PhoneTyping();
-  assert.deepEqual(m.beforeInput("insertText", "ls\nrm -rf x", P, 0), { cancel: true, paste: "ls\nrm -rf x" });
-  assert.deepEqual(m.beforeInput("insertText", "a\r", P, 0), { cancel: true, paste: "a\r" });
+  assert.deepEqual(m.beforeInput("insertText", "ls\nrm -rf x", P, 0), { cancel: true, paste: "ls\nrm -rf x", disarm: true });
+  assert.deepEqual(m.beforeInput("insertText", "a\r", P, 0), { cancel: true, paste: "a\r", disarm: true });
   const long = "x".repeat(33);
-  assert.deepEqual(m.beforeInput("insertText", long, P, 0), { cancel: true, paste: long });
+  assert.deepEqual(m.beforeInput("insertText", long, P, 0), { cancel: true, paste: long, disarm: true });
   for (const t of ["insertReplacementText", "insertFromPaste", "insertFromDrop", "insertFromYank"]) {
-    assert.deepEqual(m.beforeInput(t, "a\nb", P, 0), { cancel: true, paste: "a\nb" }, t);
+    assert.deepEqual(m.beforeInput(t, "a\nb", P, 0), { cancel: true, paste: "a\nb", disarm: true }, t);
   }
 });
 
@@ -40,30 +40,72 @@ test("a replacement outside a composition never re-sends: what it would correct 
   assert.deepEqual(m.beforeInput("insertFromDrop", null, P, 0), { cancel: true });
   assert.deepEqual(m.beforeInput("insertFromDrop", "x", P, 0), { cancel: true });
   // a short paste from the keyboard's clipboard: still a paste
-  assert.deepEqual(m.beforeInput("insertFromPaste", "ls", P, 0), { cancel: true, paste: "ls" });
+  assert.deepEqual(m.beforeInput("insertFromPaste", "ls", P, 0), { cancel: true, paste: "ls", disarm: true });
 });
 
 test("Backspace with an empty field is DEL", () => {
   const m = new PhoneTyping();
-  assert.deepEqual(m.beforeInput("deleteContentBackward", null, P, 0), { cancel: true, send: "\x7f" });
-  assert.deepEqual(m.beforeInput("deleteContentBackward", null, P, 5), { cancel: true, send: "\x7f" });
+  assert.deepEqual(m.beforeInput("deleteContentBackward", null, P, 0), { cancel: true, send: "\x7f", disarm: true });
+  assert.deepEqual(m.beforeInput("deleteContentBackward", null, P, 5), { cancel: true, send: "\x7f", disarm: true });
 });
 
 test("Enter is one CR whether keydown, insertLineBreak, a bare newline input, or several of them", () => {
   const m = new PhoneTyping();
-  assert.deepEqual(m.keydown("Enter", noMods, 13, false, false, 100), { cancel: true, send: "\r", reset: true });
+  assert.deepEqual(m.keydown("Enter", noMods, 13, false, false, false, 100), { cancel: true, send: "\r", reset: true });
   assert.deepEqual(m.beforeInput("insertLineBreak", null, P, 103), { cancel: true });
   assert.deepEqual(m.input("insertText", P + "\n", false, false, 104), { reset: true });
+  m.settle();
   assert.deepEqual(m.beforeInput("insertParagraph", null, P, 500), { cancel: true, send: "\r", reset: true });
+  m.settle();
   assert.deepEqual(m.input("insertLineBreak", P + "\n", false, false, 1000), { send: "\r", reset: true });
+});
+
+test("two Enters from the same source are two Enters, however fast; a held key repeats", () => {
+  const m = new PhoneTyping();
+  const r = { cancel: true, send: "\r", reset: true };
+  assert.deepEqual(m.keydown("Enter", noMods, 13, false, false, false, 100), r);
+  assert.deepEqual(m.keydown("Enter", noMods, 13, false, false, false, 110), r);
+  assert.deepEqual(m.keydown("Enter", noMods, 13, false, true, false, 115), r); // e.repeat
+  m.settle();
+  assert.deepEqual(m.beforeInput("insertLineBreak", null, P, 500), r);
+  m.settle();
+  assert.deepEqual(m.beforeInput("insertLineBreak", null, P, 510), r);
+  // across sources, the second of a pair only once: a third is an Enter again
+  m.settle();
+  assert.deepEqual(m.keydown("Enter", noMods, 13, false, false, false, 900), r);
+  assert.deepEqual(m.beforeInput("insertLineBreak", null, P, 905), { cancel: true });
+  m.settle();
+  assert.deepEqual(m.keydown("Enter", noMods, 13, false, false, false, 910), r);
+});
+
+test("a cancel the browser ignored: the input after it only empties the field, nothing sent twice", () => {
+  const m = new PhoneTyping();
+  assert.deepEqual(m.beforeInput("deleteContentBackward", null, P, 0), { cancel: true, send: "\x7f", disarm: true });
+  assert.deepEqual(m.input("deleteContentBackward", "", false, false, 1), { reset: true });
+  assert.deepEqual(m.beforeInput("insertText", "a", P, 2), { cancel: true, typed: "a" });
+  assert.deepEqual(m.input("insertText", P + "a", false, false, 3), { reset: true });
+  // once settled (the next tick), an input is the browser's own again
+  m.beforeInput("insertText", "b", P, 4);
+  m.settle();
+  assert.deepEqual(m.input("insertText", P + "c", false, false, 5), { typed: "c", reset: true });
+});
+
+test("an insertion the browser would not let us cancel, of something already handled: only emptied", () => {
+  for (const t of ["insertFromComposition", "insertReplacementText", "insertFromDrop", "deleteCompositionText", "deleteByComposition"]) {
+    const m = new PhoneTyping();
+    m.compositionStart();
+    m.input("insertCompositionText", P + "日本", true, false, 0);
+    assert.deepEqual(m.compositionEnd(P + "日本", 1), { send: "日本", reset: true });
+    assert.deepEqual(m.input(t, P + "日本", false, false, 2), { reset: true }, t);
+  }
 });
 
 test("a browser that does not cancel: what reached the field is sent once, and the field emptied", () => {
   const m = new PhoneTyping();
-  assert.deepEqual(m.input("insertText", P + "ab", false, false, 0), { send: "ab", reset: true });
-  assert.deepEqual(m.input("insertText", "a" + P + "b", false, false, 0), { send: "ab", reset: true }); // the placeholder anywhere
-  assert.deepEqual(m.input("insertText", P + "a\nb", false, false, 0), { paste: "a\nb", reset: true });
-  assert.deepEqual(m.input("deleteContentBackward", "", false, false, 0), { send: "\x7f", reset: true });
+  assert.deepEqual(m.input("insertText", P + "ab", false, false, 0), { send: "ab", reset: true, disarm: true });
+  assert.deepEqual(m.input("insertText", "a" + P + "b", false, false, 0), { send: "ab", reset: true, disarm: true }); // the placeholder anywhere
+  assert.deepEqual(m.input("insertText", P + "a\nb", false, false, 0), { paste: "a\nb", reset: true, disarm: true });
+  assert.deepEqual(m.input("deleteContentBackward", "", false, false, 0), { send: "\x7f", reset: true, disarm: true });
   assert.deepEqual(m.input("insertText", P, false, false, 0), {});
 });
 
@@ -102,7 +144,7 @@ test("a key-bar key mid-composition: the composition ends, nothing of it is sent
   m.input("insertCompositionText", P + "g", true, false, 0);
   m.input("insertCompositionText", P + "gt", true, false, 1);
   m.input("insertCompositionText", P + "gti", true, false, 2);
-  assert.deepEqual(m.resetField(), { reset: true, endComposition: true }); // then the key bar sends its Enter
+  assert.deepEqual(m.resetField(P + "gti", 2), { reset: true, endComposition: true }); // then the key bar sends its Enter
   // the keyboard still finishing the word it thinks it has
   assert.deepEqual(m.input("insertCompositionText", P + "gti", true, false, 3), {});
   assert.deepEqual(m.compositionEnd(P + "gti", 4), { reset: true });
@@ -167,10 +209,10 @@ test("keys that are keys: Enter, Tab, Esc, arrows (application cursor mode too),
   assert.equal(k("Unidentified"), null);
   // keydown of a key: one send; a 229 or composing keydown: nothing (the input events tell)
   const m = new PhoneTyping();
-  assert.deepEqual(m.keydown("ArrowUp", noMods, 38, false, false, 0), { cancel: true, send: "\x1b[A", reset: true });
-  assert.deepEqual(m.keydown("Enter", noMods, 229, false, false, 0), {});
-  assert.deepEqual(m.keydown("Enter", noMods, 13, true, false, 0), {});
-  assert.deepEqual(m.keydown("a", noMods, 65, false, false, 0), {});
+  assert.deepEqual(m.keydown("ArrowUp", noMods, 38, false, false, false, 0), { cancel: true, send: "\x1b[A", reset: true });
+  assert.deepEqual(m.keydown("Enter", noMods, 229, false, false, false, 0), {});
+  assert.deepEqual(m.keydown("Enter", noMods, 13, true, false, false, 0), {});
+  assert.deepEqual(m.keydown("a", noMods, 65, false, false, false, 0), {});
 });
 
 test("sticky Ctrl and Alt apply to one character only", () => {
@@ -181,4 +223,28 @@ test("sticky Ctrl and Alt apply to one character only", () => {
   assert.deepEqual(applyMods(b("f"), { ctrl: false, alt: true }), b("\x1bf"));
   assert.deepEqual(applyMods(b("x"), { ctrl: true, alt: true }), b("\x1b\x18"));
   assert.deepEqual(applyMods(b("\x7f"), { ctrl: true, alt: false }), b("\x7f"));
+});
+
+test("a key-bar key during a word in another script: what the field shows goes first, then the key", () => {
+  const m = new PhoneTyping();
+  m.compositionStart();
+  m.input("insertCompositionText", P + "にほ", true, false, 0);
+  assert.deepEqual(m.resetField(P + "にほ", 1), { send: "にほ", reset: true, endComposition: true });
+  assert.deepEqual(m.compositionEnd(P + "にほ", 2), { reset: true });
+});
+
+test("a word dropped by a key-bar key, committed late by the keyboard: not sent (its next letter is)", () => {
+  const m = new PhoneTyping();
+  m.compositionStart();
+  m.input("insertCompositionText", P + "ls", true, false, 0);
+  m.resetField(P + "ls", 10);
+  assert.deepEqual(m.compositionEnd(P, 11), { reset: true }); // the blur's own end
+  m.settle();
+  assert.deepEqual(m.beforeInput("insertText", "ls", P, 100), { cancel: true });
+  m.settle();
+  assert.deepEqual(m.beforeInput("insertText", "l", P, 120), { cancel: true }); // a prefix of it
+  m.settle();
+  assert.deepEqual(m.beforeInput("insertText", "lsc", P, 150), { cancel: true, typed: "c" }); // and the letter typed since
+  m.settle();
+  assert.deepEqual(m.beforeInput("insertText", "ls", P, 500), { cancel: true, send: "ls", disarm: true }); // later: typing again
 });

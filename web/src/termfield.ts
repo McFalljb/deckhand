@@ -17,6 +17,8 @@ export interface FieldOps {
   send(text: string): void;
   paste(text: string): void;
   armed(): boolean; // the key bar's Ctrl or Alt is down for the next character
+  disarm(): void; // let them go (what was sent was not one typed character)
+  focused(): void; // the user's focus came (not our own blur and focus to drop a composition)
   appCursor(): boolean;
   // where the cursor is in the host (px), null: not on screen
   cursorAt(): { left: number; top: number; height: number } | null;
@@ -59,6 +61,7 @@ export function createTermField(host: HTMLElement, ops: FieldOps): TermField {
     if (a.send) ops.send(a.send);
     if (a.typed) ops.typed(a.typed);
     if (a.paste) ops.paste(a.paste);
+    if (a.disarm) ops.disarm();
     if (a.endComposition) {
       empty();
       if (document.activeElement === el) {
@@ -73,11 +76,13 @@ export function createTermField(host: HTMLElement, ops: FieldOps): TermField {
   };
 
   const keydown = (e: KeyboardEvent) =>
-    apply(model.keydown(e.key, { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey }, e.keyCode, e.isComposing, ops.appCursor(), performance.now()), e);
+    apply(model.keydown(e.key, { ctrl: e.ctrlKey, alt: e.altKey, shift: e.shiftKey, meta: e.metaKey }, e.keyCode, e.isComposing, e.repeat, ops.appCursor(), performance.now()), e);
   const beforeinput = (e: InputEvent) => {
     // a browser that will not cancel this one: the input event after it sends what got in
     if (!e.cancelable) return;
     apply(model.beforeInput(e.inputType, e.data, el.value, performance.now()), e);
+    // the input event of a cancel the browser ignored comes at once; after a tick, input is its own
+    window.setTimeout(() => model.settle(), 0);
   };
   const input = (e: Event) => {
     const ie = e as InputEvent;
@@ -96,6 +101,7 @@ export function createTermField(host: HTMLElement, ops: FieldOps): TermField {
     model.focus(); // a stale composition never outlives the focus
     empty();
     place();
+    ops.focused();
   };
   const blur = () => {
     if (refocusing) return;
@@ -132,7 +138,7 @@ export function createTermField(host: HTMLElement, ops: FieldOps): TermField {
     },
     focused: () => document.activeElement === el,
     resetField() {
-      apply(model.resetField());
+      apply(model.resetField(el.value, performance.now()));
     },
     place,
     dispose() {

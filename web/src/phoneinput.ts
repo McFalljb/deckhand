@@ -19,6 +19,9 @@ export const PLACEHOLDER = " "; // a no-break space: Backspace on an "empty" fi
 const MAX_TYPED = 32; // longer than any typed chunk: a paste
 const ENTER_DEDUPE_MS = 50; // keydown Enter and the keyboard's own line break: one Enter
 const LIVE = /^[\x20-\x7eÀ-ɏ]*$/; // composition that goes as it is composed
+const DROPPED_MS = 300; // a keyboard committing a word a key-bar key ended: this soon after
+// input types that only repeat what was handled (or would change what was sent): never sent
+const IGNORED = new Set(["insertFromComposition", "insertReplacementText", "insertFromDrop", "deleteCompositionText", "deleteByComposition"]);
 
 export interface Act {
   cancel?: true; // preventDefault the event
@@ -27,6 +30,7 @@ export interface Act {
   paste?: string;
   reset?: true; // the field back to the placeholder alone
   endComposition?: true; // and the IME's composition dropped (the field re-focused)
+  disarm?: true; // the key bar's sticky Ctrl/Alt let go (they were for one typed character)
 }
 
 export interface KeyMods {
@@ -44,7 +48,9 @@ export class PhoneTyping {
   private composing = false;
   private sent: string[] = []; // the composed word as the terminal has it
   private dead = false; // a composition ended by us: ignore the keyboard's rest of it
-  private lastEnter = -Infinity;
+  private lastEnter: { t: number; src: "key" | "input" } | null = null;
+  private pending = false; // a beforeinput was cancelled and acted on: its input event only empties
+  private dropped: { word: string; t: number } | null = null; // a word a key-bar key ended
 
   focus(): void {
     this.clear();
@@ -52,13 +58,24 @@ export class PhoneTyping {
   blur(): void {
     this.clear();
   }
+  // a tick after a beforeinput: an input event from here on is the browser's own
+  settle(): void {
+    this.pending = false;
+  }
 
-  // The key bar is about to send a key: any composition ends, the field empties.
-  resetField(): Act {
+  // The key bar is about to send a key: any composition ends (what the field shows of a word not
+  // sent yet, another script's, goes first), the field empties. A late commit of that word by the
+  // keyboard is not sent again.
+  resetField(value: string, t: number): Act {
     const was = this.composing;
+    let out = "";
+    if (was && !this.dead) {
+      out = this.diff(cps(strip(value)));
+      this.dropped = { word: this.sent.join(""), t };
+    }
     this.clear();
     this.dead = was;
-    return was ? { reset: true, endComposition: true } : { reset: true };
+    return { ...(out ? { send: out } : {}), reset: true, ...(was ? { endComposition: true as const } : {}) };
   }
 
   compositionStart(): void {
@@ -78,9 +95,15 @@ export class PhoneTyping {
   }
 
   beforeInput(type: string, data: string | null, value: string, t: number): Act {
+    this.pending = false;
+    const a = this.before(type, data, value, t);
+    if (a.cancel) this.pending = true;
+    return a;
+  }
+
+  private before(type: string, data: string | null, value: string, t: number): Act {
     if (type === "insertLineBreak" || type === "insertParagraph") {
-      if (t - this.lastEnter < ENTER_DEDUPE_MS) return { cancel: true };
-      this.lastEnter = t;
+      if (!this.enter("input", t, false)) return { cancel: true };
       let pre = "";
       const was = this.composing;
       if (was && !this.dead) pre = this.diff(cps(strip(value)));
@@ -96,15 +119,17 @@ export class PhoneTyping {
       case "insertFromDrop":
       case "insertFromYank": {
         const text = data ?? "";
-        if (text && (LINE.test(text) || cps(text).length > MAX_TYPED)) return { cancel: true, paste: text };
-        if (text && (type === "insertFromPaste" || type === "insertFromYank")) return { cancel: true, paste: text };
+        if (text && (LINE.test(text) || cps(text).length > MAX_TYPED)) return { cancel: true, paste: text, disarm: true };
+        if (text && (type === "insertFromPaste" || type === "insertFromYank")) return { cancel: true, paste: text, disarm: true };
         // a replacement or a drop would change what was already sent: never re-sent
         if (type !== "insertText") return { cancel: true };
         if (!text) return {};
-        return cps(text).length === 1 ? { cancel: true, typed: text } : { cancel: true, send: text };
+        const late = this.late(text, t);
+        if (late !== null) return late ? { cancel: true, typed: late } : { cancel: true };
+        return cps(text).length === 1 ? { cancel: true, typed: text } : { cancel: true, send: text, disarm: true };
       }
       case "deleteContentBackward":
-        return { cancel: true, send: "\x7f" };
+        return { cancel: true, send: "\x7f", disarm: true };
       case "insertFromComposition":
       case "deleteByComposition":
       case "deleteCompositionText":
@@ -114,7 +139,7 @@ export class PhoneTyping {
   }
 
   // After an input event: the field's whole value.
-  input(_type: string, value: string, composing: boolean, armed: boolean, t: number): Act {
+  input(type: string, value: string, composing: boolean, armed: boolean, t: number): Act {
     if (composing && !this.composing) {
       // composing without a compositionstart seen: a word we ended stays ended until a new one starts
       const d = this.dead;
@@ -125,7 +150,8 @@ export class PhoneTyping {
       if (this.dead) return {};
       const now = cps(strip(value));
       if (armed) {
-        // sticky Ctrl/Alt: the first character added, alone, with the modifier; the word ends
+        // sticky Ctrl/Alt: the first character added goes alone, with the modifier (Ctrl-c, not a
+        // word), and the word ends there: the rest of it is dropped on purpose, never sent
         const p = this.prefix(now);
         const added = now.slice(p);
         if (!added.length) return {};
@@ -138,31 +164,64 @@ export class PhoneTyping {
       const out = this.diff(now);
       return out ? { send: out } : {};
     }
+    const dirty = value !== PLACEHOLDER;
+    // the browser went ahead after we cancelled and acted on its beforeinput: already handled
+    if (this.pending) {
+      this.pending = false;
+      return dirty ? { reset: true } : {};
+    }
+    // a composition's own text again, a replacement or a drop we could not cancel: never sent
+    if (IGNORED.has(type)) return dirty ? { reset: true } : {};
     // not composing: the field should hold the placeholder alone (beforeinput was cancelled);
     // anything else got through uncancelled: sent once, the field emptied
     const text = strip(value);
-    if (!value.includes(PLACEHOLDER) && !text) return { send: "\x7f", reset: true };
+    if (!value.includes(PLACEHOLDER) && !text) return { send: "\x7f", reset: true, disarm: true };
     if (!text) return {};
     if (text === "\n" || text === "\r" || text === "\r\n") {
-      if (t - this.lastEnter < ENTER_DEDUPE_MS) return { reset: true };
-      this.lastEnter = t;
+      if (!this.enter("input", t, false)) return { reset: true };
       return { send: "\r", reset: true };
     }
-    if (LINE.test(text) || cps(text).length > MAX_TYPED) return { paste: text, reset: true };
-    return cps(text).length === 1 ? { typed: text, reset: true } : { send: text, reset: true };
+    if (LINE.test(text) || cps(text).length > MAX_TYPED) return { paste: text, reset: true, disarm: true };
+    const late = this.late(text, t);
+    if (late !== null) return late ? { typed: late, reset: true } : { reset: true };
+    return cps(text).length === 1 ? { typed: text, reset: true } : { send: text, reset: true, disarm: true };
   }
 
   // A keydown: a key for the terminal (Enter, Tab, Esc, arrows, Ctrl-letter), or {} to leave it to
   // the input events (text, Backspace, Cmd shortcuts, IME keys).
-  keydown(key: string, m: KeyMods, keyCode: number, isComposing: boolean, appCursor: boolean, t: number): Act {
+  keydown(key: string, m: KeyMods, keyCode: number, isComposing: boolean, repeat: boolean, appCursor: boolean, t: number): Act {
     if (isComposing || this.composing || keyCode === 229) return {};
     const b = keyBytes(key, m, appCursor);
     if (b === null) return {};
-    if (key === "Enter") {
-      if (t - this.lastEnter < ENTER_DEDUPE_MS) return { cancel: true };
-      this.lastEnter = t;
-    }
+    if (key === "Enter" && !this.enter("key", t, repeat)) return { cancel: true };
     return { cancel: true, send: b, reset: true };
+  }
+
+  // One Enter seen from a source: false when it is the other source's report of the Enter just
+  // sent (a keydown and the keyboard's own line break); two from the same source are two Enters
+  private enter(src: "key" | "input", t: number, repeat: boolean): boolean {
+    const last = this.lastEnter;
+    if (!repeat && last && last.src !== src && t - last.t < ENTER_DEDUPE_MS) {
+      this.lastEnter = null;
+      return false;
+    }
+    this.lastEnter = { t, src };
+    return true;
+  }
+
+  // A committed insertion soon after a key-bar key dropped a word: the keyboard committing that
+  // word late. null: not that; "": all of it is the dropped word; else the letter typed since.
+  private late(text: string, t: number): string | null {
+    const d = this.dropped;
+    if (!d || t - d.t > DROPPED_MS || !d.word) return null;
+    const w = cps(d.word);
+    const c = cps(text);
+    if (text === d.word || d.word.startsWith(text)) return "";
+    if (c.length === w.length + 1 && text.startsWith(d.word)) {
+      this.dropped = null;
+      return c[c.length - 1];
+    }
+    return null;
   }
 
   private clear(): void {

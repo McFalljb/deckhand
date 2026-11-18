@@ -623,6 +623,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	deck_sync() // a session shown again: the Deck view goes (ui_deck.odin)
 	settings_page_sync() // and the Settings page (ui_settings_page.odin)
 	clay.SetLayoutDimensions({w, h})
+	chrome_scroll_flush() // the wheel since the last layout, once (chrome_scroll.odin)
 	clay.BeginLayout()
 	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"
 	palette_sync()

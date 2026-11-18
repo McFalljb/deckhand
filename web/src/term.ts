@@ -10,6 +10,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { TERM_LOOKS, type TermColors } from "./theme.gen.ts";
 import { installTouchScroll, type TouchScrolling } from "./termtouch.ts";
 import { routeCoasts, touchRoute, WheelWindow } from "./touchroute.ts";
+import { createTermField, type TermField } from "./termfield.ts";
 
 // The terminal colours of the page's look (data-look on <html>, set from the user's setting).
 function colors(light: boolean): TermColors {
@@ -34,8 +35,9 @@ export interface TermView {
   scrollToBottom(): void;
   focus(): void;
   blur(): void;
-  // raw keys: the terminal takes the keyboard itself (else the text field under it does)
-  setKeyboard(on: boolean): void;
+  // raw keys: the terminal takes the keyboard itself (else the text field under it does); field: a
+  // phone's keyboard, through the terminal's own hidden field (termfield.ts), not xterm.js's
+  setKeyboard(on: boolean, field?: boolean): void;
   // a touch scroll may send what the wheel would (mouse reports, arrows): this pane is the one typed into
   setScrollReports(on: boolean): void;
   // a touch scroll's coast ends now
@@ -50,6 +52,15 @@ export interface TermView {
   onInput(fn: (bytes: Uint8Array) => void): void;
   // a touch scroll's wheel reports (not typing: no sticky modifiers)
   onScrollInput(fn: (bytes: Uint8Array) => void): void;
+  // a phone field's bytes that are not one typed character (keys, a word's correction, a paste):
+  // no sticky modifiers
+  onPlainInput(fn: (bytes: Uint8Array) => void): void;
+  // the key bar's Ctrl or Alt is down for the next typed character
+  onArmed(fn: () => boolean): void;
+  // let them go (a chunk, a paste or a Backspace was sent, not one typed character)
+  onDisarm(fn: () => void): void;
+  // the key bar is about to send a key: the phone field's composition ends, the field empties
+  resetField(): void;
   onLink(fn: (url: string) => void): void;
   dispose(): void;
 }
@@ -91,6 +102,10 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
 
   let inputFn: ((b: Uint8Array) => void) | null = null;
   let scrollFn: ((b: Uint8Array) => void) | null = null;
+  let plainFn: ((b: Uint8Array) => void) | null = null;
+  let armedFn: () => boolean = () => false;
+  let disarmFn: () => void = () => {};
+  let plainOut = false; // a phone field's paste is being written (its output: plainFn)
   let scrollReports = false;
   const touchWheel = new WheelWindow(); // a touch scroll's wheel events being handled: output to scrollFn
   let touch: TouchScrolling | null = null;
@@ -123,12 +138,12 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     term.onData((d) => {
       // focus reports go as FOCUS frames (the core reports them if the program asked)
       if (d === "\x1b[I" || d === "\x1b[O") return;
-      (touchWheel.active ? scrollFn : inputFn)?.(enc.encode(d));
+      (touchWheel.active ? scrollFn : plainOut ? plainFn : inputFn)?.(enc.encode(d));
     }),
     term.onBinary((d) => {
       const b = new Uint8Array(d.length);
       for (let i = 0; i < d.length; i++) b[i] = d.charCodeAt(i) & 0xff;
-      (touchWheel.active ? scrollFn : inputFn)?.(b);
+      (touchWheel.active ? scrollFn : plainOut ? plainFn : inputFn)?.(b);
     }),
   );
 
@@ -184,8 +199,75 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     return true;
   };
 
-  return {
+  // ---- a phone's typing: the hidden field (termfield.ts), at the cursor in the mount element ----
+  let host: HTMLElement | null = null;
+  let field: TermField | null = null;
+  let fieldOn = false; // the field has the keyboard (else nothing types through it)
+  const cursorAt = () => {
+    const screen = term.element?.querySelector(".xterm-screen");
+    if (!host || !screen) return null;
+    const b = term.buffer.active;
+    const row = b.baseY + b.cursorY - b.viewportY;
+    if (row < 0 || row >= term.rows) return null;
+    const hr = host.getBoundingClientRect();
+    const sr = screen.getBoundingClientRect();
+    const h = cellH();
+    const w = sr.width / term.cols;
+    return { left: sr.left - hr.left + b.cursorX * w, top: sr.top - hr.top + row * h, height: h };
+  };
+  // the keyboard opened or closed (the visible height changed by a keyboard's worth, not a pinch
+  // or a scroll): the cursor's line back in view
+  let vvH = window.visualViewport?.height ?? 0;
+  const keepInView = (e?: Event) => {
+    const h = window.visualViewport?.height ?? 0;
+    const opened = e?.type === "focus";
+    if (!opened && Math.abs(h - vvH) < 120) return;
+    vvH = h;
+    if (!field?.focused()) return;
+    term.scrollToBottom();
+    field.place();
+  };
+  const pastePlain = (text: string) => {
+    const was = term.options.disableStdin;
+    term.options.disableStdin = false;
+    plainOut = true;
+    try {
+      term.paste(text); // bracketed when the program asked
+    } finally {
+      plainOut = false;
+      term.options.disableStdin = was;
+    }
+  };
+  const ensureField = (): TermField | null => {
+    if (field || !host) return field;
+    field = createTermField(host, {
+      typed: (ch) => fieldOn && inputFn?.(enc.encode(ch)),
+      send: (text) => fieldOn && plainFn?.(enc.encode(text)),
+      paste: (text) => fieldOn && pastePlain(text),
+      armed: () => armedFn(),
+      disarm: () => disarmFn(),
+      focused: () => keepInView(new Event("focus")),
+      appCursor: () => term.modes.applicationCursorKeysMode,
+      cursorAt,
+    });
+    // a tap on the terminal: xterm.js focuses its own textarea on mousedown; the field takes it
+    // back at once (still the tap's own handler: a phone brings its keyboard up)
+    host.addEventListener("focusin", redirect, true);
+    host.addEventListener("click", tapped);
+    window.visualViewport?.addEventListener("resize", keepInView);
+    subs.push(term.onRender(() => field?.focused() && field.place()));
+    return field;
+  };
+  const redirect = (e: FocusEvent) => {
+    if (fieldOn && field && e.target === term.textarea) field.focus();
+  };
+  const tapped = () => {
+    if (fieldOn && field && !field.focused()) field.focus();
+  };
+
+  const view: TermView = {
     mount(el) {
+      host = el;
       term.open(el);
       if (term.textarea && term.options.disableStdin) term.textarea.inputMode = "none";
       if (term.element && !touch) touch = installTouchScroll(term.element, { cellH, scroll: touchLines, coasts: () => routeCoasts(route()) });
@@ -217,8 +299,24 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     blur() {
       term.blur();
     },
-    setKeyboard(on) {
+    setKeyboard(on, viaField) {
       touch?.stop();
+      if (viaField) {
+        // the field types; xterm.js's textarea takes nothing and never brings a keyboard up
+        term.options.disableStdin = true;
+        if (term.textarea) term.textarea.inputMode = "none";
+        // never focused from here: only a tap on this terminal does (redirect), so a tab shown, a
+        // sheet closed or a mode switched types nowhere until the user taps where they type
+        fieldOn = on;
+        const f = ensureField();
+        if (!on) {
+          f?.blur();
+          term.blur();
+        }
+        return;
+      }
+      fieldOn = false;
+      field?.blur();
       term.options.disableStdin = !on;
       // off: a tap on the terminal must not bring up a phone's keyboard for input it drops
       if (term.textarea) term.textarea.inputMode = on ? "text" : "none";
@@ -260,15 +358,33 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     onScrollInput(fn) {
       scrollFn = fn;
     },
+    onPlainInput(fn) {
+      plainFn = fn;
+    },
+    onArmed(fn) {
+      armedFn = fn;
+    },
+    onDisarm(fn) {
+      disarmFn = fn;
+    },
+    resetField() {
+      field?.resetField();
+    },
     onLink(fn) {
       linkFn = fn;
     },
     dispose() {
       touch?.dispose();
+      fieldOn = false;
+      host?.removeEventListener("focusin", redirect, true);
+      host?.removeEventListener("click", tapped);
+      window.visualViewport?.removeEventListener("resize", keepInView);
+      field?.dispose();
       for (const s of subs) s.dispose();
       term.dispose();
     },
   };
+  return view;
 }
 
 // ---- CSP ----

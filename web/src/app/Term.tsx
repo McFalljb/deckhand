@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { createTerm, type Fit, type TermView } from "../term.ts";
 import { TermStream } from "../termstream.ts";
-import { useApp } from "./ctx.ts";
+import { useApp, type Overlay } from "./ctx.ts";
 import { storageGet, storageSet } from "../ui/dom.ts";
 import { barsFor } from "./bars.ts";
 
@@ -24,6 +24,32 @@ const byTab = new Map<number, TermHandle>();
 export function fitFor(tabId: number): Fit | null {
   const h = byTab.get(tabId) ?? focusedHandle;
   return h?.view.fit() ?? null;
+}
+
+// A menu, sheet, the palette, another overlay or the agent drawer is over the page: nothing types
+// into or scrolls a terminal's program under it.
+export function covering(o: Overlay, homeOpen: boolean): boolean {
+  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || homeOpen);
+}
+
+// A phone's own keyboard (its primary pointer a finger): typing goes through the terminal's field
+// (termfield.ts); a stylus phone still counts. A device whose primary pointer is fine (a narrow
+// desktop window, a tablet driven by its trackpad) keeps xterm.js's own keyboard handling (Ctrl+V,
+// Alt+letter as on the desktop). Looked at again when a pointer comes or goes.
+export function touchTyping(): boolean {
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+function useTouchTyping(): boolean {
+  const [on, set] = useState(touchTyping);
+  useEffect(() => {
+    const qs = ["(pointer: coarse)", "(any-pointer: fine)"].map((q) => window.matchMedia(q));
+    const f = () => set(touchTyping());
+    for (const q of qs) q.addEventListener("change", f);
+    return () => {
+      for (const q of qs) q.removeEventListener("change", f);
+    };
+  }, []);
+  return on;
 }
 
 export function termFontSize(phone: boolean): number {
@@ -51,9 +77,12 @@ export function TermPane(props: {
   keyboard: boolean; // typing goes straight in (desktop, or the phone's raw keys)
   onFocus?: () => void;
   onInput?: (b: Uint8Array) => Uint8Array; // the phone's sticky modifiers
+  armed?: () => boolean; // one of them is down for the next typed character
+  disarm?: () => void; // let them go
   handleRef?: (h: TermHandle | null) => void;
 }) {
   const app = useApp();
+  const touch = useTouchTyping();
   const box = useRef<HTMLDivElement>(null);
   const h = useRef<Held | null>(null);
   const [note, setNote] = useState("");
@@ -69,6 +98,9 @@ export function TermPane(props: {
       const f = latest.current.onInput;
       held.stream.input(f ? f(b) : b);
     };
+    held.plain = (b) => held.stream.input(b);
+    held.armed = () => !!latest.current.armed?.();
+    held.disarm = () => latest.current.disarm?.();
     held.onNote = setNote;
     setNote(held.note);
     box.current!.appendChild(held.el);
@@ -88,6 +120,9 @@ export function TermPane(props: {
     if (focusedHandle === held) focusedHandle = null;
     held.onNote = () => {};
     held.input = () => {};
+    held.plain = () => {};
+    held.armed = () => false;
+    held.disarm = () => {};
     held.el.remove();
     props.handleRef?.(null);
     if (keep && held.stream.attached && held.stream.tabId) keepTerm(held, app.phone);
@@ -140,15 +175,14 @@ export function TermPane(props: {
     const t = h.current;
     if (!t) return;
     if (props.focused) focusedHandle = t;
-    t.view.setKeyboard(props.focused && props.keyboard);
-  }, [props.focused, props.keyboard, props.tabId]);
+    // a phone types through the terminal's own field (termfield.ts), the desktop through xterm.js
+    t.view.setKeyboard(props.focused && props.keyboard, app.phone && touch);
+  }, [props.focused, props.keyboard, props.tabId, app.phone, touch]);
 
   // a touch scroll in a TUI sends what the wheel would only into the pane typed into (the phone's
   // one tab takes its text field's typing even when its keys do not go straight in), and not while
   // a menu, sheet or the palette is over it (a coast stops)
-  const o = app.overlay;
-  const covered = !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek);
-  const reports = props.focused && !covered;
+  const reports = props.focused && !covering(app.overlay, !!app.store.homeOpen);
   useEffect(() => {
     h.current?.view.setScrollReports(reports);
   }, [reports, props.tabId]);
@@ -182,6 +216,9 @@ interface Held extends TermHandle {
   note: string;
   onNote: (s: string) => void;
   input: (b: Uint8Array) => void;
+  plain: (b: Uint8Array) => void;
+  armed: () => boolean;
+  disarm: () => void;
 }
 
 const KEEP_DESKTOP = 6;
@@ -193,8 +230,11 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   el.className = "term-fill";
   const view = createTerm({ light: document.documentElement.dataset.light === "1", fontSize: termFontSize(phone) });
   const stream = new TermStream(app.link, view);
-  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {} };
+  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {}, plain: () => {}, armed: () => false, disarm: () => {} };
   view.onInput((b) => held.input(b));
+  view.onPlainInput((b) => held.plain(b));
+  view.onArmed(() => held.armed());
+  view.onDisarm(() => held.disarm());
   view.onScrollInput((b) => held.stream.input(b)); // only while shown: kept ones have reports off
   view.onLink((url) => app.setOverlay({ link: url }));
   stream.events((e) => {

@@ -186,6 +186,22 @@ term_fit_rect :: proc(tab_id: u64, x, y, w, h: f32) {
 // A new cell size (fonts_apply): every terminal is asked for its grid again at the next layout.
 term_fits_forget :: proc() {for _, &f in term_fits do f.cols = 0}
 
+// The user is at this window (it came to the front, a key, a click, a scroll; main.odin's event):
+// a terminal the core sized for another client meanwhile (a paired browser's page asks for its
+// own grid when it attaches or its size changes) is asked for this window's grid again at the
+// next layout. Otherwise it kept the page's grid until its pane's size changed: wider than the
+// pane, its lines ran off the pane's right edge. Not at the RESIZE itself: the page the user is
+// typing in keeps its size while nobody uses this window.
+term_fits_reclaim :: proc() {
+	for id, &f in term_fits {
+		v := term_view_peek(id)
+		if f.cols != 0 && v != nil && v.gt != nil && !v.stale && (v.cols != f.cols || v.rows != f.rows) {
+			f.cols = 0
+			app.redraw = true // a layout to ask in
+		}
+	}
+}
+
 // ---- each frame ----
 
 // Frame upkeep (main.odin, before the draw): views off screen for HIDDEN_DETACH detach; a

@@ -164,6 +164,22 @@ export function TermPane(props: {
     if (bars) h.current?.view.stopScroll();
   }, [bars]);
 
+  // a touch scroll in a TUI sends what the wheel would only into the pane typed into (the phone's
+  // one tab takes its text field's typing even when its keys do not go straight in), and not while
+  // a menu, sheet or the palette is over it (a coast stops)
+  const o = app.overlay;
+  const covered = !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek);
+  const reports = props.focused && !covered;
+  useEffect(() => {
+    h.current?.view.setScrollReports(reports);
+  }, [reports, props.tabId]);
+  // a bar that asks something (a permission) comes up over the tab: a coast stops there
+  const found = app.store.tab(props.tabId);
+  const bars = found ? barsFor(app.store, found.tab).length : 0;
+  useEffect(() => {
+    if (bars) h.current?.view.stopScroll();
+  }, [bars]);
+
   useEffect(() => {
     h.current?.view.setLight(light);
   }, [light, look]);

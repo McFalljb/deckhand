@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { createTerm, type Fit, type TermView } from "../term.ts";
 import { TermStream } from "../termstream.ts";
-import { useApp } from "./ctx.ts";
+import { useApp, type Overlay } from "./ctx.ts";
 import { storageGet, storageSet } from "../ui/dom.ts";
 import { barsFor } from "./bars.ts";
 
@@ -24,6 +24,12 @@ const byTab = new Map<number, TermHandle>();
 export function fitFor(tabId: number): Fit | null {
   const h = byTab.get(tabId) ?? focusedHandle;
   return h?.view.fit() ?? null;
+}
+
+// A menu, sheet, the palette or another overlay is over the page: nothing types into or scrolls a
+// terminal's program under it.
+export function covering(o: Overlay): boolean {
+  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek);
 }
 
 export function termFontSize(phone: boolean): number {
@@ -140,15 +146,14 @@ export function TermPane(props: {
     const t = h.current;
     if (!t) return;
     if (props.focused) focusedHandle = t;
-    t.view.setKeyboard(props.focused && props.keyboard);
-  }, [props.focused, props.keyboard, props.tabId]);
+    // a phone types through the terminal's own field (termfield.ts), the desktop through xterm.js
+    t.view.setKeyboard(props.focused && props.keyboard, app.phone);
+  }, [props.focused, props.keyboard, props.tabId, app.phone]);
 
   // a touch scroll in a TUI sends what the wheel would only into the pane typed into (the phone's
   // one tab takes its text field's typing even when its keys do not go straight in), and not while
   // a menu, sheet or the palette is over it (a coast stops)
-  const o = app.overlay;
-  const covered = !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek);
-  const reports = props.focused && !covered;
+  const reports = props.focused && !covering(app.overlay);
   useEffect(() => {
     h.current?.view.setScrollReports(reports);
   }, [reports, props.tabId]);

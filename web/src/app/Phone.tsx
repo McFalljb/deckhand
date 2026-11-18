@@ -13,7 +13,8 @@ import { Deck } from "./Deck.tsx";
 import { JobsPanel } from "./Jobs.tsx";
 import { fileTabPath, newTabItems, tabHarness, tabTitle } from "./Panes.tsx";
 import { FilesPanel, FileTab } from "./Files.tsx";
-import { setTermFont, termFontSize, TermPane, type TermHandle } from "./Term.tsx";
+import { covering, setTermFont, termFontSize, TermPane, type TermHandle } from "./Term.tsx";
+import { applyMods } from "../phoneinput.ts";
 import { agentName, AgentDrawer } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { storageGet, storageSet } from "../ui/dom.ts";
@@ -63,7 +64,9 @@ export function PhoneSession({ id }: { id: number }) {
   const app = useApp();
   const { store } = app;
   const s = store.session(id);
-  const [raw, setRawState] = useState(() => storageGet("deckhand.rawKeys") === "1");
+  // typing goes straight into the terminal (its own hidden field: termfield.ts) unless this phone
+  // chose the text field (dictation and autocorrect, a long message composed before it goes)
+  const [raw, setRawState] = useState(() => storageGet("deckhand.phoneTyping") !== "field");
   const [mods, setMods] = useState({ ctrl: false, alt: false });
   const modsRef = useRef(mods);
   modsRef.current = mods;
@@ -100,28 +103,14 @@ export function PhoneSession({ id }: { id: number }) {
 
   const setRaw = (on: boolean) => {
     setRawState(on);
-    storageSet("deckhand.rawKeys", on ? "1" : "0");
+    storageSet("deckhand.phoneTyping", on ? "direct" : "field");
     if (!on) window.setTimeout(() => field.current?.focus(), 0);
   };
   const withMods = (b: Uint8Array): Uint8Array => {
     const m = modsRef.current;
     if (!m.ctrl && !m.alt) return b;
-    let out = b;
-    if (m.ctrl && b.length === 1) {
-      const c = b[0];
-      if (c >= 0x61 && c <= 0x7a) out = new Uint8Array([c - 0x60]);
-      else if (c >= 0x40 && c <= 0x5f) out = new Uint8Array([c - 0x40]);
-      else if (c === 0x20) out = new Uint8Array([0]);
-      else if (c === 0x3f) out = new Uint8Array([0x7f]);
-    }
-    if (m.alt) {
-      const x = new Uint8Array(out.length + 1);
-      x[0] = 0x1b;
-      x.set(out, 1);
-      out = x;
-    }
     setMods({ ctrl: false, alt: false });
-    return out;
+    return applyMods(b, m);
   };
   const input = (b: Uint8Array) => term.current?.stream.input(b);
   const key = (seq: string) => input(withMods(enc.encode(seq)));
@@ -153,7 +142,7 @@ export function PhoneSession({ id }: { id: number }) {
       { label: "Text smaller", run: () => setTermFont(termFontSize(true) - 1) },
       { label: "Text larger", run: () => setTermFont(termFontSize(true) + 1) },
       { label: "Copy screen text", run: () => app.setOverlay({ copy: term.current?.view.screenText() ?? "" }) },
-      { label: raw ? "Type in a text field" : "Raw keys (a keyboard)", run: () => setRaw(!raw) },
+      { label: raw ? "Type in a text field" : "Type straight into the terminal", run: () => setRaw(!raw) },
       { sep: true },
       ...(tab && tabKind(tab) !== "pi_tab" ? [{ label: "Close this tab", run: () => app.run({ type: "close_tab", tab_id: tab.id }) }] : []),
       { label: "Close session", run: () => app.run({ type: "close_session", session: s.id }).then((r) => r.ok && app.go({ screen: "home" })) },
@@ -185,7 +174,7 @@ export function PhoneSession({ id }: { id: number }) {
               tabId={tab.id}
               attachable={tab.status !== "not_started"}
               focused
-              keyboard={raw}
+              keyboard={raw && !covering(app.overlay)}
               onInput={withMods}
               handleRef={(h) => (term.current = h)}
             />
@@ -223,11 +212,11 @@ export function PhoneSession({ id }: { id: number }) {
         )}
       </div>
       <div class="inputrow">
-        <button type="button" class={"icon-btn" + (raw ? " on" : "")} aria-pressed={raw ? "true" : "false"} title="Raw keys" aria-label="Raw keys" onClick={() => setRaw(!raw)}>
+        <button type="button" class={"icon-btn" + (raw ? " on" : "")} aria-pressed={raw ? "true" : "false"} title="Type straight into the terminal" aria-label="Type straight into the terminal" onClick={() => setRaw(!raw)}>
           <Icon name="keyboard" size={18} />
         </button>
         {raw ? (
-          <span class="raw-note muted small">Typing goes straight to the terminal</span>
+          <span class="raw-note muted small">Tap the terminal to type</span>
         ) : (
           <textarea
             ref={field}

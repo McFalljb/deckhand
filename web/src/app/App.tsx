@@ -122,8 +122,13 @@ function Root() {
     const mq = window.matchMedia(PHONE);
     const onMq = () => setPhone(mq.matches);
     mq.addEventListener("change", onMq);
-    const vv = () => document.documentElement.style.setProperty("--vvh", `${window.visualViewport ? window.visualViewport.height : window.innerHeight}px`);
+    const vv = () => {
+      const v = window.visualViewport;
+      document.documentElement.style.setProperty("--vvh", `${v ? v.height : window.innerHeight}px`);
+      document.documentElement.style.setProperty("--vvtop", `${v ? Math.max(0, v.offsetTop) : 0}px`);
+    };
     window.visualViewport?.addEventListener("resize", vv);
+    window.visualViewport?.addEventListener("scroll", vv);
     window.addEventListener("resize", vv);
     vv();
     const onHash = () => setRoute(parseHash());

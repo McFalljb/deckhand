@@ -36,6 +36,7 @@ html, body {
 #app {
   position: fixed;
   inset: 0 0 auto 0;
+  top: var(--vvtop, 0px); /* iOS pans the page under the keyboard: the app follows what is visible */
   height: var(--vvh);
   display: flex;
   flex-direction: column;
@@ -449,6 +450,8 @@ a { color: inherit; }
 /* the browser pans nothing on a terminal (a drag is its own scroll: termtouch.ts, which also cancels
    the touch once it scrolls); a pinch still zooms the page */
 .term-fill .xterm { touch-action: pinch-zoom; }
+/* a phone's typing (termfield.ts): at the cursor, invisible, 16 px so iOS does not zoom into it */
+.term-field { position: absolute; left: 0; top: 0; z-index: 0; width: 2em; height: 18px; margin: 0; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden; white-space: pre; font-size: 16px; line-height: 1; color: transparent; background: transparent; caret-color: transparent; opacity: 0; pointer-events: none; }
 .term-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--text-secondary); background: var(--bg-app); text-align: center; }
 .exited-bar {
   position: absolute;

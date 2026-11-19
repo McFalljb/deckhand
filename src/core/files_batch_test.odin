@@ -400,6 +400,36 @@ fs_check_nested_project_root_user_only :: proc(t: ^testing.T) {
 		testing.expectf(t, !r.ok && (panel || strings.contains(r.error, "not on a project folder itself")), "%v delete_path: %q", c, r.error)
 		testing.expect(t, os.is_dir(inner), "still there")
 	}
+	// another spelling of it (a volume that ignores case, macOS's default) is the same folder:
+	// still refused, nothing moves
+	other := fmt.tprintf("%s/INNER", dir)
+	if os.exists(other) {
+		for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}}) {
+			_, _, e := fs_check(other, c)
+			testing.expectf(t, e == "not on a project folder itself", "%v fs_check INNER: %q", c, e)
+			r := run_command(Rename_Path{from = other, to = fmt.tprintf("%s/moved", dir)}, c)
+			testing.expectf(t, !r.ok && r.error == "not on a project folder itself", "%v rename_path INNER: %q", c, r.error)
+			r = run_command(Delete_Path{path = other}, c)
+			testing.expectf(t, !r.ok && r.error == "not on a project folder itself", "%v delete_path INNER: %q", c, r.error)
+			testing.expect(t, os.is_dir(inner), "still there")
+		}
+		_, _, eu := fs_check(other, UI)
+		testing.expect_value(t, eu, "") // the user here: as by its own spelling
+		_, _, eg := fs_check(fmt.tprintf("%s/.GIT", dir), Caller{kind = .Control})
+		testing.expect_value(t, eg, "not inside .git")
+		// the user here changes only the case of its name, and back
+		testing.expect_value(t, fs_rename(inner, other, UI), "")
+		testing.expect_value(t, fs_rename(other, inner, UI), "")
+		testing.expect(t, os.is_dir(inner), "back")
+	}
+	// a link to it is the link, not the project: renamed or trashed as before, by anyone
+	lnk := fmt.tprintf("%s/lnk", dir)
+	testing.expect(t, os.symlink(inner, lnk) == nil, "link made")
+	for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}, UI}) {
+		_, _, e := fs_check(lnk, c)
+		testing.expectf(t, e == "", "%v fs_check link: %q", c, e)
+	}
+	os.remove(lnk)
 	// a project folder inside no other project: refused for the user too
 	_, _, e0 := fs_check(dir, UI)
 	testing.expect_value(t, e0, "not on a project folder itself")
@@ -413,10 +443,15 @@ fs_check_nested_project_root_user_only :: proc(t: ^testing.T) {
 	// copied (duplicated)
 	_, _, ce := fs_copy_paths(inner, fmt.tprintf("%s/inner copy", dir), UI)
 	testing.expect_value(t, ce, "")
-	// moved into another folder, and back
+	// moved into another folder, and back; folders open inside it stay open, as a plain folder's
 	moved := fmt.tprintf("%s/dest/inner", dir)
+	os.make_directory_all(fmt.tprintf("%s/sub", inner))
+	testing.expect(t, run_command(Files_Expand{path = inner, expanded = true}, UI).ok, "open inner")
+	testing.expect(t, run_command(Files_Expand{path = fmt.tprintf("%s/sub", inner), expanded = true}, UI).ok, "open sub")
 	testing.expect_value(t, fs_rename(inner, moved, UI), "")
 	testing.expect(t, !os.exists(inner) && os.exists(fmt.tprintf("%s/x.txt", moved)), "moved")
+	testing.expect(t, files_is_open(moved), "the moved folder stays open")
+	testing.expect(t, files_is_open(fmt.tprintf("%s/sub", moved)), "its open folder stays open")
 	testing.expect_value(t, fs_rename(moved, inner, UI), "")
 	testing.expect(t, os.exists(fmt.tprintf("%s/x.txt", inner)), "moved back")
 	// trashed, with a restore id, and restored

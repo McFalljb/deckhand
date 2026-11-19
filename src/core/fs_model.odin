@@ -254,17 +254,25 @@ fs_check :: proc(path: string, caller: Caller, allow_root := false) -> (abs, roo
 	full, _ := filepath.join({parent, filepath.base(abs)}, context.temp_allocator)
 	if allow_root do full = fs_real(abs)
 	roots := fs_roots()
-	// any project's own folder, also one inside another project (whose root would match first)
-	if !allow_root do for r in roots do if full == r do return "", "", "not on a project folder itself"
+	// any project's own folder, also one inside another project (whose root would match first);
+	// but the user here may act on one inside another project like any folder (a folder a session
+	// once ran in is a project too), that project then its root
+	if !allow_root do for r in roots do if full == r && !(fs_user_here(caller) && fs_inside_other_root(full, roots)) do return "", "", "not on a project folder itself"
 	for r in roots {
 		if !within(full, r) do continue
-		if full == r && !allow_root do return "", "", "not on a project folder itself"
+		if full == r && !allow_root do continue // only the user here's nested one gets here: its outer project decides
 		rel := full[len(r):]
 		if fs_in_git(rel) do return "", "", "not inside .git"
 		if caller.kind == .Panel && fs_outside_own(full, caller) do return "", "", "only inside this session's project folder"
 		return full, r, ""
 	}
 	return "", "", FS_NOT_IN_PROJECT
+}
+
+// Whether another of roots holds path strictly inside it.
+fs_inside_other_root :: proc(path: string, roots: []string) -> bool {
+	for r in roots do if r != path && within(path, r) do return true
+	return false
 }
 
 // fs_check for a command that creates, renames or deletes: the user's own

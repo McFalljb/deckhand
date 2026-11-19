@@ -325,9 +325,10 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 Editor tabs and files (`src/editor_commands.odin`). Paths may be absolute, `~/…`, or relative:
 for a caller bound to a tab (a pi tab's bridge, Home's `control`) relative to its own session's
 folder, otherwise to the session on screen. File commands work only inside a project folder (or
-an open session's folder), never on a project folder itself and never inside `.git`; symlinks
-are resolved first. A pi tab's bridge (`panel`) stays inside its own session's project. A
-confirmation always parks and shows the resolved absolute path, so confirming later acts on that
+an open session's folder), never on a project folder itself (but the user in the window may
+rename, move, trash or copy one that lies inside another project folder, as any folder of that
+project) and never inside `.git`; symlinks are resolved first. A pi tab's bridge (`panel`) stays
+inside its own session's project. A confirmation always parks and shows the resolved absolute path, so confirming later acts on that
 file whatever is on screen then. Only regular files open (pipes, devices and sockets open as a tab
 that says why; restored tabs on them are dropped); files over 2 MB, or whose parse takes over
 500 ms, show as plain text. There is no `editor_edit`: agents edit files with their own tools, and editor

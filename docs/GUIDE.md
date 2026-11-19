@@ -1557,7 +1557,9 @@ Sessions.
 - **Filter**: type in the field above the tree to match paths loosely.
 - **Folders inside folders**: a folder that is a project of its own (or a session's worktree)
   opens in the tree it sits in like any other folder, and so does a symlinked folder (in place,
-  wherever it points).
+  wherever it points). You, in the window, can rename, move, trash or duplicate such a folder
+  there (once moved or trashed, its project shows as missing); agents, scripts and browsers
+  cannot, and nobody can on a project folder that is not inside another.
 - **A folder that cannot be opened** shows a red line under it saying why, with **Retry**. "macOS
   needs permission" means macOS privacy protects it (Desktop, Documents, Downloads, iCloud Drive,
   removable and network volumes): allow Deckhand in **System Settings › Privacy & Security ›

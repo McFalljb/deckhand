@@ -69,6 +69,9 @@ Editor :: struct {
 	always_readonly: bool, // never editable (a Markdown tab's source): editor_reopen keeps readonly
 	codex_view_only: bool, // Codex's hooks (core.codex_view_only): shown, never written
 	refused:     string, // not shown: why (binary, too large, unreadable)
+	image_tab:   bool, // an image's tab (image_view.odin): shown as a picture, or why not; never text
+	img:         ^Image_View, // the picture, when it could be read
+	img_stale:   bool, // the file is read and decoded at the next draw (image_ensure)
 	// the file on disk (editor_file.odin)
 	disk:        core.Disk_Stamp,
 	disk_hash:   u64, // hash of the text on disk, as last read or written
@@ -140,6 +143,7 @@ editor_free :: proc(e: ^Editor) {
 	delete(e.notice)
 	git_gutter_free(&e.git)
 	find_free(&e.find)
+	image_free(e)
 	free(e)
 }
 

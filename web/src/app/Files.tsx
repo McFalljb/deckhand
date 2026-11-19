@@ -36,6 +36,8 @@ import { ClipBar } from "./FileClipBar.tsx";
 import { storageGet, storageSet } from "../ui/dom.ts";
 import { clickPick, dragText, dropDir, entryPaths, fileIcon, inIgnored, extendPick, folderRows, gitLetter, gitTone, isEditRow, movedPath, moveResult, moveSel, newTarget, outermost, parentOf, parentsOf, pickOne, planMove, prunePick, relPath, rowKey, stemEnd, trashTargets, treeRows, typeMatch, typed, type Edit, type Listing, type Pick, type Row } from "./filetree.ts";
 import { CheckoutButton, FilterBox, FilterList, useCheckout, useFind } from "./FilesFind.tsx";
+import { ImageTab, SvgPreview } from "./ImageView.tsx";
+import { isImagePath, isSvgPath } from "./image.ts";
 
 // A result's data: the link gives it parsed (an object) or as text.
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
@@ -1216,7 +1218,15 @@ function useFile(app: App, path: string) {
   return { file, err, draft, setDraft, changed, save, reload };
 }
 
-export function FileTab({ tab, path, markdown }: { s: OpenSession; tab: Tab; path: string; markdown: boolean }) {
+// A PNG, JPEG… shows its picture (ImageView.tsx); any other file its text, and so does one named
+// .png that is text after all.
+export function FileTab(props: { s: OpenSession; tab: Tab; path: string; markdown: boolean }) {
+  const [textPath, setTextPath] = useState("");
+  const image = isImagePath(props.path) && textPath !== props.path;
+  return image ? <ImageTab key={props.path} path={props.path} onText={() => setTextPath(props.path)} /> : <TextFileTab {...props} />;
+}
+
+function TextFileTab({ tab, path, markdown }: { s: OpenSession; tab: Tab; path: string; markdown: boolean }) {
   const app = useApp();
   const f = useFile(app, path);
   const [source, setSource] = useState(false);
@@ -1234,13 +1244,14 @@ export function FileTab({ tab, path, markdown }: { s: OpenSession; tab: Tab; pat
     return () => window.removeEventListener("keydown", onKey);
   });
   const name = path.slice(path.lastIndexOf("/") + 1);
+  const svg = isSvgPath(path); // its text, previewed as an image (an <img>, never markup)
   return (
     <div class="file-tab">
       <div class="ch-file-bar">
         <Icon name="file" size={14} class="muted" />
         <span class="ch-path" title={path}>{name}{dirty ? " •" : ""}</span>
         <span class="spacer" />
-        {markdown ? (
+        {markdown || svg ? (
           <button type="button" class="btn small" onClick={() => setSource(!source)}>{source ? "Preview" : "Source"}</button>
         ) : null}
         {dirty ? <button type="button" class="btn small" onClick={() => f.setDraft(null)}>Revert</button> : null}
@@ -1260,6 +1271,8 @@ export function FileTab({ tab, path, markdown }: { s: OpenSession; tab: Tab; pat
         <div class="ch-msg muted-text">Reading…</div>
       ) : markdown && !source ? (
         <MarkdownView app={app} text={text} path={path} />
+      ) : svg && !source ? (
+        <SvgPreview text={text} name={name} />
       ) : (
         <CodeEdit key={tab.id + ":" + path} text={text} path={path} onEdit={(t) => f.setDraft(t)} />
       )}

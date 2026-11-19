@@ -907,12 +907,12 @@ session's pi.
 
 When you ask an agent to open or show a file "in a tab", it shows it in Deckhand: pi with its
 `desk_show` tool, Claude with `deckhand show`. A Markdown file opens in a
-[Markdown tab](#markdown-tabs), rendered; any other text file opens in an editor tab, at a line
-if the agent gives one. A pi or Claude tab shows files only in its own session, right after its
+[Markdown tab](#markdown-tabs), rendered; an image shows as a picture ([Editor tabs](#editor-tabs));
+any other text file opens in an editor tab, at a line if the agent gives one. A pi or Claude tab shows files only in its own session, right after its
 own tab; Atlas names the session. The tab opens behind the one you are looking at, and a file
 already open is not opened twice. It is display only: the agent cannot edit the tab, and nothing
 of it goes back to the agent. Agents are refused coding agents' sign-ins and secret files (keys,
-`~/.ssh`…; a project's `.env` is shown like any file), binary files, files over 20 MB, network and iCloud-only files, and more than 20 such
+`~/.ssh`…; a project's `.env` is shown like any file), other binary files, files over 20 MB (images: 64 MB), network and iCloud-only files, and more than 20 such
 tabs per session.
 
 ### Browser tabs
@@ -1410,7 +1410,13 @@ Deckhand has a small code editor with syntax highlighting.
   **Compare** (a diff with the disk), **Keep mine** (your next save overwrites the file) and
   **Reload** (take the disk's version; one undo step). A file deleted on disk shows "Deleted on
   disk: ⌘S saves it again".
-- Deckhand does not open binary files, files over 20 MB, or **credential files**: pi's sign-ins
+- **Images**: a PNG, JPEG, GIF (its first frame) or BMP shows as a picture, read-only: centred,
+  shrunk to fit the pane (never enlarged past its own size), over a checkerboard where it is
+  transparent, with its type, size in pixels and file size under it. It follows the file on disk.
+  There is no zoom. Images over 64 MB or 100 megapixels, and images that cannot be decoded,
+  say they can't be shown. WebP shows in a browser only; an SVG opens as text (a browser also
+  previews it).
+- Deckhand does not open other binary files, files over 20 MB, or **credential files**: pi's sign-ins
   (`auth.json` and similar), other private files in pi's folder, and Claude's and Codex's sign-ins
   and state. They show "Credentials file: managed by pi (/login), not opened". A project's `.env`
   opens and saves like any file.
@@ -2420,7 +2426,8 @@ views this one.
 The browser has the window's layout: the left column (Sessions, Files, Jobs), the session's tabs
 and terminals, split panes, the Deck, the palette, the bell, the right column's panels, Atlas's
 drawer, Jobs and the job sheet, the Changes tab, the Files tab, and file tabs (Markdown rendered,
-editor tabs with line numbers, syntax colours and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
+editor tabs with line numbers, syntax colours and editing; ⌘S saves, Ctrl+S off a Mac; images
+as pictures, WebP too, up to 8 MB; an SVG has **Preview**/**Source**). A file changed on disk follows
 when you have not edited it, and asks when you have. In the Files tab the arrows, Home and End move
 the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
 right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to

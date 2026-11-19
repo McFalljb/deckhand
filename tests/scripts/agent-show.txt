@@ -58,4 +58,16 @@ assert_state open_sessions.1.active_tab $last
 assert_state current_session $session
 assert_state open_sessions.0.tabs.# 1
 shot agent-show/claude-behind
+# 3. an image: an editor tab that shows the picture (image_view.odin); the user brings it to the front
+type !cli show shot.png
+key enter
+waitfor CLI show shot.png -> exit 0 15000
+waitstate 10000 open_sessions.1.tabs.4.turn idle
+assert_state open_sessions.1.tabs.5.kind editor
+assert_state open_sessions.1.tabs.5.title shot.png
+command {"type":"open_file","path":"$homedir/proj/shot.png"}
+assert_result ok true
+assert_state open_sessions.1.active_tab $last
+wait 500
+shot agent-show/image-tab
 quit

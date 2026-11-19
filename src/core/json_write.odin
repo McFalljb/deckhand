@@ -578,6 +578,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case File_Read:
 		kv_str(&w, "path", c.path)
 		if c.since != "" do kv_str(&w, "since", c.since)
+		if c.image do kv_bool(&w, "image", true)
 	case File_Save:
 		// events and the log (redact): the path and how much, never the text
 		kv_str(&w, "path", c.path)

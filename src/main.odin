@@ -618,6 +618,7 @@ frame :: proc "c" () {
 	app_frames_committed() // slots this frame stopped showing go back once its GPU work is done
 	browser_frames_committed() // the same for browser tabs
 	app.redraw = font_frame_done() // the atlas grew or started over: draw again
+	images_frame_done() // closed or reloaded image tabs' textures (image_view.odin)
 	if t != nil do t.changed = false
 	for x in views_on_screen() do x.changed = false // every pane's terminal was drawn
 	if at != nil do at.changed = false

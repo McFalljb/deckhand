@@ -129,7 +129,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Machines_Reachable: return Set_Machines_Reachable{on = c.on, confirm = s(c.confirm, allocator)}
 	case Set_Web_Access:      return Set_Web_Access{on = c.on, confirm = s(c.confirm, allocator)}
 	case Web_Watch:           return Web_Watch{projects = slice.clone(c.projects, allocator)}
-	case File_Read:           return File_Read{path = s(c.path, allocator), since = s(c.since, allocator)}
+	case File_Read:           return File_Read{path = s(c.path, allocator), since = s(c.since, allocator), image = c.image}
 	case File_Save:           return File_Save{path = s(c.path, allocator), text = s(c.text, allocator), base = s(c.base, allocator), force = c.force}
 	case Web_Settings, Job_Draft: return web_extra_clone(cmd, allocator)
 	case Set_Web_Listen:      return Set_Web_Listen{address = s(c.address, allocator)}

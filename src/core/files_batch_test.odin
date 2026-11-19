@@ -372,10 +372,11 @@ delete_batch_merges_by_the_real_file :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(fs_delete_merge({fmt.tprintf("%s/src", dir), fmt.tprintf("%s/SRC/x.txt", dir)})), 1)
 }
 
-// A project folder inside another project is a project folder itself: never trashed or renamed
-// through the outer one.
+// A project folder inside another project (a folder a session once ran in): the user at the
+// window may rename, move, trash, restore and copy it like any folder, the outer project its root;
+// every other caller is refused, as is a project folder inside no other project, for everyone.
 @(test)
-fs_check_refuses_a_nested_project_root :: proc(t: ^testing.T) {
+fs_check_nested_project_root_user_only :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	saved := fs_trash_fn
 	defer fs_trash_fn = saved
@@ -383,13 +384,105 @@ fs_check_refuses_a_nested_project_root :: proc(t: ^testing.T) {
 	defer {os.remove_all(dir); state = State{}}
 	inner := fmt.tprintf("%s/inner", dir)
 	bwrite(dir, "inner/x.txt")
+	bwrite(dir, "dest/keep.txt")
 	append(&state.projects, Project{id = new_id(), cwd = strings.clone(inner), label = "inner"})
 	UI :: Caller{kind = .UI}
-	testing.expect_value(t, fs_delete(inner, UI), "not on a project folder itself")
-	testing.expect_value(t, fs_rename(inner, fmt.tprintf("%s/moved", dir), UI), "not on a project folder itself")
-	r := run_command(Delete_Path{paths = {fmt.tprintf("%s/inner/x.txt", dir), inner}}, UI)
-	testing.expectf(t, !r.ok && strings.contains(r.error, "not on a project folder itself"), "%q", r.error)
+	// everyone else: refused with the old message, nothing moves
+	for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .Panel}, {kind = .Internal}, {kind = .UI, web = true}, {kind = .UI, hub = true}}) {
+		_, _, e := fs_check(inner, c)
+		testing.expectf(t, e == "not on a project folder itself", "%v fs_check: %q", c, e)
+		testing.expectf(t, fs_delete(inner, c) == "not on a project folder itself", "%v delete", c)
+		testing.expectf(t, fs_rename(inner, fmt.tprintf("%s/moved", dir), c) == "not on a project folder itself", "%v rename", c)
+		r := run_command(Rename_Path{from = inner, to = fmt.tprintf("%s/moved", dir)}, c)
+		panel := c.kind == .Panel // an unbound panel is refused before any path
+		testing.expectf(t, !r.ok && (panel || r.error == "not on a project folder itself"), "%v rename_path: %q", c, r.error)
+		r = run_command(Delete_Path{paths = {fmt.tprintf("%s/inner/x.txt", dir), inner}}, c)
+		testing.expectf(t, !r.ok && (panel || strings.contains(r.error, "not on a project folder itself")), "%v delete_path: %q", c, r.error)
+		testing.expect(t, os.is_dir(inner), "still there")
+	}
+	// another spelling of it (a volume that ignores case, macOS's default) is the same folder:
+	// still refused, nothing moves
+	other := fmt.tprintf("%s/INNER", dir)
+	if os.exists(other) {
+		for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}}) {
+			_, _, e := fs_check(other, c)
+			testing.expectf(t, e == "not on a project folder itself", "%v fs_check INNER: %q", c, e)
+			r := run_command(Rename_Path{from = other, to = fmt.tprintf("%s/moved", dir)}, c)
+			testing.expectf(t, !r.ok && r.error == "not on a project folder itself", "%v rename_path INNER: %q", c, r.error)
+			r = run_command(Delete_Path{path = other}, c)
+			testing.expectf(t, !r.ok && r.error == "not on a project folder itself", "%v delete_path INNER: %q", c, r.error)
+			testing.expect(t, os.is_dir(inner), "still there")
+		}
+		_, _, eu := fs_check(other, UI)
+		testing.expect_value(t, eu, "") // the user here: as by its own spelling
+		_, _, eg := fs_check(fmt.tprintf("%s/.GIT", dir), Caller{kind = .Control})
+		testing.expect_value(t, eg, "not inside .git")
+		// the user here changes only the case of its name, and back
+		testing.expect_value(t, fs_rename(inner, other, UI), "")
+		testing.expect_value(t, fs_rename(other, inner, UI), "")
+		testing.expect(t, os.is_dir(inner), "back")
+	}
+	// a link to it is the link, not the project: renamed or trashed as before, by anyone
+	lnk := fmt.tprintf("%s/lnk", dir)
+	testing.expect(t, os.symlink(inner, lnk) == nil, "link made")
+	for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .UI, web = true}, UI}) {
+		_, _, e := fs_check(lnk, c)
+		testing.expectf(t, e == "", "%v fs_check link: %q", c, e)
+	}
+	os.remove(lnk)
+	// a project folder inside no other project: refused for the user too
+	_, _, e0 := fs_check(dir, UI)
+	testing.expect_value(t, e0, "not on a project folder itself")
+	testing.expect_value(t, fs_rename(dir, fmt.tprintf("%s-moved", dir), UI), "not on a project folder itself")
+	testing.expect_value(t, fs_delete(dir, UI), "not on a project folder itself")
+	// the user here: the outer project is its root
+	p, root, e := fs_check(inner, UI)
+	testing.expect_value(t, e, "")
+	testing.expect_value(t, p, inner)
+	testing.expect_value(t, root, dir)
+	// copied (duplicated)
+	_, _, ce := fs_copy_paths(inner, fmt.tprintf("%s/inner copy", dir), UI)
+	testing.expect_value(t, ce, "")
+	// moved into another folder, and back; folders open inside it stay open, as a plain folder's
+	moved := fmt.tprintf("%s/dest/inner", dir)
+	os.make_directory_all(fmt.tprintf("%s/sub", inner))
+	testing.expect(t, run_command(Files_Expand{path = inner, expanded = true}, UI).ok, "open inner")
+	testing.expect(t, run_command(Files_Expand{path = fmt.tprintf("%s/sub", inner), expanded = true}, UI).ok, "open sub")
+	testing.expect_value(t, fs_rename(inner, moved, UI), "")
+	testing.expect(t, !os.exists(inner) && os.exists(fmt.tprintf("%s/x.txt", moved)), "moved")
+	testing.expect(t, files_is_open(moved), "the moved folder stays open")
+	testing.expect(t, files_is_open(fmt.tprintf("%s/sub", moved)), "its open folder stays open")
+	testing.expect_value(t, fs_rename(moved, inner, UI), "")
+	testing.expect(t, os.exists(fmt.tprintf("%s/x.txt", inner)), "moved back")
+	// trashed, with a restore id, and restored
+	trash := fmt.tprintf("%s/dest/trash", dir)
+	os.make_directory_all(trash)
+	nested_trash_dir = trash
+	fs_trash_fn = proc(path: string) -> bool {
+		to := fmt.tprintf("%s/%d-inner", nested_trash_dir, time.now()._nsec)
+		if os.rename(path, to) != nil do return false
+		fs_trash_where = to
+		return true
+	}
+	plan, perr := fs_delete_plan({inner}, UI)
+	testing.expect_value(t, perr, "")
+	testing.expect_value(t, len(plan), 1)
+	derr, id := fs_trash_checked(plan[0])
+	testing.expect_value(t, derr, "")
+	testing.expect(t, id != "" && !os.exists(inner), "trashed, with a restore id")
+	_, rerr := fs_restore(id, UI)
+	testing.expect_value(t, rerr, "")
+	testing.expect(t, os.exists(fmt.tprintf("%s/x.txt", inner)), "restored")
+	// a running terminal in it still refuses (fs_in_use_by)
+	s := Open_Session{id = new_id(), project_id = state.projects[1].id, cwd = strings.clone(inner)}
+	append(&s.tabs, Tab{id = new_id(), kind = Shell_Tab{}, title = "sh", status = .Running})
+	append(&state.open_sessions, s)
+	e1 := fs_rename(inner, moved, UI)
+	testing.expectf(t, strings.contains(e1, "is running in it"), "%q", e1)
 	testing.expect(t, os.is_dir(inner), "still there")
 	// what is inside it is fine
 	testing.expect_value(t, fs_delete(fmt.tprintf("%s/inner/x.txt", dir), UI), "")
 }
+
+@(private = "file")
+nested_trash_dir: string

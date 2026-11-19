@@ -226,8 +226,18 @@ files_set_expanded :: proc(root, rel: string, on: bool) -> bool {
 // follow, within the same tree; so does the selection.
 files_renamed :: proc(from, to: string) {
 	root := fs_root_longest(from)
-	if root != "" && root == fs_root_longest(to) && from != root && to != root do files_renamed_in(root, from, to)
-	else if r := settings_tree_root(from); r != "" && r == settings_tree_root(to) do files_renamed_in(r, from, to)
+	nested := root != "" && root == from // a project folder inside another (the user's own move): its outer tree's
+	if nested do root = fs_root_above(from)
+	if root != "" && root == fs_root_longest(to) && from != root && to != root {
+		files_renamed_in(root, from, to)
+		// the folders open inside it were kept under its own folder (files_expand_key): now under the outer one
+		if nested {
+			rt := to[len(root) + 1:]
+			dirs := make([dynamic]string, context.temp_allocator)
+			for fr in state.files.expanded do if fr.root == from do for d in fr.dirs do append(&dirs, strings.concatenate({rt, "/", d}, context.temp_allocator))
+			for d in dirs do files_set_expanded(root, d, true)
+		}
+	} else if r := settings_tree_root(from); r != "" && r == settings_tree_root(to) do files_renamed_in(r, from, to)
 	for v in ([]^Files_View{&files_ui}) {
 		if v.cursor == from || strings.has_prefix(v.cursor, strings.concatenate({from, "/"}, context.temp_allocator)) {
 			files_select_in(v, strings.concatenate({to, v.cursor[len(from):]}, context.temp_allocator))

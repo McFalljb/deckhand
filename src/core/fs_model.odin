@@ -254,17 +254,54 @@ fs_check :: proc(path: string, caller: Caller, allow_root := false) -> (abs, roo
 	full, _ := filepath.join({parent, filepath.base(abs)}, context.temp_allocator)
 	if allow_root do full = fs_real(abs)
 	roots := fs_roots()
-	// any project's own folder, also one inside another project (whose root would match first)
-	if !allow_root do for r in roots do if full == r do return "", "", "not on a project folder itself"
+	// any project's own folder, also one inside another project (whose root would match first);
+	// but the user here may act on one inside another project like any folder (a folder a session
+	// once ran in is a project too), that project then its root
+	if !allow_root {
+		// the name as typed stays (a rename that changes only its case is the user's to make)
+		if r := fs_root_at(full, roots); r != "" && !(fs_user_here(caller) && fs_inside_other_root(r, roots)) do return "", "", "not on a project folder itself"
+	}
 	for r in roots {
 		if !within(full, r) do continue
-		if full == r && !allow_root do return "", "", "not on a project folder itself"
+		if full == r && !allow_root do continue // only the user here's nested one gets here: its outer project decides
 		rel := full[len(r):]
 		if fs_in_git(rel) do return "", "", "not inside .git"
 		if caller.kind == .Panel && fs_outside_own(full, caller) do return "", "", "only inside this session's project folder"
 		return full, r, ""
 	}
 	return "", "", FS_NOT_IN_PROJECT
+}
+
+// The one of roots that full (its folder's real path and its name as typed) is ("" = none): by
+// the path, else by the file, so another spelling of the name (a volume that ignores case takes
+// INNER for inner) is that project folder too. A link is never the folder it leads to: renaming
+// or trashing it acts on the link. Only roots in the same folder (by name, any case) are looked at.
+fs_root_at :: proc(full: string, roots: []string) -> string {
+	for r in roots do if full == r do return r
+	dir_of :: proc(p: string) -> string {
+		i := strings.last_index_byte(p, '/')
+		return i <= 0 ? "/" : p[:i]
+	}
+	pd := dir_of(full)
+	st: posix.stat_t
+	looked, is_dir := false, false
+	for r in roots {
+		if !strings.equal_fold(dir_of(r), pd) do continue
+		if !looked {
+			looked = true
+			is_dir = posix.lstat(strings.clone_to_cstring(full, context.temp_allocator), &st) == .OK && posix.S_ISDIR(st.st_mode)
+		}
+		if !is_dir do return ""
+		rs: posix.stat_t
+		if posix.stat(strings.clone_to_cstring(r, context.temp_allocator), &rs) == .OK && rs.st_dev == st.st_dev && rs.st_ino == st.st_ino do return r
+	}
+	return ""
+}
+
+// Whether another of roots holds path strictly inside it.
+fs_inside_other_root :: proc(path: string, roots: []string) -> bool {
+	for r in roots do if r != path && within(path, r) do return true
+	return false
 }
 
 // fs_check for a command that creates, renames or deletes: the user's own

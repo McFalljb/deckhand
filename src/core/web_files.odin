@@ -20,6 +20,7 @@ import "core:sys/posix"
 import "core:unicode/utf8"
 import "core:crypto"
 import "core:encoding/hex"
+import "core:encoding/base64"
 
 WEB_FILE_MAX :: 4 << 20 // a file a browser views or saves: at most this many bytes
 
@@ -28,6 +29,7 @@ WEB_FILE_MAX :: 4 << 20 // a file a browser views or saves: at most this many by
 File_Read :: struct {
 	path:  string, // absolute
 	since: string,
+	image: bool, // the bytes of a PNG, JPEG, GIF, BMP or WebP (base64, its type from its first bytes) instead of text
 }
 
 // Saves a browser's edit of a project's text file (an existing regular file, replaced atomically,
@@ -133,13 +135,13 @@ web_file_remember :: proc(key: string, st: posix.stat_t, h: string) {
 // credentials file by inode, at most WEB_FILE_MAX. since/key: the hash the browser has and the
 // file's key (web_file_remember): the same file, as fstat says, is not read (same).
 @(private = "file")
-web_file_bytes :: proc(dirfd: posix.FD, name: string, since := "", key := "") -> (data: []u8, st: posix.stat_t, err: string, same: bool) {
+web_file_bytes :: proc(dirfd: posix.FD, name: string, since := "", key := "", limit := WEB_FILE_MAX) -> (data: []u8, st: posix.stat_t, err: string, same: bool) {
 	fd := posix.openat(dirfd, strings.clone_to_cstring(name, context.temp_allocator), {.NOFOLLOW, .CLOEXEC, .NONBLOCK})
 	if fd < 0 do return nil, st, posix.errno() == .ELOOP ? "a link: open the file it points to" : "no such file", false
 	defer posix.close(fd)
 	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return nil, st, "not a regular file", false
 	if credential_inode(u64(st.st_dev), u64(st.st_ino)) do return nil, st, CREDENTIAL_REFUSED, false
-	if i64(st.st_size) > WEB_FILE_MAX do return nil, st, fmt.tprintf("too large to open in a browser (%.1f MB; at most %d MB)", f64(st.st_size) / (1 << 20), WEB_FILE_MAX >> 20), false
+	if i64(st.st_size) > i64(limit) do return nil, st, fmt.tprintf("too large to open in a browser (%.1f MB; at most %d MB)", f64(st.st_size) / (1 << 20), limit >> 20), false
 	if since != "" {
 		if seen, ok := web_file_seen[key]; ok && seen == web_file_seen_as(st, since) do return nil, st, "", true
 	}
@@ -156,7 +158,7 @@ web_file_bytes :: proc(dirfd: posix.FD, name: string, since := "", key := "") ->
 		if k == 0 do break
 		n += int(k)
 	}
-	if n > WEB_FILE_MAX do return nil, st, "too large to open in a browser", false
+	if n > limit do return nil, st, "too large to open in a browser", false
 	return buf[:n], st, "", false
 }
 
@@ -164,7 +166,7 @@ web_file_bytes :: proc(dirfd: posix.FD, name: string, since := "", key := "") ->
 web_file_hash :: proc(b: []u8) -> string {return fmt.tprintf("%016x", hash.fnv64a(b))}
 
 @(private = "file")
-web_file_json :: proc(path: string, st: posix.stat_t, h: string, text: Maybe(string), saved := false) -> string {
+web_file_json :: proc(path: string, st: posix.stat_t, h: string, text: Maybe(string), saved := false, image := "", b64 := "") -> string {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, `{"path":`)
 	json_quote(&b, path)
@@ -173,6 +175,8 @@ web_file_json :: proc(path: string, st: posix.stat_t, h: string, text: Maybe(str
 	if t, has := text.?; has {
 		strings.write_string(&b, `,"text":`)
 		json_quote(&b, t)
+	} else if image != "" {
+		fmt.sbprintf(&b, `,"image":"%s","base64":"%s"`, image, b64) // a MIME type and base64: nothing to escape
 	} else do strings.write_string(&b, saved ? `,"saved":true` : `,"same":true`)
 	strings.write_byte(&b, '}')
 	return strings.to_string(b)
@@ -185,14 +189,27 @@ file_read_apply :: proc(c: File_Read, caller: Caller) -> Result {
 	if derr != "" do return fail(derr)
 	defer posix.close(dirfd)
 	key := strings.concatenate({strings.trim_right(fd_real_path(dirfd), "/"), "/", name}, context.temp_allocator)
-	data, st, rerr, same := web_file_bytes(dirfd, name, c.since, key)
+	data, st, rerr, same := web_file_bytes(dirfd, name, c.since, key, c.image ? WEB_IMAGE_MAX : WEB_FILE_MAX)
 	if rerr != "" do return fail(rerr)
 	if same do return {ok = true, data = strings.clone(web_file_json(p, st, c.since, nil))} // unchanged since its last read
+	if c.image do return web_image_read(p, key, st, data, c.since) // image_file.odin's formats, as base64
 	if terr := web_file_text_err(data); terr != "" do return fail(terr)
 	h := web_file_hash(data)
 	web_file_remember(key, st, h)
 	if c.since != "" && c.since == h do return {ok = true, data = strings.clone(web_file_json(p, st, h, nil))}
 	return {ok = true, data = strings.clone(web_file_json(p, st, h, string(data)))}
+}
+
+// file_read's image: the file's bytes when they are an image (image_sniff), base64 with its type.
+@(private = "file")
+web_image_read :: proc(p, key: string, st: posix.stat_t, data: []u8, since: string) -> Result {
+	f := image_sniff(data[:min(len(data), 16)])
+	if f == .None do return fail("not an image Deckhand shows (PNG, JPEG, GIF, BMP, WebP)")
+	h := web_file_hash(data)
+	web_file_remember(key, st, h)
+	if since != "" && since == h do return {ok = true, data = strings.clone(web_file_json(p, st, h, nil))}
+	j := web_file_json(p, st, h, nil, image = IMAGE_MIME[f], b64 = base64.encode(data, allocator = context.temp_allocator))
+	return {ok = true, data = strings.clone(j)}
 }
 
 file_save_apply :: proc(c: File_Save, caller: Caller) -> Result {

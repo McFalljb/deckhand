@@ -196,6 +196,10 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 	th := theme()
 	ec := editor_colors()
 	draw_rect(x, y, w, h, th.bg_app)
+	if e.img != nil {
+		image_draw(e, x, y, w, h) // an image's tab (image_view.odin)
+		return
+	}
 	if e.refused != "" {
 		msg := e.refused
 		tw := text_width(msg, .UI)

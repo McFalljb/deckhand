@@ -920,6 +920,11 @@ body:has(.files-pick:not(.files-clip)) .toasts { bottom: calc(132px + env(safe-a
 .md-body th, .md-body td { border: 1px solid var(--border); padding: 4px 10px; }
 .md-body hr { border: 0; border-top: 1px solid var(--border); }
 .md-img { color: var(--text-muted); }
+/* an image's tab (ImageView.tsx): centred, shrunk to fit, never enlarged, over a checkerboard */
+.img-view { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 16px; gap: 8px; }
+.img-box { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.img-box img { max-width: 100%; max-height: 100%; object-fit: contain; --chk: color-mix(in srgb, var(--text-muted) 30%, var(--bg-app)); background: repeating-conic-gradient(var(--chk) 0 25%, var(--bg-app) 0 50%) 0 0 / 16px 16px; }
+.img-cap { flex: none; }
 .phone-term .file-tab { position: absolute; inset: 0; }
 .phone-term .md-body { padding: 16px; }
 .phone-term .phone-files { position: absolute; inset: 0; display: flex; flex-direction: column; width: auto; border: 0; }

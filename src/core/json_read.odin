@@ -727,7 +727,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_harness_flags":   cmd = Set_Harness_Flags{harness = harness_key(&r), flags = get_str(&r, "flags", optional = true)}
 	case "web_pair":            cmd = Web_Pair{}
 	case "web_devices":         cmd = Web_Devices{}
-	case "file_read":           cmd = File_Read{path = get_str(&r, "path"), since = get_str(&r, "since", true)}
+	case "file_read":           cmd = File_Read{path = get_str(&r, "path"), since = get_str(&r, "since", true), image = opt_bool(&r, "image").? or_else false}
 	case "file_save":           cmd = File_Save{path = get_str(&r, "path"), text = get_str(&r, "text"), base = get_str(&r, "base", true), force = opt_bool(&r, "force").? or_else false}
 	case "web_watch":           cmd = Web_Watch{projects = get_ids(&r, "projects", WEB_WATCH_IN_MAX)}
 	case "web_settings":        cmd = Web_Settings{open = get_bool(&r, "open")}

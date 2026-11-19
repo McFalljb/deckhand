@@ -17,7 +17,9 @@ package core
 //   credentials file (settings_credential, as open_file). fs_check's project boundary is for
 //   listing and changing files, which this does not do.
 // - What it shows: what the editor can (disk_read): binary files, files over 20 MB, folders,
-//   pipes and missing files are refused with a hint, and no tab opens.
+//   pipes and missing files are refused with a hint, and no tab opens. An image (image_file.odin:
+//   PNG, JPEG, GIF, BMP, WebP by extension and first bytes, up to IMAGE_FILE_MAX) opens in an
+//   editor tab that shows the picture; nothing of it goes to the agent.
 // - The tab is an ordinary editor tab for the user; no agent has a command that edits it (save_file, reload_file… are not for panel callers).
 
 import "core:fmt"
@@ -111,7 +113,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	if refused := show_file_peek(p); refused != "" {
 		switch {
 		case refused == CREDENTIALS_NOT_OPENED:      return refuse("credentials", CREDENTIAL_REFUSED, CRED_HINT), false
-		case strings.has_prefix(refused, "Binary"):    return refuse("binary", refused, "only text files are shown (an image, PDF or other binary file is not): tell the user the file's path instead"), false
+		case strings.has_prefix(refused, "Binary"):    return refuse("binary", refused, "only text files and images (PNG, JPEG, GIF, BMP, WebP) are shown (a PDF or other binary file is not): tell the user the file's path instead"), false
 		case strings.has_prefix(refused, "Too large"): return refuse("too_large", refused, "tell the user the file's path, or show a smaller excerpt saved as its own text file"), false
 		}
 		return refuse("unreadable", refused, "only readable text files are shown"), false
@@ -242,15 +244,19 @@ show_file_peek :: proc(path: string) -> string {
 	case .Other:   return "Not a regular file (a pipe, device or socket): not opened"
 	case .File:
 	}
-	too_large :: proc(size: i64) -> string {return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), EDITOR_MAX_BYTES >> 20)}
-	if st.size > EDITOR_MAX_BYTES do return too_large(st.size)
+	// an image (by extension and its first bytes: image_file.odin) shows as one, up to IMAGE_FILE_MAX
+	img := image_file(path)
+	limit := img ? i64(IMAGE_FILE_MAX) : i64(EDITOR_MAX_BYTES)
+	too_large :: proc(size, limit: i64) -> string {return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), limit >> 20)}
+	if st.size > limit do return too_large(st.size, limit)
 	f, oerr := os.open(path, {.Read, .Non_Blocking})
 	if oerr != nil do return fmt.tprintf("Cannot read: %v", oerr)
 	defer os.close(f)
 	sb: posix.stat_t
 	if posix.fstat(posix.FD(os.fd(f)), &sb) != .OK || !posix.S_ISREG(sb.st_mode) do return "Not a regular file (a pipe, device or socket): not opened"
 	if credential_inode(u64(sb.st_dev), u64(sb.st_ino)) do return CREDENTIALS_NOT_OPENED
-	if i64(sb.st_size) > EDITOR_MAX_BYTES do return too_large(i64(sb.st_size))
+	if i64(sb.st_size) > limit do return too_large(i64(sb.st_size), limit)
+	if img do return ""
 	buf: [8192 + 8]u8 // a little past looks_binary's window: a cut sequence at its end is fine
 	n, rerr := disk_read_chunk(f, buf[:])
 	if rerr != nil && rerr != .EOF do return fmt.tprintf("Cannot read: %v", rerr)

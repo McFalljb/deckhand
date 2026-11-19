@@ -101,7 +101,8 @@ fd_stamp :: proc(f: ^os.File) -> (st: core.Disk_Stamp, ok: bool) {
 // most EDITOR_MAX_BYTES, not binary. Otherwise refused says why (data nil).
 // Opened non-blocking and checked again on the open file, so a FIFO or a
 // device (even one swapped in after the stat) never blocks or streams.
-disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, st: core.Disk_Stamp, refused: string) {
+// limit, binary_ok: an image's (image_view.odin).
+disk_read :: proc(path: string, allocator := context.allocator, limit := i64(core.EDITOR_MAX_BYTES), binary_ok := false) -> (data: []u8, st: core.Disk_Stamp, refused: string) {
 	// agents' sign-ins and state are never read, by any name (settings_files.odin)
 	if core.settings_credential(path) do return nil, {}, core.CREDENTIALS_NOT_OPENED
 	kind, pre := core.path_stat(path)
@@ -111,22 +112,22 @@ disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, 
 	case .Other:   return nil, {}, "Not a regular file (a pipe, device or socket): not opened"
 	case .File:
 	}
-	if pre.size > core.EDITOR_MAX_BYTES do return nil, {}, too_large(pre.size)
+	if pre.size > limit do return nil, {}, too_large(pre.size, limit)
 	f, oerr := os.open(path, {.Read, .Non_Blocking})
 	if oerr != nil do return nil, {}, fmt.tprintf("Cannot read: %v", oerr)
 	defer os.close(f)
 	ff, fok := fd_stamp(f)
 	if !fok do return nil, {}, "Not a regular file (a pipe, device or socket): not opened"
 	if core.credential_inode(ff.dev, ff.inode) do return nil, {}, core.CREDENTIALS_NOT_OPENED // swapped in after the check
-	if ff.size > core.EDITOR_MAX_BYTES do return nil, {}, too_large(ff.size)
+	if ff.size > limit do return nil, {}, too_large(ff.size, limit)
 	buf := make([dynamic]u8, 0, int(ff.size), allocator)
 	chunk: [64 * 1024]u8
 	for {
 		n, rerr := core.disk_read_chunk(f, chunk[:])
 		if n > 0 do append(&buf, ..chunk[:n])
-		if len(buf) > core.EDITOR_MAX_BYTES {
+		if i64(len(buf)) > limit {
 			delete(buf)
-			return nil, {}, too_large(i64(len(buf)))
+			return nil, {}, too_large(i64(len(buf)), limit)
 		}
 		if rerr == .EOF || (rerr == nil && n == 0) do break
 		if rerr != nil {
@@ -135,7 +136,7 @@ disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, 
 			return nil, {}, fmt.tprintf("Cannot read: %v", rerr)
 		}
 	}
-	if core.looks_binary(buf[:]) {
+	if !binary_ok && core.looks_binary(buf[:]) {
 		delete(buf)
 		return nil, {}, "Binary file: not shown"
 	}
@@ -143,8 +144,8 @@ disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, 
 }
 
 @(private = "file")
-too_large :: proc(size: i64) -> string {
-	return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), core.EDITOR_MAX_BYTES >> 20)
+too_large :: proc(size, limit: i64) -> string {
+	return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), limit >> 20)
 }
 
 // Reads path into e (a fresh editor). False with e.refused set when the
@@ -154,6 +155,7 @@ editor_load :: proc(e: ^Editor, path: string) -> bool {
 	e.eol = "\n"
 	e.indent_w = 4
 	e.path = strings.clone(path)
+	if image_load(e) do return e.img != nil // a PNG, JPEG…: its picture (image_view.odin)
 	data, st, refused := disk_read(path)
 	if refused != "" {
 		e.refused = strings.clone(refused)
@@ -253,6 +255,8 @@ editor_drop_disk_text :: proc(e: ^Editor) {
 // file that cannot be shown leaves a read-only tab that says why.
 editor_reopen :: proc(e: ^Editor) {
 	path := strings.clone(e.path, context.temp_allocator)
+	image_free(e)
+	e.image_tab = false
 	tb_destroy(&e.buf)
 	syntax_close(&e.sx)
 	ed_clear_history(e)
@@ -272,6 +276,10 @@ editor_reopen :: proc(e: ^Editor) {
 // Looks at the file on disk: a clean buffer reloads, a dirty one gets the
 // banner. Cheap when nothing changed (one stat).
 editor_check_disk :: proc(e: ^Editor) {
+	if e.image_tab {
+		image_check_disk(e) // image_view.odin
+		return
+	}
 	if e.view != .File || e.refused != "" do return
 	st, ok := disk_stamp(e.path)
 	if !ok {

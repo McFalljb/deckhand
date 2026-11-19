@@ -3,7 +3,8 @@
 # a fake pi bridge (fake-bridge-show.py, caller panel) and a fake claude running the plugin's
 # `deckhand show` (fake-claude.py) each show a .md (a Markdown tab) and a .txt (an editor tab) in
 # their own session, right after their own tab, behind the user's view; a file outside every
-# project is shown; another session, a binary file are refused (code and hint). Never a real pi
+# project is shown; another session, a binary file are refused (code and hint); a PNG shows as a
+# picture (an editor tab: build/agent-show/…/image-tab). Never a real pi
 # or claude. Quiet test mode, a fake HOME, a temp data dir. Needs ./build.sh (build/claude-code,
 # build/deckhand-cli). Writes build/agent-show/ (run.log, show.log, claude.log).
 # Usage: tests/scripts/agent-show.sh
@@ -23,7 +24,8 @@ printf '# Plan\n\nintro\n\n## Setup\n\nsteps\n' > "$PROJ/README.md"
 printf 'one\ntwo\nthree\nfour\n' > "$PROJ/notes.txt"
 printf '# Plan\n\n## Setup\n\nfrom Claude\n' > "$PROJ/docs/plan.md"
 printf 'a\nb\nc\n' > "$PROJ/docs/todo.txt"
-printf '\211PNG\r\n\032\n\000\000\000\rIHDR' > "$PROJ/logo.png"
+printf 'not an image\000\001\002' > "$PROJ/logo.png" # named .png, not one by its first bytes: binary
+cp "$ROOT/docs/images/deckhand.png" "$PROJ/shot.png"
 printf 'other\n' > "$FAKE_HOME/other/notes.txt"
 OUTSIDE="$FAKE_HOME/outside/sre-interview-questions.md"
 printf '# SRE interview questions\n\n## Incidents\n' > "$OUTSIDE"
@@ -62,11 +64,12 @@ def check(cond, what):
     global ok
     print(("ok: " if cond else "FAILED: ") + what)
     ok = ok and cond
-check(len(calls) == 3, "claude: three deckhand show calls (%d)" % len(calls))
-a, b, c = out(0), out(1), out(2)
+check(len(calls) == 4, "claude: four deckhand show calls (%d)" % len(calls))
+a, b, c, d = out(0), out(1), out(2), out(3)
 check(calls[0]["exit"] == 0 and a.get("kind") == "markdown" and "behind the user's view" in a.get("message", ""), "claude: a .md in a Markdown tab, behind the view")
 check(calls[1]["exit"] == 0 and b.get("kind") == "editor", "claude: a .txt in an editor tab")
 check(calls[2]["exit"] == 1 and c.get("code") == "binary" and c.get("hint"), "claude: a binary file refused with a code and a hint")
+check(calls[3]["exit"] == 0 and d.get("kind") == "editor", "claude: a PNG in an editor tab (its picture)")
 sys.exit(0 if ok else 1)
 PY
 if [ $fail = 1 ]; then echo "agent-show scene failed (logs: $W)"; exit 1; fi

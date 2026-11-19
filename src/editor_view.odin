@@ -196,8 +196,9 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 	th := theme()
 	ec := editor_colors()
 	draw_rect(x, y, w, h, th.bg_app)
+	if e.image_tab do image_ensure(e) // an image's tab: read and decoded at its first draw (image_view.odin)
 	if e.img != nil {
-		image_draw(e, x, y, w, h) // an image's tab (image_view.odin)
+		image_draw(e, x, y, w, h)
 		return
 	}
 	if e.refused != "" {

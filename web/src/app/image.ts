@@ -36,3 +36,32 @@ export function imageCaption(mime: string, size: number, w = 0, h = 0): string {
   const kind = mime === "image/svg+xml" ? "SVG" : mime.replace(/^image\//, "").toUpperCase();
   return [kind, w > 0 && h > 0 ? `${w} × ${h} px` : "", sizeText(size)].filter(Boolean).join(" · ");
 }
+
+// Runs one job at a time, in the order asked (a failed job does not stop the next). An image read
+// answers up to ~11 MB of base64: one at a time per page, so several tabs on a slow link never
+// queue more than the link's backlog allows.
+export function oneAtATime() {
+  let last: Promise<unknown> = Promise.resolve();
+  return <T>(job: () => Promise<T>): Promise<T> => {
+    const p = last.then(job, job);
+    last = p.catch(() => {});
+    return p;
+  };
+}
+
+// An SVG's text as a data: URL (an <img> of it, opened in a new tab, has an opaque origin).
+export function svgDataUrl(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return "data:image/svg+xml;base64," + btoa(bin);
+}
+
+// An image read's reply that means "this is text, not an image": the core's refusal of a file
+// whose first bytes are no image, or a core without image reads answering with its text. The tab
+// shows the text instead.
+export function notAnImage(r: { ok: boolean; error?: string; data?: unknown }): boolean {
+  if (!r.ok) return (r.error ?? "").startsWith("not an image");
+  const d = typeof r.data === "string" ? JSON.parse(r.data) : (r.data ?? {});
+  return typeof d.text === "string" && typeof d.base64 !== "string";
+}

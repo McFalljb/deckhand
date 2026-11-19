@@ -1218,9 +1218,12 @@ function useFile(app: App, path: string) {
   return { file, err, draft, setDraft, changed, save, reload };
 }
 
-// A PNG, JPEG… shows its picture (ImageView.tsx); any other file its text.
+// A PNG, JPEG… shows its picture (ImageView.tsx); any other file its text, and so does one named
+// .png that is text after all.
 export function FileTab(props: { s: OpenSession; tab: Tab; path: string; markdown: boolean }) {
-  return isImagePath(props.path) ? <ImageTab key={props.path} path={props.path} /> : <TextFileTab {...props} />;
+  const [textPath, setTextPath] = useState("");
+  const image = isImagePath(props.path) && textPath !== props.path;
+  return image ? <ImageTab key={props.path} path={props.path} onText={() => setTextPath(props.path)} /> : <TextFileTab {...props} />;
 }
 
 function TextFileTab({ tab, path, markdown }: { s: OpenSession; tab: Tab; path: string; markdown: boolean }) {

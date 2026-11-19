@@ -200,11 +200,12 @@ file_read_apply :: proc(c: File_Read, caller: Caller) -> Result {
 	return {ok = true, data = strings.clone(web_file_json(p, st, h, string(data)))}
 }
 
-// file_read's image: the file's bytes when they are an image (image_sniff), base64 with its type.
+// file_read's image: the file's bytes when its name and its first bytes say image (image_ext,
+// image_sniff: as the window's tabs), base64 with its type.
 @(private = "file")
 web_image_read :: proc(p, key: string, st: posix.stat_t, data: []u8, since: string) -> Result {
 	f := image_sniff(data[:min(len(data), 16)])
-	if f == .None do return fail("not an image Deckhand shows (PNG, JPEG, GIF, BMP, WebP)")
+	if f == .None || image_ext(p) == .None do return fail("not an image Deckhand shows (PNG, JPEG, GIF, BMP, WebP)")
 	h := web_file_hash(data)
 	web_file_remember(key, st, h)
 	if since != "" && since == h do return {ok = true, data = strings.clone(web_file_json(p, st, h, nil))}

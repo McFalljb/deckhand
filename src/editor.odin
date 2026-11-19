@@ -71,6 +71,7 @@ Editor :: struct {
 	refused:     string, // not shown: why (binary, too large, unreadable)
 	image_tab:   bool, // an image's tab (image_view.odin): shown as a picture, or why not; never text
 	img:         ^Image_View, // the picture, when it could be read
+	img_stale:   bool, // the file is read and decoded at the next draw (image_ensure)
 	// the file on disk (editor_file.odin)
 	disk:        core.Disk_Stamp,
 	disk_hash:   u64, // hash of the text on disk, as last read or written

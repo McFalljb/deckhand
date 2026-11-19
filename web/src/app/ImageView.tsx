@@ -1,14 +1,18 @@
 // A file tab of an image (image.ts says which): the picture, read-only, centred, shrunk to fit and
 // never enlarged, over a checkerboard, its type, pixels and size under it. The bytes come from
 // file_read with image (the core's rules for a browser's reads, at most 8 MB), followed on disk as
-// text tabs are (its hash: an unchanged file sends nothing). Shown only through an <img> of a blob:
-// URL typed by the core from the bytes, revoked when replaced or unmounted: nothing of a file is
-// ever put in the page as markup (an SVG's scripts never run in an <img>).
+// text tabs are (its hash: an unchanged file sends nothing), one read at a time per page (a reply
+// can be ~11 MB). Shown only through an <img> of a blob: URL typed by the core from the bytes,
+// revoked when replaced or unmounted; an SVG's preview is a data: URL of its text (opened in a new
+// tab: an opaque origin). Nothing of a file is ever put in the page as markup (an SVG's scripts
+// never run in an <img>). A file that turns out to be text (notAnImage) shows as text (onText).
 
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useMemo, useState } from "preact/hooks";
 import { useApp } from "./ctx.ts";
 import { Icon } from "./icons.tsx";
-import { fromBase64, imageCaption } from "./image.ts";
+import { fromBase64, imageCaption, notAnImage, oneAtATime, svgDataUrl } from "./image.ts";
+
+const imageReads = oneAtATime(); // this page's image reads, one at a time
 
 const json = (d: unknown): any => (typeof d === "string" ? JSON.parse(d) : (d ?? {}));
 
@@ -60,12 +64,12 @@ function Picture({ pic, name }: { pic: Pic; name: string }) {
 
 // An SVG tab's preview: its text (already read as text) as an image.
 export function SvgPreview({ text, name }: { text: string; name: string }) {
-  const url = useBlobUrl(text, "image/svg+xml");
+  const url = useMemo(() => svgDataUrl(text), [text]);
   return <Picture pic={{ url, mime: "image/svg+xml", size: new TextEncoder().encode(text).length }} name={name} />;
 }
 
 // A PNG, JPEG, GIF, BMP or WebP file's tab.
-export function ImageTab({ path }: { path: string }) {
+export function ImageTab({ path, onText }: { path: string; onText: () => void }) {
   const app = useApp();
   const [got, setGot] = useState<{ bytes: Uint8Array; mime: string; size: number } | null>(null);
   const [err, setErr] = useState("");
@@ -78,8 +82,9 @@ export function ImageTab({ path }: { path: string }) {
     const read = async () => {
       if (busy) return;
       busy = true;
-      const r = await app.link.run({ type: "file_read", path, image: true, since: hash }).finally(() => (busy = false));
-      if (!live) return;
+      const r = await imageReads(async () => (live ? app.link.run({ type: "file_read", path, image: true, since: hash }) : null)).finally(() => (busy = false));
+      if (!live || r === null) return;
+      if (notAnImage(r)) return onText(); // text after all (or a core without image reads)
       if (!r.ok) return setErr(r.error || "cannot read it");
       const d = json(r.data);
       setErr("");

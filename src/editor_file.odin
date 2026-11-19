@@ -155,7 +155,7 @@ editor_load :: proc(e: ^Editor, path: string) -> bool {
 	e.eol = "\n"
 	e.indent_w = 4
 	e.path = strings.clone(path)
-	if image_load(e) do return e.img != nil // a PNG, JPEG…: its picture (image_view.odin)
+	if image_load(e) do return true // a PNG, JPEG…: its picture, decoded at its first draw (image_view.odin)
 	data, st, refused := disk_read(path)
 	if refused != "" {
 		e.refused = strings.clone(refused)

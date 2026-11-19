@@ -3,7 +3,9 @@ package main
 // Image tabs: an editor tab whose file is a PNG, JPEG, GIF (its first frame) or BMP shows the
 // picture instead of text (core/image_file.odin decides what is an image). It stays an ordinary
 // editor tab for the core and the agents, read-only and "refused" as text (no buffer, no save,
-// find or diff: e.refused names the image), so nothing of the bytes reaches an agent. The file is
+// find or diff: e.refused names the image), so nothing of the bytes reaches an agent. Opening reads
+// 16 bytes; the file is read and decoded at the tab's first draw (image_ensure: a tab an agent
+// showed behind the view holds no pixels), and again at the next draw after it changes. The file is
 // read as the editor reads text (disk_read: credentials, regular files, non-blocking) up to
 // core.IMAGE_FILE_MAX; its size is checked (core.IMAGE_PIXELS_MAX) before anything is decoded,
 // with stb_image. Drawn centred, fitted to the pane and never past 100% (one image pixel a
@@ -27,7 +29,7 @@ Image_View :: struct {
 	format:     core.Image_Format,
 	w, h:       int, // the image's pixels
 	tw, th:     int, // the texture's (scaled down past IMAGE_TEX_MAX)
-	pixels:     []u8, // RGBA, tw x th, until uploaded at the first draw (stb_image's: stbi.image_free)
+	pixels:     []u8, // RGBA, tw x th, until uploaded at the first draw (heap)
 	image:      sg.Image,
 	view:       sg.View,
 	size:       i64, // bytes on disk
@@ -46,41 +48,58 @@ checker: struct {
 	view:  sg.View,
 }
 
-// Loads e's file as an image when its extension names one (true: e is an image tab now, shown or
-// saying why not); false: not an image after all (its first bytes): the caller reads it as text.
+// Opens e's file as an image tab when its extension names an image format and its first bytes
+// are one (core.image_file: a stat and 16 bytes); false: the caller reads it as text. Nothing is
+// decoded here: a tab never drawn (one an agent showed behind the user's view) holds no pixels;
+// image_ensure decodes at its first draw.
 image_load :: proc(e: ^Editor) -> bool {
-	if core.image_ext(e.path) == .None do return false
-	data, st, refused := disk_read(e.path, limit = core.IMAGE_FILE_MAX, binary_ok = true)
-	e.image_tab = true
-	e.readonly = true
-	e.disk = st
+	if core.image_ext(e.path) == .None || core.settings_credential(e.path) || !core.image_file(e.path) do return false
+	e.image_tab, e.img_stale, e.readonly = true, true, true
+	e.disk, _ = disk_stamp(e.path)
 	tb_init(&e.buf, nil)
+	e.refused = fmt.aprintf("%s image (not text)", core.IMAGE_NAME[core.image_ext(e.path)])
+	return true
+}
+
+// An image tab about to be drawn: its file read and decoded, unless done since it last changed.
+// The bytes are read as the editor reads text (disk_read: credentials, regular files), up to
+// core.IMAGE_FILE_MAX; no longer an image by its first bytes: a text tab from now on.
+image_ensure :: proc(e: ^Editor) {
+	if !e.image_tab || !e.img_stale do return
+	e.img_stale = false
+	image_free(e)
+	data, st, refused := disk_read(e.path, limit = core.IMAGE_FILE_MAX, binary_ok = true)
 	if refused != "" {
+		delete(e.refused)
 		e.refused = strings.clone(refused)
-		e.disk, _ = disk_stamp(e.path) // not read again until the file changes
-		return true
+		return
 	}
+	e.disk = st
 	defer delete(data)
 	f := core.image_sniff(data[:min(len(data), 16)])
 	if f == .None {
-		e.image_tab = false
-		e.readonly = false
+		path := strings.clone(e.path, context.temp_allocator)
 		tb_destroy(&e.buf)
-		return false
+		delete(e.refused)
+		delete(e.path)
+		e.refused, e.path = "", ""
+		e.image_tab, e.readonly = false, false
+		editor_load(e, path)
+		return
 	}
 	v, why := image_decode(data, f)
+	delete(e.refused)
 	if why != "" {
 		e.refused = strings.clone(why)
-		return true
+		return
 	}
 	v.size = i64(len(data))
 	e.img = new_clone(v)
 	e.refused = fmt.aprintf("%s image, %d × %d px (not text)", core.IMAGE_NAME[f], v.w, v.h)
-	return true
 }
 
-// Decodes an image's bytes into RGBA pixels (not yet a texture), or why it cannot be shown. Pure:
-// no GPU (tests).
+// Decodes an image's bytes into RGBA pixels of their own (not yet a texture; stb_image's buffer
+// freed before it returns), or why it cannot be shown. Pure: no GPU (tests).
 image_decode :: proc(data: []u8, f: core.Image_Format) -> (v: Image_View, why: string) {
 	v.format = f
 	if f == .WebP do return v, "Can't display this image here: WebP images show in a browser, not in the window"
@@ -93,25 +112,27 @@ image_decode :: proc(data: []u8, f: core.Image_Format) -> (v: Image_View, why: s
 	}
 	px := stbi.load_from_memory(raw_data(data), c.int(len(data)), &w, &h, &n, 4)
 	if px == nil do return v, "Can't display this image: it could not be decoded"
+	defer stbi.image_free(px)
 	v.w, v.h = int(w), int(h)
 	// one in every `step` pixels each way, so the texture fits IMAGE_TEX_MAX (it is shown smaller
-	// anyway), in place: each pixel moves to where it is now or before (no second copy)
+	// anyway); never 0 wide or high (8193 x 1)
 	step := max((v.w + IMAGE_TEX_MAX - 1) / IMAGE_TEX_MAX, (v.h + IMAGE_TEX_MAX - 1) / IMAGE_TEX_MAX, 1)
-	v.tw, v.th = v.w / step, v.h / step
-	all := px[:v.w * v.h * 4]
-	if step > 1 do for y in 0 ..< v.th do for x in 0 ..< v.tw {
+	v.tw, v.th = max(v.w / step, 1), max(v.h / step, 1)
+	src := px[:v.w * v.h * 4]
+	v.pixels = make([]u8, v.tw * v.th * 4)
+	if step == 1 do copy(v.pixels, src)
+	else do for y in 0 ..< v.th do for x in 0 ..< v.tw {
 		s := ((y * step) * v.w + x * step) * 4
-		copy(all[(y * v.tw + x) * 4:][:4], all[s:s + 4])
+		copy(v.pixels[(y * v.tw + x) * 4:][:4], src[s:s + 4])
 	}
-	v.pixels = all[:v.tw * v.th * 4]
 	return v, ""
 }
 
-// The tab's image goes (its tab closed, or the file reloads): its pixels now, its texture after
+// The tab's image goes (its tab closed, or the file changed): its pixels now, its texture after
 // this frame's commit.
 image_free :: proc(e: ^Editor) {
 	if e.img == nil do return
-	if e.img.pixels != nil do stbi.image_free(raw_data(e.img.pixels))
+	delete(e.img.pixels)
 	if e.img.image.id != 0 do append(&image_retired, e.img^)
 	free(e.img)
 	e.img = nil
@@ -127,18 +148,14 @@ images_frame_done :: proc() {
 	clear(&image_retired)
 }
 
-// An image tab looks at its file: changed on disk (or back), the image is read again.
+// An image tab looks at its file: changed on disk (or back), its picture goes and the file is read
+// again at its next draw (image_ensure), not now: a hidden tab decodes nothing.
 image_check_disk :: proc(e: ^Editor) {
 	st, ok := disk_stamp(e.path)
 	if !ok || st == e.disk do return
-	path := strings.clone(e.path, context.temp_allocator)
+	e.disk = st
 	image_free(e)
-	tb_destroy(&e.buf)
-	delete(e.refused)
-	delete(e.path)
-	e.refused, e.path = "", ""
-	e.image_tab, e.readonly = false, false
-	editor_load(e, path) // an image again (or, its first bytes no longer one, a text tab)
+	e.img_stale = true
 	app.redraw = true
 }
 
@@ -151,9 +168,18 @@ image_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 	draw_rect(x, y, w, h, th.bg_app)
 	if v.image.id == 0 && v.pixels != nil {
 		v.image = sg.make_image({width = c.int(v.tw), height = c.int(v.th), pixel_format = .RGBA8, data = {ptr = raw_data(v.pixels), size = c.size_t(len(v.pixels))}})
-		v.view = sg.make_view({texture = {image = v.image}})
-		stbi.image_free(raw_data(v.pixels))
+		delete(v.pixels)
 		v.pixels = nil
+		if sg.query_image_state(v.image) != .VALID {
+			// the GPU did not take it: the tab says so (no texture to keep or count)
+			sg.destroy_image(v.image)
+			v.image = {}
+			image_free(e)
+			delete(e.refused)
+			e.refused = strings.clone("Can't display this image: it could not be made a texture")
+			return
+		}
+		v.view = sg.make_view({texture = {image = v.image}})
 		image_textures += 1
 	}
 	pad := px(16)

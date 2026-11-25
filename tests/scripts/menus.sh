@@ -17,7 +17,7 @@ cd "$ROOT"
 W="$ROOT/build/menus"
 rm -rf "$W" build/shots/menus
 FAKE_HOME="$W/home"
-claude_stub "$FAKE_HOME" # Claude Code "installed": the menus read as with it (docs/CLAUDE.md §1)
+claude_stub "$FAKE_HOME" # Claude Code "installed": the menus read as with it (docs/CLAUDE-TABS.md §1)
 STORE="$FAKE_HOME/.pi/agent/sessions"
 A="$FAKE_HOME/code/alpha"
 B="$FAKE_HOME/code/bravo"

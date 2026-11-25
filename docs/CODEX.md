@@ -4,7 +4,7 @@ How Deckhand runs the [Codex CLI](https://github.com/openai/codex) as a tab (new
 in #112): what works, what does not yet, how it was tested, and the rules that keep it safe. The user's view is in
 [GUIDE.md](GUIDE.md#codex-tabs); the wire in [PROTOCOL.md](PROTOCOL.md) ("Claude Code tabs":
 `harness`). Code: `src/core/codex.odin`, and the Claude tab's code it shares
-([CLAUDE.md](CLAUDE.md)): `src/core/claude.odin`, `claude_status.odin`, `dead_tab.odin`,
+([CLAUDE-TABS.md](CLAUDE-TABS.md)): `src/core/claude.odin`, `claude_status.odin`, `dead_tab.odin`,
 `tools/deckhand-cli/hooks.odin`.
 
 **One record, two harnesses.** A Codex tab is a Claude tab record (`Claude_Tab`, `Claude_Record`)
@@ -147,7 +147,7 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   from that window), split as a shell splits words (quotes honoured, nothing expanded:
   `core.flags_split`), and send them as `args`; the row shows `codex_args_check`'s reason before
   anything starts (also in a project's menu, and the picker's **With flags…**). A start on another
-  machine sends them as typed, checked and given that machine's own defaults there (CLAUDE.md §1).
+  machine sends them as typed, checked and given that machine's own defaults there (CLAUDE-TABS.md §1).
   The tab's badge (`claude_mode.odin`), in the warning colour, names how its start flags let Codex
   act without asking, read as full access's rule reads them (`codex_access_choices`): **bypass**
   (`--dangerously-bypass-approvals-and-sandbox`), **full access** (`-s`/`-c sandbox_mode`
@@ -394,7 +394,7 @@ held Codex's files is given back); never HOME or a folder above it.
 ## 6a. Accounts
 
 An account is a **Codex home**: the folder `CODEX_HOME` names (its sign-in, config, sessions).
-Claude's accounts code with harness `.Codex` (`src/core/claude_accounts.odin`; docs/CLAUDE.md §1b):
+Claude's accounts code with harness `.Codex` (`src/core/claude_accounts.odin`; docs/CLAUDE-TABS.md §1b):
 
 - **Which**: the default, `CODEX_HOME` as tabs get it when absolute (never HOME or above it), else
   `~/.codex` (`codex_home`); `~/.codex` too while `CODEX_HOME` names another; then the folders the
@@ -525,7 +525,7 @@ tab, which that core checks under its own flag rule (§1a), as it would its own 
 
 ## 9. The settings bar (hot reload)
 
-Claude's bars' model and watcher (`src/core/claude_reload.odin`, [CLAUDE.md](CLAUDE.md)), a
+Claude's bars' model and watcher (`src/core/claude_reload.odin`, [CLAUDE-TABS.md](CLAUDE-TABS.md)), a
 second watcher for Codex tabs (`codex_file_class`, `codex_sources`). Codex has no in-place reload
 of a file a user edits (the app-server's `reloadUserConfig` applies only to its own config writes),
 so the bar offers **Restart**: `codex resume <id>` in the same tab, idle tabs now, busy ones once

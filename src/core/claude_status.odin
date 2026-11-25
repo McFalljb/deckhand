@@ -1,6 +1,6 @@
 package core
 
-// A Claude tab's status for any setup (docs/CLAUDE.md §5a): what Deckhand can tell when Claude Code
+// A Claude tab's status for any setup (docs/CLAUDE-TABS.md §5a): what Deckhand can tell when Claude Code
 // gives it less than the newest version does.
 //
 //   - Dots from the hooks. Claude Code reports its own status (OSC 7501) from v2.1.295; an older or

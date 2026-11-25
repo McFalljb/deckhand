@@ -1,6 +1,6 @@
 package core
 
-// Claude tabs, part two (docs/CLAUDE.md §6a, §6b, §9): Claude's todos, subagents and background
+// Claude tabs, part two (docs/CLAUDE-TABS.md §6a, §6b, §9): Claude's todos, subagents and background
 // work as right-column panels, and claude_restart (a dead Claude tab's Restart, dead_tab.odin).
 //
 // The plugin's async hooks (integrations/claude-code/hooks/hooks.json, tools/deckhand-cli/
@@ -776,7 +776,7 @@ claude_extra_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Re
 		}
 		if restart_waiting(tab.id) do return fail("this tab is restarting"), false
 		if s.missing do return fail("this session is gone"), false
-		// the saved flags are the user's to replay (CLAUDE.md §3)
+		// the saved flags are the user's to replay (CLAUDE-TABS.md §3)
 		r := claude_tab_restart(s, tab, caller.kind == .UI, c.pick_model && caller.kind == .UI) // Restart with model… is the user's
 		return r, r.ok // a refusal (still not installed, could not start) changes nothing
 	case Claude_Todos:

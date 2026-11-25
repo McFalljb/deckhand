@@ -1,4 +1,4 @@
-# Claude Code runtime operations (tests/scripts/claude-runtime.sh; docs/CLAUDE.md §4a): a fake claude
+# Claude Code runtime operations (tests/scripts/claude-runtime.sh; docs/CLAUDE-TABS.md §4a): a fake claude
 # in a Claude tab, a fake ~/.claude and a fake claude install (never run).
 wait 1500
 command {"type":"add_project","cwd":"$homedir/proj"}

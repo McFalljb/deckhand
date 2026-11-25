@@ -285,7 +285,7 @@ socket_pi_env :: proc(caller: Caller) -> []string {
 
 // The environment a Claude tab's process gets (claude.odin; temp allocator): DECKHAND_SOCKET, a
 // fresh MULTI-use token in DECKHAND_CLAUDE_TOKEN (the CLI and the hooks are a new process per call,
-// so a single-use token cannot work; see docs/CLAUDE.md for what that costs and why the hello
+// so a single-use token cannot work; see docs/CLAUDE-TABS.md for what that costs and why the hello
 // checks the caller's process), DECKHAND_CLI (the bundled CLI, so plugin and app match),
 // DECKHAND_SHOTS_DIR and DECKHAND_CLAUDE_TAB. Tokens the tab had before are revoked first. Nil when
 // the socket is not running.

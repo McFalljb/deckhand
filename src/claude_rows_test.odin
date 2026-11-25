@@ -1,6 +1,6 @@
 package main
 
-// Claude rows and tabs at parity with pi's (claude_rows.odin; docs/CLAUDE.md §4b): the transcript
+// Claude rows and tabs at parity with pi's (claude_rows.odin; docs/CLAUDE-TABS.md §4b): the transcript
 // path and model in the history, the row's session info, Reveal and Copy path, the model's
 // switches, the question and error dots, the rename pushed to Claude Code, the exit's bell entry,
 // Send and close in a Claude-only session, Ask Claude to review, PI_KIT_NOTES_DIR and

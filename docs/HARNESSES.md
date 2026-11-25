@@ -4,7 +4,7 @@ Deckhand runs three agent harnesses: **pi**, **Claude Code** and **Codex**. For 
 own integration and passes it per run, so the user installs only the harness and Deckhand itself
 writes nothing into the harness's config (setup's **Install** runs the harness's own installer, §7). This document covers what each integration does, how it is
 loaded, how it steps back when the user has something of their own, and how setup checks and
-installs the harnesses. The Claude and Codex tabs themselves: [CLAUDE.md](CLAUDE.md),
+installs the harnesses. The Claude and Codex tabs themselves: [CLAUDE-TABS.md](CLAUDE-TABS.md),
 [CODEX.md](CODEX.md).
 
 | | pi | Claude Code | Codex |
@@ -14,7 +14,7 @@ installs the harnesses. The Claude and Codex tabs themselves: [CLAUDE.md](CLAUDE
 | Minimum | 1.4.0 (`PI_MIN_VERSION`) | 2.1.295 (`CLAUDE_MIN_VERSION`) | 0.163.0 (`CODEX_MIN_VERSION`) |
 | Older than that | starts without the integration; a bar with the update command | starts; status from the hooks only; a bar saying how to update | from 0.157.0 (`--no-daemon`): starts plain (no hooks, MCP server or token; nothing typed into it); a bar saying how to update. Older: not started; the tab says how to update |
 | Version read from | its `package.json`, never run | where `claude` links, never run | its install's files; else `codex --version` under a throwaway `CODEX_HOME` |
-| Accounts | — | config folders ([CLAUDE.md §1b](CLAUDE.md#1b-accounts)) | Codex homes ([CODEX.md §6a](CODEX.md#6a-accounts)) |
+| Accounts | — | config folders ([CLAUDE-TABS.md §1b](CLAUDE-TABS.md#1b-accounts)) | Codex homes ([CODEX.md §6a](CODEX.md#6a-accounts)) |
 | On another machine | yes | yes | when that machine's core starts Codex tabs (§6) |
 | Continue this conversation on <machine> | yes, pi 1.4.0 or later there | not yet ([#115](https://github.com/McFalljb/deckhand/issues/115)) | not yet (#115) |
 
@@ -31,7 +31,7 @@ Contents: 1. [Origin](#1-origin-pi-kit) ·
 **Where the integrations live.** In the app bundle: `Contents/Resources/pi` and
 `Contents/Resources/claude-code` in `Deckhand.app`, and `Contents/Resources/integrations/{pi,claude-code}`
 in the nested `Deckhand Core.app`. Codex's hooks and MCP server are the bundled CLI, by its
-absolute path ([CLAUDE.md](CLAUDE.md) §1, "Plugin and CLI paths"). The core uses its own copy. A separate core runs from its
+absolute path ([CLAUDE-TABS.md](CLAUDE-TABS.md) §1, "Plugin and CLI paths"). The core uses its own copy. A separate core runs from its
 installed copy under `<data>/core/<version>-<sha12>/`, which is kept while any process (a pi
 with one of its `-e` paths, a holder, a core) still runs from it, so live tabs keep their paths
 across an update (`src/core/core_versions.odin`).
@@ -135,7 +135,7 @@ former **Start chats read-only** is gone): what a chat's agent may do is the cha
    internal event names differ too: pi-kit's bridge and desk register `kit:desk:command` and
    `kit:desk:control:command` listeners at load, active or not, and its bridge registers
    `/desk-reload`. App tabs ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)) and Claude tabs
-   ([CLAUDE.md](CLAUDE.md) §3) have their own variables.
+   ([CLAUDE-TABS.md](CLAUDE-TABS.md) §3) have their own variables.
 2. **The event bus as a public contract.** The bridge keeps emitting `kit:desk:mode` and accepting
    `kit:desk:panels` (now merged by panel name, so several producers can publish). pi-kit's
    sidebar keeps handing its panels over and doesn't draw its column in Deckhand. The mode is said
@@ -177,7 +177,7 @@ former **Start chats read-only** is gone): what a chat's agent may do is the cha
 ## 5. Claude Code: `--plugin-dir`
 
 Source: code.claude.com/docs/en/plugins/loading.md, "Name conflicts". The integration itself is
-described in [CLAUDE.md](CLAUDE.md).
+described in [CLAUDE-TABS.md](CLAUDE-TABS.md).
 
 - `--plugin-dir` loads the folder as `<name>@inline` for that session only, in place; nothing goes
   into `~/.claude`.
@@ -187,7 +187,7 @@ described in [CLAUDE.md](CLAUDE.md).
   off; `"<name>@inline": false` disables it. Deckhand's "hooks silent" bar catches all of these.
 - **Minimum Claude Code 2.1.295** (`CLAUDE_MIN_VERSION`): OSC 7501 and hook `onFailure`. An older
   one still starts; its status comes from the hooks only and a bar says how to update
-  ([CLAUDE.md §5a](CLAUDE.md#5a-any-setup-older-claude-code-hooks-that-do-not-run)).
+  ([CLAUDE-TABS.md §5a](CLAUDE-TABS.md#5a-any-setup-older-claude-code-hooks-that-do-not-run)).
 
 ## 5a. Codex: hooks per run
 

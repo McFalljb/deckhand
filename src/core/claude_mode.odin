@@ -1,7 +1,7 @@
 package core
 
 // A Claude or Codex tab's permission mode, for the quiet badge on its tab and its tooltip
-// (docs/CLAUDE.md §4b, docs/CODEX.md §1a). Never guessed, and never safer-sounding than it may be:
+// (docs/CLAUDE-TABS.md §4b, docs/CODEX.md §1a). Never guessed, and never safer-sounding than it may be:
 //   - Claude Code: what its hooks report comes first (`permission_mode` on claude.session and
 //     claude.turn: SessionStart, UserPromptSubmit, Stop, Notification), so Shift+Tab's switches
 //     show at the next prompt or turn's end; "default" clears it. Until one does: the flags the tab

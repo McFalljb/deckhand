@@ -1,4 +1,4 @@
-# Claude status feeds (tests/scripts/claude-feeds.sh; docs/CLAUDE.md §5a, §6a, §6b): a fake claude
+# Claude status feeds (tests/scripts/claude-feeds.sh; docs/CLAUDE-TABS.md §5a, §6a, §6b): a fake claude
 # (no OSC 7501) in Claude tabs, a fake claude install at 2.1.250 (never run).
 wait 1500
 window_active on

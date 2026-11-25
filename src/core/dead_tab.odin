@@ -93,7 +93,7 @@ tab_is_dead :: proc(tab: ^Tab) -> bool {
 // Opening a session again: its pi starts again if it exited (a failure is
 // said by pi_tab_restart); so does the Claude tab it shows, unless claude is
 // still not found (its bar says so: nothing is started, nothing more said).
-// user: the user opened it (a Claude tab gets its saved flags, CLAUDE.md §3).
+// user: the user opened it (a Claude tab gets its saved flags, CLAUDE-TABS.md §3).
 restart_if_dead :: proc(s: ^Open_Session, user := false) {
 	if s.missing || s.machine != 0 do return // gone, or another machine's (machine_mirror.odin)
 	if tab := session_pi_tab(s); tab_is_dead(tab) do pi_tab_restart(s, tab, false)

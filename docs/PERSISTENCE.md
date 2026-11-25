@@ -66,7 +66,7 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   own session and load once shown (docs/BROWSER.md §2.4). A user name and password in the
   URL (`user:pw@`) are never saved (nor shown in State); the query string and fragment are kept as
   they are, and may hold sign-in tokens (an OAuth `code` or `access_token`). Unknown tab kinds are skipped on restore.
-  Claude tabs save `{"kind":"claude","claude_session_id"?,"cwd","args"?,"account"?}` (docs/CLAUDE.md): Claude
+  Claude tabs save `{"kind":"claude","claude_session_id"?,"cwd","args"?,"account"?}` (docs/CLAUDE-TABS.md): Claude
   Code's session id once its SessionStart hook reported it, where it ran, the user's extra
   flags, and `account`: its account's config folder (§1b; it starts there again; absent: the default). A saved id that is not a session id, or flags Deckhand sets itself, drop the tab.
   Codex tabs save the same fields with `"kind":"codex"` (`account`: its Codex home; docs/CODEX.md)
@@ -100,7 +100,7 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   so an older Deckhand ignores it and keeps the rest. On restore a project no longer listed is
   skipped, and each file must still pass the open rules (a regular file, not a sign-in, inside the
   project or the checkout its Files tree shows); one with no file left does not come back.
-- A Claude-only session (docs/CLAUDE.md §1) is saved in `open_sessions` as
+- A Claude-only session (docs/CLAUDE-TABS.md §1) is saved in `open_sessions` as
   `{"agent":"claude","claude_session_id","pi_session_id":"","cwd","project","tabs":[{"kind":"claude",…},…],"active_tab"}`:
   `tabs[0]` is its main Claude tab (same id; a Codex-only session's is `"kind":"codex"`), never a
   pi tab; saved once Claude (or Codex) reported its session id; `pi_session_id` is `""`. Known
@@ -111,7 +111,7 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   the Claude sessions Deckhand ran, the Claude rows of each project's session list. `title` is the
   first prompt's first line or the user's rename (≤ 80 characters); `used` the last prompt (or
   close). `named: true` when `title` is the user's rename (pushed to Claude
-  Code as its session title, docs/CLAUDE.md §4b). `transcript`: Claude Code's transcript file as
+  Code as its session title, docs/CLAUDE-TABS.md §4b). `transcript`: Claude Code's transcript file as
   SessionStart reported it, kept only under Claude's config dir's `projects/` (checked again on
   load: one that is not is dropped); never read. `model`: the last model reported (SessionStart,
   PostModelSwitch). `account`: the config folder it ran under (written at each start; left out
@@ -171,7 +171,7 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   derived at each scan and not saved. A project added by hand is saved in `projects` with
   `"added": true`, so a subfolder you added stays a top-level row across restarts (as pinned
   ones do); restored as saved (`added` absent: a found row that nests), never selected one by
-  one. A folder only Claude Code ran in (docs/CLAUDE.md §4c) is saved with `"claude": true`: the
+  one. A folder only Claude Code ran in (docs/CLAUDE-TABS.md §4c) is saved with `"claude": true`: the
   Rescan after launch keeps it while an account still has its transcripts, else drops it
   (unless added, named or open). `sidebar.expanded`: the Projects tree's parent and group rows you opened, by folder
   path (collapsed by default; restored with `set_row_expanded`).
@@ -183,7 +183,7 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   An older file's `settings.chats_readonly`, tabs' and `claude_sessions` entries' `readonly` and
   top-level `claude_readonly_ids` (the removed Start chats read-only) are ignored: such a tab
   starts as a full agent.
-- Claude Code accounts (`src/core/claude_accounts.odin`, docs/CLAUDE.md §1b): `settings.claude_accounts`
+- Claude Code accounts (`src/core/claude_accounts.odin`, docs/CLAUDE-TABS.md §1b): `settings.claude_accounts`
   (`[{dir, label?, added?, removed?}]`: only what the user changed: a name of their own, a folder
   they added, one they removed; absolute folders, at most 64), `settings.claude_account_default`
   (the chosen default's folder; left out: the environment's) and `settings.claude_account_last`
@@ -303,7 +303,7 @@ the settings' own commands (`set_claude_default_flags`, `set_pi_extension`, `set
 - Shell tabs restart as a new login shell in their saved cwd (the session's if that is gone) and
   print a dim note that the old history is not kept. Claude tabs start `claude --plugin-dir …
   --resume <id> <flags>` in their saved cwd (no `--resume` when no id was reported), with a new
-  token; with Claude Code not installed they say why and show as exited (docs/CLAUDE.md §1).
+  token; with Claude Code not installed they say why and show as exited (docs/CLAUDE-TABS.md §1).
 - Corrupt file, unknown `v`, not a regular file, or over 4 MB (checked before reading) → moved
   aside to `workspace.json.bad-<unix time>`, start empty. Nothing is changed before the file is
   validated.

@@ -1,6 +1,6 @@
 package main
 
-// Claude sessions, review round 2 (claude.odin; docs/CLAUDE.md §3, §4): no agent path starts a
+// Claude sessions, review round 2 (claude.odin; docs/CLAUDE-TABS.md §3, §4): no agent path starts a
 // restored Claude tab (focus_session takes the real caller); a saved chat's Claude tab does not
 // come back and cannot start; new_claude_tab's resume goes through the same id checks as
 // claude_resume.

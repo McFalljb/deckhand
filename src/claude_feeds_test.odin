@@ -1,6 +1,6 @@
 package main
 
-// Claude status feeds (`./build.sh test`; docs/CLAUDE.md §5, §6a, §6b): dots from the hooks when
+// Claude status feeds (`./build.sh test`; docs/CLAUDE-TABS.md §5, §6a, §6b): dots from the hooks when
 // Claude Code reports no OSC 7501, background work at a turn's end (Stop's background_tasks) as
 // busy for waits and named by the restart confirmation, the Background panel, the "hooks not
 // running" bar, the minimum-version hint, and subagents' current tool, durations and own todos.

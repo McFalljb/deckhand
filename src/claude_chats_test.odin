@@ -1,6 +1,6 @@
 package main
 
-// Claude in chats (claude.odin; docs/CLAUDE.md §3): Claude-only chats and Claude tabs in pi chats
+// Claude in chats (claude.odin; docs/CLAUDE-TABS.md §3): Claude-only chats and Claude tabs in pi chats
 // start like a project's, as full agents (what a chat's agent may do is the chats folder's
 // AGENTS.md / CLAUDE.md's to say); the user's default flags apply at the starts the user makes.
 

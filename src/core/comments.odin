@@ -831,7 +831,7 @@ comments_claude_target :: proc(s: ^Open_Session) -> ^Tab {
 	return tab
 }
 
-// Why Send now cannot go into the Claude tab now ("" = it can): the held-prompt rules (CLAUDE.md
+// Why Send now cannot go into the Claude tab now ("" = it can): the held-prompt rules (CLAUDE-TABS.md
 // §5): idle per its hooks and its OSC 7501 status, bracketed paste on, nothing typed, no Enter due.
 // Never into a dialog or a half-typed prompt.
 @(private = "file")

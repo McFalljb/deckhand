@@ -1,4 +1,4 @@
-# Claude Code tabs, run 1 (tests/scripts/claude.sh; docs/CLAUDE.md): a fake claude
+# Claude Code tabs, run 1 (tests/scripts/claude.sh; docs/CLAUDE-TABS.md): a fake claude
 # (fake-claude.py) that runs the bundled plugin's hooks and its `deckhand` CLI as Claude Code would.
 # A browser page and the fake app beside it; the "+" menu's New Claude tab; its session id from the
 # SessionStart hook; the CLI against both tabs; the token refused outside the tab's processes; an

@@ -2516,7 +2516,7 @@ refresh_listing :: proc(s: ^Open_Session) {
 }
 
 // caller: who brings it up. An agent's (control) never starts restored Claude tabs: they would
-// run with the user's saved flags (docs/CLAUDE.md §3, §4); they stay not started until the user
+// run with the user's saved flags (docs/CLAUDE-TABS.md §3, §4); they stay not started until the user
 // (or Deckhand itself, or a test script) shows the session.
 focus_session :: proc(id: u64, caller: Caller) {
 	// a session made current is laid out again; until then its panes' rects come from its tree

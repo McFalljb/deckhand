@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude-only sessions in quiet test mode (docs/CLAUDE.md §1, §4): never a real claude. A fake
+# Claude-only sessions in quiet test mode (docs/CLAUDE-TABS.md §1, §4): never a real claude. A fake
 # claude (tests/scripts/fake-claude.py) runs the bundled plugin's hooks; a stand-in `claude` in
 # the fake HOME's ~/.local/bin makes Claude Code "installed" (claude-stub.sh; never run).
 #   1. claude-sessions-1.txt: + New session (the picker, Claude Code), its row (marked Claude) beside a pi session,

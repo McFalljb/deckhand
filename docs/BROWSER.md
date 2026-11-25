@@ -344,7 +344,7 @@ For a pi tab:
 3. **Send now** is `pi_prompt` with `images`.
 
 Claude tabs get the same block with the next message through the plugin's UserPromptSubmit hook
-([CLAUDE.md §6](CLAUDE.md#6-comments)), Codex tabs through Deckhand's hook for Codex
+([CLAUDE-TABS.md §6](CLAUDE-TABS.md#6-comments)), Codex tabs through Deckhand's hook for Codex
 ([CODEX.md §2a](CODEX.md#2a-comments)). Their **Send now** types only a fixed line ("Here are my
 comments.") and the hook adds the comments.
 
@@ -378,7 +378,7 @@ Code: `src/browser_agent.odin` (reads, reader `src/native/browser_read.js`) and
 
 - **pi tab:** the `browser` extension (`integrations/pi/extensions/browser`) sends `browser_*`
   commands over its bridge's connection.
-- **Claude tab:** the `deckhand` command (`deckhand read`, `deckhand click`…; [CLAUDE.md](CLAUDE.md)).
+- **Claude tab:** the `deckhand` command (`deckhand read`, `deckhand click`…; [CLAUDE-TABS.md](CLAUDE-TABS.md)).
 - **Codex tab:** the same commands as MCP tools (`browser_read`, `browser_click`…) from a per-run
   MCP server, with the tab's own token ([CODEX.md §7](CODEX.md#7-deckhands-tools-a-per-run-mcp-server)).
 - **Atlas:** the same `browser` extension, over the desk extension's control connection (it names

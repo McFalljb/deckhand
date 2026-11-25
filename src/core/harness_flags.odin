@@ -1,6 +1,6 @@
 package core
 
-// The user's flags for harness tabs (docs/GUIDE.md "Flags for a tab"; docs/CLAUDE.md §1,
+// The user's flags for harness tabs (docs/GUIDE.md "Flags for a tab"; docs/CLAUDE-TABS.md §1,
 // docs/CODEX.md §3):
 //
 //   - Per tab: new_claude_tab / new_claude_session / new_chat take `args` from the user (and

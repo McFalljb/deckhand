@@ -1,7 +1,7 @@
 package core
 
 // What Settings lists of Claude Code's plugins and user MCP servers, by name only (Settings →
-// Coding agents → Claude Code: Plugins, MCP servers (user); docs/CLAUDE.md §1c).
+// Coding agents → Claude Code: Plugins, MCP servers (user); docs/CLAUDE-TABS.md §1c).
 //
 // Both live where Settings shows no file: plugins are turned on and off in the account's
 // settings.json (`enabledPlugins`, the plugin id → true or false; the plugins themselves are in

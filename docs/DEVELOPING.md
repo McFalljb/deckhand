@@ -664,7 +664,7 @@ core/pty*.odin      the PTY: forkpty (macOS, Linux); ConPTY later
 core/persist.odin   workspace.json (PERSISTENCE.md)
 core/login_env.odin the login shell's environment (Launch environment, below)
 core/sessions.odin, titles.odin  pi's sessions and their titles
-core/claude*.odin   Claude Code tabs (CLAUDE.md); ../tools/deckhand-cli/ the CLI its plugin runs
+core/claude*.odin   Claude Code tabs (CLAUDE-TABS.md); ../tools/deckhand-cli/ the CLI its plugin runs
 core/codex.odin     Codex tabs: command line, per-run hooks and MCP server, version rule (CODEX.md)
 core/harness*.odin, ui_harness.odin  which coding agents are installed; the checklist's install and update
 core/pi_integration.odin  the bundled pi integration (HARNESSES.md)
@@ -743,7 +743,7 @@ and command code never calls sokol; what it needs from the window goes as `windo
 
 The core listens on `core.sock` in a per-user `0700` runtime dir and gives each pi tab
 `DECKHAND_SOCKET` and its own `DECKHAND_TOKEN` (caller `panel`); Claude and Codex tabs get
-tokens of their own, accepted only from the tab's processes ([CLAUDE.md](CLAUDE.md),
+tokens of their own, accepted only from the tab's processes ([CLAUDE-TABS.md](CLAUDE-TABS.md),
 [CODEX.md](CODEX.md)). The bridge of Deckhand's pi
 integration ([HARNESSES.md](HARNESSES.md)) reports `pi.session` and `pi.status`, publishes panels
 with `panel.set` and receives `pi.prompt`, `pi.reload` and `pi.wait_idle`. Atlas drives the app

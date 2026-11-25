@@ -1,7 +1,7 @@
 package main
 
 // Claude Code accounts and Claude sessions found on disk (claude_accounts.odin, claude_disk.odin;
-// docs/CLAUDE.md §1b, §4c). Every test runs in a fake HOME with fake config folders and fake
+// docs/CLAUDE-TABS.md §1b, §4c). Every test runs in a fake HOME with fake config folders and fake
 // transcripts: never the user's ~/.claude*, never a real claude (a shell line stands in for it).
 
 import "base:runtime"

@@ -25,7 +25,7 @@ package core
 // per OSC 7501, nothing typed or held, no subagent running; busy ones wait; a tab that never
 // reported its session id (no --resume possible) is left alone. Restarting stops what Claude
 // runs in the background (background shells, monitors), which Deckhand sees only as of Claude's
-// last turn (claude_panels.odin): the user always confirms, and the confirmation names them. Only the user's own restart replays the tab's saved flags (CLAUDE.md §3).
+// last turn (claude_panels.odin): the user always confirms, and the confirmation names them. Only the user's own restart replays the tab's saved flags (CLAUDE-TABS.md §3).
 //
 // Claude Code's version: `claude` is found as the tab's command finds it (the children's
 // PATH, ~/.local/bin, ~/.claude/local; DECKHAND_CLAUDE_BIN in tests; none while
@@ -578,7 +578,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		// always asked, by the user: Deckhand sees Claude's background work only as of its last turn
 		gr, go_on, ch := confirm_gate(cmd, .Session_Restart, caller, c.confirm, what, force_ask = caller.kind != .Internal)
 		if !go_on do return gr, ch
-		flags := asker.kind == .UI // the saved flags are the user's to replay, on the user's restart (CLAUDE.md §3)
+		flags := asker.kind == .UI // the saved flags are the user's to replay, on the user's restart (CLAUDE-TABS.md §3)
 		for t in now do restart_now(t, flags)
 		for t in later {
 			t.reload.queued, t.reload.flags, t.reload.all = .Restart, flags, c.all

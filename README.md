@@ -148,7 +148,7 @@ and protocol between releases.
 |---|---|
 | [GUIDE.md](docs/GUIDE.md) | The user guide: every feature, shortcut, setting, your data, troubleshooting. Also in the app (**Help › Deckhand user guide**). |
 | [HARNESSES.md](docs/HARNESSES.md) | How Deckhand runs pi, Claude Code and Codex, and what setup installs. |
-| [CLAUDE.md](docs/CLAUDE.md) | Claude Code tabs, the bundled plugin, accounts. |
+| [CLAUDE-TABS.md](docs/CLAUDE-TABS.md) | Claude Code tabs, the bundled plugin, accounts. |
 | [CODEX.md](docs/CODEX.md) | Codex tabs, the per-run tools, accounts, limits. |
 | [BROWSER.md](docs/BROWSER.md) | Browser tabs, comment mode and agent access. |
 | [ATLAS.md](docs/ATLAS.md) | Atlas, jobs and memory. |

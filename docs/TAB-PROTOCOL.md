@@ -93,7 +93,7 @@ in logical px) for Deckhand's Inspect overlay.
 
 | Tab | Display | Input | Control |
 |---|---|---|---|
-| terminal (pi, shell, Claude, Codex) | drawn by the window from its own libghostty-vt copy, fed by the core (PROTOCOL.md §5a) | encoded by the window, sent to the core, which writes it to the PTY | pi tabs: the bridge (PROTOCOL.md §4); Claude tabs: the plugin's hooks and `deckhand` CLI (CLAUDE.md); Codex tabs: hooks and a per-run MCP server (CODEX.md) |
+| terminal (pi, shell, Claude, Codex) | drawn by the window from its own libghostty-vt copy, fed by the core (PROTOCOL.md §5a) | encoded by the window, sent to the core, which writes it to the PTY | pi tabs: the bridge (PROTOCOL.md §4); Claude tabs: the plugin's hooks and `deckhand` CLI (CLAUDE-TABS.md); Codex tabs: hooks and a per-run MCP server (CODEX.md) |
 | markdown | drawn by Deckhand (own parser, `src/markdown.odin`) | Deckhand | Deckhand commands (open, scroll, find) |
 | game engine | texture, via a small Odin package linked into the engine | forwarded input events | the package implements `tab.*`: this **is** the engine bridge ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)): inspect/set state, pause/step, capture, inject input, hit test |
 | browser | CEF off-screen rendering into the texture | forwarded to CEF | Deckhand's `browser_*` commands over the Chrome DevTools Protocol (BROWSER.md); no `tab.*` adapter |

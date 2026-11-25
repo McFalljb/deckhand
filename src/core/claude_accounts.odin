@@ -1,6 +1,6 @@
 package core
 
-// Claude Code accounts (docs/CLAUDE.md §1b). An account in Deckhand is a Claude Code config folder:
+// Claude Code accounts (docs/CLAUDE-TABS.md §1b). An account in Deckhand is a Claude Code config folder:
 // what CLAUDE_CONFIG_DIR names (its sign-in, settings, transcripts). Sign-ins that come from the
 // environment (ANTHROPIC_API_KEY, apiKeyHelper, Bedrock, Vertex) are untouched: claude inherits
 // the login environment as before, and Deckhand never stores a secret.

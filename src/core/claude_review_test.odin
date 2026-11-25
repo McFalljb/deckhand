@@ -1,6 +1,6 @@
 package core
 
-// Claude sessions, review round 1 (claude.odin; docs/CLAUDE.md §1, §3, §4): a Claude tab cannot
+// Claude sessions, review round 1 (claude.odin; docs/CLAUDE-TABS.md §1, §3, §4): a Claude tab cannot
 // take a pi session's id; a dead Claude-only session resumes in place; agents never start restored
 // Claude tabs (the user's saved flags); the history is checked on load. (Claude in chats:
 // claude_chats_test.odin.)

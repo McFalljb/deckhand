@@ -1,6 +1,6 @@
 package core
 
-// Claude Code sessions started outside Deckhand, as rows (docs/CLAUDE.md §4c). For the selected
+// Claude Code sessions started outside Deckhand, as rows (docs/CLAUDE-TABS.md §4c). For the selected
 // project (and Chats), each account's <config>/projects/<folder>/<session id>.jsonl, where
 // <folder> is Claude Code's name for the project's folder (claude_project_slug: computed from
 // the project's path and its real path, never turned back into a path). When that name is not

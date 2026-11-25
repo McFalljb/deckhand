@@ -1,6 +1,6 @@
 package main
 
-// Claude-only sessions and Claude rows in the left column (claude.odin, sidebar.odin; docs/CLAUDE.md
+// Claude-only sessions and Claude rows in the left column (claude.odin, sidebar.odin; docs/CLAUDE-TABS.md
 // §1, §4), and Deckhand without Claude Code installed. Same rules as core_test.odin: shared global
 // State, one thread, harmless processes (`sleep` or a shell line standing in for claude).
 

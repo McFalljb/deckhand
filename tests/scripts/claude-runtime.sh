@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code runtime operations in quiet test mode (docs/CLAUDE.md §4a): never a real claude, never
+# Claude Code runtime operations in quiet test mode (docs/CLAUDE-TABS.md §4a): never a real claude, never
 # the user's ~/.claude. A fake HOME with a fake Claude config folder (~/.claude: settings.json,
 # CLAUDE.md, a credentials file and a transcript that must never show), a fake `claude` install
 # (~/.local/bin/claude -> versions/2.1.300, DECKHAND_CLAUDE_BIN; never run), the fake claude

@@ -40,7 +40,7 @@ Tab_Kind :: union {
 	Markdown_Tab, // a .md file drawn as a document (markdown_view.odin); its source is a read-only editor in `editors`
 	Browser_Tab, // a web page (browser.odin; CEF, docs/BROWSER.md)
 	App_Tab, // a program rendering into the tab (app_tab.odin; docs/ENGINE-BRIDGE.md)
-	Claude_Tab, // Claude Code in a terminal, with Deckhand's plugin (claude.odin; docs/CLAUDE.md)
+	Claude_Tab, // Claude Code in a terminal, with Deckhand's plugin (claude.odin; docs/CLAUDE-TABS.md)
 }
 
 Tab_Status :: enum {

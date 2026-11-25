@@ -24,7 +24,7 @@ definitions in Claude's context):
   turn starts, ends or waits for the user (Deckhand types into the tab only when Claude is idle and
   nothing is typed), and UserPromptSubmit hands Claude the user's pending comments with the
   message. Async hooks (todos, tasks, subagents, background shells, model switches) feed the
-  right column's panels and print nothing. The full list: [docs/CLAUDE.md](../../docs/CLAUDE.md) §2.
+  right column's panels and print nothing. The full list: [docs/CLAUDE-TABS.md](../../docs/CLAUDE-TABS.md) §2.
 
 All rules (own session only, no JavaScript, refused password/card/one-time-code fields, the
 user's Allow for uploads and downloads, Take over, Stop) are enforced by Deckhand, not here. See

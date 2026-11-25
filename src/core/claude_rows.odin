@@ -1,6 +1,6 @@
 package core
 
-// Claude rows and tabs at parity with pi's (docs/CLAUDE.md §4b): the history entry's transcript
+// Claude rows and tabs at parity with pi's (docs/CLAUDE-TABS.md §4b): the history entry's transcript
 // path and model (SessionStart), the model's switches (PostModelSwitch: claude.model), the row's
 // session info, Reveal and Copy path, the question and error dots (Stop, StopFailure), and the
 // user's rename pushed to Claude Code as its session title.

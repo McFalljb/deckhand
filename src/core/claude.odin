@@ -1,6 +1,6 @@
 package core
 
-// Claude Code tabs (docs/CLAUDE.md): `claude` in a terminal tab of an open session, started
+// Claude Code tabs (docs/CLAUDE-TABS.md): `claude` in a terminal tab of an open session, started
 // with Deckhand's own plugin (`--plugin-dir`, integrations/claude-code/, copied into the app
 // bundle) and nothing installed in the user's Claude Code config.
 //

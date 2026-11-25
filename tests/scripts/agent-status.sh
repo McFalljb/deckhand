@@ -18,7 +18,7 @@ SCRIPT=${1:-tests/scripts/agent-status.txt}
 W="$ROOT/build/agent-status"
 rm -rf "$W"
 FAKE_HOME="$W/home"
-claude_stub "$FAKE_HOME" # Claude Code "installed": the menus read as with it (docs/CLAUDE.md §1)
+claude_stub "$FAKE_HOME" # Claude Code "installed": the menus read as with it (docs/CLAUDE-TABS.md §1)
 PROJ="$FAKE_HOME/code/recipe-box"
 DIR="$FAKE_HOME/.pi/agent/sessions/--status--"
 mkdir -p "$PROJ" "$DIR" "$W/data"

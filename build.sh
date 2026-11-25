@@ -223,7 +223,7 @@ check_link_minos() { # odin build args (package and defines)
   if [ $# = 0 ]; then echo "check-minos: found no link inputs"; exit 1; fi
   scripts/check-minos.sh $MACOS_MIN "$@"
 }
-# Claude Code tabs (src/core/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
+# Claude Code tabs (src/core/claude.odin, docs/CLAUDE-TABS.md): the deckhand CLI the plugin's bin/deckhand
 # (and its alias bin/pi-desk) runs (tools/deckhand-cli; from src/ only src/jsonguard, which imports only core), and the plugin itself next to the binary
 # (build/claude-code; bundle-app.sh copies both into the app)
 build_claude() {

@@ -895,6 +895,9 @@ body:has(.files-pick:not(.files-clip)) .toasts { bottom: calc(132px + env(safe-a
 .code-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .code-paint { margin: 0; padding: 8px 12px; font: inherit; line-height: inherit; white-space: pre; tab-size: 4; color: var(--syn-plain); will-change: transform; }
 .code-line { height: 18px; }
+/* a phone: 16 px text, or iOS zooms the page into the editor (phone.ts codeMetrics) */
+.code-edit.phone { font-size: 16px; line-height: 22px; }
+.code-edit.phone .code-line { height: 22px; }
 .code-text.painted { position: relative; color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); }
 .code-text.painted::selection { background: var(--selection); }
 .sy-comment { color: var(--syn-comment); }

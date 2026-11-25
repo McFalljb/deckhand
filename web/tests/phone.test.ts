@@ -232,3 +232,9 @@ test("Atlas's button: shown once Atlas has a session, or before its first start 
   assert.equal(atlasShown(0, { atlas: false } as any), false, "no pi: no button");
   assert.equal(atlasShown(0, null), false);
 });
+
+test("file editing on a phone: the editor's text is 16 px (iOS zooms the page into a field under 16 px) with its own line height", async () => {
+  const { codeMetrics } = await import("../src/app/phone.ts");
+  assert.deepEqual(codeMetrics(true), { cls: "code-edit phone", lineH: 22 });
+  assert.deepEqual(codeMetrics(false), { cls: "code-edit", lineH: 18 });
+});

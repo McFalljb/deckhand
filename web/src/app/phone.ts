@@ -177,3 +177,10 @@ export function sessionPanels(tabs: Tab[], panelsOf: (tabId: number) => Panel[])
 export function panelView(p: Panel): { head: string; rows: Panel["rows"] } {
   return p.rows[0]?.head ? { head: p.rows[0].text, rows: p.rows.slice(1) } : { head: p.title, rows: p.rows };
 }
+
+// ---- file editing ----
+// The file editor (Code.tsx CodeEdit) on a phone: 16 px text (iOS and Chrome on iOS zoom the page
+// into a field whose text is smaller, and stay zoomed), so a taller line (.code-edit.phone).
+export function codeMetrics(phone: boolean): { cls: string; lineH: number } {
+  return phone ? { cls: "code-edit phone", lineH: 22 } : { cls: "code-edit", lineH: 18 };
+}

@@ -16,7 +16,7 @@ import { newTabItems } from "./Panes.tsx";
 import { setTermFont, termFontSize } from "./Term.tsx";
 import { openJobSheet } from "./JobSheet.tsx";
 import { toggleAtlas } from "./Bars.tsx";
-import { paletteShows } from "./phone.ts";
+import { paletteShows, atlasShown } from "./phone.ts";
 
 export interface Action {
   id: string;
@@ -83,7 +83,7 @@ export const ACTIONS: Action[] = [
     id: "toggle_agent",
     label: (app) => `Toggle ${app.store.settings.agent_name || "Atlas"}`,
     keys: { k: "j" },
-    when: (app) => !!app.store.homeSession,
+    when: (app) => atlasShown(app.store.homeSession, app.store.web),
     run: (app) => toggleAtlas(app),
   },
   { id: "notifications", label: "Notifications", run: (app) => app.setOverlay({ bell: true, palette: false }) },

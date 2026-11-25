@@ -15,7 +15,8 @@ package core
 //                 attention [{session, group, tab}], deck [same], filtered (waiting rows the
 //                 filter hides), here {name, label}, watch [project ids], new [{machine,
 //                 projects, chats, claude_tab, codex_tab, note}]: the New session picker's harnesses (web_view_new_choices),
-//                 filter {text, running, waiting, pinned}: the browser's own (web_filters)}
+//                 filter {text, running, waiting, pinned}: the browser's own (web_filters), atlas: Atlas is
+//                 offered (atlas_offered: its button shows before its first start)}
 //   webo:<id>     an open session's row: {title, place, chat, at (Unix ns, 0 = new)}
 //   webm          [{no, open [ids], projects [{id, depth, name}]}]: each other machine
 //   webtree       the Projects tree in order: [[key, depth, kids, forced] or key (0, 0, 0)]; key = a project's
@@ -298,6 +299,7 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 	}
 	strings.write_string(&b, `],"new":`)
 	web_view_new_choices(&b)
+	fmt.sbprintf(&b, `,"atlas":%v`, atlas_offered()) // Atlas's button before its first start (pi: web_view_new_key)
 	strings.write_string(&b, `,"filter":{"text":`)
 	json_quote(&b, wf.text)
 	fmt.sbprintf(&b, `,"running":%v,"waiting":%v,"pinned":%v}}`, wf.running, wf.waiting, wf.pinned)

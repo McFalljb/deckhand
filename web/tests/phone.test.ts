@@ -224,3 +224,11 @@ test("select text: over a terminal the session menu has Select text (the scrollb
   const none = { menu: null, sheet: null, palette: false, bell: false, link: null, copy: null, job: null, peek: null, atlas: false, panels: null, select: null } as any;
   assert.equal(covering({ ...none, select: "text" }, false), true);
 });
+
+test("Atlas's button: shown once Atlas has a session, or before its first start when the core offers it (pi installed)", async () => {
+  const { atlasShown } = await import("../src/app/phone.ts");
+  assert.equal(atlasShown(7, null), true, "a Home session");
+  assert.equal(atlasShown(0, { atlas: true } as any), true, "never started: Start Atlas starts it");
+  assert.equal(atlasShown(0, { atlas: false } as any), false, "no pi: no button");
+  assert.equal(atlasShown(0, null), false);
+});

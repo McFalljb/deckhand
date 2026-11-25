@@ -20,7 +20,7 @@ import { agentName, toggleAtlas } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { TabBars } from "./TabBars.tsx";
 import { modeBadge } from "./harness.ts";
-import { ATLAS_START, atlasNeedsStart, composeSend, drawerShown, panelView, phoneSessionItems, sessionPanels } from "./phone.ts";
+import { ATLAS_START, atlasNeedsStart, atlasShown, composeSend, drawerShown, panelView, phoneSessionItems, sessionPanels } from "./phone.ts";
 
 const enc = new TextEncoder();
 const SELECT_ROWS = 5000; // Select text: the last rows of the scrollback and the screen
@@ -38,7 +38,7 @@ export function PhoneHome() {
         <IconButton icon="search" label="Search or run a command" run={() => app.setOverlay({ palette: true })} />
         <IconButton icon="bell" label="Notifications" badge={unreadCount(app)} run={() => app.setOverlay({ bell: true })} />
         <IconButton icon="sliders" label="Settings" run={() => app.go({ screen: "settings" })} />
-        {app.store.homeSession ? (
+        {atlasShown(app.store.homeSession, app.store.web) ? (
           <button type="button" class="agent-btn" aria-label={agentName(app)} onClick={() => toggleAtlas(app)}>
             <span class="agent-avatar">{agentName(app)[0]}</span>
           </button>

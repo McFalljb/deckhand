@@ -1,6 +1,6 @@
 // The phone's choices that need no DOM (Phone.tsx, Palette.tsx, Files.tsx use them; tests too).
 
-import { tabKind, isTerminalTab, type Panel, type Tab } from "../state.ts";
+import { tabKind, isTerminalTab, type Panel, type Tab, type WebView } from "../state.ts";
 import type { MenuItem, Overlay } from "./ctx.ts";
 
 // ---- typing ----
@@ -147,6 +147,11 @@ export function atlasToggle(phone: boolean, localOpen: boolean, homeOpen: boolea
 // Atlas's pi is not running yet (never started, or restored and not started): a phone shows Start
 // Atlas, which sends ATLAS_START.
 export const atlasNeedsStart = (status: string | undefined): boolean => !status || status === "not_started";
+
+// Atlas's button (the phone's home bar, the desktop's top bar, the palette): once Atlas has a
+// session, or before its first start when the core offers it ("web".atlas: pi installed). With no
+// session yet the phone's Atlas screen shows Start Atlas, and the desktop's set_home makes it.
+export const atlasShown = (homeSession: number, web: WebView | null): boolean => !!homeSession || !!web?.atlas;
 
 // Start Atlas on a phone: the core's start_home starts Atlas's pi and leaves the Mac's drawer and
 // keyboard as they are (set_home would open the drawer at the Mac and take its keyboard).

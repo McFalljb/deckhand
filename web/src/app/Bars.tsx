@@ -9,7 +9,7 @@ import { newTabItems } from "./Panes.tsx";
 import { TermPane } from "./Term.tsx";
 import { unreadCount } from "./Bell.tsx";
 import type { Panel } from "../state.ts";
-import { atlasToggle, panelView, sessionPanels } from "./phone.ts";
+import { atlasShown, atlasToggle, panelView, sessionPanels } from "./phone.ts";
 
 export function agentName(app: ReturnType<typeof useApp>): string {
   return String(app.store.settings.agent_name || "Atlas");
@@ -69,7 +69,7 @@ export function TopBar() {
       ) : null}
       <IconButton icon="bell" label="Notifications" badge={unread} run={() => app.setOverlay({ bell: !app.overlay.bell })} />
       <IconButton icon="sidebar-right" label={`Right panels (${keysLabel({ k: "b", alt: true })})`} run={() => app.run({ type: "set_layout", right_open: !store.layout.right_open })} />
-      {store.homeSession ? (
+      {atlasShown(store.homeSession, store.web) ? (
         <button type="button" class={"agent-btn" + (store.homeOpen ? " on" : "")} onClick={() => toggleAtlas(app)} title={`${name} (${keysLabel({ k: "j" })})`}>
           <span class="agent-avatar">{name[0]?.toUpperCase()}</span>
           {name}

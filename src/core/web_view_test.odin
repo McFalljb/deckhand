@@ -254,3 +254,27 @@ web_view_own_filter :: proc(t: ^testing.T) {
 	testing.expect(t, run_command(Set_Filter{show_hidden = true}, BROWSER).ok)
 	testing.expect(t, state.sidebar.show_hidden)
 }
+
+// Atlas's button in a browser before Atlas's first start (#196): "web".atlas is atlas_offered (pi
+// installed, or Atlas open or running), so a phone can start it (start_home) with no Home yet.
+@(test)
+web_view_atlas_offered :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	defer harness_installed_probe[.Pi] = nil
+	atlas :: proc() -> string {
+		secs := state_sections(&state)
+		for x in web_view_cached(secs[:]) do if x[0] == "web" {
+			v, _ := json.parse_string(x[1], allocator = context.temp_allocator)
+			b, ok := v.(json.Object)["atlas"].(json.Boolean)
+			return ok ? fmt.tprintf("%v", b) : "missing"
+		}
+		return "no web section"
+	}
+	harness_installed_probe[.Pi] = proc() -> bool {return true}
+	testing.expect_value(t, atlas(), "true")
+	harness_installed_probe[.Pi] = proc() -> bool {return false}
+	testing.expect_value(t, atlas(), "false")
+}

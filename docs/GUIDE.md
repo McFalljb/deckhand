@@ -2488,8 +2488,8 @@ in a sheet, kept up to date; folding one there doesn't fold it at the Mac. A lon
 path into the tab as a drop on it does at the Mac (never Enter; a name with a control character
 is refused). **Atlas** (its button on the home screen, or the palette) opens full screen under its
 own bar, typed into like a session. It is the phone's own: opening or closing it never opens or
-closes Atlas's drawer at the Mac. When Atlas isn't running, **Start Atlas** starts it, without
-opening it at the Mac or taking the Mac's keyboard. The filter box and its chips (Running,
+closes Atlas's drawer at the Mac. When Atlas isn't running (or has never run, with pi
+installed), **Start Atlas** starts it, without opening it at the Mac or taking the Mac's keyboard. The filter box and its chips (Running,
 Waiting, Pinned) are the phone's own: they never change the Mac's left column, nor another
 browser's. The palette leaves out what would only change the Mac's window: split panes, the
 columns, dim panes, Show changes, Show hidden and the left column's sorts.

@@ -162,8 +162,12 @@ async function openSide(app: App, path: string) {
 // as a drop on it does at the desktop; a phone goes back from Files to that tab. null: none to type into.
 function insertItem(app: App, path: string): MenuItem | null {
   const s = app.store.session(shownSession(app));
-  const cmd = s ? insertPath(app.store.tabs(s.id), app.phone ? wished(`ptab:${s.id}`, s.active_tab) : s.active_tab, path) : null;
-  return cmd ? { label: "Insert path", run: () => app.run(cmd).then((r) => r.ok && opened()) } : null;
+  const ins = s ? insertPath(app.store.tabs(s.id), app.phone ? wished(`ptab:${s.id}`, s.active_tab) : s.active_tab, path) : null;
+  if (!ins) return null;
+  return {
+    label: "Insert path",
+    run: () => ("error" in ins ? app.toast(`Not inserted: ${ins.error}`, true) : app.run(ins.cmd).then((r) => r.ok && opened())),
+  };
 }
 
 function copyText(app: App, text: string) {

@@ -20,7 +20,7 @@ import { agentName, toggleAtlas } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { TabBars } from "./TabBars.tsx";
 import { modeBadge } from "./harness.ts";
-import { composeSend, drawerShown, phoneSessionItems } from "./phone.ts";
+import { atlasNeedsStart, composeSend, drawerShown, phoneSessionItems } from "./phone.ts";
 
 const enc = new TextEncoder();
 
@@ -201,11 +201,12 @@ function PhoneTerminal(props: { tab: Tab; term: { current: TermHandle | null }; 
   const send = () => {
     const f = field.current;
     if (!f) return;
-    const plan = composeSend(f.value);
+    const plan = composeSend(f.value, !!term.current?.stream.attached);
+    if ("keep" in plan) return void app.toast(plan.error, true);
     f.value = "";
     setMods({ ctrl: false, alt: false });
-    if (plan.close) props.setCompose?.(false);
-    if (!term.current?.stream.attached) return;
+    props.setCompose?.(false);
+    if (!term.current) return;
     if (plan.paste) {
       term.current.view.paste(plan.paste); // bracketed when the program asked; out through onInput
       window.setTimeout(() => input(enc.encode("\r")), 30); // Enter after the paste, apart
@@ -316,7 +317,19 @@ function PhoneAtlas() {
           <div class="bar-title">{name}</div>
         </div>
       </header>
-      {tab ? <PhoneTerminal tab={tab} term={term} inDrawer /> : <p class="empty">Starting {name}…</p>}
+      {tab && !atlasNeedsStart(tab.status) ? (
+        <PhoneTerminal tab={tab} term={term} inDrawer />
+      ) : (
+        // only set_home starts Atlas's pi, and it opens Atlas's drawer at the Mac too: the user's
+        // choice, said on the button (opening and closing here never touch the Mac's drawer)
+        <div class="empty atlas-start">
+          <p>{name} isn't running.</p>
+          <button type="button" class="btn primary" onClick={() => app.run({ type: "set_home", open: true })}>
+            Start {name}
+          </button>
+          <p class="muted small">This also opens {name} at the Mac.</p>
+        </div>
+      )}
     </aside>
   );
 }

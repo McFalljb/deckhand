@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { createTerm, type Fit, type TermView } from "../term.ts";
 import { TermStream } from "../termstream.ts";
-import { reopenAfterClose } from "../state.ts";
+import { ReopenGuard } from "../state.ts";
 import { useApp } from "./ctx.ts";
 import { covering, drawerShown } from "./phone.ts";
 import { storageGet, storageSet } from "../ui/dom.ts";
@@ -143,19 +143,20 @@ export function TermPane(props: {
     };
   }, []);
 
-  // the tab's process ran again (Restart) after the core closed its stream: the new terminal, once
-  // (reopenAfterClose); the status change and the close can come in either order
+  // the tab's process ran again (Restart) after the core closed its stream: the new terminal
+  // (ReopenGuard: bounded, and never stuck); the status change and the close come in either order
   const status = app.store.tab(props.tabId)?.tab.status;
   const latestStatus = useRef(status);
   latestStatus.current = status;
   const reopen = () => {
     const t = h.current;
     if (!t || t.stream.attached || t.stream.tabId !== latest.current.tabId || !app.link.up) return;
-    if (!reopenAfterClose({ status: latestStatus.current, attachable: latest.current.attachable, retried: t.reopened })) return;
-    t.reopened = true;
-    t.stream.reattach();
+    if (t.guard.want(latestStatus.current, latest.current.attachable)) t.stream.reattach();
   };
-  useEffect(() => reopen(), [status]);
+  useEffect(() => {
+    h.current?.guard.status(status);
+    reopen();
+  }, [status]);
 
   // the tab it shows; again after the link came back (a fresh channel and snapshot)
   const linkUp = app.link.up;
@@ -232,7 +233,7 @@ interface Held extends TermHandle {
   note: string;
   onNote: (s: string) => void;
   onClosed: () => void; // the core closed the stream (the process went)
-  reopened: boolean; // attached again after a close (reset by the next attach)
+  guard: ReopenGuard; // attaching again after a close
   input: (b: Uint8Array) => void;
   plain: (b: Uint8Array) => void;
   armed: () => boolean;
@@ -248,7 +249,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   el.className = "term-fill";
   const view = createTerm({ light: document.documentElement.dataset.light === "1", fontSize: termFontSize(phone) });
   const stream = new TermStream(app.link, view);
-  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, onClosed: () => {}, reopened: false, input: () => {}, plain: () => {}, armed: () => false, disarm: () => {} };
+  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, onClosed: () => {}, guard: new ReopenGuard(), input: () => {}, plain: () => {}, armed: () => false, disarm: () => {} };
   view.onInput((b) => held.input(b));
   view.onPlainInput((b) => held.plain(b));
   view.onArmed(() => held.armed());
@@ -258,7 +259,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   stream.events((e) => {
     held.note = e.kind === "error" ? "No terminal for this tab yet." : e.kind === "closed" ? "This tab's terminal closed." : "";
     held.onNote(held.note);
-    if (e.kind === "attached") held.reopened = false;
+    if (e.kind === "live") held.guard.live();
     if (e.kind === "closed") held.onClosed();
   });
   allViews.add(held);

@@ -9,27 +9,18 @@ import { newTabItems } from "./Panes.tsx";
 import { TermPane } from "./Term.tsx";
 import { unreadCount } from "./Bell.tsx";
 import type { Panel } from "../state.ts";
+import { atlasToggle } from "./phone.ts";
 
 export function agentName(app: ReturnType<typeof useApp>): string {
   return String(app.store.settings.agent_name || "Atlas");
 }
 
-// Atlas's drawer shown or hidden. The desktop follows the core's home_open (the Mac window's too);
-// a phone has its own (phone.ts drawerShown): opening it still starts Atlas (set_home), and closing
-// it shuts the core's drawer only when this phone was the one that opened it.
-let phoneOpened = false;
+// Atlas's drawer shown or hidden (phone.ts atlasToggle): the desktop follows the core's home_open;
+// a phone opens and closes its own and never the Mac's drawer.
 export function toggleAtlas(app: ReturnType<typeof useApp>): void {
-  const homeOpen = !!app.store.homeOpen;
-  if (!app.phone) return void app.run({ type: "set_home", open: !homeOpen });
-  if (app.overlay.atlas) {
-    app.setOverlay({ atlas: false });
-    if (phoneOpened && homeOpen) app.run({ type: "set_home", open: false });
-    phoneOpened = false;
-    return;
-  }
-  phoneOpened = !homeOpen;
-  if (!homeOpen) app.run({ type: "set_home", open: true });
-  app.setOverlay({ atlas: true });
+  const t = atlasToggle(app.phone, !!app.overlay.atlas, !!app.store.homeOpen);
+  if (t.cmd) app.run(t.cmd);
+  if (app.phone) app.setOverlay({ atlas: t.atlas });
 }
 
 export function TopBar() {

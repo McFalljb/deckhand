@@ -70,7 +70,8 @@ export const ACTIONS: Action[] = [
     when: (app) => !!app.store.selectedProject,
     run: (app) => newSession(app, app.store.selectedProject),
   },
-  { id: "new_shell_tab", label: "New shell tab", keys: { k: "t", alt: true }, when: (app) => !!cur(app), run: (app) => app.run({ type: "new_shell_tab", session: cur(app)!.id, pane: panes(app)?.focused_pane || undefined }) },
+  // a phone names no pane (the Mac's focused pane is not the phone's to pick)
+  { id: "new_shell_tab", label: "New shell tab", keys: { k: "t", alt: true }, when: (app) => !!cur(app), run: (app) => app.run({ type: "new_shell_tab", session: cur(app)!.id, pane: (!app.phone && panes(app)?.focused_pane) || undefined }) },
   // while that harness is there (harness.ts); the account is the core's pick, as the native palette's
   { id: "new_claude_tab", label: "New Claude tab", when: (app) => !!cur(app) && newTabChoices(app.store, cur(app)!.machine, { session: cur(app)!.id }, false, "").length > 0, run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id }) },
   { id: "new_codex_tab", label: "New Codex tab", when: (app) => !!cur(app) && newTabChoices(app.store, cur(app)!.machine, { session: cur(app)!.id }, true, "").length > 0, run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id, harness: "codex" }) },
@@ -162,7 +163,8 @@ export const ACTIONS: Action[] = [
     run: (app) => app.run({ type: "set_unread", tab_id: curTab(app)!.id, unread: true }),
   },
   { id: "mark_all_read", label: "Mark all sessions as read", run: (app) => app.run({ type: "mark_all_read" }) },
-  { id: "show_deck", label: "Show the Deck", run: (app) => app.run({ type: "show_no_session" }).then(() => app.go({ screen: "deck" })) },
+  // a phone's Deck is its own screen: the Mac's session stays on screen there
+  { id: "show_deck", label: "Show the Deck", run: (app) => (app.phone ? app.go({ screen: "deck" }) : app.run({ type: "show_no_session" }).then(() => app.go({ screen: "deck" }))) },
   { id: "unpair", label: "Unpair this browser", run: (app) => app.unpair() },
 ];
 
@@ -171,7 +173,7 @@ export function actionLabel(a: Action, app: App): string {
 }
 
 export function focusFilter(app: App) {
-  if (app.store.layout.left_tab !== "sessions") app.run({ type: "set_left_tab", tab: "sessions" });
+  if (app.store.layout.left_tab !== "sessions" && !app.phone) app.run({ type: "set_left_tab", tab: "sessions" });
   if (!app.store.layout.left_open && !app.phone) app.run({ type: "set_layout", left_open: true });
   app.go({ screen: "home" });
   window.setTimeout(() => (document.getElementById("sidebar-filter") as HTMLInputElement | null)?.focus(), 60);

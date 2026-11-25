@@ -2478,10 +2478,13 @@ mouse wheel would: its scrollback, or inside a full-screen program (less, an age
 sends there. A tab whose program exited shows **Restart** (an agent's) and **Close** (any but
 pi's), as at the Mac. A long press on a Deck card peeks at that session; on a row of the Files view
 (the folder button) it opens that row's menu as a sheet, where **Insert path** types that file's
-quoted path into the tab (never Enter). **Atlas** (its button on the home screen, or the palette)
-opens full screen under its own bar, typed into like a session; it is the phone's own: Atlas's
-drawer open at the Mac does not cover the phone. The palette leaves out what only rearranges the
-Mac's window (split panes, the columns, dim panes).
+path into the tab as a drop on it does at the Mac (never Enter; a name with a control character
+is refused). **Atlas** (its button on the home screen, or the palette) opens full screen under its
+own bar, typed into like a session. It is the phone's own: opening or closing it never opens or
+closes Atlas's drawer at the Mac. When Atlas isn't running, **Start Atlas** starts it, and that
+opens it at the Mac too. The palette leaves out what would only change the Mac's window: split
+panes, the columns, dim panes, Show changes, and the left column's filters and sorts (the phone's
+list has its own filter box).
 
 ### From a terminal (Linux)
 

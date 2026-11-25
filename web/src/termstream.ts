@@ -20,7 +20,7 @@ const CREDIT_BATCH = 32 * 1024;
 const CREDIT_DELAY = 25; // ms: small credits go together
 const FIT_DELAY = 150; // ms: a keyboard sliding in resizes once, not every frame
 
-export type StreamEvent = { kind: "attached" } | { kind: "error"; text: string } | { kind: "closed" };
+export type StreamEvent = { kind: "attached" } | { kind: "live" } | { kind: "error"; text: string } | { kind: "closed" };
 
 export class TermStream {
   tabId = 0;
@@ -33,6 +33,7 @@ export class TermStream {
   private sentFit: Fit | null = null;
   private fitRetries = 0;
   private serial = 0; // the link's socket the channel is on (link.ts)
+  private live = false; // bytes came on this channel
   private onEvent: (e: StreamEvent) => void = () => {};
   private off: (() => void)[];
 
@@ -150,6 +151,7 @@ export class TermStream {
     }
     this.channel = Number(m.channel) || 0;
     if (!this.channel) return;
+    this.live = false;
     this.serial = this.link.serial;
     this.link.onChannel(this.channel, (f) => this.onFrame(f));
     this.focus(true);
@@ -158,6 +160,11 @@ export class TermStream {
   }
 
   private onFrame(f: Frame): void {
+    // the first bytes of this channel (a snapshot or output): the stream works (Term.tsx's reopen)
+    if (!this.live && (f.kind === Kind.Snapshot || f.kind === Kind.Data)) {
+      this.live = true;
+      this.onEvent({ kind: "live" });
+    }
     switch (f.kind) {
       case Kind.Snapshot: {
         const s = decodeSnapshot(f.payload);

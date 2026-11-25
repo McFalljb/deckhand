@@ -1,7 +1,6 @@
 // The phone's choices that need no DOM (Phone.tsx, Palette.tsx, Files.tsx use them; tests too).
 
 import { tabKind, isTerminalTab, type Tab } from "../state.ts";
-import { shellQuote } from "./filetree.ts";
 import type { MenuItem, Overlay } from "./ctx.ts";
 
 // ---- typing ----
@@ -11,16 +10,29 @@ import type { MenuItem, Overlay } from "./ctx.ts";
 // terminal never took the keyboard again: that saved choice is dropped once, and never written.
 export const OLD_TYPING_KEY = "deckhand.phoneTyping";
 
-// True when this browser was left in the old text-box mode (it now types straight in again).
-export function forgetTypingMode(store: { get(k: string): string | null; remove(k: string): void }): boolean {
-  const was = store.get(OLD_TYPING_KEY);
-  if (was !== null) store.remove(OLD_TYPING_KEY);
-  return was === "field";
+// True when this browser was left in the old text-box mode and is now switched back (the caller
+// says so once). At most once per page load; a storage that throws, or keeps the key after the
+// remove (removeItem failing quietly), counts as done: no toast on every load.
+const pageOnce = { done: false };
+export function forgetTypingMode(store: { get(k: string): string | null; remove(k: string): void }, once = pageOnce): boolean {
+  if (once.done) return false;
+  once.done = true;
+  try {
+    const was = store.get(OLD_TYPING_KEY);
+    if (was === null) return false;
+    store.remove(OLD_TYPING_KEY);
+    return was === "field" && store.get(OLD_TYPING_KEY) === null;
+  } catch {
+    return false;
+  }
 }
 
 // The compose box's Send: its text goes once as a paste (bracketed when the program asked), then
-// Enter apart; an empty box sends Enter alone. The box closes after either.
-export function composeSend(text: string): { paste: string | null; enter: true; close: true } {
+// Enter apart; an empty box sends Enter alone. The box closes after either. While the terminal is
+// not attached (a reconnect, a tab starting) nothing goes: the box stays open with its text.
+export type ComposePlan = { paste: string | null; enter: true; close: true } | { keep: true; error: string };
+export function composeSend(text: string, attached: boolean): ComposePlan {
+  if (!attached) return { keep: true, error: "Not sent: this tab's terminal is not connected. Your text is still in the box." };
   return { paste: text ? text : null, enter: true, close: true };
 }
 
@@ -62,8 +74,9 @@ export function exitBar(tab: Tab): { text: string; restart: string; close: boole
 }
 
 // ---- the palette ----
-// Entries that change the desktop window's layout: on a phone (one tab at a time, no columns) they
-// would only rearrange the Mac's window or a desktop browser's, unseen from here.
+// Entries that change the desktop window's layout or view: on a phone (one tab at a time, no
+// columns) they would only rearrange the Mac's window or a desktop browser's, unseen from here.
+// Show the Deck, Show jobs, Filter and New shell tab stay, phone-local there (Palette.tsx).
 const DESKTOP_ONLY = new Set([
   "toggle_left",
   "toggle_right",
@@ -77,17 +90,39 @@ const DESKTOP_ONLY = new Set([
   "focus_pane_up",
   "focus_pane_down",
   "dim_panes",
+  // a Changes tab placed in the Mac's panes; the left column's filters and sorts (the Mac's
+  // sidebar: the phone's own list has its filter box and chips)
+  "show_changes",
+  "clear_filter",
+  "quick_running",
+  "quick_waiting",
+  "quick_pinned",
+  "show_hidden",
+  "sort_projects",
+  "sort_sessions",
+  "sort_chats",
 ]);
 export const paletteShows = (id: string, phone: boolean): boolean => !(phone && DESKTOP_ONLY.has(id));
 
 // ---- Insert path ----
-// A file's path typed into the session's terminal: the tab on screen (the focused pane's), quoted
-// as the window's tree pastes it on a drop (filetree.ts shellQuote), no newline: it never runs.
+// A file's path typed into the session's terminal on screen (the focused pane's), by the Mac's drop
+// rule (src/core/files_drops.odin pane_drop_text): a shell's path shell-quoted; an agent's prompt's
+// plain, quoted only when it must be (a space or a quote, or a word starting / ! $ @, which an
+// empty prompt may read as a command or a picker); a space after it, never Enter. Marked
+// generated, as the Mac's drop: the core then applies a Codex composer's rule (no picker, not
+// while it waits). A name with a control character (C0, DEL, C1) is refused: never typed.
 // null: that tab is not a running terminal.
-export function insertPath(tabs: Tab[], active: number, path: string): { type: "send_text"; tab_id: number; text: string } | null {
+export type InsertPath = { cmd: { type: "send_text"; tab_id: number; text: string; generated: true } } | { error: string };
+const CONTROL = /[\x00-\x1f\x7f-\x9f]/;
+const MUST_QUOTE = /[ \t'"\\`$]/;
+export function insertPath(tabs: Tab[], active: number, path: string): InsertPath | null {
   const t = tabs.find((x) => x.id === active);
   if (!t || !isTerminalTab(t) || t.status !== "running") return null;
-  return { type: "send_text", tab_id: t.id, text: shellQuote(path) + " " };
+  if (CONTROL.test(path)) return { error: "a name has a control character" };
+  const shell = tabKind(t) !== "pi_tab" && tabKind(t) !== "claude_tab";
+  const quote = shell || MUST_QUOTE.test(path) || "/!$@".includes(path[0] ?? "");
+  const text = (quote ? "'" + path.replaceAll("'", "'\\''") + "'" : path) + " ";
+  return { cmd: { type: "send_text", tab_id: t.id, text, generated: true } };
 }
 
 // ---- what covers a terminal ----
@@ -104,3 +139,14 @@ export function covering(o: Overlay, homeOpen: boolean, inDrawer = false): boole
 export function drawerShown(phone: boolean, o: Overlay, homeOpen: boolean): boolean {
   return phone ? !!o.atlas : homeOpen;
 }
+
+// Atlas shown or hidden from a button or the palette. A phone opens and closes its own (never the
+// core's home_open: the Mac's drawer). The desktop follows the core (set_home).
+export function atlasToggle(phone: boolean, localOpen: boolean, homeOpen: boolean): { atlas: boolean; cmd: { type: "set_home"; open: boolean } | null } {
+  if (phone) return { atlas: !localOpen, cmd: null };
+  return { atlas: false, cmd: { type: "set_home", open: !homeOpen } };
+}
+
+// Atlas's pi is not running yet (never started, or restored and not started): only set_home starts
+// it, and set_home also opens the Mac's drawer, so on a phone that is a button saying so.
+export const atlasNeedsStart = (status: string | undefined): boolean => !status || status === "not_started";

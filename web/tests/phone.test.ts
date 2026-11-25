@@ -186,3 +186,29 @@ test("filter: a browser's filter and chips are its own (\"web\".filter), never t
   assert.deepEqual(ownFilter(web), { text: "api", running: true, waiting: false, pinned: false });
   assert.deepEqual(ownFilter({} as any), { text: "", running: false, waiting: false, pinned: false }, "none set yet");
 });
+
+test("panels on a phone: the session's panels (pi's, a Claude tab's subagents, background and todos) once each, in tab order", async () => {
+  const { sessionPanels, panelView } = await import("../src/app/phone.ts");
+  const P = (id: string, title: string, rows: { text: string; tone?: string; head?: boolean }[] = []) => ({ id, title, rows: rows.map((r) => ({ text: r.text, tone: r.tone ?? "normal", head: !!r.head })) });
+  const of: Record<number, any[]> = {
+    1: [P("todos", "Todos", [{ text: "Todos 1/2", head: true }, { text: "✓ a" }, { text: "○ b" }])],
+    2: [P("subagents", "Subagents", [{ text: "explore: running" }]), P("background", "Background", [{ text: "npm test" }])],
+    3: [P("todos", "Todos (another tab)")],
+  };
+  const got = sessionPanels([tab(1, "pi_tab"), tab(2, "claude_tab"), tab(3, "shell_tab")], (id) => of[id] ?? []);
+  assert.deepEqual(got.map((p) => p.id), ["todos", "subagents", "background"], "one per id, the first tab's");
+  assert.deepEqual(sessionPanels([], () => []), []);
+  // a bridge's first head row is the panel's title, as the window draws it
+  const v = panelView(got[0]);
+  assert.equal(v.head, "Todos 1/2");
+  assert.deepEqual(v.rows.map((r) => r.text), ["✓ a", "○ b"]);
+  assert.deepEqual(panelView(got[1]), { head: "Subagents", rows: got[1].rows });
+});
+
+test("panels on a phone: the sheet stops the terminal's typing, as any sheet", async () => {
+  const { covering } = await import("../src/app/phone.ts");
+  const none = { menu: null, sheet: null, palette: false, bell: false, link: null, copy: null, job: null, peek: null, atlas: false, panels: null } as any;
+  assert.equal(covering(none, false), false);
+  assert.equal(covering({ ...none, panels: 3 }, false), true);
+});
+

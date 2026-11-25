@@ -20,7 +20,7 @@ import { agentName, toggleAtlas } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { TabBars } from "./TabBars.tsx";
 import { modeBadge } from "./harness.ts";
-import { ATLAS_START, atlasNeedsStart, composeSend, drawerShown, phoneSessionItems } from "./phone.ts";
+import { ATLAS_START, atlasNeedsStart, composeSend, drawerShown, panelView, phoneSessionItems, sessionPanels } from "./phone.ts";
 
 const enc = new TextEncoder();
 
@@ -100,6 +100,7 @@ export function PhoneSession({ id }: { id: number }) {
   const tab = tabs.find((t) => t.id === shownTab) ?? tabs[0];
   const w = store.webTitle(s.id);
   const terminal = !!tab && isTerminalTab(tab);
+  const panels = sessionPanels(tabs, (t) => store.panels(t));
 
   const menu = (e: MouseEvent) =>
     menuAt(
@@ -130,6 +131,7 @@ export function PhoneSession({ id }: { id: number }) {
           <div class="bar-title">{w?.title ?? s.title}</div>
           <div class="bar-sub">{[w?.chat ? "Chats" : w?.place, store.machineName(s.machine)].filter(Boolean).join(" · ")}</div>
         </div>
+        {panels.length ? <IconButton icon="sidebar-right" label="Panels" badge={panels.length} run={() => app.setOverlay({ panels: s.id })} /> : null}
         <IconButton icon="folder" label={files ? "Back to the tab" : "Files"} on={files} run={() => setFiles(!files)} />
         <IconButton icon="more" label="Session menu" run={menu} />
       </header>
@@ -366,3 +368,59 @@ function PhoneStrip({ s, active }: { s: OpenSession; active: number }) {
     </div>
   );
 }
+
+// The right column's panels on a phone (the desktop's RightPanels): a sheet over the session, live
+// as its agents publish. Folding a panel here is the phone's own (never set_panel_collapsed: the
+// Mac's right column keeps its folds).
+export function PanelsSheet() {
+  const app = useApp();
+  const id = app.overlay.panels;
+  const [folded, setFolded] = useState<Set<string>>(new Set());
+  if (id === null) return null;
+  const close = () => app.setOverlay({ panels: null });
+  const s = app.store.session(id);
+  const panels = s ? sessionPanels(app.store.tabs(s.id), (t) => app.store.panels(t)) : [];
+  return (
+    <div class="scrim" onMouseDown={close}>
+      <div class="sheet bottom panels-sheet" role="dialog" aria-label="Panels" onMouseDown={(e) => e.stopPropagation()}>
+        <div class="sheet-title">Panels</div>
+        <div class="panels-scroll">
+          {panels.length === 0 ? <p class="empty small">The session's agent publishes its todos, subagents and shells here.</p> : null}
+          {panels.map((p) => {
+            const shut = folded.has(p.id);
+            const { head, rows } = panelView(p);
+            return (
+              <section class="panel" key={p.id}>
+                <button
+                  type="button"
+                  class="panel-head"
+                  aria-expanded={!shut}
+                  onClick={() => {
+                    const n = new Set(folded);
+                    if (shut) n.delete(p.id);
+                    else n.add(p.id);
+                    setFolded(n);
+                  }}
+                >
+                  <Icon name={shut ? "chevron-right" : "chevron-down"} size={12} />
+                  <span>{head}</span>
+                </button>
+                {shut
+                  ? null
+                  : rows.map((r) => (
+                      <div class={"panel-row tone-" + (r.tone || "normal") + (r.head ? " head" : "")}>
+                        <span>{r.text}</span>
+                      </div>
+                    ))}
+              </section>
+            );
+          })}
+        </div>
+        <button type="button" class="btn wide sheet-cancel" onClick={close}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+

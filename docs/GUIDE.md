@@ -2478,7 +2478,9 @@ long-press Paste, the session menu (⋯) has **Type in a text box**: a box under
 text goes in once with Enter, then the box closes. Drag a terminal up or down to scroll it as the
 mouse wheel would: its scrollback, or inside a full-screen program (less, an agent) what the wheel
 sends there. A tab whose program exited shows **Restart** (an agent's) and **Close** (any but
-pi's), as at the Mac. A long press on a Deck card peeks at that session; on a row of the Files view
+pi's), as at the Mac. When the session's agents publish panels (pi's, or a Claude tab's Todos,
+Subagents and Background), the panels button in the session's bar shows how many and opens them
+in a sheet, kept up to date; folding one there doesn't fold it at the Mac. A long press on a Deck card peeks at that session; on a row of the Files view
 (the folder button) it opens that row's menu as a sheet, where **Insert path** types that file's
 path into the tab as a drop on it does at the Mac (never Enter; a name with a control character
 is refused). **Atlas** (its button on the home screen, or the palette) opens full screen under its

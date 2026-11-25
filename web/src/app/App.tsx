@@ -14,7 +14,7 @@ import { AgentDrawer, RightPanels, TopBar } from "./Bars.tsx";
 import { Palette, useShortcuts } from "./Palette.tsx";
 import { Bell } from "./Bell.tsx";
 import { ConfirmBar, CopySheet, LinkSheet, Menu, Sheet, Toasts, type ToastItem } from "./Overlays.tsx";
-import { PhoneHome, PhoneSession } from "./Phone.tsx";
+import { PanelsSheet, PhoneHome, PhoneSession } from "./Phone.tsx";
 import { fitFor, focusedFit } from "./Term.tsx";
 import { pairScreen } from "../ui/pair.ts";
 import { SettingsPage } from "./Settings.tsx";
@@ -24,7 +24,7 @@ import { forgetTypingMode } from "./phone.ts";
 import { storageGet, storageRemove } from "../ui/dom.ts";
 
 const PHONE = "(max-width: 760px)";
-const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null, atlas: false };
+const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null, atlas: false, panels: null };
 
 type Screen = { kind: "pair" } | { kind: "away"; title: string; text: string; button: string; act: () => void } | { kind: "main" };
 
@@ -217,6 +217,7 @@ function Root() {
           <Sheet />
           <LinkSheet />
           <CopySheet />
+          <PanelsSheet />
           {overlay.job ? <JobSheet /> : null}
           {overlay.peek ? <Peek /> : null}
         </>

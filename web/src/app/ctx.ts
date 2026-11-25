@@ -26,6 +26,7 @@ export interface Overlay {
   job: { job: string; for_project: string; data?: any } | null; // the job sheet (JobSheet.tsx): a job to edit, or "" new; data: its job_draft open, read before it shows
   peek: { session: number; tab: number; x: number; y: number } | null; // a look at another session (Peek.tsx)
   atlas: boolean; // a phone's own Atlas drawer (phone.ts drawerShown; the desktop follows the core's home_open)
+  panels: number | null; // a phone's sheet of a session's right-column panels (Phone.tsx PanelsSheet): that session's id
 }
 
 export interface App {

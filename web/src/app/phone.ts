@@ -1,6 +1,6 @@
 // The phone's choices that need no DOM (Phone.tsx, Palette.tsx, Files.tsx use them; tests too).
 
-import { tabKind, isTerminalTab, type Tab } from "../state.ts";
+import { tabKind, isTerminalTab, type Panel, type Tab } from "../state.ts";
 import type { MenuItem, Overlay } from "./ctx.ts";
 
 // ---- typing ----
@@ -126,7 +126,7 @@ export function insertPath(tabs: Tab[], active: number, path: string): InsertPat
 // into or scrolls a terminal's program under it. The drawer's own terminal (inDrawer) is not under
 // it: it types and scrolls (a menu over it still covers it).
 export function covering(o: Overlay, homeOpen: boolean, inDrawer = false): boolean {
-  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || (homeOpen && !inDrawer));
+  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || o.panels || (homeOpen && !inDrawer));
 }
 
 // Whether the Atlas drawer shows. The core's home_open is one flag for the Mac's window (an agent
@@ -150,3 +150,24 @@ export const atlasNeedsStart = (status: string | undefined): boolean => !status 
 // Start Atlas on a phone: the core's start_home starts Atlas's pi and leaves the Mac's drawer and
 // keyboard as they are (set_home would open the drawer at the Mac and take its keyboard).
 export const ATLAS_START = { type: "start_home" } as const;
+
+// ---- the right column's panels ----
+// What the session's agents publish (a pi bridge's panels; a Claude tab's Todos, Subagents and
+// Background: claude_panels.odin), as the desktop's right column lists them (Bars.tsx RightPanels):
+// each tab's in tab order, one per id (the first). A phone shows them in a sheet (Phone.tsx).
+export function sessionPanels(tabs: Tab[], panelsOf: (tabId: number) => Panel[]): Panel[] {
+  const out: Panel[] = [];
+  const seen = new Set<string>();
+  for (const t of tabs)
+    for (const p of panelsOf(t.id))
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        out.push(p);
+      }
+  return out;
+}
+
+// A panel as drawn: a bridge's first head row is its title ("Todos 3/4"), as the window draws it.
+export function panelView(p: Panel): { head: string; rows: Panel["rows"] } {
+  return p.rows[0]?.head ? { head: p.rows[0].text, rows: p.rows.slice(1) } : { head: p.title, rows: p.rows };
+}

@@ -14,6 +14,24 @@ export function agentName(app: ReturnType<typeof useApp>): string {
   return String(app.store.settings.agent_name || "Atlas");
 }
 
+// Atlas's drawer shown or hidden. The desktop follows the core's home_open (the Mac window's too);
+// a phone has its own (phone.ts drawerShown): opening it still starts Atlas (set_home), and closing
+// it shuts the core's drawer only when this phone was the one that opened it.
+let phoneOpened = false;
+export function toggleAtlas(app: ReturnType<typeof useApp>): void {
+  const homeOpen = !!app.store.homeOpen;
+  if (!app.phone) return void app.run({ type: "set_home", open: !homeOpen });
+  if (app.overlay.atlas) {
+    app.setOverlay({ atlas: false });
+    if (phoneOpened && homeOpen) app.run({ type: "set_home", open: false });
+    phoneOpened = false;
+    return;
+  }
+  phoneOpened = !homeOpen;
+  if (!homeOpen) app.run({ type: "set_home", open: true });
+  app.setOverlay({ atlas: true });
+}
+
 export function TopBar() {
   const app = useApp();
   const { store } = app;
@@ -61,7 +79,7 @@ export function TopBar() {
       <IconButton icon="bell" label="Notifications" badge={unread} run={() => app.setOverlay({ bell: !app.overlay.bell })} />
       <IconButton icon="sidebar-right" label={`Right panels (${keysLabel({ k: "b", alt: true })})`} run={() => app.run({ type: "set_layout", right_open: !store.layout.right_open })} />
       {store.homeSession ? (
-        <button type="button" class={"agent-btn" + (store.homeOpen ? " on" : "")} onClick={() => app.run({ type: "set_home", open: !store.homeOpen })} title={`${name} (${keysLabel({ k: "j" })})`}>
+        <button type="button" class={"agent-btn" + (store.homeOpen ? " on" : "")} onClick={() => toggleAtlas(app)} title={`${name} (${keysLabel({ k: "j" })})`}>
           <span class="agent-avatar">{name[0]?.toUpperCase()}</span>
           {name}
           {agentUnread ? <span class="badge">{agentUnread}</span> : null}
@@ -135,7 +153,7 @@ export function AgentDrawer() {
         <IconButton small icon="close" label={`Close ${name}`} run={() => app.run({ type: "set_home", open: false })} />
       </div>
       <div class="drawer-body">
-        {tab ? <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused keyboard={!app.phone} /> : <p class="empty">Starting {name}…</p>}
+        {tab ? <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused keyboard={!app.phone} inDrawer /> : <p class="empty">Starting {name}…</p>}
       </div>
     </aside>
   );

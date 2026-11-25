@@ -417,3 +417,10 @@ export function sessionTitle(store: Store, s: OpenSession): string {
   if (p) return p.name || p.label;
   return "Session " + s.id;
 }
+
+// The core closed a pane's stream (Kind.Close): its tab's process went. When the tab runs again
+// (Restart: a new process, a new terminal), the pane attaches to it, once per close; a tab still
+// exited keeps its last output under the exit bar.
+export function reopenAfterClose(o: { status: string | undefined; attachable: boolean; retried: boolean }): boolean {
+  return o.status === "running" && o.attachable && !o.retried;
+}

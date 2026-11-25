@@ -4,7 +4,9 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { createTerm, type Fit, type TermView } from "../term.ts";
 import { TermStream } from "../termstream.ts";
-import { useApp, type Overlay } from "./ctx.ts";
+import { reopenAfterClose } from "../state.ts";
+import { useApp } from "./ctx.ts";
+import { covering, drawerShown } from "./phone.ts";
 import { storageGet, storageSet } from "../ui/dom.ts";
 import { barsFor } from "./bars.ts";
 
@@ -26,11 +28,8 @@ export function fitFor(tabId: number): Fit | null {
   return h?.view.fit() ?? null;
 }
 
-// A menu, sheet, the palette, another overlay or the agent drawer is over the page: nothing types
-// into or scrolls a terminal's program under it.
-export function covering(o: Overlay, homeOpen: boolean): boolean {
-  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || homeOpen);
-}
+// What covers a terminal (a menu, a sheet, the agent drawer…): phone.ts.
+export { covering };
 
 // A phone's own keyboard (its primary pointer a finger): typing goes through the terminal's field
 // (termfield.ts); a stylus phone still counts. A device whose primary pointer is fine (a narrow
@@ -74,7 +73,8 @@ export function TermPane(props: {
   tabId: number;
   attachable: boolean; // the tab has a terminal the core can stream (running, has_term)
   focused: boolean;
-  keyboard: boolean; // typing goes straight in (desktop, or the phone's raw keys)
+  keyboard: boolean; // typing goes straight in (desktop, or a phone's own keyboard through the terminal's field)
+  inDrawer?: boolean; // the Atlas drawer's own terminal: the drawer does not cover it
   onFocus?: () => void;
   onInput?: (b: Uint8Array) => Uint8Array; // the phone's sticky modifiers
   armed?: () => boolean; // one of them is down for the next typed character
@@ -102,6 +102,7 @@ export function TermPane(props: {
     held.armed = () => !!latest.current.armed?.();
     held.disarm = () => latest.current.disarm?.();
     held.onNote = setNote;
+    held.onClosed = () => reopen();
     setNote(held.note);
     box.current!.appendChild(held.el);
     if (!held.mounted) {
@@ -119,6 +120,7 @@ export function TermPane(props: {
     for (const [k, v] of byTab) if (v === held) byTab.delete(k);
     if (focusedHandle === held) focusedHandle = null;
     held.onNote = () => {};
+    held.onClosed = () => {};
     held.input = () => {};
     held.plain = () => {};
     held.armed = () => false;
@@ -140,6 +142,20 @@ export function TermPane(props: {
       hide(true); // Deck, Settings, another session: kept for coming back
     };
   }, []);
+
+  // the tab's process ran again (Restart) after the core closed its stream: the new terminal, once
+  // (reopenAfterClose); the status change and the close can come in either order
+  const status = app.store.tab(props.tabId)?.tab.status;
+  const latestStatus = useRef(status);
+  latestStatus.current = status;
+  const reopen = () => {
+    const t = h.current;
+    if (!t || t.stream.attached || t.stream.tabId !== latest.current.tabId || !app.link.up) return;
+    if (!reopenAfterClose({ status: latestStatus.current, attachable: latest.current.attachable, retried: t.reopened })) return;
+    t.reopened = true;
+    t.stream.reattach();
+  };
+  useEffect(() => reopen(), [status]);
 
   // the tab it shows; again after the link came back (a fresh channel and snapshot)
   const linkUp = app.link.up;
@@ -182,7 +198,7 @@ export function TermPane(props: {
   // a touch scroll in a TUI sends what the wheel would only into the pane typed into (the phone's
   // one tab takes its text field's typing even when its keys do not go straight in), and not while
   // a menu, sheet or the palette is over it (a coast stops)
-  const reports = props.focused && !covering(app.overlay, !!app.store.homeOpen);
+  const reports = props.focused && !covering(app.overlay, drawerShown(app.phone, app.overlay, !!app.store.homeOpen), !!props.inDrawer);
   useEffect(() => {
     h.current?.view.setScrollReports(reports);
   }, [reports, props.tabId]);
@@ -215,6 +231,8 @@ interface Held extends TermHandle {
   mounted: boolean;
   note: string;
   onNote: (s: string) => void;
+  onClosed: () => void; // the core closed the stream (the process went)
+  reopened: boolean; // attached again after a close (reset by the next attach)
   input: (b: Uint8Array) => void;
   plain: (b: Uint8Array) => void;
   armed: () => boolean;
@@ -230,7 +248,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   el.className = "term-fill";
   const view = createTerm({ light: document.documentElement.dataset.light === "1", fontSize: termFontSize(phone) });
   const stream = new TermStream(app.link, view);
-  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {}, plain: () => {}, armed: () => false, disarm: () => {} };
+  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, onClosed: () => {}, reopened: false, input: () => {}, plain: () => {}, armed: () => false, disarm: () => {} };
   view.onInput((b) => held.input(b));
   view.onPlainInput((b) => held.plain(b));
   view.onArmed(() => held.armed());
@@ -240,6 +258,8 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   stream.events((e) => {
     held.note = e.kind === "error" ? "No terminal for this tab yet." : e.kind === "closed" ? "This tab's terminal closed." : "";
     held.onNote(held.note);
+    if (e.kind === "attached") held.reopened = false;
+    if (e.kind === "closed") held.onClosed();
   });
   allViews.add(held);
   return held;

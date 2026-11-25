@@ -14,6 +14,8 @@ import { newTabChoices } from "./harness.ts";
 import { newTabItems } from "./Panes.tsx";
 import { setTermFont, termFontSize } from "./Term.tsx";
 import { openJobSheet } from "./JobSheet.tsx";
+import { toggleAtlas } from "./Bars.tsx";
+import { paletteShows } from "./phone.ts";
 
 export interface Action {
   id: string;
@@ -80,7 +82,7 @@ export const ACTIONS: Action[] = [
     label: (app) => `Toggle ${app.store.settings.agent_name || "Atlas"}`,
     keys: { k: "j" },
     when: (app) => !!app.store.homeSession,
-    run: (app) => app.run({ type: "set_home", open: !app.store.homeOpen }),
+    run: (app) => toggleAtlas(app),
   },
   { id: "notifications", label: "Notifications", run: (app) => app.setOverlay({ bell: true, palette: false }) },
   { id: "notifications_read", label: "Notifications: mark all read", run: (app) => app.run({ type: "notifications_mark_read", all: true }) },
@@ -89,7 +91,7 @@ export const ACTIONS: Action[] = [
   { id: "toggle_right", label: "Toggle right panels", keys: { k: "b", alt: true }, when: (app) => !app.phone, run: (app) => app.run({ type: "set_layout", right_open: !app.store.layout.right_open }) },
   { id: "settings", label: "Settings…", keys: { k: "," }, run: (app) => app.go({ screen: app.route.screen === "settings" ? "home" : "settings" }) },
   { id: "job_new", label: "New job", run: (app) => { app.setOverlay({ palette: false }); openJobSheet(app, ""); } },
-  { id: "show_jobs", label: "Show jobs", run: (app) => app.run({ type: "set_left_tab", tab: "jobs" }) },
+  { id: "show_jobs", label: "Show jobs", run: (app) => (app.phone ? app.go({ screen: "jobs" }) : app.run({ type: "set_left_tab", tab: "jobs" })) },
   { id: "jobs_pause_all", label: "Pause all jobs", run: (app) => app.run({ type: "jobs_pause" }) },
   { id: "jobs_resume_all", label: "Resume all jobs", run: (app) => app.run({ type: "jobs_resume" }) },
   { id: "jobs_stop_all", label: "Stop all running jobs", run: (app) => app.run({ type: "job_stop" }) },
@@ -191,7 +193,7 @@ export function useShortcuts(app: App) {
       if (a.overlay.palette || a.overlay.sheet) return;
       if (treeTakes(e)) return; // ⌘D on a Files row duplicates it (fileops.ts), not Split pane right
       for (const x of ACTIONS) {
-        if (x.keys && keysMatch(x.keys, e) && (!x.when || x.when(a))) {
+        if (x.keys && keysMatch(x.keys, e) && paletteShows(x.id, a.phone) && (!x.when || x.when(a))) {
           e.preventDefault();
           e.stopPropagation();
           x.run(a);
@@ -269,14 +271,14 @@ export function Palette() {
             run: () => {
               app.run({ type: "select_project", project_id: p.id });
               app.go({ screen: "home" });
-              if (!store.layout.left_open) app.run({ type: "set_layout", left_open: true });
+              if (!store.layout.left_open && !app.phone) app.run({ type: "set_layout", left_open: true });
             },
           },
         });
       }
     }
     for (const a of ACTIONS) {
-      if (a.when && !a.when(app)) continue;
+      if (!paletteShows(a.id, app.phone) || (a.when && !a.when(app))) continue;
       const label = actionLabel(a, app);
       const sc = score(label, query);
       if (sc <= 0) continue;

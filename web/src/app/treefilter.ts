@@ -4,7 +4,14 @@
 // core's answer then replaces it (it also keeps projects whose sessions match, and orders by score).
 
 import { score } from "./match.ts";
-import type { WebProjectRow } from "../state.ts";
+import type { WebFilter, WebProjectRow, WebView } from "../state.ts";
+
+// This browser's filter and quick filters ("web".filter: set_filter from a browser sets its own,
+// web_view.odin web_filters). The sidebar section's filter is the Mac's window's: never read here.
+export function ownFilter(web: WebView | null): WebFilter {
+  const f = web?.filter;
+  return { text: f?.text ?? "", running: !!f?.running, waiting: !!f?.waiting, pinned: !!f?.pinned };
+}
 
 export function wordsOf(text: string): string[] {
   return text.toLowerCase().split(/\s+/).filter(Boolean);

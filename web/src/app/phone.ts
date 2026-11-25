@@ -90,13 +90,9 @@ const DESKTOP_ONLY = new Set([
   "focus_pane_up",
   "focus_pane_down",
   "dim_panes",
-  // a Changes tab placed in the Mac's panes; the left column's filters and sorts (the Mac's
-  // sidebar: the phone's own list has its filter box and chips)
+  // a Changes tab placed in the Mac's panes; the left column's sorts and Show hidden (the Mac's
+  // sidebar; the filter and its chips are each browser's own)
   "show_changes",
-  "clear_filter",
-  "quick_running",
-  "quick_waiting",
-  "quick_pinned",
   "show_hidden",
   "sort_projects",
   "sort_sessions",

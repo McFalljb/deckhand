@@ -1547,6 +1547,15 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Set_Filter:
 		sb := &state.sidebar
 		ch := false
+		if caller_from_web(caller) {
+			// a browser's filter is its own (web_view.odin web_filters); Show hidden is one setting
+			ch = web_filter_apply(c)
+			if b, ok := c.show_hidden.?; ok && b != sb.show_hidden {
+				sb.show_hidden = b
+				ch = true
+			}
+			return {ok = true}, ch
+		}
 		if text, ok := c.text.?; ok {
 			text = cut_utf8(one_line(text, context.temp_allocator), FILTER_MAX)
 			if text != sb.filter {

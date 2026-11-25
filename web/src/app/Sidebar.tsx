@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { OpenSession, Store, WebProjectRow, WebSessionRow } from "../state.ts";
 import { sessionView, tabView, type Dot } from "../status.ts";
 import { ago, keysLabel, menuAt, useApp, type App, type MenuItem, shownSession, wished } from "./ctx.ts";
-import { narrowTree } from "./treefilter.ts";
+import { narrowTree, ownFilter } from "./treefilter.ts";
 import { newSessionChoices, newSessionPlan, newTabChoices } from "./harness.ts";
 import { HarnessIcon, Icon, StatusMark, dotMark } from "./icons.tsx";
 import { JobsPanel } from "./Jobs.tsx";
@@ -97,6 +97,7 @@ function SessionsTab() {
   const sb = store.sidebar;
   const web = store.web;
   const attention = sb.view === "attention";
+  const f = ownFilter(web); // this browser's own (set_filter from a browser never changes the Mac's)
   return (
     <div class="sessions-tab">
       <div class="view-switch segmented small">
@@ -105,9 +106,9 @@ function SessionsTab() {
       </div>
       <FilterField />
       <div class="chips">
-        <Chip label="Running" dot="running" on={!!sb.only_running} run={() => app.run({ type: "set_filter", running: !sb.only_running })} />
-        <Chip label="Waiting" dot="waiting" on={!!sb.only_waiting} run={() => app.run({ type: "set_filter", waiting: !sb.only_waiting })} />
-        <Chip label="Pinned" on={!!sb.only_pinned} run={() => app.run({ type: "set_filter", pinned: !sb.only_pinned })} />
+        <Chip label="Running" dot="running" on={f.running} run={() => app.run({ type: "set_filter", running: !f.running })} />
+        <Chip label="Waiting" dot="waiting" on={f.waiting} run={() => app.run({ type: "set_filter", waiting: !f.waiting })} />
+        <Chip label="Pinned" on={f.pinned} run={() => app.run({ type: "set_filter", pinned: !f.pinned })} />
       </div>
       {web && web.filtered > 0 && !attention ? (
         <button type="button" class="filtered-note" onClick={() => app.run({ type: "set_filter", text: "", running: false, waiting: false, pinned: false })}>
@@ -121,7 +122,7 @@ function SessionsTab() {
 
 function FilterField() {
   const app = useApp();
-  const text = String(app.store.sidebar.filter ?? "");
+  const text = ownFilter(app.store.web).text;
   const [v, setV] = useState(text);
   const timer = useRef(0);
   const focused = useRef(false);
@@ -220,7 +221,7 @@ function TreeList() {
   const chatsFolded = !!sb.folded?.chats;
   const chats = store.chatsEntry;
   // a filter typed and not yet the core's: the rows the page holds, narrowed by it at once
-  const applied = String(sb.filter ?? "");
+  const applied = ownFilter(web).text;
   const typed = wished("filter", applied);
   const tree = typed !== applied ? narrowTree(store.webTree, typed) : store.webTree;
   const localProjects = tree.length || store.projects.some((p) => p.group === "projects" && !p.machine);

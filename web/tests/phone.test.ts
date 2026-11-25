@@ -171,10 +171,18 @@ test("Atlas on a phone: Start Atlas starts its pi without the Mac's drawer (star
   assert.deepEqual(ATLAS_START, { type: "start_home" });
 });
 
-test("palette: on a phone, nothing that changes the Mac's view: Changes into its panes, the sidebar's filters and sorts", () => {
-  for (const id of ["show_changes", "clear_filter", "quick_running", "quick_waiting", "quick_pinned", "show_hidden", "sort_projects", "sort_sessions", "sort_chats"]) {
+test("palette: on a phone, nothing that changes the Mac's view: Changes into its panes, the sidebar's sorts and Show hidden", () => {
+  for (const id of ["show_changes", "show_hidden", "sort_projects", "sort_sessions", "sort_chats"]) {
     assert.equal(paletteShows(id, true), false, id);
     assert.equal(paletteShows(id, false), true, id);
   }
-  for (const id of ["filter", "show_deck", "show_jobs", "new_shell_tab"]) assert.equal(paletteShows(id, true), true, id + " (phone-local on a phone)");
+  for (const id of ["filter", "clear_filter", "quick_running", "quick_waiting", "quick_pinned", "show_deck", "show_jobs", "new_shell_tab"]) assert.equal(paletteShows(id, true), true, id + " (phone-local on a phone)");
+});
+
+test("filter: a browser's filter and chips are its own (\"web\".filter), never the Mac's sidebar filter", async () => {
+  const { ownFilter } = await import("../src/app/treefilter.ts");
+  assert.deepEqual(ownFilter(null), { text: "", running: false, waiting: false, pinned: false }, "before the core's first answer");
+  const web = { filter: { text: "api", running: true, waiting: false, pinned: false } } as any;
+  assert.deepEqual(ownFilter(web), { text: "api", running: true, waiting: false, pinned: false });
+  assert.deepEqual(ownFilter({} as any), { text: "", running: false, waiting: false, pinned: false }, "none set yet");
 });

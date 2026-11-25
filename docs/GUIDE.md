@@ -2481,8 +2481,8 @@ pi's), as at the Mac. A long press on a Deck card peeks at that session; on a ro
 path into the tab as a drop on it does at the Mac (never Enter; a name with a control character
 is refused). **Atlas** (its button on the home screen, or the palette) opens full screen under its
 own bar, typed into like a session. It is the phone's own: opening or closing it never opens or
-closes Atlas's drawer at the Mac. When Atlas isn't running, **Start Atlas** starts it, and that
-opens it at the Mac too. The palette leaves out what would only change the Mac's window: split
+closes Atlas's drawer at the Mac. When Atlas isn't running, **Start Atlas** starts it, without
+opening it at the Mac or taking the Mac's keyboard. The palette leaves out what would only change the Mac's window: split
 panes, the columns, dim panes, Show changes, and the left column's filters and sorts (the phone's
 list has its own filter box).
 

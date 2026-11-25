@@ -20,7 +20,7 @@ import { agentName, toggleAtlas } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { TabBars } from "./TabBars.tsx";
 import { modeBadge } from "./harness.ts";
-import { atlasNeedsStart, composeSend, drawerShown, phoneSessionItems } from "./phone.ts";
+import { ATLAS_START, atlasNeedsStart, composeSend, drawerShown, phoneSessionItems } from "./phone.ts";
 
 const enc = new TextEncoder();
 
@@ -320,14 +320,13 @@ function PhoneAtlas() {
       {tab && !atlasNeedsStart(tab.status) ? (
         <PhoneTerminal tab={tab} term={term} inDrawer />
       ) : (
-        // only set_home starts Atlas's pi, and it opens Atlas's drawer at the Mac too: the user's
-        // choice, said on the button (opening and closing here never touch the Mac's drawer)
+        // start_home: the Mac's drawer and keyboard stay as they are (opening and closing here never
+        // touch them either)
         <div class="empty atlas-start">
           <p>{name} isn't running.</p>
-          <button type="button" class="btn primary" onClick={() => app.run({ type: "set_home", open: true })}>
+          <button type="button" class="btn primary" onClick={() => app.run(ATLAS_START)}>
             Start {name}
           </button>
-          <p class="muted small">This also opens {name} at the Mac.</p>
         </div>
       )}
     </aside>

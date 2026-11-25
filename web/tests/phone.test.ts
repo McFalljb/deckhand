@@ -166,6 +166,11 @@ test("Atlas on a phone: opening and closing it never opens or closes the Mac's d
   assert.equal(atlasNeedsStart("exited"), false, "the exit bar's Restart");
 });
 
+test("Atlas on a phone: Start Atlas starts its pi without the Mac's drawer (start_home, never set_home)", async () => {
+  const { ATLAS_START } = await import("../src/app/phone.ts");
+  assert.deepEqual(ATLAS_START, { type: "start_home" });
+});
+
 test("palette: on a phone, nothing that changes the Mac's view: Changes into its panes, the sidebar's filters and sorts", () => {
   for (const id of ["show_changes", "clear_filter", "quick_running", "quick_waiting", "quick_pinned", "show_hidden", "sort_projects", "sort_sessions", "sort_chats"]) {
     assert.equal(paletteShows(id, true), false, id);

@@ -147,6 +147,10 @@ export function atlasToggle(phone: boolean, localOpen: boolean, homeOpen: boolea
   return { atlas: false, cmd: { type: "set_home", open: !homeOpen } };
 }
 
-// Atlas's pi is not running yet (never started, or restored and not started): only set_home starts
-// it, and set_home also opens the Mac's drawer, so on a phone that is a button saying so.
+// Atlas's pi is not running yet (never started, or restored and not started): a phone shows Start
+// Atlas, which sends ATLAS_START.
 export const atlasNeedsStart = (status: string | undefined): boolean => !status || status === "not_started";
+
+// Start Atlas on a phone: the core's start_home starts Atlas's pi and leaves the Mac's drawer and
+// keyboard as they are (set_home would open the drawer at the Mac and take its keyboard).
+export const ATLAS_START = { type: "start_home" } as const;

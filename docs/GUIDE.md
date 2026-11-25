@@ -2411,6 +2411,28 @@ Away from `localhost` the page is not a secure context for the browser, so:
   selected and a **Copy** button that tries the browser's older copy command; if that fails,
   copy it by hand.
 
+### HTTPS with Tailscale Serve
+
+If your devices are on a Tailscale network, Tailscale Serve can put Deckhand's page behind HTTPS,
+with a certificate the browser trusts, at `https://<the Mac's name>.<your tailnet>.ts.net/`:
+
+1. In Settings › Machines, set **Listen address…** to `127.0.0.1:7433`, so only Serve (and this
+   Mac) reaches the plain HTTP page.
+2. In Terminal on the Mac: `tailscale serve --bg 7433`. It prints the address; the first time,
+   it may ask you to turn on HTTPS certificates for your tailnet in Tailscale's admin console.
+3. On the phone (signed in to the same tailnet), open that `https://` address and pair it as
+   above. It is a new address, so it is a new pairing.
+
+`tailscale serve status` shows what Serve shares, and `tailscale serve --https=443 off` stops
+sharing it. Use Serve, never `tailscale funnel`, which publishes the page to the whole internet.
+Another HTTPS reverse proxy works the same way if it passes WebSocket upgrades and keeps the
+browser's `Host` header: the page refuses a connection whose origin is not the address it was
+opened at, so a proxy that rewrites `Host` shows the page but never connects.
+
+Over HTTPS the page is a secure context: **Copy** puts text on the clipboard directly, without
+the box. Notifications still show only in the page and the bell: Deckhand doesn't send system or
+push notifications to a browser yet.
+
 ### One view at a time
 
 A core shows its sessions in one place at a time. A browser that opens takes the view from the

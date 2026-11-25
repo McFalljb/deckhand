@@ -38,7 +38,7 @@ test("typing: a browser left in the saved text-box mode types straight in again,
 test("typing: the text box is a one-time compose in the session menu; its Send pastes once, Enter apart, and closes", () => {
   const calls: string[] = [];
   const f = (n: string) => () => void calls.push(n);
-  const base = { smaller: f("s"), larger: f("l"), copy: f("c"), compose: f("compose"), closeTab: f("ct"), closeSession: f("cs") };
+  const base = { smaller: f("s"), larger: f("l"), copy: f("c"), compose: f("compose"), select: f("select"), closeTab: f("ct"), closeSession: f("cs") };
   const items = phoneSessionItems({ ...base, tab: tab(1, "shell_tab"), terminal: true });
   const labels = items.filter((i) => !i.sep).map((i) => i.label);
   assert.ok(labels.includes("Type in a text box"));
@@ -212,3 +212,15 @@ test("panels on a phone: the sheet stops the terminal's typing, as any sheet", a
   assert.equal(covering({ ...none, panels: 3 }, false), true);
 });
 
+test("select text: over a terminal the session menu has Select text (the scrollback and screen in a sheet to select from); its sheet stops the typing", async () => {
+  const { covering } = await import("../src/app/phone.ts");
+  const calls: string[] = [];
+  const f = (n: string) => () => void calls.push(n);
+  const base = { smaller: f("s"), larger: f("l"), copy: f("copy"), compose: f("compose"), select: f("select"), closeTab: f("ct"), closeSession: f("cs") };
+  const items = phoneSessionItems({ ...base, tab: tab(1, "shell_tab"), terminal: true });
+  items.find((i) => i.label === "Select text")!.run!();
+  assert.deepEqual(calls, ["select"]);
+  assert.ok(!phoneSessionItems({ ...base, tab: tab(2, "changes_tab"), terminal: false }).some((i) => i.label === "Select text"), "only over a terminal");
+  const none = { menu: null, sheet: null, palette: false, bell: false, link: null, copy: null, job: null, peek: null, atlas: false, panels: null, select: null } as any;
+  assert.equal(covering({ ...none, select: "text" }, false), true);
+});

@@ -44,6 +44,7 @@ export function phoneSessionItems(o: {
   larger(): void;
   copy(): void;
   compose(): void;
+  select(): void; // the terminal's text in a sheet to select from (Phone.tsx SelectSheet)
   closeTab(): void;
   closeSession(): void;
 }): MenuItem[] {
@@ -52,7 +53,7 @@ export function phoneSessionItems(o: {
     { label: "Text larger", run: o.larger },
     { label: "Copy screen text", run: o.copy },
   ];
-  if (o.terminal) items.push({ label: "Type in a text box", run: o.compose });
+  if (o.terminal) items.push({ label: "Select text", run: o.select }, { label: "Type in a text box", run: o.compose });
   items.push({ sep: true });
   if (o.tab && tabKind(o.tab) !== "pi_tab") items.push({ label: "Close this tab", run: o.closeTab });
   items.push({ label: "Close session", run: o.closeSession });
@@ -126,7 +127,7 @@ export function insertPath(tabs: Tab[], active: number, path: string): InsertPat
 // into or scrolls a terminal's program under it. The drawer's own terminal (inDrawer) is not under
 // it: it types and scrolls (a menu over it still covers it).
 export function covering(o: Overlay, homeOpen: boolean, inDrawer = false): boolean {
-  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || o.panels || (homeOpen && !inDrawer));
+  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || o.panels || o.select !== null && o.select !== undefined || (homeOpen && !inDrawer));
 }
 
 // Whether the Atlas drawer shows. The core's home_open is one flag for the Mac's window (an agent

@@ -5,6 +5,7 @@
 // terminal: docs/PROTOCOL.md §5a "Terminal streams") and never sizes itself (the core sends
 // RESIZE). Input leaves through onInput as bytes for the terminal's channel.
 
+import { bufferText } from "./termtext.ts";
 import { Terminal, type IDisposable, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { TERM_LOOKS, type TermColors } from "./theme.gen.ts";
@@ -47,6 +48,8 @@ export interface TermView {
   stopScroll(): void;
   // the rows on screen as text (Copy, where selecting is awkward)
   screenText(): string;
+  // the scrollback and the screen as text, at most the last `max` rows (termtext.ts): Select text
+  allText(max: number): string;
   // pasted text, bracketed when the program asked for it, out through onInput
   paste(text: string): void;
   appCursor(): boolean;
@@ -343,6 +346,10 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       const lines: string[] = [];
       for (let y = b.viewportY; y < b.viewportY + term.rows; y++) lines.push(b.getLine(y)?.translateToString(true) ?? "");
       return lines.join("\n").replace(/\s+$/, "");
+    },
+    allText(max) {
+      const b = term.buffer.active;
+      return bufferText({ length: b.length, text: (y, trim) => b.getLine(y)?.translateToString(trim) ?? "", wrapped: (y) => !!b.getLine(y)?.isWrapped }, max);
     },
     paste(text) {
       // xterm wraps it in ESC[200~ … ESC[201~ when the program turned bracketed paste on

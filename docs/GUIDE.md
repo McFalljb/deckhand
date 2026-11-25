@@ -2475,7 +2475,10 @@ the terminal, or **Show keyboard** under it, to type: each key goes straight in,
 menu, a sheet or another tab stops the typing until you tap again); the phone's keyboard may learn
 the words typed there, as in any text field. For dictation, autocorrect, a long message, or a
 long-press Paste, the session menu (⋯) has **Type in a text box**: a box under the terminal whose
-text goes in once with Enter, then the box closes. Drag a terminal up or down to scroll it as the
+text goes in once with Enter, then the box closes. To copy part of a terminal, **Select text** in
+the same menu shows its scrollback and screen (the last 5,000 rows, a wrapped line joined) as text:
+touch and hold to select with the phone's own handles, then **Copy** (or **Copy all** with nothing
+selected); **Copy screen text** copies the rows on screen. Drag a terminal up or down to scroll it as the
 mouse wheel would: its scrollback, or inside a full-screen program (less, an agent) what the wheel
 sends there. A tab whose program exited shows **Restart** (an agent's) and **Close** (any but
 pi's), as at the Mac. When the session's agents publish panels (pi's, or a Claude tab's Todos,

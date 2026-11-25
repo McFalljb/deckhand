@@ -486,6 +486,8 @@ a { color: inherit; }
 .panel-head { display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; padding: 0 4px; border: 0; background: none; color: var(--text-secondary); font-weight: 600; cursor: pointer; text-align: left; }
 .panel-row { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 4px 0 22px; color: var(--text); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .panel-row.head { color: var(--text-secondary); font-weight: 600; padding-left: 4px; }
+/* Select text on a phone (Phone.tsx SelectSheet): the terminal's text, selectable by the phone's own selection */
+.select-sheet .select-text { margin: 0 0 8px; max-height: min(60vh, 540px); overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 8px; border-radius: var(--radius-sm); background: var(--bg-field); font-family: var(--font-mono); font-size: 12px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 /* the right column's panels as a phone's sheet (Phone.tsx PanelsSheet): long rows wrap, the list scrolls */
 .panels-sheet .panels-scroll { max-height: min(62vh, 560px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .panels-sheet .panel-head { height: 36px; font-size: 15px; }

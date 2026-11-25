@@ -23,6 +23,7 @@ import { modeBadge } from "./harness.ts";
 import { ATLAS_START, atlasNeedsStart, composeSend, drawerShown, panelView, phoneSessionItems, sessionPanels } from "./phone.ts";
 
 const enc = new TextEncoder();
+const SELECT_ROWS = 5000; // Select text: the last rows of the scrollback and the screen
 
 export function PhoneHome() {
   const app = useApp();
@@ -112,6 +113,7 @@ export function PhoneSession({ id }: { id: number }) {
         smaller: () => setTermFont(termFontSize(true) - 1),
         larger: () => setTermFont(termFontSize(true) + 1),
         copy: () => app.setOverlay({ copy: term.current?.view.screenText() ?? "" }),
+        select: () => app.setOverlay({ select: term.current?.view.allText(SELECT_ROWS) ?? "" }),
         compose: () => {
           // still the tap's own handler: the terminal's field takes the focus now, so iOS raises
           // its keyboard; the box takes the focus from it once it shows (the keyboard stays up)
@@ -424,3 +426,76 @@ export function PanelsSheet() {
   );
 }
 
+// Select text on a phone: the terminal's scrollback and screen as plain text in a sheet, where the
+// phone's own selection works (touch and hold, drag the handles, the system's Copy), scrolled to
+// the newest line. Copy copies what is selected in it, else all of it: the selection is kept as it
+// changes, since a tap on the button may clear it first. A terminal's own selection (xterm's) is a
+// mouse drag, and a drag on a phone scrolls.
+export function SelectSheet() {
+  const app = useApp();
+  const text = app.overlay.select;
+  const pre = useRef<HTMLPreElement>(null);
+  const picked = useRef("");
+  const [some, setSome] = useState(false);
+  useEffect(() => {
+    if (text === null) return;
+    picked.current = "";
+    setSome(false);
+    const el = pre.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    const changed = () => {
+      const sel = document.getSelection();
+      const inside = !!sel && sel.rangeCount > 0 && !!el && el.contains(sel.anchorNode) && el.contains(sel.focusNode);
+      const t = inside ? sel!.toString() : "";
+      // a tap outside the text (the button) clears it: keep the last selection until the sheet closes
+      if (t || inside) {
+        picked.current = t;
+        setSome(!!t);
+      }
+    };
+    document.addEventListener("selectionchange", changed);
+    return () => document.removeEventListener("selectionchange", changed);
+  }, [text]);
+  if (text === null) return null;
+  const close = () => app.setOverlay({ select: null });
+  const copy = () => {
+    const what = picked.current || text;
+    const done = () => {
+      app.toast(picked.current ? "Copied" : "Copied all");
+      close();
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(what).then(done, () => app.toast("Select the text and use the phone's Copy", true));
+      return;
+    }
+    // not a secure context: the older copy command, from a field holding the text (in this tap)
+    const ta = document.createElement("textarea");
+    ta.value = what;
+    ta.readOnly = true;
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(0, what.length);
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (ok) done();
+    else app.toast("Select the text and use the phone's Copy", true);
+  };
+  return (
+    <div class="scrim" onMouseDown={close}>
+      <div class="sheet bottom select-sheet" role="dialog" aria-label="Select text" onMouseDown={(e) => e.stopPropagation()}>
+        <div class="sheet-title">Select text</div>
+        <p class="muted small sheet-body">Touch and hold to select, then Copy.</p>
+        <pre ref={pre} class="select-text">{text || " "}</pre>
+        <div class="prompt-actions">
+          <button type="button" class="btn" onClick={close}>
+            Close
+          </button>
+          <button type="button" class="btn primary" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={copy}>
+            {some ? "Copy" : "Copy all"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

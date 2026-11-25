@@ -2468,14 +2468,23 @@ without Shift goes to the terminal (Ctrl+S in a file tab saves).
 
 Below 760 pixels wide the page is the phone's: the left column full width (or the Deck), then a
 session one tab at a time. Under a terminal: a key bar (Esc, Tab, Ctrl and Alt that stay down
-for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you). Tap the
-terminal to type: each key goes straight in, as on a desktop (a menu, a sheet or another tab
-stops the typing until you tap again); the phone's keyboard may learn the words typed there, as
-in any text field. The keyboard button switches to a text field instead, for
-dictation, autocorrect, a long message, or a long-press Paste, sent with Enter. Drag a terminal
-up or down to scroll it as the mouse wheel would: its scrollback, or inside a full-screen program
-(less, an agent) what the wheel sends there. A long press on a Deck card peeks at that session;
-on a row of the Files view (the folder button) it opens that row's menu as a sheet.
+for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you). Tap
+the terminal, or **Show keyboard** under it, to type: each key goes straight in, as on a desktop (a
+menu, a sheet or another tab stops the typing until you tap again); the phone's keyboard may learn
+the words typed there, as in any text field. For dictation, autocorrect, a long message, or a
+long-press Paste, the session menu (⋯) has **Type in a text box**: a box under the terminal whose
+text goes in once with Enter, then the box closes. Drag a terminal up or down to scroll it as the
+mouse wheel would: its scrollback, or inside a full-screen program (less, an agent) what the wheel
+sends there. A tab whose program exited shows **Restart** (an agent's) and **Close** (any but
+pi's), as at the Mac. A long press on a Deck card peeks at that session; on a row of the Files view
+(the folder button) it opens that row's menu as a sheet, where **Insert path** types that file's
+path into the tab as a drop on it does at the Mac (never Enter; a name with a control character
+is refused). **Atlas** (its button on the home screen, or the palette) opens full screen under its
+own bar, typed into like a session. It is the phone's own: opening or closing it never opens or
+closes Atlas's drawer at the Mac. When Atlas isn't running, **Start Atlas** starts it, and that
+opens it at the Mac too. The palette leaves out what would only change the Mac's window: split
+panes, the columns, dim panes, Show changes, and the left column's filters and sorts (the phone's
+list has its own filter box).
 
 ### From a terminal (Linux)
 

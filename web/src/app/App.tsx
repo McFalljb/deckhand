@@ -20,9 +20,11 @@ import { pairScreen } from "../ui/pair.ts";
 import { SettingsPage } from "./Settings.tsx";
 import { JobSheet } from "./JobSheet.tsx";
 import { Peek } from "./Peek.tsx";
+import { forgetTypingMode } from "./phone.ts";
+import { storageGet, storageRemove } from "../ui/dom.ts";
 
 const PHONE = "(max-width: 760px)";
-const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null };
+const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null, atlas: false };
 
 type Screen = { kind: "pair" } | { kind: "away"; title: string; text: string; button: string; act: () => void } | { kind: "main" };
 
@@ -39,6 +41,11 @@ function Root() {
   const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
   const [route, setRoute] = useState<App["route"]>(() => parseHash());
   const toastId = useRef(0);
+  // a browser left in the old saved text-box mode types straight in again, once (phone.ts)
+  useEffect(() => {
+    if (forgetTypingMode({ get: storageGet, remove: storageRemove }))
+      toast("Typing goes straight into the terminal again. The text box is in the session menu (⋯).");
+  }, []);
 
   const toast = (text: string, err = false, action?: ToastAction) => {
     const id = ++toastId.current;

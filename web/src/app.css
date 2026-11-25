@@ -508,7 +508,10 @@ a { color: inherit; }
 }
 .drawer-head { padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); }
 .drawer-body { position: relative; flex: 1; min-height: 0; }
-.drawer.phone { position: fixed; inset: env(safe-area-inset-top) 0 0 0; width: 100%; z-index: 15; }
+/* a phone's Atlas not started: why, and its Start button */
+.atlas-start { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px 16px; text-align: center; }
+/* a phone's Atlas: over its screen, inside the page's height (--vvh: the keyboard's room left out) */
+.drawer.phone { position: absolute; inset: 0; width: 100%; z-index: 15; border-left: 0; box-shadow: none; background: var(--bg-app); }
 @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } }
 
 
@@ -755,7 +758,7 @@ a { color: inherit; }
 .inputrow .icon-btn { width: 40px; height: 40px; }
 .inputrow .input { flex: 1; resize: none; max-height: 120px; min-height: 40px; font-size: 16px; }
 .inputrow .send { width: 40px; min-height: 40px; padding: 0; border-radius: 20px; }
-.raw-note { flex: 1; align-self: center; }
+.show-kb { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; font-size: 15px; touch-action: manipulation; }
 
 /* xterm.js's scrollbar: quiet until the pointer is over the terminal; none on a phone */
 .term .xterm-scrollable-element > .scrollbar.vertical { opacity: 0; transition: opacity 160ms; }

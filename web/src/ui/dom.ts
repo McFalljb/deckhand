@@ -67,3 +67,11 @@ export function storageSet(key: string, value: string): void {
     /* private mode, or storage off: a preference that does not stick */
   }
 }
+
+export function storageRemove(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* storage off: nothing kept to remove */
+  }
+}

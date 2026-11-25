@@ -22,7 +22,8 @@
 import type { ComponentChildren } from "preact";
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { OpenSession, Tab } from "../state.ts";
-import { IS_MAC, shownSession, useApp, type App, type MenuItem } from "./ctx.ts";
+import { IS_MAC, shownSession, useApp, wished, type App, type MenuItem } from "./ctx.ts";
+import { insertPath } from "./phone.ts";
 import { Icon } from "./icons.tsx";
 import { parseMarkdown, safeHref, type Block, type Inline } from "./markdown.ts";
 import { Windowed, type WItem } from "./Windowed.tsx";
@@ -155,6 +156,18 @@ function openFile(app: App, path: string, quiet = false) {
 async function openSide(app: App, path: string) {
   const r = await app.run({ type: "show_file", path });
   if (r.ok && r.created_id) app.run({ type: "split_pane", direction: "right", tab_id: r.created_id });
+}
+
+// Insert path (phone.ts insertPath): the quoted path typed into the session's terminal on screen,
+// as a drop on it does at the desktop; a phone goes back from Files to that tab. null: none to type into.
+function insertItem(app: App, path: string): MenuItem | null {
+  const s = app.store.session(shownSession(app));
+  const ins = s ? insertPath(app.store.tabs(s.id), app.phone ? wished(`ptab:${s.id}`, s.active_tab) : s.active_tab, path) : null;
+  if (!ins) return null;
+  return {
+    label: "Insert path",
+    run: () => ("error" in ins ? app.toast(`Not inserted: ${ins.error}`, true) : app.run(ins.cmd).then((r) => r.ok && opened())),
+  };
 }
 
 function copyText(app: App, text: string) {
@@ -437,6 +450,8 @@ function rowItems(app: App, root: string, path: string, dir: boolean): MenuItem[
     items.push({ label: "Move to Trash", keys: keys(IS_MAC ? "⌘⌫" : "Delete"), danger: true, run: () => trash(app, path) });
     items.push({ sep: true });
   }
+  const ins = insertItem(app, path);
+  if (ins) items.push(ins);
   items.push({ label: "Copy path", run: () => copyText(app, path) });
   items.push({ label: "Copy relative path", run: () => copyText(app, relPath(root, path)) });
   return items;
@@ -473,7 +488,10 @@ function foundItems(app: App, root: string, path: string, clear: () => void): Me
   const items: MenuItem[] = [{ label: "Open", keys: app.phone ? undefined : "↩", run: () => openFile(app, path) }];
   if (!app.phone) items.push({ label: "Open to the side", run: () => openSide(app, path) });
   items.push({ label: "Show in the tree", run: () => { clear(); reveal(app, root, path); } });
-  items.push({ sep: true }, { label: "Copy path", run: () => copyText(app, path) }, { label: "Copy relative path", run: () => copyText(app, relPath(root, path)) });
+  items.push({ sep: true });
+  const ins = insertItem(app, path);
+  if (ins) items.push(ins);
+  items.push({ label: "Copy path", run: () => copyText(app, path) }, { label: "Copy relative path", run: () => copyText(app, relPath(root, path)) });
   return items;
 }
 

@@ -417,3 +417,29 @@ export function sessionTitle(store: Store, s: OpenSession): string {
   if (p) return p.name || p.label;
   return "Session " + s.id;
 }
+
+// A pane's stream the core closed (Kind.Close: its tab's process went). When the tab runs again
+// (Restart: a new process, a new terminal) the pane attaches to it. Bounded: a stream attached and
+// closed again with no bytes (another machine's terminal that is not there) is tried at most
+// REOPEN_TRIES times; bytes on the new channel (live) or the tab leaving running (a new process
+// to come) start the count again, so a reattach that failed never blocks the next Restart. A tab
+// still exited keeps its last output under the exit bar.
+export const REOPEN_TRIES = 3;
+export class ReopenGuard {
+  private tries = 0;
+  // the tab's status now (and on each change): not running gives the next process its tries
+  status(s: string | undefined): void {
+    if (s !== "running") this.tries = 0;
+  }
+  // bytes came on the attached channel: the stream works
+  live(): void {
+    this.tries = 0;
+  }
+  // after a close or a status change: attach again now?
+  want(status: string | undefined, attachable: boolean): boolean {
+    this.status(status);
+    if (status !== "running" || !attachable || this.tries >= REOPEN_TRIES) return false;
+    this.tries++;
+    return true;
+  }
+}

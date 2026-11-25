@@ -9,9 +9,18 @@ import { newTabItems } from "./Panes.tsx";
 import { TermPane } from "./Term.tsx";
 import { unreadCount } from "./Bell.tsx";
 import type { Panel } from "../state.ts";
+import { atlasToggle } from "./phone.ts";
 
 export function agentName(app: ReturnType<typeof useApp>): string {
   return String(app.store.settings.agent_name || "Atlas");
+}
+
+// Atlas's drawer shown or hidden (phone.ts atlasToggle): the desktop follows the core's home_open;
+// a phone opens and closes its own and never the Mac's drawer.
+export function toggleAtlas(app: ReturnType<typeof useApp>): void {
+  const t = atlasToggle(app.phone, !!app.overlay.atlas, !!app.store.homeOpen);
+  if (t.cmd) app.run(t.cmd);
+  if (app.phone) app.setOverlay({ atlas: t.atlas });
 }
 
 export function TopBar() {
@@ -61,7 +70,7 @@ export function TopBar() {
       <IconButton icon="bell" label="Notifications" badge={unread} run={() => app.setOverlay({ bell: !app.overlay.bell })} />
       <IconButton icon="sidebar-right" label={`Right panels (${keysLabel({ k: "b", alt: true })})`} run={() => app.run({ type: "set_layout", right_open: !store.layout.right_open })} />
       {store.homeSession ? (
-        <button type="button" class={"agent-btn" + (store.homeOpen ? " on" : "")} onClick={() => app.run({ type: "set_home", open: !store.homeOpen })} title={`${name} (${keysLabel({ k: "j" })})`}>
+        <button type="button" class={"agent-btn" + (store.homeOpen ? " on" : "")} onClick={() => toggleAtlas(app)} title={`${name} (${keysLabel({ k: "j" })})`}>
           <span class="agent-avatar">{name[0]?.toUpperCase()}</span>
           {name}
           {agentUnread ? <span class="badge">{agentUnread}</span> : null}
@@ -135,7 +144,7 @@ export function AgentDrawer() {
         <IconButton small icon="close" label={`Close ${name}`} run={() => app.run({ type: "set_home", open: false })} />
       </div>
       <div class="drawer-body">
-        {tab ? <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused keyboard={!app.phone} /> : <p class="empty">Starting {name}…</p>}
+        {tab ? <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused keyboard={!app.phone} inDrawer /> : <p class="empty">Starting {name}…</p>}
       </div>
     </aside>
   );

@@ -38,6 +38,9 @@ export interface TermView {
   // raw keys: the terminal takes the keyboard itself (else the text field under it does); field: a
   // phone's keyboard, through the terminal's own hidden field (termfield.ts), not xterm.js's
   setKeyboard(on: boolean, field?: boolean): void;
+  // the phone's Show keyboard: the terminal's field takes the focus now. Call it from the tap's own
+  // handler: iOS raises its keyboard only for a focus a user gesture makes
+  showKeyboard(): void;
   // a touch scroll may send what the wheel would (mouse reports, arrows): this pane is the one typed into
   setScrollReports(on: boolean): void;
   // a touch scroll's coast ends now
@@ -322,6 +325,11 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
       if (term.textarea) term.textarea.inputMode = on ? "text" : "none";
       if (on) term.focus();
       else term.blur();
+    },
+    showKeyboard() {
+      // a phone (the field was made by setKeyboard(…, true)): its field; else xterm.js's own
+      if (field) field.focus();
+      else term.focus();
     },
     stopScroll() {
       touch?.stop();

@@ -20,6 +20,7 @@ export function fileTabPath(t: Tab): string {
 }
 import { modeBadge, newTabChoices } from "./harness.ts";
 import { TabBars } from "./TabBars.tsx";
+import { exitBar } from "./phone.ts";
 
 const KIND_WORDS: Record<string, string> = {
   editor_tab: "an editor",
@@ -150,21 +151,21 @@ function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: 
   );
 }
 
-function ExitedBar({ tab }: { tab: Tab }) {
+// An exited terminal's bar (phone.ts exitBar): Restart for an agent, Close but for pi's tab.
+export function ExitedBar({ tab }: { tab: Tab }) {
   const app = useApp();
-  const code = tab.exit?.known ? (tab.exit.signal ? `signal ${tab.exit.signal}` : `code ${tab.exit.code}`) : "";
-  const k = tabKind(tab);
-  const restart = k === "pi_tab" ? "pi_restart" : k === "claude_tab" ? "claude_restart" : "";
+  const b = exitBar(tab);
+  if (!b) return null;
   return (
     <div class="exited-bar">
-      <span>Exited{code ? ` (${code})` : ""}</span>
+      <span>{b.text}</span>
       <span class="spacer" />
-      {restart ? (
-        <button type="button" class="btn small" onClick={() => app.run({ type: restart, tab_id: tab.id })}>
+      {b.restart ? (
+        <button type="button" class="btn small" onClick={() => app.run({ type: b.restart, tab_id: tab.id })}>
           Restart
         </button>
       ) : null}
-      {k !== "pi_tab" ? (
+      {b.close ? (
         <button type="button" class="btn small" onClick={() => app.run({ type: "close_tab", tab_id: tab.id })}>
           Close
         </button>

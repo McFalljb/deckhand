@@ -569,6 +569,23 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
   at most 250 ms for a result. If the connection ends, the window dials again and relaunches a
   core if needed (at most 3 times a minute); only a core that said `window.request quit` first
   ends the window. See `src/client_core.odin` and [PROTOCOL.md](PROTOCOL.md) §5a.
+- **A core or holder from an ended login** (#202, `src/core/login_session.odin`). A process keeps
+  the macOS audit session (the login) it started in, and one that outlives a logout keeps running
+  in the dead login: its Mach bootstrap lookups fail (`141: Reentrancy avoided`), so what it
+  starts has no account lookups, no system DNS and no Metal compiler. Before its hello the window
+  compares the core's session (the audit token it reads on `core.sock`, `val[6]`) with its own
+  (`getaudit_addr`). It replaces the core only when it runs in the current GUI login itself (graphic
+  access, not remote, and the `gui/<uid>` domain's session) and the core's session is another
+  GUI-kind one (its flags by `auditon(A_GETSINFO_ADDR)`): a user has one GUI login at a time, so
+  that one has ended. An ssh login's core, or one whose session can't be read, is attached to as
+  before. Replacing: SIGTERM (its save), SIGKILL after 20 s, by pid and start time; at most once per
+  dial, so a core that won't stop is an error, not a loop. The core applies the same rule to a
+  holder at connect: it stops it (its sessions end; its socket goes only once it is gone) and
+  starts a new one, and the tabs restore as after Stop All. Both say so in a toast. A launch that
+  fails with launchd's 141 from a GUI-kind session never falls back to a direct start (that would
+  land in the dead login too), and a core whose launch failed so exits; an ssh caller keeps the
+  fallback. Test builds: `DECKHAND_TEST_ASID=N[:ended|:remote]` stands in for the session (scene
+  `other-login`).
 - **The core** runs headless in a `poll(2)` loop (`src/coremain/serve.odin`). It takes
   `core.lock` (one core per data dir) and `instance.lock` (shared), adopts the holder, restores and
   serves. It runs with or without a window, and exits after 10 idle minutes: no window, no live tab
@@ -584,7 +601,9 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
   process over the in-memory transport (`src/core/window_link.odin`), with the same messages.
 - **Quitting** goes through one table, `quit_route` in `src/main.odin`: ⌘Q, the Dock's Quit and
   closing the window close only the window; *Quit Deckhand and Stop All Sessions…* stops the core
-  and the holder; logout ends everything. User-facing behaviour:
+  and the holder. Logout should end everything, but a core and holder started by `__detach`
+  belong to no launchd job once the launcher boots the job out, so launchd does not stop them
+  then (#202): the next login replaces them (above). User-facing behaviour:
   [How Deckhand runs](GUIDE.md#how-deckhand-runs).
 - **On Linux** there is no window and no Core.app: `core/<version>-<sha12>/` holds
   `deckhand-core-serve` and `deckhand-core`, the core runs as the systemd user unit

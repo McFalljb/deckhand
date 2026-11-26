@@ -1,0 +1,6 @@
+# tests/scripts/other-login.sh, run 2 (login 222): this window replaced login 111's core (and its
+# core the holder); the session restores here, a new fake pi ticking.
+waitfor turn-tick 3 20000
+wait 800
+dump other-login-2
+quit_window

@@ -215,6 +215,10 @@ client_core_reconnect :: proc() -> string {
 	client.lost = false
 	why := client_core_subscribe()
 	if why == "" && core.autotest_active do fmt.printfln("[autotest] core: reattached to pid %d", client.core_pid)
+	if why == "" && client.replaced_other_login {
+		client.replaced_other_login = false
+		toast_show(CORE_OTHER_LOGIN_TOAST)
+	}
 	app.redraw = true
 	return why
 }
@@ -244,15 +248,29 @@ client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, wh
 	last_launch: time.Tick
 	core.core_refused_take(run) // an earlier core's: not this start's
 	refused: string // why the last core launched refused to start (instance_guard), for the timeout's message
+	replaced_other := false // a core from an ended login was replaced in this dial (at most one)
 	for {
 		if fd, ok := core.sock_connect(path); ok {
 			if core.window_token_read(run) != "" {
 				hello, why = client_core_hello(fd, run)
-				if why == "" do return
-				core.sock_close(fd)
-				return
+				if why == "" && hello.other_login {
+					// a core from an ended GUI login (#202): stopped, and one launched from this login,
+					// once per dial (client_core_replace_other_login); then the loop goes on as usual
+					core.sock_close(fd)
+					pid, start := hello.pid, hello.start
+					hello = {}
+					if why = client_core_replace_other_login(pid, start, &replaced_other); why != "" do return
+					client.replaced_other_login = true
+					deadline = time.tick_add(time.tick_now(), CORE_START_WAIT) // the stop took up to 20 s of it
+					last_launch = {}
+				} else {
+					if why == "" do return
+					core.sock_close(fd)
+					return
+				}
+			} else {
+				core.sock_close(fd) // not a core's (yet): no window token
 			}
-			core.sock_close(fd) // not a core's (yet): no window token
 		}
 		// a core refused to start (instance_guard) says why. Not final: one launched a second ago
 		// may still be starting and hold the lock; told only if no core comes up
@@ -294,9 +312,36 @@ client_core_launch :: proc(run, data: string, from_tab := false) -> string {
 
 // What the core's hello reply said (client_core_handover_to decides on it).
 Core_Hello :: struct {
-	skew:  cw.Skew,
-	build: string, // the core's two binaries' hash (core.core_build_of)
+	skew:        cw.Skew,
+	build:       string, // the core's two binaries' hash (core.core_build_of)
+	other_login: bool, // the core runs in an ended GUI login (#202): no hello was sent; client_core_dial replaces it
+	pid:         i32, // with other_login: the core's
+	start:       i64, // ...and its start time (0: not known), read while the socket tied pid to it
 }
+
+CORE_OTHER_LOGIN_STOP_WAIT :: 20 * time.Second // its SIGTERM's save and handover, then SIGKILL
+
+// A core from an ended GUI login (#202, core/login_session.odin): a process that outlived a logout,
+// whose sessions can't reach the login's services. It gets SIGTERM, its clean stop (the workspace
+// saved, the holder said a handover goodbye, so its supervisor relaunches nothing), and SIGKILL
+// after CORE_OTHER_LOGIN_STOP_WAIT, by pid and start time (core.login_stop_pid: never a reused
+// pid; its binary may be gone). At most one per dial (replaced): another one after it (an old
+// supervisor's relaunch), or one that won't stop, is the dial's reason to fail, never a loop.
+// The core this window then launches finds that login's holder and replaces it too.
+client_core_replace_other_login :: proc(pid: i32, start: i64, replaced: ^bool, stop := core.login_stop_pid) -> string {
+	if replaced^ do return fmt.tprintf("A Deckhand core from an earlier login (pid %d) is running again after it was stopped. Quit it in Activity Monitor (deckhand-core-serve), then open Deckhand again", pid)
+	fmt.eprintln("Deckhand: background core: pid", pid, "runs in a GUI login that has ended; stopping it and starting one here")
+	if core.autotest_active do fmt.printfln("[autotest] core: replacing pid %d from another login", pid)
+	if !stop(pid, start, CORE_OTHER_LOGIN_STOP_WAIT) {
+		return fmt.tprintf("A Deckhand core from an earlier login (pid %d) could not be stopped. Quit it in Activity Monitor (deckhand-core-serve), then open Deckhand again", pid)
+	}
+	replaced^ = true
+	return ""
+}
+
+// The toast after a window replaced a core from another login.
+CORE_OTHER_LOGIN_TOAST :: "Replaced Deckhand's core from an earlier login: your sessions restart here."
+
 
 // The window's half of the framed hello on fd (connected to core.sock). "" = the link is up.
 @(private = "file")
@@ -304,6 +349,13 @@ client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> (hello: Core_Hello, 
 	peer: trust.Peer
 	peer, why = core.core_peer_check(fd) // before a byte is sent (B4)
 	if why != "" do return
+	// a core from an ended GUI login, this window in the current one (#202): nothing is sent to it
+	// (client_core_dial replaces it). Any other session (an ssh login's): attached as before
+	if _, tok := trust.peer_read_token(fd); core.login_should_replace(tok, peer.pid) {
+		start: i64
+		if h, ok := core.lock_proc_ident(peer.pid); ok do start = h.start
+		return {other_login = true, pid = peer.pid, start = start}, ""
+	}
 	token := core.window_token_read(run)
 	line := fmt.tprintf("{{\"id\":\"w\",\"v\":%d,\"type\":\"hello\",\"framed\":true,\"token\":\"%s\"}}\n", core.PROTOCOL_VERSION, token)
 	if !core.sock_write_all(fd, transmute([]u8)line) do return {}, "the background core closed the connection"

@@ -1,0 +1,13 @@
+# tests/scripts/other-login.sh, run 1 (login 111): a separate core and a holder (keep_sessions on)
+# with a session whose fake pi ticks. The scene kills this window (-9) once the dump is written.
+wait 300
+ui_command {"type":"set_keep_sessions","on":true}
+assert_result ok true
+command {"type":"add_project","cwd":"$cwd/build/other-login/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"oooo-1"}
+assert_result ok true
+waitfor turn-tick 5 15000
+wait 1500
+dump other-login-1
+wait 60000

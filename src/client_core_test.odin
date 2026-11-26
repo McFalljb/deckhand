@@ -3,6 +3,7 @@ package main
 // The window's side of a separate core (client_core.odin): a command's result is waited for at
 // most CLIENT_WAIT, then it shows as pending and the late one is dropped (design Q9).
 
+import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
@@ -93,4 +94,25 @@ client_changes_action_reads_list_now :: proc(t: ^testing.T) {
 	window_request_run({op = .Path_Changed, path = "/tmp/dh-changes-b"}) // a file command's path: the debounce as before
 	testing.expect(t, !b.now, "a plain path_changed reads the list at once")
 	client.sock = nil
+}
+
+// #204 review, item 1: a core from another login is replaced at most once per dial, and one that
+// can't be stopped is a reason, never a loop.
+@(private = "file")
+cc_stop_ok :: proc(pid: i32, start: i64, wait: time.Duration) -> bool {return true}
+@(private = "file")
+cc_stop_fails :: proc(pid: i32, start: i64, wait: time.Duration) -> bool {return false}
+
+@(test)
+client_core_other_login_once :: proc(t: ^testing.T) {
+	replaced := false
+	why := client_core_replace_other_login(4242, 99, &replaced, cc_stop_ok)
+	testing.expect_value(t, why, "")
+	testing.expect(t, replaced, "the first one is replaced")
+	why = client_core_replace_other_login(4243, 99, &replaced, cc_stop_ok)
+	testing.expectf(t, strings.contains(why, "pid 4243") && strings.contains(why, "earlier login"), "a second one in the same dial: %q", why)
+	replaced = false
+	why = client_core_replace_other_login(4244, 99, &replaced, cc_stop_fails)
+	testing.expectf(t, strings.contains(why, "pid 4244") && strings.contains(why, "could not be stopped"), "one that won't stop: %q", why)
+	testing.expect(t, !replaced)
 }

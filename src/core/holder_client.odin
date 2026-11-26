@@ -292,6 +292,8 @@ holder_client_start :: proc() -> bool {
 			case .Stale:
 				log_ln("Deckhand: session holder: removing a dead holder's socket", path)
 				sock_unlink(path)
+			case .Other_Login:
+				_ = holder_replace_other_login(refused_code_pid, path) // not stopped: its socket stays, a new holder starts beside it
 			}
 		}
 		if !quiet do break
@@ -343,10 +345,12 @@ holder_client_start :: proc() -> bool {
 	}
 	defer delete(exe)
 	before := holder_socks(run)
-	if _, lok, lwhy := holder_launch(exe, run, home_root, nil); !lok {
+	hpid, lok, lwhy := holder_launch(exe, run, home_root, nil)
+	if !lok {
 		log_ln("Deckhand: session holder: cannot start it:", lwhy)
 		return false
 	}
+	login_note(hpid) // test builds: it runs in this core's login (login_session.odin)
 	deadline := time.tick_now()
 	for time.tick_since(deadline) < HOLDER_WAIT {
 		outer: for path in holder_socks(run) {
@@ -388,6 +392,7 @@ Connect_Result :: enum {
 	Stale, // nobody listens (a holder killed with -9: the holder unlinks only its own socket at exit)
 	Quiet, // took the connection but closed it, or never answered, without a byte (shutting down?)
 	Refused_Code, // a holder of this user whose code is not ours (another build): nothing was sent to it
+	Other_Login, // ours, but from another login (#202): nothing was sent to it; holder_client_start replaces it
 }
 
 @(private = "file")
@@ -438,6 +443,14 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		sock_close(fd)
 		refused_code_pid = peer.pid
 		return .Refused_Code
+	}
+	// a holder from an ended GUI login, this core in the current one (#202, login_session.odin):
+	// nothing is sent to it; it is replaced. Any other session (an ssh login's): attached as before
+	if login_should_replace(tok, peer.pid) {
+		log_ln("Deckhand: session holder: pid", peer.pid, "runs in a GUI login that has ended")
+		sock_close(fd)
+		refused_code_pid = peer.pid
+		return .Other_Login
 	}
 	set_timeouts(fd)
 	hc.fd, hc.peer = fd, peer

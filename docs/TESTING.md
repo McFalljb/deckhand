@@ -136,6 +136,7 @@ Typical times and tags are in `tests/scenes.txt`; each script's header says what
 | Scene | Protects |
 |---|---|
 | `two-process` | a separate core: the window launches it, attaches, closes; the core and a shell run on; a second window shows the same terminal |
+| `other-login` | a core and a holder from another login (#202, `DECKHAND_TEST_ASID`): a window in a new login stops that core and launches its own, which replaces the holder; the session restores with a new process, and both toasts show |
 | `window-attach` | the window killed during a pi turn (the turn runs on); the core killed (the window relaunches one, which adopts from the holder) |
 | `holder-stall` | the core stopped (SIGSTOP) past the holder's 30 s pong timeout, as a sleep or a long stall would (#108): once continued it attaches to the same holder again; its pi tab still runs, same process, input and output through it, nothing started twice |
 | `handover` | a core handed over to another: same holder and session pids, terminals exact from the snapshot, a job run finished, no secret in any log; the supervisor relaunches a killed core |

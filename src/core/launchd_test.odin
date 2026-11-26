@@ -416,3 +416,57 @@ holder_install_tmp_unique :: proc(t: ^testing.T) {
 	testing.expect(t, a != b, a)
 	testing.expect(t, strings.has_prefix(a, "/d/.deckhand-core.") && strings.has_suffix(a, ".tmp"), a)
 }
+
+// #202: a launch from a process whose login has ended fails with launchd's "141: Reentrancy
+// avoided". No direct start follows (it would land in the dead login too), for the holder and the
+// core alike, and login_gone is set (a core then exits). A stand-in launchctl; launchd untouched.
+@(test)
+launchd_login_gone_no_fallback :: proc(t: ^testing.T) {
+	d := lt_dir("lgone")
+	defer os.remove_all(d)
+	run := fmt.tprintf("%s/run", d)
+	testing.expect_value(t, runtime_dir_prepare(run, RUNTIME_HOLDER_NEED), "")
+	fake := fmt.tprintf("%s/launchctl", d)
+	script := "#!/bin/sh\nif [ \"$1\" = bootstrap ]; then echo 'Bootstrap failed: 141: Reentrancy avoided' >&2; exit 141; fi\nif [ \"$1\" = bootout ]; then echo 'Boot-out failed: 141: Reentrancy avoided' >&2; exit 141; fi\nexit 0\n"
+	_ = os.write_entire_file(fake, transmute([]byte)script)
+	posix.chmod(strings.clone_to_cstring(fake, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+	// a real binary: a direct start of it would succeed, so a fallback would show
+	bin := fmt.tprintf("%s/deckhand-core", d)
+	if !lt_cc(t, LT_MAIN, bin, "") do return
+	saved := launchd_launchctl
+	launchd_launchctl = fake
+	defer {
+		launchd_launchctl = saved
+		login_gone = false
+		login_gui_kind_for_test = 0
+	}
+	login_gone = false
+	login_gui_kind_for_test = 1 // a GUI login (its end is what 141 means)
+	pid, ok, why := holder_launch(bin, run, fmt.tprintf("%s/data", d), {"PATH=/usr/bin:/bin"})
+	testing.expectf(t, !ok && pid == 0, "the holder's launch fails: %v %d", ok, pid)
+	testing.expectf(t, strings.contains(why, "login that has ended"), "why: %s", why)
+	testing.expect(t, login_gone, "login_gone is set")
+	login_gone = false
+	pid, ok, why = core_launch(bin, run, fmt.tprintf("%s/data", d))
+	testing.expectf(t, !ok && pid == 0, "the core's launch fails: %v %d", ok, pid)
+	testing.expectf(t, strings.contains(why, "login that has ended"), "why: %s", why)
+	testing.expect(t, login_gone, "login_gone is set")
+
+	// #204 review, item 6b: a caller in an ssh login (`deckhand-core-serve connect` from another
+	// Mac, a tmux from ssh) keeps the direct start: its 141 says nothing about the GUI login
+	login_gone = false
+	login_gui_kind_for_test = 2
+	pid, ok, why = holder_launch(bin, run, fmt.tprintf("%s/data", d), {"PATH=/usr/bin:/bin"})
+	testing.expectf(t, ok && pid > 0, "an ssh caller's holder starts directly: %v %d %s", ok, pid, why)
+	testing.expect(t, !login_gone, "and login_gone stays clear")
+}
+
+@(test)
+launchd_login_gone_parse :: proc(t: ^testing.T) {
+	// core.log of #202, verbatim
+	testing.expect(t, launchd_login_gone("launchctl bootstrap: Failed Bootstrap failed: 141: Reentrancy avoided"))
+	testing.expect(t, launchd_login_gone("Bootstrap failed: 141: Reentrancy avoided"))
+	testing.expect(t, !launchd_login_gone("launchctl bootstrap: Failed Bootstrap failed: 5: Input/output error"))
+	testing.expect(t, !launchd_login_gone("the detached holder never connected to the ready socket"))
+	testing.expect(t, !launchd_login_gone(""))
+}

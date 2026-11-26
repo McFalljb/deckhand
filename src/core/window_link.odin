@@ -265,6 +265,36 @@ window_link_drain_starts :: proc() {if link != nil && link.on_drain != nil do li
 // Something the window shows changed (window_state_changed): the next flush looks.
 window_link_dirty :: proc() {if link != nil do link.dirty = true}
 
+Waiting_Toast :: struct {
+	text: string, // heap
+	err:  bool,
+}
+
+// Toasts that wait for the next window to subscribe while none is (window_toast_shown).
+@(private = "file")
+toasts_waiting: [dynamic]Waiting_Toast
+
+// A toast the user must see even when it happens before a window attached (a core's start: #202's
+// replaced holder): sent now to a subscribed window, else at the next one's state.subscribe.
+window_toast_shown :: proc(text: string, err := false) {
+	if link != nil && link.subscribed && !link.web {
+		_ = window_link_toast(text, err)
+		return
+	}
+	heap := runtime.heap_allocator()
+	if toasts_waiting.allocator.procedure == nil do toasts_waiting = make([dynamic]Waiting_Toast, heap)
+	if len(toasts_waiting) < 8 do append(&toasts_waiting, Waiting_Toast{strings.clone(text, heap), err})
+}
+
+@(private = "file")
+toasts_waiting_send :: proc() {
+	for t in toasts_waiting {
+		_ = window_link_toast(t.text, t.err)
+		delete(t.text, runtime.heap_allocator())
+	}
+	clear(&toasts_waiting)
+}
+
 // A short line at the bottom of the window. False: no window attached.
 window_link_toast :: proc(text: string, err: bool) -> bool {
 	if link == nil do return false
@@ -1003,6 +1033,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		link.subscribed = true
 		link.dirty = false
 		link_send_state(state_full_json(&state, &link.sent))
+		if !link.web do toasts_waiting_send() // after the state.full: the window shows toasts once attached
 		// a window that attached to a running core (after another window quit) gets the views of
 		// the tabs that have one, as start_restored_tabs gives them: a page loads when shown, a
 		// buffer reads its file. A view the window already has stays (view_open is a no-op then).

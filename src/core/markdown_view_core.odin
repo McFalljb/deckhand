@@ -29,6 +29,6 @@ Markdown_Scroll :: struct {
 // Follows a link of the document, as a click on it does.
 Markdown_Follow :: struct {
 	tab_id:  u64,
-	url:     string,
-	confirm: string `cmd:"omit"`, // a web or mail link from a caller other than the user: the user confirms
+	url:     string `cmd:"red=url"`,
+	confirm: string `cmd:"omit,red=token"`, // a web or mail link from a caller other than the user: the user confirms
 }

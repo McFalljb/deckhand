@@ -74,7 +74,7 @@ machines_reachable_default_on :: false
 
 Set_Machines_Reachable :: struct {
 	on:      bool,
-	confirm: string `cmd:"omit"`, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
+	confirm: string `cmd:"omit,red=token"`, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
 }
 
 // What turning Allow other machines to connect on asks first (the guide's warning, plainly).
@@ -90,7 +90,7 @@ Machine_Add :: struct {
 // Removes a machine (the user confirms first: nothing on it is touched). User-only.
 Machine_Remove :: struct {
 	no:      u64,
-	confirm: string `cmd:"omit"`,
+	confirm: string `cmd:"omit,red=token"`,
 }
 // Renames a machine: only what Deckhand calls it; its ssh target stays. User-only.
 Machine_Rename :: struct {

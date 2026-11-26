@@ -199,7 +199,7 @@ cmd_write :: proc(b: ^strings.Builder, cmd: Command, mode: Cmd_Mode) {
 // One field as its tag says (command_codec.odin).
 @(private = "file")
 cmd_write_field :: proc(w: ^Jw, info: ^Cmd_Info, f: ^Cmd_Field, cmd: ^Command, mode: Cmd_Mode) {
-	if f.skip do return
+	if f.skip || (f.ui && mode != .Wire) do return // ui: only on the wire, whatever red= says
 	data := rawptr(uintptr(cmd) + f.offset)
 	t: Cmd_Transform
 	if mode != .Wire || !f.full {
@@ -430,7 +430,7 @@ write_command_hook :: proc(w: ^Jw, cmd: Command, mode: Cmd_Mode) -> bool {
 			kv_bool(w, "can_back", c.can_back)
 			kv_bool(w, "can_forward", c.can_forward)
 		}
-		if .Blocked in c.what do kv_str(w, "blocked_popup", c.blocked)
+		if .Blocked in c.what do kv_str(w, "blocked_popup", mode == .Red ? browser_url_redacted(c.blocked) : c.blocked)
 	case Restore_Session:
 		kv_u64(w, "project_id", c.project_id)
 		kv_str(w, "pi_session_id", c.pi_session_id)
@@ -444,7 +444,7 @@ write_command_hook :: proc(w: ^Jw, cmd: Command, mode: Cmd_Mode) -> bool {
 			o := obj_begin(w.b)
 			kv_str(&o, "kind", TAB_KIND_NAMES[t.kind])
 			kv_str(&o, "title", t.title)
-			kv_str(&o, "cwd", t.cwd)
+			kv_str(&o, "cwd", mode == .Red && t.kind == .Browser ? browser_url_redacted(t.cwd) : t.cwd) // a browser tab's: its URL
 			if t.active do kv_bool(&o, "active", true)
 			if len(c.layout.nodes) > 0 {
 				if pn, ok := t.pane.?; ok { // its saved pane (left out: not known)

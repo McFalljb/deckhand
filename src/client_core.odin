@@ -330,6 +330,10 @@ CORE_OTHER_LOGIN_STOP_WAIT :: 20 * time.Second // its SIGTERM's save and handove
 // The core this window then launches finds that login's holder and replaces it too.
 client_core_replace_other_login :: proc(pid: i32, start: i64, replaced: ^bool, stop := core.login_stop_pid) -> string {
 	if replaced^ do return fmt.tprintf("A Deckhand core from an earlier login (pid %d) is running again after it was stopped. Quit it in Activity Monitor (deckhand-core-serve), then open Deckhand again", pid)
+	if start == 0 { // it exited as this window connected: gone already, this dial's one replacement
+		replaced^ = true
+		return ""
+	}
 	fmt.eprintln("Deckhand: background core: pid", pid, "runs in a GUI login that has ended; stopping it and starting one here")
 	if core.autotest_active do fmt.printfln("[autotest] core: replacing pid %d from another login", pid)
 	if !stop(pid, start, CORE_OTHER_LOGIN_STOP_WAIT) {

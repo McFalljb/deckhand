@@ -278,3 +278,26 @@ web_view_atlas_offered :: proc(t: ^testing.T) {
 	harness_installed_probe[.Pi] = proc() -> bool {return false}
 	testing.expect_value(t, atlas(), "false")
 }
+
+// A browser's set_filter is its sender's (#198 review): the device rides on the Caller, so a command
+// still queued when another browser (or the window) takes the view never lands on that one.
+@(test)
+web_view_filter_is_the_senders :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	defer web_filters_reset()
+	a := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-sender-alpha"}
+	b := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-sender-beta"}
+	append(&state.projects, a, b)
+	A := Caller{kind = .UI, web = true, web_device = web_device_key("device-a")}
+	testing.expect(t, A.web_device != 0)
+	testing.expect(t, run_command(Set_Filter{text = "alpha"}, A).ok)
+	testing.expect_value(t, web_filters[A.web_device].text, "alpha")
+	// the view now (no browser attached here: another device's): not narrowed by A's filter
+	testing.expect_value(t, web_filter_now().text, "")
+	secs := state_sections(&state)
+	for x in web_view_cached(secs[:]) do if x[0] == "webtree" do testing.expect_value(t, x[1], fmt.tprintf(`["%d","%d"]`, a.id, b.id))
+	testing.expect_value(t, state.sidebar.filter, "") // nor the window's
+}

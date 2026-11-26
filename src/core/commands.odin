@@ -859,6 +859,7 @@ Caller :: struct {
 	claude: bool, // kind panel: a Claude tab's plugin and CLI (claude.odin), not a pi tab's bridge
 	hub:    bool, // it came over a hub link (another machine's core, on_behalf): kept with a queued command, so a hub that is gone by the time it runs still counts (caller_from_hub)
 	web:    bool, // kind ui: a paired browser's (web access, web.odin): the user, with a hub's caps and no User_Here (web_may_run)
+	web_device: u64, // with web: which paired browser (web_device_key of its device id), kept with a queued command: its own filter (web_filters)
 }
 
 // The command came from another machine's core: its own link said so (kept with it in the inbox),
@@ -1549,7 +1550,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		ch := false
 		if caller_from_web(caller) {
 			// a browser's filter is its own (web_view.odin web_filters); Show hidden is one setting
-			ch = web_filter_apply(c)
+			ch = web_filter_apply(c, caller.web_device != 0 ? caller.web_device : web_device_key(window_link_web_device()))
 			if b, ok := c.show_hidden.?; ok && b != sb.show_hidden {
 				sb.show_hidden = b
 				ch = true
@@ -2397,7 +2398,7 @@ CHATS_NOT_A_PROJECT :: "Chats is not a project: its sessions are in state.chats 
 home_start :: proc(caller: Caller) -> (^Tab, Result) {
 	// Atlas runs on pi (harness.odin): without it nothing starts and the user is told how to install it
 	if !agent_running() && !(caller.kind == .UI ? pi_installed_now() : pi_installed()) {
-		if caller.kind == .UI && !caller.web do window_toast(ATLAS_NEEDS_PI, err = true) // a browser shows the result's error itself
+		if caller.kind == .UI && !caller_from_web(caller) do window_toast(ATLAS_NEEDS_PI, err = true) // a browser shows the result's error itself
 		return nil, fail(ATLAS_NEEDS_PI)
 	}
 	if state.home == 0 {

@@ -131,25 +131,32 @@ web_watch_list :: proc(w: ^Web_Watched) {
 
 // A browser's own filter and quick filters (#196): set_filter from a browser sets these, never
 // the window's (state.sidebar), so a phone's filter box and chips leave the Mac's left column as
-// it was. Per paired browser (its device id), in memory like the window's (never saved). The
-// browser's tree and Attention list are computed with them (web_view_build), and "web".filter
-// says what they are.
+// it was. Per paired browser, keyed by the sender's device (Caller.web_device: a command still
+// queued when another browser takes the view stays its sender's), in memory like the window's
+// (never saved). The browser's tree and Attention list are computed with the attached browser's
+// (web_view_build), and "web".filter says what it is.
 Web_Filter :: struct {
 	text:                      string, // heap
 	running, waiting, pinned: bool,
 }
 @(private)
-web_filters: map[string]Web_Filter // by device id (heap)
+web_filters: map[u64]Web_Filter // by web_device_key
+
+// A paired browser's key: its device id hashed, never 0 (0: none).
+web_device_key :: proc(device: string) -> u64 {
+	if device == "" do return 0
+	h := hash.fnv64a(transmute([]u8)device)
+	return h == 0 ? 1 : h
+}
 
 // The attached browser's filter ({} : none set).
 web_filter_now :: proc() -> Web_Filter {
-	return web_filters[window_link_web_device()]
+	return web_filters[web_device_key(window_link_web_device())]
 }
 
-// set_filter from a browser (commands.odin): its own filter; changed: it differs now.
-web_filter_apply :: proc(c: Set_Filter) -> (changed: bool) {
+// set_filter from a browser (commands.odin), for its device; changed: its filter differs now.
+web_filter_apply :: proc(c: Set_Filter, dev: u64) -> (changed: bool) {
 	heap := runtime.heap_allocator()
-	dev := window_link_web_device()
 	f := web_filters[dev]
 	if text, ok := c.text.?; ok {
 		text = cut_utf8(one_line(text, context.temp_allocator), FILTER_MAX)
@@ -170,8 +177,7 @@ web_filter_apply :: proc(c: Set_Filter) -> (changed: bool) {
 	set(&f.pinned, c.pinned, &changed)
 	if dev not_in web_filters {
 		if len(web_filters) >= WEB_FILTERS_MAX do web_filters_reset() // a few paired browsers; past that, start over
-		if web_filters == nil do web_filters = make(map[string]Web_Filter, heap)
-		dev = strings.clone(dev, heap)
+		if web_filters == nil do web_filters = make(map[u64]Web_Filter, heap)
 	}
 	web_filters[dev] = f
 	return
@@ -180,10 +186,7 @@ WEB_FILTERS_MAX :: 32
 
 web_filters_reset :: proc() {
 	heap := runtime.heap_allocator()
-	for k, f in web_filters {
-		delete(k, heap)
-		delete(f.text, heap)
-	}
+	for _, f in web_filters do delete(f.text, heap)
 	clear(&web_filters)
 }
 

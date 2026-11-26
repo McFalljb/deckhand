@@ -7,7 +7,8 @@ package core
 // name is its type's name lowercased unless COMMAND_NAMES says otherwise.
 //
 // A field with no tag is written always (log, redacted log and wire alike) under its own name
-// and is required when parsed. The tag `cmd:"a,b,..."` changes that:
+// and is required when parsed, but for a float or a Maybe: optional (absent: 0, or def; a Maybe
+// unset). The tag `cmd:"a,b,..."` changes that:
 //
 //   key=K      its key on the wire is K
 //   omit       written only when not zero; optional when parsed (absent: zero)
@@ -28,10 +29,11 @@ package core
 //   red=T      in the redacted log as T
 //   full       on the wire as it is, whatever log= says
 //   names=N    an enum's wire names from the table N (cmd_enum_names), not its lowercased names
-//   codec=C    written and parsed by json_write.odin's and json_read.odin's codec C
+//   codec=C    written and parsed by json_write.odin's and json_read.odin's codec C (one of
+//              CMD_CODECS: on a field of its type, beside the sibling fields it uses)
 //   borrow     the inbox's copy shares it with the original, and command_free leaves it: a
 //              value handed over to the command's handler, or borrowed for a command that is
-//              never queued
+//              never queued; a field that holds a pointer must say it
 //
 // where T (cmd_transform) is one of
 //
@@ -46,6 +48,12 @@ package core
 //   items:W    "<redacted N W>" (N: the list's length)
 //   cut:N      the string's first N bytes (whole UTF-8 characters)
 //   f3         a number with 3 decimals
+//
+// A tag the codec does not know, a codec on a field it does not fit, ui with log=, or a pointer
+// without borrow: a test build lists them (command_codec_tags fails), any other build panics at
+// startup. A field that holds a string with no say over its log (log=, red=, -, codec=, ui), or
+// a parsed field with no say over its parse (noparse, -, ui), must be in tests/command-codec/'s
+// lists (command_codec_test.odin): a new one is a decision, not a default.
 //
 // The few commands whose log no tag can say are written by hand (json_write.odin's
 // write_command_hook). tests/command-codec/golden.txt pins every command's JSON
@@ -136,6 +144,57 @@ Cmd_Field :: struct {
 	names:       []string, // an enum's wire names, by value - names_min
 	names_min:   i64,
 	codec:       string,
+	tag:         string, // the `cmd` tag as written (command_codec_test.odin's lists)
+}
+
+// The codecs a `codec=` tag may name: whether json_write.odin's cmd_write_codec and
+// json_read.odin's cmd_read_codec have a case for it (else that side is the generic one), the
+// field's type (nil: an enum with names=), and the sibling fields it reads or sets ("has_*": has_
+// and the field's name).
+Cmd_Codec :: struct {
+	name:        string,
+	write, read: bool,
+	type:        typeid,
+	siblings:    []Cmd_Sibling,
+}
+
+Cmd_Sibling :: struct {
+	name: string,
+	type: typeid,
+}
+
+CMD_CODECS := [?]Cmd_Codec {
+	{name = "act_target", write = true, read = true, type = Act_Target},
+	{name = "app_argv", write = true, type = []string, siblings = {{"command", string}}},
+	{name = "bell_macos", write = true, read = true, type = [Bell_Group]Maybe(Os_When)},
+	{name = "bell_sound", write = true, read = true, type = [Bell_Group]Maybe(Bell_Sound)},
+	{name = "bg_crons", read = true, type = []Claude_Cron_In},
+	{name = "bg_tasks", read = true, type = []Claude_Bg_In},
+	{name = "comments", read = true, type = Comments_Choice},
+	{name = "delete_path", write = true, type = string, siblings = {{"paths", []string}}},
+	{name = "enum_of", read = true},
+	{name = "exit", write = true, type = Exit_Info},
+	{name = "exit_code", write = true, type = int, siblings = {{"status", App_Status}}},
+	{name = "files", write = true, type = []string, siblings = {{"more", int}}},
+	{name = "harness_ct", write = true, read = true, type = Harness},
+	{name = "harness_key", read = true, type = Harness},
+	{name = "has", write = true, read = true, type = string, siblings = {{"has_*", bool}}},
+	{name = "images", write = true, read = true, type = []Prompt_Image},
+	{name = "inverse", write = true, read = true, type = bool},
+	{name = "job_finished", write = true, type = Job_Finished},
+	{name = "model_word", read = true, type = string},
+	{name = "mods", write = true, read = true, type = int},
+	{name = "ok_if_empty", write = true, type = string},
+	{name = "pane_dir", read = true, type = Pane_Dir},
+	{name = "prog_summary", write = true, type = Prog_Summary},
+	{name = "raw", write = true, read = true, type = string},
+	{name = "raw_list", write = true, read = true, type = []string},
+	{name = "rect", write = true, read = true, type = App_Rect, siblings = {{"has_rect", bool}}},
+	{name = "rows", write = true, read = true, type = []Panel_Row},
+	{name = "todos", read = true, type = []Claude_Todo_In},
+	{name = "wait_value", write = true, type = string, siblings = {{"what", string}}},
+	{name = "web_ids", read = true, type = []u64},
+	{name = "xy", write = true, type = i32, siblings = {{"x", i32}, {"y", i32}}},
 }
 
 Cmd_Info :: struct {
@@ -220,6 +279,8 @@ cmd_field :: proc(type_name: string, name: string, tag: string, offset: uintptr,
 		append(&command_tag_problems, strings.concatenate({type_name, ".", name, ": ", what}))
 	}
 	v, _ := reflect.struct_tag_lookup(reflect.Struct_Tag(tag), "cmd")
+	f.tag = string(v)
+	has_log := false
 	for opt in strings.split(v, ",", context.temp_allocator) {
 		k, _, arg := strings.partition(opt, "=")
 		switch k {
@@ -240,8 +301,11 @@ cmd_field :: proc(type_name: string, name: string, tag: string, offset: uintptr,
 		case "nonneg":  f.nonneg = true
 		case "log", "red":
 			t, ok := cmd_transform(arg)
-			if !ok do bad(type_name, name, opt)
-			if k == "log" do f.log = t
+			if !ok {
+				bad(type_name, name, opt)
+				t = {tx = .Drop} // fail closed: left out
+			}
+			if k == "log" do f.log, has_log = t, true
 			else do f.red = t
 		case "def":
 			x, ok := strconv.parse_f64(arg)
@@ -259,7 +323,76 @@ cmd_field :: proc(type_name: string, name: string, tag: string, offset: uintptr,
 		case:           bad(type_name, name, opt)
 		}
 	}
+	if f.ui && has_log do bad(type_name, name, "ui with log= (ui fields are never in the log)")
+	if f.borrow == false && cmd_has_pointer(ti, nil) do bad(type_name, name, "holds a pointer: command_clone would share it (borrow, if that is meant)")
 	return f
+}
+
+// Whether a value of type ti holds a pointer (wire_clone copies a pointer, not what it points to).
+@(private = "file")
+cmd_has_pointer :: proc(ti: ^runtime.Type_Info, seen: ^map[typeid]bool) -> bool {
+	seen := seen
+	local: map[typeid]bool
+	if seen == nil {
+		local = make(map[typeid]bool, context.temp_allocator)
+		seen = &local
+	}
+	if ti.id in seen^ do return false
+	seen[ti.id] = true
+	#partial switch t in ti.variant {
+	case runtime.Type_Info_Named:            return cmd_has_pointer(t.base, seen)
+	case runtime.Type_Info_Pointer, runtime.Type_Info_Multi_Pointer, runtime.Type_Info_Procedure, runtime.Type_Info_Any:
+		return true
+	case runtime.Type_Info_Struct:
+		for k in 0 ..< int(t.field_count) do if cmd_has_pointer(t.types[k], seen) do return true
+	case runtime.Type_Info_Union:
+		for v in t.variants do if cmd_has_pointer(v, seen) do return true
+	case runtime.Type_Info_Slice:            return cmd_has_pointer(t.elem, seen)
+	case runtime.Type_Info_Dynamic_Array:    return cmd_has_pointer(t.elem, seen)
+	case runtime.Type_Info_Array:            return cmd_has_pointer(t.elem, seen)
+	case runtime.Type_Info_Enumerated_Array: return cmd_has_pointer(t.elem, seen)
+	case runtime.Type_Info_Map:              return cmd_has_pointer(t.key, seen) || cmd_has_pointer(t.value, seen)
+	case runtime.Type_Info_String:           return t.is_cstring
+	}
+	return false
+}
+
+// A field's codec= is one CMD_CODECS has, on a field of its type, beside the siblings it uses.
+@(private = "file")
+cmd_codec_check :: proc(info: ^Cmd_Info, f: ^Cmd_Field) {
+	bad :: proc(info: ^Cmd_Info, f: ^Cmd_Field, what: string) {
+		append(&command_tag_problems, strings.concatenate({info.name, ".", f.name, ": codec=", f.codec, ": ", what}))
+	}
+	c: ^Cmd_Codec
+	for &x in CMD_CODECS do if x.name == f.codec do c = &x
+	if c == nil {
+		bad(info, f, "no such codec")
+		return
+	}
+	if c.type != nil && f.ti.id != c.type do bad(info, f, "wants another field type")
+	if c.type == nil && (f.names == nil || !reflect.is_enum(f.ti)) do bad(info, f, "wants an enum with names=")
+	for s in c.siblings {
+		want := s.name == "has_*" ? strings.concatenate({"has_", f.name}, context.temp_allocator) : s.name
+		found := false
+		for &g in info.fields do if g.name == want {
+			found = true
+			if g.ti.id != s.type do bad(info, f, strings.concatenate({"its sibling ", want, " has another type"}, context.temp_allocator))
+		}
+		if !found do bad(info, f, strings.concatenate({"no sibling field ", want}, context.temp_allocator))
+	}
+}
+
+// A command struct's info from its tags (its problems appended to command_tag_problems).
+cmd_info_of :: proc(vt: ^runtime.Type_Info) -> (info: Cmd_Info) {
+	info.id, info.ti = vt.id, vt
+	named := vt.variant.(runtime.Type_Info_Named)
+	info.name = strings.to_lower(named.name)
+	for x in COMMAND_NAMES do if x.id == vt.id do info.name = x.name
+	st := runtime.type_info_base(vt).variant.(runtime.Type_Info_Struct)
+	info.fields = make([]Cmd_Field, st.field_count)
+	for k in 0 ..< int(st.field_count) do info.fields[k] = cmd_field(named.name, st.names[k], st.tags[k], st.offsets[k], st.types[k])
+	for &f in info.fields do if f.codec != "" do cmd_codec_check(&info, &f)
+	return
 }
 
 @(init, private = "file")
@@ -269,19 +402,18 @@ command_codec_init :: proc "contextless" () {
 	command_infos = make([]Cmd_Info, len(u.variants))
 	for vt, i in u.variants {
 		info := &command_infos[i]
-		info.id, info.ti = vt.id, vt
-		named := vt.variant.(runtime.Type_Info_Named)
-		info.name = strings.to_lower(named.name)
-		for x in COMMAND_NAMES do if x.id == vt.id do info.name = x.name
-		st := runtime.type_info_base(vt).variant.(runtime.Type_Info_Struct)
-		info.fields = make([]Cmd_Field, st.field_count)
-		for k in 0 ..< int(st.field_count) do info.fields[k] = cmd_field(named.name, st.names[k], st.tags[k], st.offsets[k], st.types[k])
+		info^ = cmd_info_of(vt)
 		if spec := command_spec(info.name); spec != nil && spec.who != .Internal {
 			info.parsed = true
 			command_by_name[info.name] = i
 		}
 	}
 	free_all(context.temp_allocator)
+	// a tag the codec does not know, or a codec it cannot run, fails closed: a test build lists
+	// them (command_codec_tags), any other build will not start
+	when !ODIN_TEST {
+		if len(command_tag_problems) > 0 do panic(command_tag_problems[0])
+	}
 }
 
 // The info of a command's variant (nil for a nil command).

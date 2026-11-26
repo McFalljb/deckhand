@@ -240,7 +240,7 @@ Set_Job_Limits :: struct {
 Jobs_Sync :: struct {} // the rows follow the scheduler
 Jobs_Tick :: struct {} // the scheduler's timer thread (jobs_timer)
 Job_Run_Done :: struct {
-	run: ^Job_Run `cmd:"-"`,
+	run: ^Job_Run `cmd:"-,borrow"`, // handed over: job_finish frees it
 }
 Jobs_Env :: struct {
 	path:  string `cmd:"-"`, // the login shell's PATH (never logged)

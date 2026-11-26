@@ -447,7 +447,7 @@ Tab_Exited :: struct {
 }
 Rescan_Done :: struct {
 	request_id: u64,
-	scan:       ^Scan_Result `cmd:"-"`,
+	scan:       ^Scan_Result `cmd:"-,borrow"`, // handed over: apply_scan takes it
 }
 Refresh_Shell_Env_Done :: struct {
 	request_id: u64,

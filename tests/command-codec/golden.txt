@@ -380,7 +380,7 @@ New_Shell_Tab.a	var	{"new_shell_tab":{"session":49,"cwd":"s49 \"q\\\" \n\t ✓",
 New_Shell_Tab.a	dump	New_Shell_Tab{session=49, cwd="s49 \"q\\\" \n\t ✓", pane=1}
 New_Shell_Tab.a	p.wire	=dump
 New_Shell_Tab.a	ui.wire	=p.wire
-New_Shell_Tab.a	clone	New_Shell_Tab{session=49, cwd="s49 \"q\\\" \n\t ✓", pane=0}
+New_Shell_Tab.a	clone	same
 New_Shell_Tab.b	log	{"type":"new_shell_tab","session":5000000048,"cwd":"user:pw@bare49.example/x","pane":5000000050}
 New_Shell_Tab.b	red	=log
 New_Shell_Tab.b	wire	=log
@@ -388,7 +388,7 @@ New_Shell_Tab.b	var	{"new_shell_tab":{"session":5000000048,"cwd":"user:pw@bare49
 New_Shell_Tab.b	dump	New_Shell_Tab{session=5000000048, cwd="user:pw@bare49.example/x", pane=5000000050}
 New_Shell_Tab.b	p.wire	=dump
 New_Shell_Tab.b	ui.wire	=p.wire
-New_Shell_Tab.b	clone	New_Shell_Tab{session=5000000048, cwd="user:pw@bare49.example/x", pane=0}
+New_Shell_Tab.b	clone	same
 Close_Tab.zero	log	{"type":"close_tab","tab_id":0}
 Close_Tab.zero	red	=log
 Close_Tab.zero	wire	=log
@@ -6739,7 +6739,7 @@ Claude_Restore_History.a	var	{"claude_restore_history":{"records":[{"id":"s843 \
 Claude_Restore_History.a	dump	Claude_Restore_History{records=[Claude_Record{id="s843 \"q\\\" \n\t ✓", cwd="s844 \"q\\\" \n\t ✓", project="s845 \"q\\\" \n\t ✓", title="s846 \"q\\\" \n\t ✓", used=48, args=["s849 \"q\\\" \n\t ✓", "s850 \"q\\\" \n\t ✓"], named=true, transcript="s852 \"q\\\" \n\t ✓", model="s853 \"q\\\" \n\t ✓", readonly=true, account="s855 \"q\\\" \n\t ✓", harness=.Claude}, Claude_Record{id="s860 \"q\\\" \n\t ✓", cwd="s861 \"q\\\" \n\t ✓", project="s862 \"q\\\" \n\t ✓", title="s863 \"q\\\" \n\t ✓", used=15, args=["s866 \"q\\\" \n\t ✓", "s867 \"q\\\" \n\t ✓"], named=true, transcript="s869 \"q\\\" \n\t ✓", model="s870 \"q\\\" \n\t ✓", readonly=true, account="s872 \"q\\\" \n\t ✓", harness=.Claude}]}
 Claude_Restore_History.a	p.wire	err unknown command claude_restore_history
 Claude_Restore_History.a	ui.wire	=p.wire
-Claude_Restore_History.a	clone	Claude_Restore_History{records=[Claude_Record{id="s843 \"q\\\" \n\t ✓", cwd="s844 \"q\\\" \n\t ✓", project="s845 \"q\\\" \n\t ✓", title="s846 \"q\\\" \n\t ✓", used=48, args=["s849 \"q\\\" \n\t ✓", "s850 \"q\\\" \n\t ✓"], named=true, transcript="s852 \"q\\\" \n\t ✓", model="s853 \"q\\\" \n\t ✓", readonly=false, account="s855 \"q\\\" \n\t ✓", harness=.Claude}, Claude_Record{id="s860 \"q\\\" \n\t ✓", cwd="s861 \"q\\\" \n\t ✓", project="s862 \"q\\\" \n\t ✓", title="s863 \"q\\\" \n\t ✓", used=15, args=["s866 \"q\\\" \n\t ✓", "s867 \"q\\\" \n\t ✓"], named=true, transcript="s869 \"q\\\" \n\t ✓", model="s870 \"q\\\" \n\t ✓", readonly=false, account="s872 \"q\\\" \n\t ✓", harness=.Claude}]}
+Claude_Restore_History.a	clone	same
 Claude_Restore_History.b	log	{"type":"claude_restore_history","records":1}
 Claude_Restore_History.b	red	=log
 Claude_Restore_History.b	wire	=log

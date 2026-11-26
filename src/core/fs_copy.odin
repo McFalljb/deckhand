@@ -24,13 +24,13 @@ import "core:thread"
 
 // Internal: a copy's worker finished.
 Fs_Copy_Done :: struct {
-	request_id: u64,
+	request_id: u64 `cmd:"-"`,
 	path:       string, // the target (absolute)
-	copied:     int, // items made
-	total:      int, // items planned
-	failed:     string, // where it stopped, relative to the copy ("" = the copy itself; err says)
-	err:        string, // "" = all copied
-	skipped:    string, // what the plan left out, a JSON array ([{path, why}]; "" = none)
+	copied:     int `cmd:"-"`, // items made
+	total:      int `cmd:"-"`, // items planned
+	failed:     string `cmd:"-"`, // where it stopped, relative to the copy ("" = the copy itself; err says)
+	err:        string `cmd:"omit"`, // "" = all copied
+	skipped:    string `cmd:"-"`, // what the plan left out, a JSON array ([{path, why}]; "" = none)
 }
 
 FS_COPY_MAX_ENTRIES :: 20_000 // files, folders and links in one copy

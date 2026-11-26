@@ -29,13 +29,13 @@ Browser_Download_Op :: enum u8 {
 
 Browser_Zoom :: struct {
 	tab_id: u64,
-	step:   Browser_Zoom_Step,
+	step:   Browser_Zoom_Step `cmd:"first,names=zoom_step,codec=enum_of"`,
 }
 
 Browser_Find :: struct {
 	tab_id: u64,
 	text:   string, // "" clears the matches (the bar stays)
-	back:   bool, // the previous match
+	back:   bool `cmd:"omit"`, // the previous match
 }
 
 Browser_Find_Close :: struct {
@@ -45,7 +45,7 @@ Browser_Find_Close :: struct {
 Browser_Dialog :: struct {
 	tab_id: u64,
 	ok:     bool,
-	text:   string, // a prompt's answer
+	text:   string `cmd:"omit,red=bytes"`, // a prompt's answer
 }
 
 Browser_Permission :: struct {
@@ -60,13 +60,14 @@ Browser_Popup :: struct {
 
 Browser_Edit :: struct {
 	tab_id: u64,
-	op:     Browser_Edit_Op,
+	op:     Browser_Edit_Op `cmd:"first,names=edit_op,codec=enum_of"`,
 }
 
 Browser_Devtools :: struct {
 	tab_id: u64,
-	x, y:   i32, // inspect the element at this page position (logical px); -1: just open
-	close:  bool,
+	x:      i32 `cmd:"first,opt,def=-1,max=1048576,codec=xy"`, // inspect the element at this page position (logical px); -1: just open
+	y:      i32 `cmd:"first,opt,def=-1,max=1048576,codec=xy"`,
+	close:  bool `cmd:"omit"`,
 }
 
 Browser_External :: struct {
@@ -75,5 +76,5 @@ Browser_External :: struct {
 
 Browser_Download :: struct {
 	download_id: u64,
-	op:          Browser_Download_Op,
+	op:          Browser_Download_Op `cmd:"first,names=download_op,codec=enum_of"`,
 }

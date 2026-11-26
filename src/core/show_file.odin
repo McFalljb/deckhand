@@ -30,9 +30,9 @@ import "core:sys/posix"
 
 Show_File :: struct {
 	path:    string, // absolute, ~/, or relative to the session's folder
-	line:    int, // 1-based; 0 = none
-	anchor:  string, // a Markdown heading id, "#" optional ("" = none)
-	session: u64, // a pi or Claude tab: 0 or its own; the user, scripts: 0 = the one on screen
+	line:    int `cmd:"omit,nonneg,max=1073741824"`, // 1-based; 0 = none
+	anchor:  string `cmd:"omit"`, // a Markdown heading id, "#" optional ("" = none)
+	session: u64 `cmd:"omit"`, // a pi or Claude tab: 0 or its own; the user, scripts: 0 = the one on screen
 }
 
 // The session a caller's show_file goes to, or why not.

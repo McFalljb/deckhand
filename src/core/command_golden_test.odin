@@ -258,7 +258,7 @@ cg_dump_cmd :: proc(cmd: Command) -> string {
 // ---- the parser's answer ----
 
 // "ok <dump>" or "err <message>"; leaks and bad frees of the parse and its free are counted in
-// `leaks` (not pinned: see command_golden).
+// `leaks`.
 @(private = "file")
 cg_parse :: proc(text: string, ui: bool, leaks: ^int) -> string {
 	track: mem.Tracking_Allocator
@@ -415,8 +415,9 @@ command_golden :: proc(t: ^testing.T) {
 	root := cg_root()
 	_ = os.write_entire_file(fmt.tprintf("%s/%s", root, ACTUAL), transmute([]u8)got)
 	_ = os.write_entire_file(fmt.tprintf("%s/%s", root, ACTUAL_PARSE), transmute([]u8)strings.to_string(parse_out))
-	fmt.printfln("command_golden: parse leaks %d; clone leaks in %d samples", leaks, len(clone_leaks))
-	for l in clone_leaks do fmt.printfln("  clone leak %s", l)
+	// what the parser and command_clone allocate, command_free frees (command_codec.odin)
+	testing.expectf(t, leaks == 0, "the parser's cases leak %d allocations", leaks)
+	for l in clone_leaks do testing.expectf(t, false, "command_clone then command_free leaks: %s", l)
 	want, rerr := os.read_entire_file(fmt.tprintf("%s/%s", root, GOLDEN), context.temp_allocator)
 	if !testing.expectf(t, rerr == nil, "%s missing: %s has what the code does", GOLDEN, ACTUAL) do return
 	if string(want) == got do return
@@ -432,4 +433,10 @@ command_golden :: proc(t: ^testing.T) {
 		if shown >= 20 do break
 	}
 	testing.expectf(t, false, "%s differs from %s (diff them; the parser's cases in full: %s)", ACTUAL, GOLDEN, ACTUAL_PARSE)
+}
+
+// Every command's `cmd` tags say something command_codec.odin knows.
+@(test)
+command_codec_tags :: proc(t: ^testing.T) {
+	for p in command_tag_problems do testing.expectf(t, false, "%s", p)
 }

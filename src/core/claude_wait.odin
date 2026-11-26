@@ -31,8 +31,8 @@ import "core:time"
 
 Claude_Wait_Idle :: struct {
 	tab_id:     u64,
-	timeout_ms: u64, // 0: no timeout
-	prompt_id:  u64, // a held text's id (claude_prompt): its drop ends the wait
+	timeout_ms: u64 `cmd:"omit"`, // 0: no timeout
+	prompt_id:  u64 `cmd:"omit"`, // a held text's id (claude_prompt): its drop ends the wait
 }
 // The timer's tick (internal): held texts and waits while frames are paused.
 Claude_Wait_Tick :: struct {}
@@ -236,10 +236,4 @@ code_fail :: proc(code, msg: string) -> Result {
 claude_wait_finish :: proc(request_id: u64, r: Result) {
 	if claude_wait_test_finished != nil do claude_wait_test_finished[request_id] = strings.clone(result_json(r))
 	emit_event(Finished_Event{request_id = request_id, result = r})
-}
-
-claude_wait_write :: proc(b: ^strings.Builder, c: Claude_Wait_Idle) {
-	fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
-	if c.timeout_ms != 0 do fmt.sbprintf(b, `,"timeout_ms":%d`, c.timeout_ms)
-	if c.prompt_id != 0 do fmt.sbprintf(b, `,"prompt_id":%d`, c.prompt_id)
 }

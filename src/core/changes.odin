@@ -54,25 +54,25 @@ Changes_Tab :: struct {
 // Opens (or focuses) the Changes tab of a checkout in an open session:
 // path's checkout (default: the session's folder's).
 Changes_Open :: struct {
-	session: u64, // 0 = the current one
-	path:    string, // a folder in the checkout ("" = the session's folder)
+	session: u64 `cmd:"omit"`, // 0 = the current one
+	path:    string `cmd:"omit"`, // a folder in the checkout ("" = the session's folder)
 }
 // The changed files of a checkout: paths and counts, no diff text.
 Changes_List :: struct {
-	tab_id: u64, // a Changes tab (its checkout)
-	path:   string, // or a folder in a checkout ("" and no tab = the current session's)
+	tab_id: u64 `cmd:"omit"`, // a Changes tab (its checkout)
+	path:   string `cmd:"omit"`, // or a folder in a checkout ("" and no tab = the current session's)
 }
 // The user's actions on one listed file of a Changes tab (path relative to
 // its checkout, as listed).
 Changes_Stage :: struct {
 	tab_id: u64,
 	path:   string,
-	status: string, // "M" "A" "D" "R" "U" "untracked": which entry when a path has two ("" = its only one)
+	status: string `cmd:"omit"`, // "M" "A" "D" "R" "U" "untracked": which entry when a path has two ("" = its only one)
 }
 Changes_Unstage :: struct {
 	tab_id: u64,
 	path:   string,
-	status: string, // "M" "A" "D" "R" "U" "untracked": which entry when a path has two ("" = its only one)
+	status: string `cmd:"omit"`, // "M" "A" "D" "R" "U" "untracked": which entry when a path has two ("" = its only one)
 }
 // Discards a file's uncommitted changes (back to HEAD). Confirms (class
 // delete); a file git does not have (untracked, newly added, a rename's new
@@ -80,46 +80,46 @@ Changes_Unstage :: struct {
 Changes_Discard :: struct {
 	tab_id:  u64,
 	path:    string,
-	status:  string, // as for Changes_Stage
-	confirm: string,
-	second:  bool,
+	status:  string `cmd:"omit"`, // as for Changes_Stage
+	confirm: string `cmd:"omit,red=token,last"`,
+	second:  bool `cmd:"omit"`,
 }
 // Commits what is staged with the user's hooks (see the top).
 Changes_Commit :: struct {
 	tab_id:  u64,
-	message: string,
+	message: string `cmd:"red=len:message_bytes"`,
 }
 // A browser's Changes tab (web_changes.odin): selects a listed file (its diff is read as for
 // the window's), shows more of the diff, or reads the checkout again. View state only.
 Changes_Select :: struct {
 	tab_id:  u64,
-	path:    string, // "" = keep the selection
-	scope:   string, // "uncommitted" (default) or "committed"
-	status:  string, // as for Changes_Stage
-	more:    bool, // CHANGES_LINES_STEP more lines of the diff
-	refresh: bool, // read the checkout again now
+	path:    string `cmd:"omit"`, // "" = keep the selection
+	scope:   string `cmd:"omit"`, // "uncommitted" (default) or "committed"
+	status:  string `cmd:"omit"`, // as for Changes_Stage
+	more:    bool `cmd:"omit"`, // CHANGES_LINES_STEP more lines of the diff
+	refresh: bool `cmd:"omit"`, // read the checkout again now
 }
 // Internal: a worker read a checkout's changes.
 Changes_Scan_Done :: struct {
 	root: string,
-	gen:  u64,
-	out:  string,
+	gen:  u64 `cmd:"-"`,
+	out:  string `cmd:"-"`,
 }
 // Internal: a worker read one file's diff for a tab.
 Changes_Diff_Done :: struct {
 	tab_id: u64,
-	gen:    u64,
-	text:   string,
-	err:    string,
+	gen:    u64 `cmd:"-"`,
+	text:   string `cmd:"-"`,
+	err:    string `cmd:"-"`,
 }
 // Internal: a worker ran a stage, unstage, discard or commit.
 Changes_Op_Done :: struct {
 	tab_id:     u64,
-	root:       string,
-	request_id: u64,
+	root:       string `cmd:"-"`,
+	request_id: u64 `cmd:"-"`,
 	what:       string, // "stage", "unstage", "discard", "commit"
-	trash:      string, // discard: then this file goes to the Trash (main thread)
-	err:        string, // "" = ok; shown in the tab (commit: git's own words)
+	trash:      string `cmd:"-"`, // discard: then this file goes to the Trash (main thread)
+	err:        string `cmd:"key=ok,codec=ok_if_empty"`, // "" = ok; shown in the tab (commit: git's own words)
 }
 
 CHANGES_DEBOUNCE :: 400 * time.Millisecond // after the last change before reading again
@@ -1389,68 +1389,3 @@ changes_json :: proc(r: ^Changes_Repo) -> string {
 }
 
 // ---- command plumbing (inbox.odin, json_write.odin) ----
-
-changes_command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
-	s :: proc(x: string, a: runtime.Allocator) -> string {return strings.clone(x, a)}
-	#partial switch c in cmd {
-	case Changes_Open:      return Changes_Open{session = c.session, path = s(c.path, allocator)}
-	case Changes_List:      return Changes_List{tab_id = c.tab_id, path = s(c.path, allocator)}
-	case Changes_Stage:     return Changes_Stage{tab_id = c.tab_id, path = s(c.path, allocator), status = s(c.status, allocator)}
-	case Changes_Unstage:   return Changes_Unstage{tab_id = c.tab_id, path = s(c.path, allocator), status = s(c.status, allocator)}
-	case Changes_Discard:   return Changes_Discard{tab_id = c.tab_id, path = s(c.path, allocator), status = s(c.status, allocator), confirm = s(c.confirm, allocator), second = c.second}
-	case Changes_Commit:    return Changes_Commit{tab_id = c.tab_id, message = s(c.message, allocator)}
-	case Changes_Select:    return Changes_Select{tab_id = c.tab_id, path = s(c.path, allocator), scope = s(c.scope, allocator), status = s(c.status, allocator), more = c.more, refresh = c.refresh}
-	case Changes_Scan_Done: return Changes_Scan_Done{root = s(c.root, allocator), gen = c.gen, out = s(c.out, allocator)}
-	case Changes_Diff_Done: return Changes_Diff_Done{tab_id = c.tab_id, gen = c.gen, text = s(c.text, allocator), err = s(c.err, allocator)}
-	case Changes_Op_Done:   return Changes_Op_Done{tab_id = c.tab_id, root = s(c.root, allocator), request_id = c.request_id, what = c.what, trash = s(c.trash, allocator), err = s(c.err, allocator)}
-	}
-	return cmd
-}
-
-changes_command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
-	#partial switch c in cmd {
-	case Changes_Open:    delete(c.path, allocator)
-	case Changes_List:    delete(c.path, allocator)
-	case Changes_Stage:
-		delete(c.path, allocator)
-		delete(c.status, allocator)
-	case Changes_Unstage:
-		delete(c.path, allocator)
-		delete(c.status, allocator)
-	case Changes_Discard:
-		delete(c.path, allocator)
-		delete(c.status, allocator)
-		delete(c.confirm, allocator)
-	case Changes_Commit:  delete(c.message, allocator)
-	case Changes_Select:
-		delete(c.path, allocator)
-		delete(c.scope, allocator)
-		delete(c.status, allocator)
-	case Changes_Scan_Done:
-		delete(c.root, allocator)
-		delete(c.out, allocator)
-	case Changes_Diff_Done:
-		delete(c.text, allocator)
-		delete(c.err, allocator)
-	case Changes_Op_Done:
-		delete(c.root, allocator)
-		delete(c.trash, allocator)
-		delete(c.err, allocator)
-	}
-}
-
-changes_command_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Changes_Open:      return "changes_open"
-	case Changes_List:      return "changes_list"
-	case Changes_Stage:     return "changes_stage"
-	case Changes_Unstage:   return "changes_unstage"
-	case Changes_Discard:   return "changes_discard"
-	case Changes_Commit:    return "changes_commit"
-	case Changes_Select:    return "changes_select"
-	case Changes_Scan_Done: return "changes_scan_done"
-	case Changes_Diff_Done: return "changes_diff_done"
-	case Changes_Op_Done:   return "changes_op_done"
-	}
-	return ""
-}

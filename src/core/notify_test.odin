@@ -569,9 +569,7 @@ bell_settings_migrate :: proc(t: ^testing.T) {
 	sb, _ := cmd.(Set_Bell)
 	testing.expect(t, sb.macos[.Jobs] == Os_When.Never && sb.macos[.Finished] == Os_When.Default && sb.macos[.Waiting] == nil, "macos parsed")
 	testing.expect(t, sb.sound[.Waiting] == Bell_Sound.None && sb.sound[.Jobs] == nil, "sound parsed")
-	b := strings.builder_make(context.temp_allocator)
-	notify_write(&b, sb)
-	again, aerr := parse_command(fmt.tprintf(`{{"type":"set_notifications"%s}}`, strings.to_string(b)))
+	again, aerr := parse_command(command_json(sb))
 	testing.expect_value(t, aerr, "")
 	testing.expect_value(t, again.(Set_Bell), sb)
 	for bad in ([]string{`{"type":"set_notifications","sound":{"waiting":"Submarine"}}`, `{"type":"set_notifications","macos":{"nope":"never"}}`, `{"type":"set_notifications","macos":"never"}`}) {

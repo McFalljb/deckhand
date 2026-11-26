@@ -181,37 +181,40 @@ jobs_now :: proc() -> i64 {return time.time_to_unix(time.now()) + jobs_clock_off
 // ---- commands ----
 
 Job_List :: struct {
-	unread: bool, // only jobs with unread runs
+	unread: bool `cmd:"omit"`, // only jobs with unread runs
 }
 Job_Runs :: struct {
 	job:   string,
-	limit: int,
+	limit: int `cmd:"omit,nonneg,max=1000"`,
 }
 Job_Run_Now :: struct {
 	job: string,
 }
 Job_Stop :: struct {
-	job: string, // "" = every running job
+	job: string `cmd:"omit"`, // "" = every running job
 }
 Jobs_Pause :: struct {
-	job: string, // "" = all jobs (the kill switch)
+	job: string `cmd:"omit"`, // "" = all jobs (the kill switch)
 }
 Jobs_Resume :: struct {
-	job: string,
+	job: string `cmd:"omit"`,
 }
 Job_Create :: struct {
-	name, schedule, prompt, folder: string,
-	for_project: string, // the owner: a project (folder or name), atlas, chats, none; "" = none set (jobs_owner.odin)
+	name:     string `cmd:"opt"`,
+	schedule: string `cmd:"omit"`,
+	prompt:   string `cmd:"omit,red=bytes,last"`, // the user's text: its length only in the log
+	folder:   string `cmd:"omit"`,
+	for_project: string `cmd:"omit"`, // the owner: a project (folder or name), atlas, chats, none; "" = none set (jobs_owner.odin)
 }
 // The job sheet's Create / Save (ui_job_sheet.odin): the whole note.
 Job_Save :: struct {
-	path:     string, // "" = a new note
-	text:     string,
-	based_on: string, // editing: job_note_hash of the note's text the edit started from (refused when the file has changed since)
+	path:     string `cmd:"omit"`, // "" = a new note
+	text:     string `cmd:"red=bytes"`,
+	based_on: string `cmd:"omit"`, // editing: job_note_hash of the note's text the edit started from (refused when the file has changed since)
 }
 Job_Mark_Read :: struct {
-	job: string, // "" = every job
-	run: string, // "" = all its runs
+	job: string `cmd:"omit"`, // "" = every job
+	run: string `cmd:"omit"`, // "" = all its runs
 }
 Job_Set_Enabled :: struct {
 	job: string,
@@ -219,7 +222,7 @@ Job_Set_Enabled :: struct {
 }
 Job_Delete :: struct {
 	job:     string,
-	confirm: string,
+	confirm: string `cmd:"omit,red=token"`,
 }
 Job_Open :: struct {
 	job:  string,
@@ -230,18 +233,19 @@ Set_Pi_Path :: struct {
 }
 Set_Job_Limits :: struct {
 	max_cost, day, week, month:                      Maybe(f64),
-	timeout, stall:                                  Maybe(i64),
-	max_turns, concurrency, loop_calls, fail_pause: Maybe(int),
+	timeout, stall:                                  Maybe(i64) `cmd:"signed,max=1099511627776"`,
+	max_turns, concurrency, loop_calls, fail_pause: Maybe(int) `cmd:"signed,max=1073741824"`,
 }
 // Internal only.
 Jobs_Sync :: struct {} // the rows follow the scheduler
 Jobs_Tick :: struct {} // the scheduler's timer thread (jobs_timer)
 Job_Run_Done :: struct {
-	run: ^Job_Run,
+	run: ^Job_Run `cmd:"-"`,
 }
 Jobs_Env :: struct {
-	path, notes: string, // the login shell's PATH and PI_KIT_NOTES_DIR
-	login:       bool, // from the login shell (not a saved jobs_path)
+	path:  string `cmd:"-"`, // the login shell's PATH (never logged)
+	notes: string `cmd:"-"`, // its PI_KIT_NOTES_DIR
+	login: bool `cmd:"-"`, // from the login shell (not a saved jobs_path)
 }
 
 // The due check waits this long at most for the login shell's

@@ -1715,6 +1715,7 @@ has no cookie, so it can only guess codes while one is open (5 tries).
 |---|---|
 | parser (test mode, scripts, socket) | `parse_command`, `parse_request` in `src/core/json_read.odin` |
 | encoders (commands, results, events, replies, state) | `src/core/json_write.odin` |
+| a command's JSON (wire name, fields, what the log redacts), its inbox copy | its struct's `cmd` tags, read by `src/core/command_codec.odin`; pinned by `tests/command-codec/golden.txt` |
 | the command table (who may send what, args, confirm class, long-running) | `src/core/command_table.odin` |
 | callers, `caller_may`, confirmation policy | `src/core/commands.odin` |
 | inbox (any thread → the core's loop), reply slots | `src/core/inbox.odin` |

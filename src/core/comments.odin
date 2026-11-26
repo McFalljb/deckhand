@@ -108,15 +108,15 @@ Comments_Ask :: struct {
 // Internal only: a source adds a comment. crop is a PNG file it wrote at comments_crop_path();
 // the comment owns it from now on (removed on a refusal too).
 Comment_Add :: struct {
-	source: Comment_Source,
+	source: Comment_Source `cmd:"names=comment_source"`,
 	tab_id: u64,
 	what:   string,
-	text:   string,
-	crop:   string,
+	text:   string `cmd:"red=bytes"`,
+	crop:   string `cmd:"omit"`,
 }
 Comment_Edit :: struct {
 	comment_id: u64,
-	text:       string,
+	text:       string `cmd:"red=bytes"`,
 }
 Comment_Delete :: struct {
 	comment_id: u64,
@@ -127,12 +127,12 @@ Comments_Clear :: struct {
 // Sends the session's pending comments (only tab_id's, if set) to its pi as a message of their own.
 Comments_Send_Now :: struct {
 	session: u64,
-	tab_id:  u64,
+	tab_id:  u64 `cmd:"omit"`,
 }
 Comments_Ask_Cancel :: struct {} // the close prompt's Cancel
 // A pi tab's bridge: the user's message took this attachment (pi.attached).
 Pi_Attached :: struct {
-	tab_id:        u64,
+	tab_id:        u64 `cmd:"opt"`,
 	attachment_id: u64,
 }
 

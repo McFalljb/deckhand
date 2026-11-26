@@ -26,7 +26,7 @@ import "core:time"
 
 Add_Project :: struct {
 	cwd:     string, // added at the top if not listed yet (and shown again if hidden), then selected
-	machine: u64, // another machine's number (0 = this Mac): added there, by its core (machine_route.odin)
+	machine: u64 `cmd:"omit"`, // another machine's number (0 = this Mac): added there, by its core (machine_route.odin)
 }
 Select_Project :: struct {
 	project_id: u64,
@@ -41,11 +41,11 @@ Open_Session_Cmd :: struct {
 }
 New_Chat :: struct {
 	project_id: u64,
-	args:       []string, // pi's extra flags (pi_args_check); the user's (and scripts') only
+	args:       []string `cmd:"omit,red=len:argc"`, // pi's extra flags (pi_args_check); the user's (and scripts') only
 }
 Focus_Session :: struct {
 	session: u64, // open session id
-	reopen:  bool, // the user opened it (its row, the palette): its pi starts again if it exited (UI only)
+	reopen:  bool `cmd:"ui,omit"`, // the user opened it (its row, the palette): its pi starts again if it exited (UI only)
 }
 // No session in the centre: the open sessions stay open and run on, none is current (the window's
 // Deck view shows them all there; ui_deck.odin), and the one that was is remembered (shown_before:
@@ -54,58 +54,58 @@ Show_No_Session :: struct {}
 // The next open session that needs the user, on any online machine, and its tab that does
 // (needing_you.odin: the order), focused as a click on that tab would. back: the previous one.
 Next_Needing_You :: struct {
-	back: bool,
+	back: bool `cmd:"omit"`,
 }
 // Stops an open session's tabs and forgets it (open sessions, saved
 // workspace); pi's session file stays. Confirms (class tab_close) while any
 // of its tabs would ask to close.
 Close_Session :: struct {
 	session:  u64,
-	confirm:  string,
-	ask:      bool, // always confirm, even with nothing running (the pi tab's × and ⌘W: UI only, not on the wire)
-	comments: Comments_Choice, // its pending comments (comments.odin): ask (the user's close prompt), drop; send is refused
+	confirm:  string `cmd:"omit,red=token"`,
+	ask:      bool `cmd:"ui,omit"`, // always confirm, even with nothing running (the pi tab's × and ⌘W: UI only, not on the wire)
+	comments: Comments_Choice `cmd:"omit,names=comments,codec=comments"`, // its pending comments (comments.odin): ask (the user's close prompt), drop; send is refused
 }
 New_Shell_Tab :: struct {
 	session: u64,
-	cwd:     string, // where the shell starts: a folder inside a project ("" = the session's folder)
-	pane:    u64, // the pane of the session it opens in (0 = the focused one; panes.odin)
+	cwd:     string `cmd:"omit"`, // where the shell starts: a folder inside a project ("" = the session's folder)
+	pane:    u64 `cmd:"omit"`, // the pane of the session it opens in (0 = the focused one; panes.odin)
 }
 Close_Tab :: struct {
 	tab_id:   u64, // a session's pi tab cannot be closed
-	confirm:  string, // token from a needs_confirmation result
-	comments: Comments_Choice, // the comments made on it (comments.odin): ask (the user's close prompt), send, drop
+	confirm:  string `cmd:"omit,red=token"`, // token from a needs_confirmation result
+	comments: Comments_Choice `cmd:"omit,names=comments,codec=comments"`, // the comments made on it (comments.odin): ask (the user's close prompt), send, drop
 }
 Focus_Tab :: struct {
 	tab_id: u64, // also makes its session current
 }
 // Panes (panes_commands.odin; docs/plans/split-panes.md).
 Split_Pane :: struct {
-	pane:      u64, // 0 = the current session's focused pane
-	direction: Pane_Dir, // where the new pane goes
-	tab_id:    u64, // moved into the new pane (0: a new shell tab there)
-	no_focus:  bool, // the wire's focus: false (the new pane gets the keyboard by default)
+	pane:      u64 `cmd:"omit"`, // 0 = the current session's focused pane
+	direction: Pane_Dir `cmd:"first,names=pane_dir,codec=pane_dir"`, // where the new pane goes
+	tab_id:    u64 `cmd:"omit"`, // moved into the new pane (0: a new shell tab there)
+	no_focus:  bool `cmd:"key=focus,omit,codec=inverse"`, // the wire's focus: false (the new pane gets the keyboard by default)
 }
 Close_Pane :: struct {
 	pane: u64, // its tabs join the neighbouring pane
 }
 Focus_Pane :: struct {
-	pane:      u64, // a pane, or 0 with a direction from the current session's focused pane
-	direction: string, // left, right, up, down, next, prev ("" with a pane)
+	pane:      u64 `cmd:"omit"`, // a pane, or 0 with a direction from the current session's focused pane
+	direction: string `cmd:"omit"`, // left, right, up, down, next, prev ("" with a pane)
 }
 Move_Tab :: struct {
 	tab_id: u64,
 	pane:   u64, // a pane of the tab's session (its own: a reorder)
-	index:  int, // strip position there (-1 = the end)
+	index:  int `cmd:"opt,def=-1,max=1073741824,nonneg"`, // strip position there (-1 = the end)
 }
 Set_Split :: struct {
 	split: u64, // a divider: a split node's id (the snapshot's layout)
-	ratio: f32, // its first child's share
+	ratio: f32 `cmd:"log=f3,full,opt,def=-1"`, // its first child's share
 }
 Equalize_Panes :: struct {
-	session: u64, // 0 = the current session
+	session: u64 `cmd:"omit"`, // 0 = the current session
 }
 Zoom_Pane :: struct {
-	pane: u64, // 0 = the current session's focused pane
+	pane: u64 `cmd:"omit"`, // 0 = the current session's focused pane
 	zoom: Maybe(bool), // true: it fills the panes' area; false: the layout comes back; unset: toggle
 }
 Copy_Selection :: struct {
@@ -113,11 +113,11 @@ Copy_Selection :: struct {
 }
 Send_Text :: struct {
 	tab_id:    u64,
-	text:      string, // pasted into the tab (bracketed if the app asked)
-	generated: bool, // Deckhand's text, not the user's (the window's file drop): a Codex composer's rule applies (codex.odin)
+	text:      string `cmd:"red=bytes"`, // pasted into the tab (bracketed if the app asked)
+	generated: bool `cmd:"omit"`, // Deckhand's text, not the user's (the window's file drop): a Codex composer's rule applies (codex.odin)
 }
 Set_Focus :: struct {
-	widget: string, // "" = the current tab's terminal; else a widget id (FOCUS_WIDGETS)
+	widget: string `cmd:"opt"`, // "" = the current tab's terminal; else a widget id (FOCUS_WIDGETS)
 }
 // Deckhand itself moves the keyboard (a sheet it opened, a new tab's URL field, an install's
 // setup sheet), without set_focus's caller rules: the window's former direct writes.
@@ -131,7 +131,7 @@ Focus_Release :: struct {
 }
 // The harness the New session picker lists first (harness.odin).
 Set_Last_Harness :: struct {
-	harness: Harness,
+	harness: Harness `cmd:"names=harness"`,
 }
 Set_Layout :: struct {
 	left_width:    Maybe(f32), // unset fields keep their value
@@ -146,13 +146,13 @@ Set_Panel :: struct {
 	open:  bool,
 }
 Cancel_Confirmation :: struct {
-	token: string,
+	token: string `cmd:"red=token"`,
 }
 Rescan :: struct {} // long-running: returns pending, finishes with an event
 Refresh_Shell_Env :: struct {} // long-running: asks the login shell again (login_env.odin); new tabs get it
 Quit :: struct {
-	confirm:       string,
-	stop_sessions: bool, // "Quit Deckhand and Stop All Sessions…": the session holder hangs up everything too
+	confirm:       string `cmd:"omit,red=token"`,
+	stop_sessions: bool `cmd:"omit"`, // "Quit Deckhand and Stop All Sessions…": the session holder hangs up everything too
 }
 Get_State :: struct {} // query: Result.data is the state JSON
 List_Commands :: struct {} // query: the commands this caller may send (command_table.odin)
@@ -168,30 +168,30 @@ Start_Home :: struct {}
 // The left column (sidebar.odin). A target is a project (project_id) or a
 // session (pi_session_id: a project's or a chat), not both.
 Set_Pinned :: struct {
-	cwd:           string, // a project by its folder (unpinning one that is not listed any more)
-	project_id:    u64,
-	pi_session_id: string,
+	cwd:           string `cmd:"omit"`, // a project by its folder (unpinning one that is not listed any more)
+	project_id:    u64 `cmd:"omit"`,
+	pi_session_id: string `cmd:"omit"`,
 	pinned:        bool,
-	index:         Maybe(int), // place among the pinned (also moves a pinned one); unset = last, or where it is
+	index:         Maybe(int) `cmd:"max=1073741824,pos"`, // place among the pinned (also moves a pinned one); unset = last, or where it is
 }
 Set_Hidden :: struct {
-	cwd:           string, // a project by its folder (showing one that is not listed any more)
-	project_id:    u64,
-	pi_session_id: string,
+	cwd:           string `cmd:"omit"`, // a project by its folder (showing one that is not listed any more)
+	project_id:    u64 `cmd:"omit"`,
+	pi_session_id: string `cmd:"omit"`,
 	hidden:        bool, // hidden items are left out of the list unless show_hidden; nothing is deleted
 }
 Set_Sort :: struct {
-	section: Sort_Section,
-	by:      Sort_By,
+	section: Sort_Section `cmd:"names=sort_section"`,
+	by:      Sort_By `cmd:"names=sort_by"`,
 }
 Set_Sidebar_Folded :: struct {
-	section: Sidebar_Fold,
+	section: Sidebar_Fold `cmd:"names=fold"`,
 	folded:  bool,
 }
 // The Sessions column's view: By project (the tree) or Attention (one list by what needs you).
 // The user's at this Mac only (a layout setting); saved.
 Set_Sidebar_View :: struct {
-	view: Sidebar_View,
+	view: Sidebar_View `cmd:"names=sidebar_view"`,
 }
 // Opens or collapses a parent or group row of the Projects tree (its folder
 // path; project_tidy.odin). Saved; collapsed by default.
@@ -210,12 +210,12 @@ Set_Filter :: struct {
 // Shows a project's folder, or a session's file, in the file manager.
 Reveal_Path :: struct {
 	project_id:    u64,
-	pi_session_id: string, // "" = the project's folder
+	pi_session_id: string `cmd:"omit"`, // "" = the project's folder
 }
 // Copies the same path to the clipboard.
 Copy_Path :: struct {
 	project_id:    u64,
-	pi_session_id: string,
+	pi_session_id: string `cmd:"omit"`,
 }
 
 // Removed (Start chats read-only): kept on the grow-only wire (schema/released-v1.json), always refused.
@@ -226,8 +226,8 @@ Set_Chats_Readonly :: struct {
 // with harness .Codex (wire: harness "codex") Codex's (codex_with_defaults).
 Set_Claude_Default_Flags :: struct {
 	skip_permissions: bool, // --dangerously-skip-permissions; Codex: --dangerously-bypass-approvals-and-sandbox
-	harness:          Harness, // .Claude or .Codex (wire: harness "codex")
-	confirm:          string, // turning it on: the user's confirmation (confirm_gate)
+	harness:          Harness `cmd:"codec=harness_ct"`, // .Claude or .Codex (wire: harness "codex")
+	confirm:          string `cmd:"omit,red=token"`, // turning it on: the user's confirmation (confirm_gate)
 }
 Set_Agent_Name :: struct {
 	name: string, // "" = the default
@@ -235,7 +235,7 @@ Set_Agent_Name :: struct {
 // The agent's model (agent.odin): "provider/id", optionally ":thinking";
 // "" = pi's default. Passed as --model when Atlas starts.
 Set_Agent_Model :: struct {
-	model: string,
+	model: string `cmd:"opt"`,
 }
 // Shows the drawer and opens pi's model selector in Atlas's terminal.
 Agent_Model_Picker :: struct {}
@@ -345,18 +345,18 @@ Copy_Control_Token :: struct {}
 
 // User-only (caller ui or internal): settings that bound what agents may do.
 Set_Confirm_Policy :: struct {
-	caller: Caller_Kind, // script, control or panel
-	class:  Command_Class,
-	mode:   Confirm_Mode,
+	caller: Caller_Kind `cmd:"names=caller"`, // script, control or panel
+	class:  Command_Class `cmd:"names=class"`,
+	mode:   Confirm_Mode `cmd:"names=mode"`,
 }
 Set_Close_Confirm :: struct {
-	tab_kind: Tab_Kind_Id,
-	rule:     Close_Confirm,
+	tab_kind: Tab_Kind_Id `cmd:"names=tab_kind"`,
+	rule:     Close_Confirm `cmd:"names=close"`,
 }
 
 // Appearance (any caller but panels).
 Set_Theme :: struct {
-	name: Theme_Id,
+	name: Theme_Id `cmd:"names=theme"`,
 }
 Set_Reduce_Motion :: struct {
 	on: bool,
@@ -367,46 +367,46 @@ Set_Dim_Panes :: struct {
 }
 // The terminal and editor text size in points (0 = the look's own).
 Set_Terminal_Text_Size :: struct {
-	pt: int,
+	pt: int `cmd:"max=1000"`,
 }
 Set_Appearance :: struct {
-	mode: Appearance,
+	mode: Appearance `cmd:"names=appearance"`,
 }
 Set_Text_Size :: struct {
-	size: Text_Size,
+	size: Text_Size `cmd:"names=text_size"`,
 }
 
 // From a pi tab's bridge (docs/PROTOCOL.md §4). Over the socket the tab is
 // the caller's own (tab_id 0 = the token's tab); a pi tab may only report
 // for itself.
 Pi_Session_Update :: struct {
-	tab_id:        u64,
+	tab_id:        u64 `cmd:"opt"`,
 	pi_session_id: string,
-	session_file:  string,
-	cwd:           string,
+	session_file:  string `cmd:"opt"`,
+	cwd:           string `cmd:"opt"`,
 }
 Pi_Status_Update :: struct {
-	tab_id:   u64,
-	agent:    Agent_State,
+	tab_id:   u64 `cmd:"opt"`,
+	agent:    Agent_State `cmd:"names=agent"`,
 	waiting:  bool,
-	question: bool,
-	blockers: []string,
+	question: bool `cmd:"opt"`,
+	blockers: []string `cmd:"red=blockers,last"`,
 	// pi's model (a newer bridge; absent = not said: shown as none): its id, provider, thinking level
-	model:    string,
-	provider: string,
-	thinking: string,
+	model:    string `cmd:"omit,codec=model_word"`,
+	provider: string `cmd:"omit,codec=model_word"`,
+	thinking: string `cmd:"omit,codec=model_word"`,
 }
 
 // A pi tab's panels (docs/PROTOCOL.md §5). Only the tab's own bridge may
 // publish them (tab_id 0 over the socket = the token's tab).
 Panel_Set :: struct {
-	tab_id: u64,
+	tab_id: u64 `cmd:"opt"`,
 	panel:  string,
-	title:  string,
-	rows:   []Panel_Row,
+	title:  string `cmd:"opt"`,
+	rows:   []Panel_Row `cmd:"red=items:rows,codec=rows"`,
 }
 Panel_Remove :: struct {
-	tab_id: u64,
+	tab_id: u64 `cmd:"opt"`,
 	panel:  string,
 }
 // Folds or unfolds a panel's section in the right column (any tab's).
@@ -419,22 +419,22 @@ Set_Panel_Collapsed :: struct {
 // `pending`, then a `finished` event with the bridge's result.
 Pi_Prompt :: struct {
 	tab_id: u64,
-	text:   string, // submitted as a user message; refused while pi is waiting
-	images: []Prompt_Image, // sent with it (comments.odin; Send now); at most COMMENT_IMAGES_MAX
+	text:   string `cmd:"red=bytes"`, // submitted as a user message; refused while pi is waiting
+	images: []Prompt_Image `cmd:"omit,red=items:images,codec=images"`, // sent with it (comments.odin; Send now); at most COMMENT_IMAGES_MAX
 }
 Pi_Reload :: struct {
 	tab_id:  u64,
-	confirm: string, // class session_restart
+	confirm: string `cmd:"omit,red=token"`, // class session_restart
 }
 // A pi tab whose process exited: pi starts again in it, on its session
 // (dead_tab.odin). pick_model: pi's model selector opens once it is up.
 Pi_Restart :: struct {
 	tab_id:     u64,
-	pick_model: bool,
+	pick_model: bool `cmd:"omit"`,
 }
 Pi_Wait_Idle :: struct {
 	tab_id:     u64,
-	timeout_ms: u64,
+	timeout_ms: u64 `cmd:"opt"`,
 }
 
 // Internal only (never parsed from JSON): posted by the app itself.
@@ -443,16 +443,16 @@ System_Appearance :: struct {
 }
 Tab_Exited :: struct {
 	tab_id: u64,
-	exit:   Exit_Info, // how it ended (waitpid), if reaped
+	exit:   Exit_Info `cmd:"codec=exit"`, // how it ended (waitpid), if reaped
 }
 Rescan_Done :: struct {
 	request_id: u64,
-	scan:       ^Scan_Result,
+	scan:       ^Scan_Result `cmd:"-"`,
 }
 Refresh_Shell_Env_Done :: struct {
 	request_id: u64,
 	ok:         bool,
-	env:        []string, // the merged environment (heap, handed over; never logged)
+	env:        []string `cmd:"-,borrow"`, // the merged environment (heap, handed over; never logged)
 }
 // Internal only: one saved session back into State (persist.odin) with its
 // tabs not started. Focusing the session starts them (lazy restore).
@@ -500,7 +500,7 @@ Restore_Session :: struct {
 Bridge_Done :: struct { 	// a bridge answered (or dropped) a Pi_Prompt/Pi_Reload/Pi_Wait_Idle
 	request_id: u64,
 	ok:         bool,
-	error:      string,
+	error:      string `cmd:"omit"`,
 }
 
 // Internal only: the saved pins and hidden items back into State.

@@ -391,14 +391,14 @@ status_owner_gone :: proc(t: ^Term, tab: ^Tab) -> bool {
 // Internal: a tab's OSC 7501 records changed (status_pump).
 Program_Status :: struct {
 	tab_id:  u64,
-	summary: Prog_Summary, // strings borrowed
+	summary: Prog_Summary `cmd:"codec=prog_summary,borrow"`, // strings borrowed
 }
 
 // "Mark as unread" / "Mark as read": a tab (tab_id), or an open session
 // (pi_session_id: unread marks its active tab, read clears all its tabs).
 Set_Unread :: struct {
-	tab_id:        u64,
-	pi_session_id: string,
+	tab_id:        u64 `cmd:"omit"`,
+	pi_session_id: string `cmd:"omit"`,
 	unread:        bool,
 }
 

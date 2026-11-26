@@ -44,7 +44,7 @@ SESSION_HEADER_MAX :: 64 * 1024 // the header line is read up to this
 Session_Info :: struct {
 	project_id:    u64,
 	pi_session_id: string,
-	to:            string, // "" | "clipboard" | "agent"
+	to:            string `cmd:"omit"`, // "" | "clipboard" | "agent"
 }
 
 // What the info says (temp allocator).

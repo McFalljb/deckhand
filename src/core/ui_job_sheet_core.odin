@@ -5,6 +5,6 @@ package core
 
 Job_Sheet :: struct {
 	open:        bool,
-	job:         string, // a job's id: edit it ("" = a new job)
-	for_project: string, // a new job's owner, preselected
+	job:         string `cmd:"omit"`, // a job's id: edit it ("" = a new job)
+	for_project: string `cmd:"omit"`, // a new job's owner, preselected
 }

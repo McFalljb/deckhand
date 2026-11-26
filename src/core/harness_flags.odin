@@ -22,8 +22,8 @@ import "core:strings"
 
 // Settings › Coding agents › <harness> › Default flags (this Mac's user's only).
 Set_Harness_Flags :: struct {
-	harness: Harness,
-	flags:   string, // one line, split as a shell splits words (flags_split); "" = none
+	harness: Harness `cmd:"names=harness,codec=harness_key"`,
+	flags:   string `cmd:"opt,red=len:flags_bytes"`, // one line, split as a shell splits words (flags_split); "" = none
 }
 
 FLAGS_TEXT_MAX :: 4096

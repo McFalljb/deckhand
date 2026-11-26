@@ -116,60 +116,60 @@ CLAUDE_ENTER_DELAY :: 80 * time.Millisecond // a held text's Enter, after its pa
 // ---- commands (rows in command_table.odin) ----
 
 New_Claude_Tab :: struct {
-	session:    u64, // the open session (0: project_id's, see claude_host)
-	project_id: u64,
-	cwd:        string, // a folder inside the project ("" = the session's)
-	resume:     string, // a Claude session id to resume ("" = a new conversation)
-	args:       []string, // extra flags; the user's (and scripts') only
-	account:    string, // a configured account's label or folder ("" = the resumed entry's, else the last used)
-	harness:    Harness, // .Claude, or .Codex: a Codex tab instead (codex.odin; wire: harness "codex"): account is a Codex account
+	session:    u64 `cmd:"omit"`, // the open session (0: project_id's, see claude_host)
+	project_id: u64 `cmd:"omit"`,
+	cwd:        string `cmd:"omit"`, // a folder inside the project ("" = the session's)
+	resume:     string `cmd:"omit"`, // a Claude session id to resume ("" = a new conversation)
+	args:       []string `cmd:"omit,log=len:argc,full"`, // extra flags; the user's (and scripts') only
+	account:    string `cmd:"omit"`, // a configured account's label or folder ("" = the resumed entry's, else the last used)
+	harness:    Harness `cmd:"codec=harness_ct"`, // .Claude, or .Codex: a Codex tab instead (codex.odin; wire: harness "codex"): account is a Codex account
 }
 // A Claude-only session in a project (its main tab a Claude tab, no pi tab).
 New_Claude_Session :: struct {
 	project_id: u64,
-	cwd:        string,
-	args:       []string,
-	account:    string, // a configured account's label or folder ("" = the project's last used, else the last used)
-	harness:    Harness, // .Claude, or .Codex: a Codex-only session instead (codex.odin; wire: harness "codex"): account is a Codex account
+	cwd:        string `cmd:"omit"`,
+	args:       []string `cmd:"omit,log=len:argc,full"`,
+	account:    string `cmd:"omit"`, // a configured account's label or folder ("" = the project's last used, else the last used)
+	harness:    Harness `cmd:"codec=harness_ct"`, // .Claude, or .Codex: a Codex-only session instead (codex.odin; wire: harness "codex"): account is a Codex account
 }
 // A Deckhand title for a Claude session of the history (the user's; "" = none).
 Claude_Rename :: struct {
 	claude_session_id: string,
-	title:             string,
+	title:             string `cmd:"log=bytes,full"`,
 }
 Claude_Resume :: struct {
 	claude_session_id: string, // a claude_history entry
 }
 // From the tab's own plugin (or a test script): its session id, after SessionStart.
 Claude_Session_Report :: struct {
-	tab_id:          u64,
+	tab_id:          u64 `cmd:"opt"`,
 	session_id:      string,
-	cwd:             string,
-	source:          string,
-	transcript_path: string, // kept only under Claude's config dir's projects/ (claude_transcript_ok)
-	model:           string,
-	permission_mode: string, // Claude Code's permission mode (claude_mode.odin); "" = not said
+	cwd:             string `cmd:"opt,log=-"`,
+	source:          string `cmd:"omit"`,
+	transcript_path: string `cmd:"omit,log=path,last"`, // kept only under Claude's config dir's projects/ (claude_transcript_ok)
+	model:           string `cmd:"omit"`,
+	permission_mode: string `cmd:"omit,last"`, // Claude Code's permission mode (claude_mode.odin); "" = not said
 }
 Claude_Turn_Report :: struct {
-	tab_id:   u64,
+	tab_id:   u64 `cmd:"opt"`,
 	state:    string, // submitted | idle | waiting | error (StopFailure)
-	title:    string, // with submitted: the prompt's first line (history title); never logged
-	question: bool, // with idle: Claude's last answer ends with a question (Stop's last_assistant_message; never sent)
-	idle_prompt: bool, // with idle: Notification idle_prompt (not a Stop): the last turn's dot stays
-	permission_mode: string, // Claude Code's permission mode (claude_mode.odin); "" = not said
+	title:    string `cmd:"omit,log=bytes"`, // with submitted: the prompt's first line (history title); never logged
+	question: bool `cmd:"omit"`, // with idle: Claude's last answer ends with a question (Stop's last_assistant_message; never sent)
+	idle_prompt: bool `cmd:"omit"`, // with idle: Notification idle_prompt (not a Stop): the last turn's dot stays
+	permission_mode: string `cmd:"omit"`, // Claude Code's permission mode (claude_mode.odin); "" = not said
 }
 Claude_Comments :: struct {
-	tab_id: u64,
-	max:    int, // characters of text at most (default and cap CLAUDE_COMMENTS_MAX)
+	tab_id: u64 `cmd:"opt"`,
+	max:    int `cmd:"omit,signed,max=1048576"`, // characters of text at most (default and cap CLAUDE_COMMENTS_MAX)
 }
 Claude_Attached :: struct {
-	tab_id:        u64,
+	tab_id:        u64 `cmd:"opt"`,
 	attachment_id: u64,
 }
 // Text for a Claude tab as a user message: held until it can go (claude_tick).
 Claude_Prompt :: struct {
 	tab_id: u64,
-	text:   string,
+	text:   string `cmd:"red=bytes"`,
 }
 // The held strip's Send now / Drop (the user's).
 Claude_Held_Op :: struct {
@@ -179,16 +179,16 @@ Claude_Held_Op :: struct {
 // claude_tick: a held text can go now (internal).
 Claude_Deliver :: struct {
 	tab_id: u64,
-	force:  bool,
+	force:  bool `cmd:"omit"`,
 }
 Claude_Restore_History :: struct {
-	records: []Claude_Record,
+	records: []Claude_Record `cmd:"log=len"`,
 }
 // The removed read-only chats' profile ack: kept on the grow-only wire (schema/released-v1.json),
 // always refused.
 Claude_Readonly_Ack :: struct {
-	tab_id: u64,
-	nonce:  string,
+	tab_id: u64 `cmd:"opt"`,
+	nonce:  string `cmd:"log=-"`,
 }
 
 // ---- runtime (not State) ----
@@ -1315,185 +1315,6 @@ claude_command_tab :: proc(cmd: Command) -> u64 {
 }
 
 // ---- wire ----
-
-claude_command_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case New_Claude_Tab:         return "new_claude_tab"
-	case New_Claude_Session:     return "new_claude_session"
-	case Claude_Rename:          return "claude_rename"
-	case Claude_Resume:          return "claude_resume"
-	case Claude_Session_Report:  return "claude.session"
-	case Claude_Turn_Report:     return "claude.turn"
-	case Claude_Readonly_Ack:    return "claude.readonly_ack"
-	case Claude_Comments:        return "claude.comments"
-	case Claude_Attached:        return "claude.attached"
-	case Claude_Prompt:          return "claude_prompt"
-	case Claude_Held_Op:         return "claude_held"
-	case Claude_Deliver:         return "claude_deliver"
-	case Claude_Restore_History: return "claude_restore_history"
-	}
-	return ""
-}
-
-// The command's fields for events and the log: never prompt text, titles or flags' values.
-claude_command_write :: proc(b: ^strings.Builder, cmd: Command, redact: bool) {
-	#partial switch c in cmd {
-	case New_Claude_Tab:
-		if c.session != 0 do fmt.sbprintf(b, `,"session":%d`, c.session)
-		if c.project_id != 0 do fmt.sbprintf(b, `,"project_id":%d`, c.project_id)
-		if c.cwd != "" {
-			strings.write_string(b, `,"cwd":`)
-			json_quote(b, c.cwd)
-		}
-		if c.resume != "" {
-			strings.write_string(b, `,"resume":`)
-			json_quote(b, c.resume)
-		}
-		if len(c.args) > 0 do fmt.sbprintf(b, `,"argc":%d`, len(c.args))
-		if c.account != "" {
-			strings.write_string(b, `,"account":`)
-			json_quote(b, c.account)
-		}
-		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
-	case New_Claude_Session:
-		fmt.sbprintf(b, `,"project_id":%d`, c.project_id)
-		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
-		if c.account != "" {
-			strings.write_string(b, `,"account":`)
-			json_quote(b, c.account)
-		}
-		if c.cwd != "" {
-			strings.write_string(b, `,"cwd":`)
-			json_quote(b, c.cwd)
-		}
-		if len(c.args) > 0 do fmt.sbprintf(b, `,"argc":%d`, len(c.args))
-	case Claude_Rename:
-		strings.write_string(b, `,"claude_session_id":`)
-		json_quote(b, c.claude_session_id)
-		fmt.sbprintf(b, `,"title":"<redacted %d bytes>"`, len(c.title))
-	case Claude_Resume:
-		strings.write_string(b, `,"claude_session_id":`)
-		json_quote(b, c.claude_session_id)
-	case Claude_Session_Report:
-		fmt.sbprintf(b, `,"tab_id":%d,"session_id":`, c.tab_id)
-		json_quote(b, c.session_id)
-		if c.source != "" {
-			strings.write_string(b, `,"source":`)
-			json_quote(b, c.source)
-		}
-		if c.model != "" {
-			strings.write_string(b, `,"model":`)
-			json_quote(b, c.model)
-		}
-		if c.transcript_path != "" do strings.write_string(b, `,"transcript_path":"<path>"`)
-		if c.permission_mode != "" {
-			strings.write_string(b, `,"permission_mode":`)
-			json_quote(b, c.permission_mode)
-		}
-	case Claude_Turn_Report:
-		fmt.sbprintf(b, `,"tab_id":%d,"state":`, c.tab_id)
-		json_quote(b, c.state)
-		if c.title != "" do fmt.sbprintf(b, `,"title":"<redacted %d bytes>"`, len(c.title))
-		if c.question do strings.write_string(b, `,"question":true`)
-		if c.idle_prompt do strings.write_string(b, `,"idle_prompt":true`)
-		if c.permission_mode != "" {
-			strings.write_string(b, `,"permission_mode":`)
-			json_quote(b, c.permission_mode)
-		}
-	case Claude_Comments:
-		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
-		if c.max != 0 do fmt.sbprintf(b, `,"max":%d`, c.max)
-	case Claude_Attached:
-		fmt.sbprintf(b, `,"tab_id":%d,"attachment_id":%d`, c.tab_id, c.attachment_id)
-	case Claude_Prompt:
-		fmt.sbprintf(b, `,"tab_id":%d,"text":`, c.tab_id)
-		if redact do fmt.sbprintf(b, `"<redacted %d bytes>"`, len(c.text))
-		else do json_quote(b, c.text)
-	case Claude_Held_Op:
-		fmt.sbprintf(b, `,"tab_id":%d,"op":`, c.tab_id)
-		json_quote(b, c.op)
-	case Claude_Deliver:
-		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
-		if c.force do strings.write_string(b, `,"force":true`)
-	case Claude_Restore_History:
-		fmt.sbprintf(b, `,"records":%d`, len(c.records))
-	case Claude_Readonly_Ack:
-		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id) // never the nonce
-	}
-}
-
-claude_command_clone :: proc(cmd: Command, allocator := context.allocator) -> Command {
-	s :: proc(v: string, a := context.allocator) -> string {return strings.clone(v, a)}
-	ss :: proc(v: []string, a := context.allocator) -> []string {
-		out := make([]string, len(v), a)
-		for x, i in v do out[i] = strings.clone(x, a)
-		return out
-	}
-	#partial switch c in cmd {
-	case New_Claude_Tab:        return New_Claude_Tab{session = c.session, project_id = c.project_id, cwd = s(c.cwd, allocator), resume = s(c.resume, allocator), args = ss(c.args, allocator), account = s(c.account, allocator), harness = c.harness}
-	case New_Claude_Session:    return New_Claude_Session{project_id = c.project_id, cwd = s(c.cwd, allocator), args = ss(c.args, allocator), account = s(c.account, allocator), harness = c.harness}
-	case Claude_Rename:         return Claude_Rename{claude_session_id = s(c.claude_session_id, allocator), title = s(c.title, allocator)}
-	case Claude_Resume:         return Claude_Resume{claude_session_id = s(c.claude_session_id, allocator)}
-	case Claude_Session_Report: return Claude_Session_Report{tab_id = c.tab_id, session_id = s(c.session_id, allocator), cwd = s(c.cwd, allocator), source = s(c.source, allocator), transcript_path = s(c.transcript_path, allocator), model = s(c.model, allocator), permission_mode = s(c.permission_mode, allocator)}
-	case Claude_Turn_Report:    return Claude_Turn_Report{tab_id = c.tab_id, state = s(c.state, allocator), title = s(c.title, allocator), question = c.question, idle_prompt = c.idle_prompt, permission_mode = s(c.permission_mode, allocator)}
-	case Claude_Prompt:         return Claude_Prompt{tab_id = c.tab_id, text = s(c.text, allocator)}
-	case Claude_Held_Op:        return Claude_Held_Op{tab_id = c.tab_id, op = s(c.op, allocator)}
-	case Claude_Restore_History:
-		out := make([]Claude_Record, len(c.records), allocator)
-		for r, i in c.records do out[i] = {id = s(r.id, allocator), cwd = s(r.cwd, allocator), project = s(r.project, allocator), title = s(r.title, allocator), used = r.used, args = ss(r.args, allocator), named = r.named, transcript = s(r.transcript, allocator), model = s(r.model, allocator), account = s(r.account, allocator), harness = r.harness}
-		return Claude_Restore_History{records = out}
-	case Claude_Readonly_Ack: return Claude_Readonly_Ack{tab_id = c.tab_id, nonce = s(c.nonce, allocator)}
-	}
-	return cmd
-}
-
-claude_command_free :: proc(cmd: Command, allocator := context.allocator) {
-	ss :: proc(v: []string, a := context.allocator) {
-		for x in v do delete(x, a)
-		delete(v, a)
-	}
-	#partial switch c in cmd {
-	case New_Claude_Tab:
-		delete(c.cwd, allocator)
-		delete(c.resume, allocator)
-		delete(c.account, allocator)
-		ss(c.args, allocator)
-	case New_Claude_Session:
-		delete(c.cwd, allocator)
-		delete(c.account, allocator)
-		ss(c.args, allocator)
-	case Claude_Rename:
-		delete(c.claude_session_id, allocator)
-		delete(c.title, allocator)
-	case Claude_Resume: delete(c.claude_session_id, allocator)
-	case Claude_Session_Report:
-		delete(c.session_id, allocator)
-		delete(c.cwd, allocator)
-		delete(c.source, allocator)
-		delete(c.transcript_path, allocator)
-		delete(c.model, allocator)
-		delete(c.permission_mode, allocator)
-	case Claude_Turn_Report:
-		delete(c.state, allocator)
-		delete(c.title, allocator)
-		delete(c.permission_mode, allocator)
-	case Claude_Readonly_Ack: delete(c.nonce, allocator)
-	case Claude_Prompt:  delete(c.text, allocator)
-	case Claude_Held_Op: delete(c.op, allocator)
-	case Claude_Restore_History:
-		for r in c.records {
-			delete(r.id, allocator)
-			delete(r.cwd, allocator)
-			delete(r.project, allocator)
-			delete(r.title, allocator)
-			ss(r.args, allocator)
-			delete(r.transcript, allocator)
-			delete(r.model, allocator)
-			delete(r.account, allocator)
-		}
-		delete(c.records, allocator)
-	}
-}
 
 // A Claude tab's entry in the snapshot (json_write.odin): its session id, turn, held texts'
 // count and who sent them (never their text), its extra flags' count, and why held texts wait.

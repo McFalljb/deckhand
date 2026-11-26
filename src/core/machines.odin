@@ -74,7 +74,7 @@ machines_reachable_default_on :: false
 
 Set_Machines_Reachable :: struct {
 	on:      bool,
-	confirm: string, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
+	confirm: string `cmd:"omit"`, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
 }
 
 // What turning Allow other machines to connect on asks first (the guide's warning, plainly).
@@ -83,12 +83,14 @@ MACHINES_REACH_QUESTION :: "Allow other machines to connect to this Mac? A machi
 // dropped), name (what Deckhand calls it; "": the target's host part, machine_default_name);
 // via: a development or test build's command in place of `ssh … connect`. User-only.
 Machine_Add :: struct {
-	name, target, via: string,
+	name: string `cmd:"opt"`,
+	target: string `cmd:"opt"`,
+	via: string `cmd:"omit"`,
 }
 // Removes a machine (the user confirms first: nothing on it is touched). User-only.
 Machine_Remove :: struct {
 	no:      u64,
-	confirm: string,
+	confirm: string `cmd:"omit"`,
 }
 // Renames a machine: only what Deckhand calls it; its ssh target stays. User-only.
 Machine_Rename :: struct {

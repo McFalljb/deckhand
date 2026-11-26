@@ -868,7 +868,7 @@ Terminal_Link.b	p.wire	=dump
 Terminal_Link.b	ui.wire	=p.wire
 Terminal_Link.b	clone	same
 Terminal_Link.c	log	{"type":"terminal_link","tab_id":5000000081,"url":"https://user:pass@host82.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret82#frag"}
-Terminal_Link.c	red	{"type":"terminal_link","tab_id":5000000081,"url":"https://host82.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret82#frag"}
+Terminal_Link.c	red	{"type":"terminal_link","tab_id":5000000081,"url":"https://host82.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=<redacted>"}
 Terminal_Link.c	wire	=log
 Terminal_Link.c	var	{"terminal_link":{"tab_id":5000000081,"url":"https://user:pass@host82.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret82#frag","external":false}}
 Terminal_Link.c	dump	Terminal_Link{tab_id=5000000081, url="https://user:pass@host82.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret82#frag", external=false}
@@ -6693,7 +6693,7 @@ Markdown_Follow.b	p.wire	=dump
 Markdown_Follow.b	ui.wire	=p.wire
 Markdown_Follow.b	clone	same
 Markdown_Follow.c	log	{"type":"markdown_link","tab_id":5000000627,"url":"https://user:pass@host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag","confirm":"https://user:pass@host629.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret629#frag"}
-Markdown_Follow.c	red	{"type":"markdown_link","tab_id":5000000627,"url":"https://host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag","confirm":"<redacted>"}
+Markdown_Follow.c	red	{"type":"markdown_link","tab_id":5000000627,"url":"https://host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=<redacted>","confirm":"<redacted>"}
 Markdown_Follow.c	wire	=log
 Markdown_Follow.c	var	{"markdown_follow":{"tab_id":5000000627,"url":"https://user:pass@host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag","confirm":"https://user:pass@host629.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret629#frag"}}
 Markdown_Follow.c	dump	Markdown_Follow{tab_id=5000000627, url="https://user:pass@host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag", confirm="https://user:pass@host629.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret629#frag"}
@@ -7477,7 +7477,7 @@ Browser_Open.b	p.wire	=dump
 Browser_Open.b	ui.wire	=p.wire
 Browser_Open.b	clone	same
 Browser_Open.c	log	{"type":"browser_open","session":5000000699,"url":"https://user:pass@host700.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret700#frag"}
-Browser_Open.c	red	{"type":"browser_open","session":5000000699,"url":"https://host700.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret700#frag"}
+Browser_Open.c	red	{"type":"browser_open","session":5000000699,"url":"https://host700.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=<redacted>"}
 Browser_Open.c	wire	=log
 Browser_Open.c	var	{"browser_open":{"session":5000000699,"url":"https://user:pass@host700.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret700#frag"}}
 Browser_Open.c	dump	Browser_Open{session=5000000699, url="https://user:pass@host700.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret700#frag"}
@@ -7509,7 +7509,7 @@ Browser_Navigate.b	p.wire	=dump
 Browser_Navigate.b	ui.wire	=p.wire
 Browser_Navigate.b	clone	same
 Browser_Navigate.c	log	{"type":"browser_navigate","tab_id":5000000702,"url":"https://user:pass@host703.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret703#frag"}
-Browser_Navigate.c	red	{"type":"browser_navigate","tab_id":5000000702,"url":"https://host703.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret703#frag"}
+Browser_Navigate.c	red	{"type":"browser_navigate","tab_id":5000000702,"url":"https://host703.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=<redacted>"}
 Browser_Navigate.c	wire	=log
 Browser_Navigate.c	var	{"browser_navigate":{"tab_id":5000000702,"url":"https://user:pass@host703.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret703#frag"}}
 Browser_Navigate.c	dump	Browser_Navigate{tab_id=5000000702, url="https://user:pass@host703.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret703#frag"}
@@ -7669,7 +7669,7 @@ Browser_Update.b	p.wire	err unknown command browser_update
 Browser_Update.b	ui.wire	=p.wire
 Browser_Update.b	clone	same
 Browser_Update.c	log	{"type":"browser_update","tab_id":5000000717,"title":"https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag","blocked_popup":"https://user:pass@host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}
-Browser_Update.c	red	{"type":"browser_update","tab_id":5000000717,"title":"https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag","blocked_popup":"https://host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}
+Browser_Update.c	red	{"type":"browser_update","tab_id":5000000717,"title":"https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag","blocked_popup":"https://host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=<redacted>"}
 Browser_Update.c	wire	=log
 Browser_Update.c	var	{"browser_update":{"tab_id":5000000717,"what":["title","blocked"],"url":"https://user:pass@host719.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret719#frag","title":"https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag","loading":false,"can_back":false,"can_forward":false,"blocked":"https://user:pass@host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}}
 Browser_Update.c	dump	Browser_Update{tab_id=5000000717, what=bits(10), url="https://user:pass@host719.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret719#frag", title="https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag", loading=false, can_back=false, can_forward=false, blocked="https://user:pass@host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}
@@ -7693,7 +7693,7 @@ Browser_Popup_Open.a	p.wire	err unknown command browser_popup_open
 Browser_Popup_Open.a	ui.wire	=p.wire
 Browser_Popup_Open.a	clone	same
 Browser_Popup_Open.b	log	{"type":"browser_popup_open","opener":5000000720,"url":"https://user:pw@host721.example/p?q=1#f","pane":5000000723}
-Browser_Popup_Open.b	red	{"type":"browser_popup_open","opener":5000000720,"url":"https://host721.example/p?q=1#f","pane":5000000723}
+Browser_Popup_Open.b	red	{"type":"browser_popup_open","opener":5000000720,"url":"https://host721.example/p?q=<redacted>","pane":5000000723}
 Browser_Popup_Open.b	wire	=log
 Browser_Popup_Open.b	var	{"browser_popup_open":{"opener":5000000720,"url":"https://user:pw@host721.example/p?q=1#f","background":false,"pane":5000000723}}
 Browser_Popup_Open.b	dump	Browser_Popup_Open{opener=5000000720, url="https://user:pw@host721.example/p?q=1#f", background=false, pane=5000000723}
@@ -7701,7 +7701,7 @@ Browser_Popup_Open.b	p.wire	err unknown command browser_popup_open
 Browser_Popup_Open.b	ui.wire	=p.wire
 Browser_Popup_Open.b	clone	same
 Browser_Popup_Open.c	log	{"type":"browser_popup_open","opener":5000000720,"url":"https://user:pass@host721.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret721#frag","pane":5000000723}
-Browser_Popup_Open.c	red	{"type":"browser_popup_open","opener":5000000720,"url":"https://host721.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret721#frag","pane":5000000723}
+Browser_Popup_Open.c	red	{"type":"browser_popup_open","opener":5000000720,"url":"https://host721.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=<redacted>","pane":5000000723}
 Browser_Popup_Open.c	wire	=log
 Browser_Popup_Open.c	var	{"browser_popup_open":{"opener":5000000720,"url":"https://user:pass@host721.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret721#frag","background":false,"pane":5000000723}}
 Browser_Popup_Open.c	dump	Browser_Popup_Open{opener=5000000720, url="https://user:pass@host721.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret721#frag", background=false, pane=5000000723}

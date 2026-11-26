@@ -1710,10 +1710,13 @@ has no cookie, so it can only guess codes while one is open (5 tries).
   flags (only their count), `claude.todos`/`claude.task`/`claude.subagent` text (only counts,
   events and ids),
   confirmation tokens, connection tokens, or the `user:pass@` of an address (a browser tab's, a
-  refused popup's, a Markdown link's also in its confirmation question, a restored browser tab's;
-  the query stays, as in State), or whom a `mailto:` link of a command mails
-  (`mailto:<redacted>@example.com`). A `markdown_link` confirmation question names the mail
-  address on purpose: the user confirms whom it mails.
+  refused popup's, a Markdown link's also in its confirmation question, a restored browser tab's),
+  an address's query values and fragment in a command (`?code=<redacted>&state=<redacted>`, no
+  `#…`), or whom a `mailto:` link of a command mails (`mailto:<redacted>@example.com`). State
+  keeps the address whole; `get_state` writes a tab's address and a refused popup's without
+  `user:pass@` only (query and fragment kept), and its pending confirmations' commands redacted as
+  here. A `markdown_link` confirmation question names the address on purpose (without
+  `user:pass@`): the user confirms what opens, and whom a mail goes to.
 - Snapshots never contain confirmation tokens, nor a refused popup's `user:pass@`. Paths, project names and session titles are not
   redacted (the log lives in the user's own data dir, mode `0600`).
 - Panels and `pi.prompt` text are not logged in full: events and the log carry a `panel.set`'s

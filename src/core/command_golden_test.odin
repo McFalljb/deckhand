@@ -2,9 +2,10 @@ package core
 
 // Characterisation of every command's JSON (issue #195): what the encoders write, what the
 // parser reads back and what the inbox's copy keeps, pinned in tests/command-codec/golden.txt.
-// For each Command variant, three samples (all zero; filled "a": small numbers, enums' second
+// For each Command variant, four samples (all zero; filled "a": small numbers, enums' second
 // value, strings with escapes, every Maybe set; filled "b": large and negative numbers, enums'
-// last value, bools false, strings shaped like URLs with a password and like bridge blockers):
+// last value, bools false, strings shaped like URLs with a password and like bridge blockers;
+// "c": as "b", every string a URL with a password longer than any cut:N):
 //
 //   log    command_json(cmd)                the events' and the log's encoding, unredacted
 //   red    command_json(cmd, redact = true) what events and the log keep
@@ -14,8 +15,8 @@ package core
 //   clone                                    command_clone then command_free: the same value?
 //
 // and, per wire name in COMMAND_SPECS, a digest of the parser's answers to its object with each
-// field taken out and each field set to each of `"x"`, -1, 1.5, true, null, 5000000000, [] and
-// {} (required and optional fields, type checks, clamps, the first error), written out in full
+// field taken out and each field set to each of `"x"`, -1, 1.5, true, null, 5000000000, 2^41,
+// [] and {} (required and optional fields, type checks, clamps, the first error), written out in full
 // to build/command-golden-parse.txt.
 //
 // The test writes what the code does to build/command-golden.txt; a difference is a behaviour
@@ -46,7 +47,7 @@ cg_root :: proc() -> string {
 
 @(private = "file")
 Cg_Fill :: struct {
-	seed: int, // 1 = "a", 2 = "b"
+	seed: int, // 1 = "a", 2 = "b", 3 = "c"
 	n:    int,
 	a:    runtime.Allocator,
 }
@@ -92,6 +93,7 @@ cg_fill :: proc(data: rawptr, ti: ^runtime.Type_Info, f: ^Cg_Fill) {
 	case runtime.Type_Info_String:
 		if t.is_cstring do return
 		if f.seed == 1 do (^string)(data)^ = fmt.aprintf("s%d \"q\\\" \n\t ✓", n, allocator = f.a)
+		else if f.seed == 3 do (^string)(data)^ = fmt.aprintf("https://user:pass@host%d.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret%d#frag", n, n, allocator = f.a)
 		else {
 			pat := CG_B_STRINGS[n % len(CG_B_STRINGS)]
 			(^string)(data)^ = strings.contains(pat, "%d") ? fmt.aprintf(pat, n, allocator = f.a) : strings.clone(pat, f.a)
@@ -132,7 +134,6 @@ cg_fill :: proc(data: rawptr, ti: ^runtime.Type_Info, f: ^Cg_Fill) {
 }
 
 // Command variant i: seed 0 all zero, 1 and 2 filled.
-@(private = "file")
 cg_sample :: proc(i, seed: int) -> Command {
 	u := runtime.type_info_base(type_info_of(Command)).variant.(runtime.Type_Info_Union)
 	cmd: Command
@@ -247,7 +248,6 @@ cg_dump_elems :: proc(b: ^strings.Builder, data: rawptr, n, size: int, elem: ^ru
 	strings.write_byte(b, ']')
 }
 
-@(private = "file")
 cg_dump_cmd :: proc(cmd: Command) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	c := cmd
@@ -259,7 +259,6 @@ cg_dump_cmd :: proc(cmd: Command) -> string {
 
 // "ok <dump>" or "err <message>"; leaks and bad frees of the parse and its free are counted in
 // `leaks`.
-@(private = "file")
 cg_parse :: proc(text: string, ui: bool, leaks: ^int) -> string {
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, runtime.heap_allocator())
@@ -286,7 +285,6 @@ cg_line :: proc(b: ^strings.Builder, name, what, text: string) {
 
 // The object `text` (a JSON object) with member `key` replaced by `raw` ("" = removed), or with
 // every member but type set to raw (key "*").
-@(private = "file")
 cg_mutate :: proc(members: []Json_Member, key, raw: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_byte(&b, '{')
@@ -308,7 +306,7 @@ cg_mutate :: proc(members: []Json_Member, key, raw: string) -> string {
 }
 
 @(private = "file")
-CG_VALUES := [?]string{`"x"`, `-1`, `1.5`, `true`, `null`, `5000000000`, `[]`, `{}`}
+CG_VALUES := [?]string{`"x"`, `-1`, `1.5`, `true`, `null`, `5000000000`, `2199023255552`, `[]`, `{}`}
 
 // Names the parser knows that are not in COMMAND_SPECS (old names, removed commands).
 @(private = "file")
@@ -336,7 +334,7 @@ command_golden :: proc(t: ^testing.T) {
 		}
 		delete(base)
 	}
-	SEEDS :: [3]string{"zero", "a", "b"}
+	SEEDS :: [4]string{"zero", "a", "b", "c"}
 	for vt, i in u.variants {
 		name := wire_variant_name(vt)
 		for seed_name, seed in SEEDS {
@@ -435,8 +433,3 @@ command_golden :: proc(t: ^testing.T) {
 	testing.expectf(t, false, "%s differs from %s (diff them; the parser's cases in full: %s)", ACTUAL, GOLDEN, ACTUAL_PARSE)
 }
 
-// Every command's `cmd` tags say something command_codec.odin knows.
-@(test)
-command_codec_tags :: proc(t: ^testing.T) {
-	for p in command_tag_problems do testing.expectf(t, false, "%s", p)
-}

@@ -438,8 +438,10 @@ launchd_login_gone_no_fallback :: proc(t: ^testing.T) {
 	defer {
 		launchd_launchctl = saved
 		login_gone = false
+		login_gui_kind_for_test = 0
 	}
 	login_gone = false
+	login_gui_kind_for_test = 1 // a GUI login (its end is what 141 means)
 	pid, ok, why := holder_launch(bin, run, fmt.tprintf("%s/data", d), {"PATH=/usr/bin:/bin"})
 	testing.expectf(t, !ok && pid == 0, "the holder's launch fails: %v %d", ok, pid)
 	testing.expectf(t, strings.contains(why, "login that has ended"), "why: %s", why)
@@ -449,6 +451,14 @@ launchd_login_gone_no_fallback :: proc(t: ^testing.T) {
 	testing.expectf(t, !ok && pid == 0, "the core's launch fails: %v %d", ok, pid)
 	testing.expectf(t, strings.contains(why, "login that has ended"), "why: %s", why)
 	testing.expect(t, login_gone, "login_gone is set")
+
+	// #204 review, item 6b: a caller in an ssh login (`deckhand-core-serve connect` from another
+	// Mac, a tmux from ssh) keeps the direct start: its 141 says nothing about the GUI login
+	login_gone = false
+	login_gui_kind_for_test = 2
+	pid, ok, why = holder_launch(bin, run, fmt.tprintf("%s/data", d), {"PATH=/usr/bin:/bin"})
+	testing.expectf(t, ok && pid > 0, "an ssh caller's holder starts directly: %v %d %s", ok, pid, why)
+	testing.expect(t, !login_gone, "and login_gone stays clear")
 }
 
 @(test)

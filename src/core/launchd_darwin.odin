@@ -55,7 +55,7 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env)
 	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, holder_label_prefix, launchctl = launchd_launchctl)
 	if lok do return lpid, true, ""
-	if launchd_login_gone(lwhy) do return 0, false, launchd_login_gone_note("session holder", lwhy)
+	if launchd_login_gone(lwhy) && login_own_gui_kind() do return 0, false, launchd_login_gone_note("session holder", lwhy)
 	log_ln("Deckhand: session holder: the launchd launch failed:", lwhy, "- starting it directly")
 	return holder_launch_direct(bin, run, data, env)
 }
@@ -296,7 +296,9 @@ launchd_sweep :: proc(run, prefix: string, launchctl := LAUNCHCTL) {
 // avoided" (seen as "Bootstrap failed: 141: Reentrancy avoided"). A direct start would put the
 // new process in that dead login too (no account lookups, no system DNS, no Metal compiler), so
 // there is no fallback then: the launch fails, and login_gone is set (a core then exits:
-// src/coremain serve.odin).
+// src/coremain serve.odin). Only from a GUI-kind session (login_own_gui_kind): a caller in an ssh
+// login (`deckhand-core-serve connect` from another machine, a tmux started over ssh) keeps the
+// direct start, as before #202.
 launchd_login_gone :: proc(why: string) -> bool {
 	return strings.contains(why, "Reentrancy avoided") || strings.contains(why, "failed: 141:")
 }
@@ -333,7 +335,7 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env, "serve", secret)
 	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, launchctl = launchd_launchctl, mode = "serve", secret = secret)
 	if lok do return lpid, true, ""
-	if launchd_login_gone(lwhy) do return 0, false, launchd_login_gone_note("background core", lwhy)
+	if launchd_login_gone(lwhy) && login_own_gui_kind() do return 0, false, launchd_login_gone_note("background core", lwhy)
 	log_ln("Deckhand: background core: the launchd launch failed:", lwhy, "- starting it directly")
 	return holder_launch_direct(bin, run, data, env, "serve", secret)
 }

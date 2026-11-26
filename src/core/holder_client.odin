@@ -293,7 +293,7 @@ holder_client_start :: proc() -> bool {
 				log_ln("Deckhand: session holder: removing a dead holder's socket", path)
 				sock_unlink(path)
 			case .Other_Login:
-				holder_replace_other_login(refused_code_pid, path)
+				_ = holder_replace_other_login(refused_code_pid, path) // not stopped: its socket stays, a new holder starts beside it
 			}
 		}
 		if !quiet do break
@@ -444,9 +444,10 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		refused_code_pid = peer.pid
 		return .Refused_Code
 	}
-	// a holder from another login (#202, login_session.odin): nothing is sent to it; it is replaced
-	if login_other(login_asid_peer(tok, peer.pid), login_asid_own()) {
-		log_ln("Deckhand: session holder: pid", peer.pid, "runs in another login (audit session", login_asid_peer(tok, peer.pid), ", this core's", login_asid_own(), ")")
+	// a holder from an ended GUI login, this core in the current one (#202, login_session.odin):
+	// nothing is sent to it; it is replaced. Any other session (an ssh login's): attached as before
+	if login_should_replace(tok, peer.pid) {
+		log_ln("Deckhand: session holder: pid", peer.pid, "runs in a GUI login that has ended")
 		sock_close(fd)
 		refused_code_pid = peer.pid
 		return .Other_Login

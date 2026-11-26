@@ -328,7 +328,7 @@ command_codec_tags_matter :: proc(t: ^testing.T) {
 @(test)
 command_redacted_leaks :: proc(t: ^testing.T) {
 	CRED :: "https://user:pass@host.example/p?q=1#f"
-	PUBLIC :: "https://host.example/p?q=1#f"
+	PUBLIC :: "https://host.example/p?q=<redacted>" // the query's values and the fragment not kept either
 	TOKEN :: "tok-5f0c2e9a"
 	red :: proc(cmd: Command) -> string {return command_json(cmd, redact = true)}
 	lacks :: proc(t: ^testing.T, js, what: string, loc := #caller_location) {
@@ -344,6 +344,7 @@ command_redacted_leaks :: proc(t: ^testing.T) {
 	holds(t, js, `"url":"` + PUBLIC + `"`)
 	holds(t, js, `"confirm":"<redacted>"`)
 	holds(t, command_json(Markdown_Follow{tab_id = 1, url = CRED, confirm = TOKEN}), TOKEN) // the unredacted log keeps it (a test's)
+	holds(t, command_json(Markdown_Follow{tab_id = 1, url = CRED, confirm = TOKEN}), CRED) // and the address whole
 
 	js = red(Browser_Update{tab_id = 1, what = {.Url, .Title, .Blocked}, url = CRED, title = "Inbox (3)", blocked = "user:pass@popup.example/x"})
 	lacks(t, js, "user:pass")

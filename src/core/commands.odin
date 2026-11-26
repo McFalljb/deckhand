@@ -161,6 +161,9 @@ List_Commands :: struct {} // query: the commands this caller may send (command_
 Set_Home :: struct {
 	open: bool,
 }
+// Starts the agent's pi (Home, as set_home's open does) without showing its drawer or moving the
+// keyboard: a phone's Start Atlas leaves the Mac's window as it is.
+Start_Home :: struct {}
 
 // The left column (sidebar.odin). A target is a project (project_id) or a
 // session (pi_session_id: a project's or a chat), not both.
@@ -550,6 +553,7 @@ Command :: union {
 	Get_State,
 	List_Commands,
 	Set_Home,
+	Start_Home,
 	Set_Pinned,
 	Set_Hidden,
 	Set_Sort,
@@ -855,6 +859,7 @@ Caller :: struct {
 	claude: bool, // kind panel: a Claude tab's plugin and CLI (claude.odin), not a pi tab's bridge
 	hub:    bool, // it came over a hub link (another machine's core, on_behalf): kept with a queued command, so a hub that is gone by the time it runs still counts (caller_from_hub)
 	web:    bool, // kind ui: a paired browser's (web access, web.odin): the user, with a hub's caps and no User_Here (web_may_run)
+	web_device: u64, // with web: which paired browser (web_device_key of its device id), kept with a queued command: its own filter (web_filters)
 }
 
 // The command came from another machine's core: its own link said so (kept with it in the inbox),
@@ -1473,43 +1478,22 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if state.focus_widget == "agent_input" do state.focus_widget = ""
 			return {ok = true}, true
 		}
-		// Atlas runs on pi (harness.odin): without it nothing starts and the user is told how to install it
-		if !agent_running() && !(caller.kind == .UI ? pi_installed_now() : pi_installed()) {
-			if caller.kind == .UI do window_toast(ATLAS_NEEDS_PI, err = true)
-			return fail(ATLAS_NEEDS_PI), false
-		}
-		if state.home == 0 {
-			if home_root == "" do return fail("the agent is not available (no data dir)"), false
-			s := Open_Session {
-				id            = new_id(),
-				pi_session_id = new_uuid(),
-				session_dir   = home_dir(),
-				cwd           = home_cwd(),
-				home          = true,
-			}
-			append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started})
-			s.active_tab = s.tabs[0].id
-			session_panes_init(&s)
-			append(&state.open_sessions, s)
-			state.home = s.id
-		}
-		hs := home_session()
-		ht := session_pi_tab(hs)
+		ht, sr := home_start(caller)
+		if ht == nil do return sr, false
 		state.agent.unread = 0
-		if ht.status == .Exited {
-			drop_term(ht.id) // starts again, resuming its session
-			forget_confirmations_for(ht.id) // the old agent's requests die with it
-			agent_picker = {} // the selector asked of the old pi
-			ht.status = .Not_Started
-			ht.agent, ht.waiting = .Unknown, false
-		}
-		start_restored_tabs(hs)
 		state.home_open = true
 		// its terminal has the keyboard, when the user opens it (only the user
 		// moves the keyboard there; a script's open leaves it where it is)
 		if (caller.kind == .UI || caller.kind == .Internal) && !harness_run_holds_sheet() do state.focus_widget = "agent_input"
 		if ht.status != .Running do return {ok = false, error = "could not start the agent's pi", created_id = ht.id}, true
 		return {ok = true, created_id = ht.id}, true
+	case Start_Home:
+		// the drawer and the keyboard stay as they are (a phone starts Atlas for itself)
+		running := home_tab() != nil && home_tab().status == .Running
+		ht, sr := home_start(caller)
+		if ht == nil do return sr, false
+		if ht.status != .Running do return {ok = false, error = "could not start the agent's pi", created_id = ht.id}, true
+		return {ok = true, created_id = ht.id}, !running
 	case Set_Pinned:
 		key, is_project, err := sidebar_target(c.cwd, c.project_id, c.pi_session_id, !c.pinned)
 		if err != "" do return fail(err), false
@@ -1564,6 +1548,15 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Set_Filter:
 		sb := &state.sidebar
 		ch := false
+		if caller_from_web(caller) {
+			// a browser's filter is its own (web_view.odin web_filters); Show hidden is one setting
+			ch = web_filter_apply(c, caller.web_device != 0 ? caller.web_device : web_device_key(window_link_web_device()))
+			if b, ok := c.show_hidden.?; ok && b != sb.show_hidden {
+				sb.show_hidden = b
+				ch = true
+			}
+			return {ok = true}, ch
+		}
 		if text, ok := c.text.?; ok {
 			text = cut_utf8(one_line(text, context.temp_allocator), FILTER_MAX)
 			if text != sb.filter {
@@ -2399,6 +2392,42 @@ same_target :: proc(a, b: Command) -> bool {
 
 HOME_NOT_A_SESSION :: "the agent is not a session tab: show it with set_home"
 CHATS_NOT_A_PROJECT :: "Chats is not a project: its sessions are in state.chats (new_chat with its project_id starts one)"
+
+// Makes Home's session on first use and starts its pi when it is not running (set_home's open,
+// start_home). nil: it cannot start (the Result says why).
+home_start :: proc(caller: Caller) -> (^Tab, Result) {
+	// Atlas runs on pi (harness.odin): without it nothing starts and the user is told how to install it
+	if !agent_running() && !(caller.kind == .UI ? pi_installed_now() : pi_installed()) {
+		if caller.kind == .UI && !caller_from_web(caller) do window_toast(ATLAS_NEEDS_PI, err = true) // a browser shows the result's error itself
+		return nil, fail(ATLAS_NEEDS_PI)
+	}
+	if state.home == 0 {
+		if home_root == "" do return nil, fail("the agent is not available (no data dir)")
+		s := Open_Session {
+			id            = new_id(),
+			pi_session_id = new_uuid(),
+			session_dir   = home_dir(),
+			cwd           = home_cwd(),
+			home          = true,
+		}
+		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started})
+		s.active_tab = s.tabs[0].id
+		session_panes_init(&s)
+		append(&state.open_sessions, s)
+		state.home = s.id
+	}
+	hs := home_session()
+	ht := session_pi_tab(hs)
+	if ht.status == .Exited {
+		drop_term(ht.id) // starts again, resuming its session
+		forget_confirmations_for(ht.id) // the old agent's requests die with it
+		agent_picker = {} // the selector asked of the old pi
+		ht.status = .Not_Started
+		ht.agent, ht.waiting = .Unknown, false
+	}
+	start_restored_tabs(hs)
+	return ht, {ok = true}
+}
 
 // The caller is the agent itself (its control token is bound to Home's tab).
 home_bound :: proc(caller: Caller) -> bool {

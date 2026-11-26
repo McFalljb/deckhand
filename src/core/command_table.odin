@@ -62,6 +62,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_panel", args = "panel, open", does = "open or close a panel in the right column", who = .Anyone},
 	{type = "set_panel_collapsed", args = "panel, collapsed", does = "fold a panel's section", who = .Anyone},
 	{type = "set_home", args = "open", does = "show the agent's drawer, its pi terminal (starts the agent's pi on first open); hiding it is the user's, and the agent cannot send it", who = .Anyone},
+	{type = "start_home", does = "start the agent's pi (Home) as set_home's open does, without showing its drawer or moving the keyboard (a phone's Start Atlas); already running: nothing changes; created_id = Home's tab id", who = .Anyone},
 	{type = "set_agent_name", args = "name", does = `the agent's name ("" = Atlas); the user's, as it labels the agent's questions and notifications`, who = .User},
 	{type = "set_agent_model", args = "model", does = `the agent's model, "provider/id" or "provider/id:thinking" ("" = pi's default); the user's; passed as --model when the agent starts a new session or after it changed`, who = .User},
 	{type = "agent_model_picker", does = "show the agent's drawer and open pi's model selector in its terminal (Ctrl+L); the user's", who = .User},

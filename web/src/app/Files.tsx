@@ -1292,7 +1292,7 @@ function TextFileTab({ tab, path, markdown }: { s: OpenSession; tab: Tab; path: 
       ) : svg && !source ? (
         <SvgPreview text={text} name={name} />
       ) : (
-        <CodeEdit key={tab.id + ":" + path} text={text} path={path} onEdit={(t) => f.setDraft(t)} />
+        <CodeEdit key={tab.id + ":" + path} text={text} path={path} phone={app.phone} onEdit={(t) => f.setDraft(t)} />
       )}
     </div>
   );

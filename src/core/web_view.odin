@@ -14,7 +14,9 @@ package core
 //   web           {fleet {waiting, errors, unseen, working}, next (open session id, 0), open [ids],
 //                 attention [{session, group, tab}], deck [same], filtered (waiting rows the
 //                 filter hides), here {name, label}, watch [project ids], new [{machine,
-//                 projects, chats, claude_tab, codex_tab, note}]: the New session picker's harnesses (web_view_new_choices)}
+//                 projects, chats, claude_tab, codex_tab, note}]: the New session picker's harnesses (web_view_new_choices),
+//                 filter {text, running, waiting, pinned}: the browser's own (web_filters), atlas: Atlas is
+//                 offered (atlas_offered: its button shows before its first start)}
 //   webo:<id>     an open session's row: {title, place, chat, at (Unix ns, 0 = new)}
 //   webm          [{no, open [ids], projects [{id, depth, name}]}]: each other machine
 //   webtree       the Projects tree in order: [[key, depth, kids, forced] or key (0, 0, 0)]; key = a project's
@@ -127,6 +129,67 @@ web_watch_list :: proc(w: ^Web_Watched) {
 	}
 }
 
+// A browser's own filter and quick filters (#196): set_filter from a browser sets these, never
+// the window's (state.sidebar), so a phone's filter box and chips leave the Mac's left column as
+// it was. Per paired browser, keyed by the sender's device (Caller.web_device: a command still
+// queued when another browser takes the view stays its sender's), in memory like the window's
+// (never saved). The browser's tree and Attention list are computed with the attached browser's
+// (web_view_build), and "web".filter says what it is.
+Web_Filter :: struct {
+	text:                      string, // heap
+	running, waiting, pinned: bool,
+}
+@(private)
+web_filters: map[u64]Web_Filter // by web_device_key
+
+// A paired browser's key: its device id hashed, never 0 (0: none).
+web_device_key :: proc(device: string) -> u64 {
+	if device == "" do return 0
+	h := hash.fnv64a(transmute([]u8)device)
+	return h == 0 ? 1 : h
+}
+
+// The attached browser's filter ({} : none set).
+web_filter_now :: proc() -> Web_Filter {
+	return web_filters[web_device_key(window_link_web_device())]
+}
+
+// set_filter from a browser (commands.odin), for its device; changed: its filter differs now.
+web_filter_apply :: proc(c: Set_Filter, dev: u64) -> (changed: bool) {
+	heap := runtime.heap_allocator()
+	f := web_filters[dev]
+	if text, ok := c.text.?; ok {
+		text = cut_utf8(one_line(text, context.temp_allocator), FILTER_MAX)
+		if text != f.text {
+			delete(f.text, heap)
+			f.text = strings.clone(text, heap)
+			changed = true
+		}
+	}
+	set :: proc(field: ^bool, v: Maybe(bool), ch: ^bool) {
+		if b, ok := v.?; ok && b != field^ {
+			field^ = b
+			ch^ = true
+		}
+	}
+	set(&f.running, c.running, &changed)
+	set(&f.waiting, c.waiting, &changed)
+	set(&f.pinned, c.pinned, &changed)
+	if dev not_in web_filters {
+		if len(web_filters) >= WEB_FILTERS_MAX do web_filters_reset() // a few paired browsers; past that, start over
+		if web_filters == nil do web_filters = make(map[u64]Web_Filter, heap)
+	}
+	web_filters[dev] = f
+	return
+}
+WEB_FILTERS_MAX :: 32
+
+web_filters_reset :: proc() {
+	heap := runtime.heap_allocator()
+	for _, f in web_filters do delete(f.text, heap)
+	clear(&web_filters)
+}
+
 // The last sections and what they were computed from (heap); builds counts computations (tests).
 @(private)
 web_view_last: struct {
@@ -153,6 +216,10 @@ web_view_cached :: proc(sections: [][2]string) -> [][2]string {
 	}
 	gen := web_watch_gen
 	h = hash.fnv64a(mem.ptr_to_bytes(&gen), h)
+	wf := web_filter_now()
+	quick := [3]bool{wf.running, wf.waiting, wf.pinned}
+	h = hash.fnv64a(transmute([]u8)wf.text, h)
+	h = hash.fnv64a(mem.ptr_to_bytes(&quick), h)
 	nk := web_view_new_key()
 	h = hash.fnv64a(mem.ptr_to_bytes(&nk), h)
 	// the tabs' bars: some change with time alone (a Claude tab's hooks silent past their grace)
@@ -201,6 +268,14 @@ put :: proc(out: ^[dynamic][2]string, name: string, b: ^strings.Builder) {
 
 @(private = "file")
 web_view_build :: proc(out: ^[dynamic][2]string) {
+	// the browser's own filter (web_filters) in the window's place while this builds, then the
+	// window's back: the sidebar's procs read state.sidebar
+	wf := web_filter_now()
+	sb := &state.sidebar
+	saved := Web_Filter{text = sb.filter, running = sb.only_running, waiting = sb.only_waiting, pinned = sb.only_pinned}
+	sb.filter, sb.only_running, sb.only_waiting, sb.only_pinned = wf.text, wf.running, wf.waiting, wf.pinned
+	defer sb.filter, sb.only_running, sb.only_waiting, sb.only_pinned = saved.text, saved.running, saved.waiting, saved.pinned
+
 	// ---- web: the small part (fleet, Open, Attention, the Deck) ----
 	b := strings.builder_make(context.temp_allocator)
 	f := fleet_tally()
@@ -227,6 +302,10 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 	}
 	strings.write_string(&b, `],"new":`)
 	web_view_new_choices(&b)
+	fmt.sbprintf(&b, `,"atlas":%v`, atlas_offered()) // Atlas's button before its first start (pi: web_view_new_key)
+	strings.write_string(&b, `,"filter":{"text":`)
+	json_quote(&b, wf.text)
+	fmt.sbprintf(&b, `,"running":%v,"waiting":%v,"pinned":%v}}`, wf.running, wf.waiting, wf.pinned)
 	strings.write_string(&b, "}")
 	put(out, WEB_VIEW_SECTION, &b)
 

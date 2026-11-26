@@ -20,9 +20,10 @@ import { agentName, toggleAtlas } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { TabBars } from "./TabBars.tsx";
 import { modeBadge } from "./harness.ts";
-import { atlasNeedsStart, composeSend, drawerShown, phoneSessionItems } from "./phone.ts";
+import { ATLAS_START, atlasNeedsStart, atlasShown, composeSend, drawerShown, PanelFolds, panelView, phoneSessionItems, sessionPanels } from "./phone.ts";
 
 const enc = new TextEncoder();
+const SELECT_ROWS = 5000; // Select text: the last rows of the scrollback and the screen
 
 export function PhoneHome() {
   const app = useApp();
@@ -37,7 +38,7 @@ export function PhoneHome() {
         <IconButton icon="search" label="Search or run a command" run={() => app.setOverlay({ palette: true })} />
         <IconButton icon="bell" label="Notifications" badge={unreadCount(app)} run={() => app.setOverlay({ bell: true })} />
         <IconButton icon="sliders" label="Settings" run={() => app.go({ screen: "settings" })} />
-        {app.store.homeSession ? (
+        {atlasShown(app.store.homeSession, app.store.web) ? (
           <button type="button" class="agent-btn" aria-label={agentName(app)} onClick={() => toggleAtlas(app)}>
             <span class="agent-avatar">{agentName(app)[0]}</span>
           </button>
@@ -100,6 +101,7 @@ export function PhoneSession({ id }: { id: number }) {
   const tab = tabs.find((t) => t.id === shownTab) ?? tabs[0];
   const w = store.webTitle(s.id);
   const terminal = !!tab && isTerminalTab(tab);
+  const panels = sessionPanels(tabs, (t) => store.panels(t));
 
   const menu = (e: MouseEvent) =>
     menuAt(
@@ -111,6 +113,7 @@ export function PhoneSession({ id }: { id: number }) {
         smaller: () => setTermFont(termFontSize(true) - 1),
         larger: () => setTermFont(termFontSize(true) + 1),
         copy: () => app.setOverlay({ copy: term.current?.view.screenText() ?? "" }),
+        select: () => app.setOverlay({ select: term.current?.view.allText(SELECT_ROWS) ?? "" }),
         compose: () => {
           // still the tap's own handler: the terminal's field takes the focus now, so iOS raises
           // its keyboard; the box takes the focus from it once it shows (the keyboard stays up)
@@ -130,6 +133,7 @@ export function PhoneSession({ id }: { id: number }) {
           <div class="bar-title">{w?.title ?? s.title}</div>
           <div class="bar-sub">{[w?.chat ? "Chats" : w?.place, store.machineName(s.machine)].filter(Boolean).join(" · ")}</div>
         </div>
+        {panels.length ? <IconButton icon="sidebar-right" label="Panels" badge={panels.length} run={() => app.setOverlay({ panels: s.id })} /> : null}
         <IconButton icon="folder" label={files ? "Back to the tab" : "Files"} on={files} run={() => setFiles(!files)} />
         <IconButton icon="more" label="Session menu" run={menu} />
       </header>
@@ -320,14 +324,13 @@ function PhoneAtlas() {
       {tab && !atlasNeedsStart(tab.status) ? (
         <PhoneTerminal tab={tab} term={term} inDrawer />
       ) : (
-        // only set_home starts Atlas's pi, and it opens Atlas's drawer at the Mac too: the user's
-        // choice, said on the button (opening and closing here never touch the Mac's drawer)
+        // start_home: the Mac's drawer and keyboard stay as they are (opening and closing here never
+        // touch them either)
         <div class="empty atlas-start">
           <p>{name} isn't running.</p>
-          <button type="button" class="btn primary" onClick={() => app.run({ type: "set_home", open: true })}>
+          <button type="button" class="btn primary" onClick={() => app.run(ATLAS_START)}>
             Start {name}
           </button>
-          <p class="muted small">This also opens {name} at the Mac.</p>
         </div>
       )}
     </aside>
@@ -363,6 +366,134 @@ function PhoneStrip({ s, active }: { s: OpenSession; active: number }) {
         <button type="button" class="icon-btn small strip-add" aria-label="New tab" onClick={(e) => menuAt(app, e as unknown as MouseEvent, newTabItems(app, s))}>
           <Icon name="plus" size={14} />
         </button>
+      </div>
+    </div>
+  );
+}
+
+// The right column's panels on a phone (the desktop's RightPanels): a sheet over the session, live
+// as its agents publish. Folding a panel here is the phone's own (never set_panel_collapsed: the
+// Mac's right column keeps its folds).
+export function PanelsSheet() {
+  const app = useApp();
+  const id = app.overlay.panels;
+  const folds = useRef(new PanelFolds()).current; // per session
+  const [, redraw] = useState(0);
+  if (id === null) return null;
+  const close = () => app.setOverlay({ panels: null });
+  const s = app.store.session(id);
+  const panels = s ? sessionPanels(app.store.tabs(s.id), (t) => app.store.panels(t)) : [];
+  return (
+    <div class="scrim" onMouseDown={close}>
+      <div class="sheet bottom panels-sheet" role="dialog" aria-label="Panels" onMouseDown={(e) => e.stopPropagation()}>
+        <div class="sheet-title">Panels</div>
+        <div class="panels-scroll">
+          {panels.length === 0 ? <p class="empty small">The session's agent publishes its todos, subagents and shells here.</p> : null}
+          {panels.map((p) => {
+            const shut = folds.has(id, p.id);
+            const { head, rows } = panelView(p);
+            return (
+              <section class="panel" key={p.id}>
+                <button
+                  type="button"
+                  class="panel-head"
+                  aria-expanded={!shut}
+                  onClick={() => {
+                    folds.toggle(id, p.id);
+                    redraw((n) => n + 1);
+                  }}
+                >
+                  <Icon name={shut ? "chevron-right" : "chevron-down"} size={12} />
+                  <span>{head}</span>
+                </button>
+                {shut
+                  ? null
+                  : rows.map((r) => (
+                      <div class={"panel-row tone-" + (r.tone || "normal") + (r.head ? " head" : "")}>
+                        <span>{r.text}</span>
+                      </div>
+                    ))}
+              </section>
+            );
+          })}
+        </div>
+        <button type="button" class="btn wide sheet-cancel" onClick={close}>
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Select text on a phone: the terminal's scrollback and screen as plain text in a sheet, where the
+// phone's own selection works (touch and hold, drag the handles, the system's Copy), scrolled to
+// the newest line. Copy copies what is selected in it, else all of it: the selection is kept as it
+// changes, since a tap on the button may clear it first. A terminal's own selection (xterm's) is a
+// mouse drag, and a drag on a phone scrolls.
+export function SelectSheet() {
+  const app = useApp();
+  const text = app.overlay.select;
+  const pre = useRef<HTMLPreElement>(null);
+  const picked = useRef("");
+  const [some, setSome] = useState(false);
+  useEffect(() => {
+    if (text === null) return;
+    picked.current = "";
+    setSome(false);
+    const el = pre.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    const changed = () => {
+      const sel = document.getSelection();
+      const inside = !!sel && sel.rangeCount > 0 && !!el && el.contains(sel.anchorNode) && el.contains(sel.focusNode);
+      const t = inside ? sel!.toString() : "";
+      // a tap outside the text (the button) clears it: keep the last selection until the sheet closes
+      if (t || inside) {
+        picked.current = t;
+        setSome(!!t);
+      }
+    };
+    document.addEventListener("selectionchange", changed);
+    return () => document.removeEventListener("selectionchange", changed);
+  }, [text]);
+  if (text === null) return null;
+  const close = () => app.setOverlay({ select: null });
+  const copy = () => {
+    const what = picked.current || text;
+    const done = () => {
+      app.toast(picked.current ? "Copied" : "Copied all");
+      close();
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(what).then(done, () => app.toast("Select the text and use the phone's Copy", true));
+      return;
+    }
+    // not a secure context: the older copy command, from a field holding the text (in this tap)
+    const ta = document.createElement("textarea");
+    ta.value = what;
+    ta.readOnly = true;
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(0, what.length);
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (ok) done();
+    else app.toast("Select the text and use the phone's Copy", true);
+  };
+  return (
+    <div class="scrim" onMouseDown={close}>
+      <div class="sheet bottom select-sheet" role="dialog" aria-label="Select text" onMouseDown={(e) => e.stopPropagation()}>
+        <div class="sheet-title">Select text</div>
+        <p class="muted small sheet-body">Touch and hold to select, then Copy.</p>
+        <pre ref={pre} class="select-text">{text || " "}</pre>
+        <div class="prompt-actions">
+          <button type="button" class="btn" onClick={close}>
+            Close
+          </button>
+          <button type="button" class="btn primary" onPointerDown={(e) => e.preventDefault()} onMouseDown={(e) => e.preventDefault()} onClick={copy}>
+            {some ? "Copy" : "Copy all"}
+          </button>
+        </div>
       </div>
     </div>
   );

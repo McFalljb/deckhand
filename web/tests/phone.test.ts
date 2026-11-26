@@ -38,7 +38,7 @@ test("typing: a browser left in the saved text-box mode types straight in again,
 test("typing: the text box is a one-time compose in the session menu; its Send pastes once, Enter apart, and closes", () => {
   const calls: string[] = [];
   const f = (n: string) => () => void calls.push(n);
-  const base = { smaller: f("s"), larger: f("l"), copy: f("c"), compose: f("compose"), closeTab: f("ct"), closeSession: f("cs") };
+  const base = { smaller: f("s"), larger: f("l"), copy: f("c"), compose: f("compose"), select: f("select"), closeTab: f("ct"), closeSession: f("cs") };
   const items = phoneSessionItems({ ...base, tab: tab(1, "shell_tab"), terminal: true });
   const labels = items.filter((i) => !i.sep).map((i) => i.label);
   assert.ok(labels.includes("Type in a text box"));
@@ -166,10 +166,85 @@ test("Atlas on a phone: opening and closing it never opens or closes the Mac's d
   assert.equal(atlasNeedsStart("exited"), false, "the exit bar's Restart");
 });
 
-test("palette: on a phone, nothing that changes the Mac's view: Changes into its panes, the sidebar's filters and sorts", () => {
-  for (const id of ["show_changes", "clear_filter", "quick_running", "quick_waiting", "quick_pinned", "show_hidden", "sort_projects", "sort_sessions", "sort_chats"]) {
+test("Atlas on a phone: Start Atlas starts its pi without the Mac's drawer (start_home, never set_home)", async () => {
+  const { ATLAS_START } = await import("../src/app/phone.ts");
+  assert.deepEqual(ATLAS_START, { type: "start_home" });
+});
+
+test("palette: on a phone, nothing that changes the Mac's view: Changes into its panes, the sidebar's sorts and Show hidden", () => {
+  for (const id of ["show_changes", "show_hidden", "sort_projects", "sort_sessions", "sort_chats"]) {
     assert.equal(paletteShows(id, true), false, id);
     assert.equal(paletteShows(id, false), true, id);
   }
-  for (const id of ["filter", "show_deck", "show_jobs", "new_shell_tab"]) assert.equal(paletteShows(id, true), true, id + " (phone-local on a phone)");
+  for (const id of ["filter", "clear_filter", "quick_running", "quick_waiting", "quick_pinned", "show_deck", "show_jobs", "new_shell_tab"]) assert.equal(paletteShows(id, true), true, id + " (phone-local on a phone)");
+});
+
+test("filter: a browser's filter and chips are its own (\"web\".filter), never the Mac's sidebar filter", async () => {
+  const { ownFilter } = await import("../src/app/treefilter.ts");
+  assert.deepEqual(ownFilter(null), { text: "", running: false, waiting: false, pinned: false }, "before the core's first answer");
+  const web = { filter: { text: "api", running: true, waiting: false, pinned: false } } as any;
+  assert.deepEqual(ownFilter(web), { text: "api", running: true, waiting: false, pinned: false });
+  assert.deepEqual(ownFilter({} as any), { text: "", running: false, waiting: false, pinned: false }, "none set yet");
+});
+
+test("panels on a phone: the session's panels (pi's, a Claude tab's subagents, background and todos) once each, in tab order", async () => {
+  const { sessionPanels, panelView } = await import("../src/app/phone.ts");
+  const P = (id: string, title: string, rows: { text: string; tone?: string; head?: boolean }[] = []) => ({ id, title, rows: rows.map((r) => ({ text: r.text, tone: r.tone ?? "normal", head: !!r.head })) });
+  const of: Record<number, any[]> = {
+    1: [P("todos", "Todos", [{ text: "Todos 1/2", head: true }, { text: "✓ a" }, { text: "○ b" }])],
+    2: [P("subagents", "Subagents", [{ text: "explore: running" }]), P("background", "Background", [{ text: "npm test" }])],
+    3: [P("todos", "Todos (another tab)")],
+  };
+  const got = sessionPanels([tab(1, "pi_tab"), tab(2, "claude_tab"), tab(3, "shell_tab")], (id) => of[id] ?? []);
+  assert.deepEqual(got.map((p) => p.id), ["todos", "subagents", "background"], "one per id, the first tab's");
+  assert.deepEqual(sessionPanels([], () => []), []);
+  // a bridge's first head row is the panel's title, as the window draws it
+  const v = panelView(got[0]);
+  assert.equal(v.head, "Todos 1/2");
+  assert.deepEqual(v.rows.map((r) => r.text), ["✓ a", "○ b"]);
+  assert.deepEqual(panelView(got[1]), { head: "Subagents", rows: got[1].rows });
+});
+
+test("panels on a phone: the sheet stops the terminal's typing, as any sheet", async () => {
+  const { covering } = await import("../src/app/phone.ts");
+  const none = { menu: null, sheet: null, palette: false, bell: false, link: null, copy: null, job: null, peek: null, atlas: false, panels: null } as any;
+  assert.equal(covering(none, false), false);
+  assert.equal(covering({ ...none, panels: 3 }, false), true);
+});
+
+test("select text: over a terminal the session menu has Select text (the scrollback and screen in a sheet to select from); its sheet stops the typing", async () => {
+  const { covering } = await import("../src/app/phone.ts");
+  const calls: string[] = [];
+  const f = (n: string) => () => void calls.push(n);
+  const base = { smaller: f("s"), larger: f("l"), copy: f("copy"), compose: f("compose"), select: f("select"), closeTab: f("ct"), closeSession: f("cs") };
+  const items = phoneSessionItems({ ...base, tab: tab(1, "shell_tab"), terminal: true });
+  items.find((i) => i.label === "Select text")!.run!();
+  assert.deepEqual(calls, ["select"]);
+  assert.ok(!phoneSessionItems({ ...base, tab: tab(2, "changes_tab"), terminal: false }).some((i) => i.label === "Select text"), "only over a terminal");
+  const none = { menu: null, sheet: null, palette: false, bell: false, link: null, copy: null, job: null, peek: null, atlas: false, panels: null, select: null } as any;
+  assert.equal(covering({ ...none, select: "text" }, false), true);
+});
+
+test("Atlas's button: shown once Atlas has a session, or before its first start when the core offers it (pi installed)", async () => {
+  const { atlasShown } = await import("../src/app/phone.ts");
+  assert.equal(atlasShown(7, null), true, "a Home session");
+  assert.equal(atlasShown(0, { atlas: true } as any), true, "never started: Start Atlas starts it");
+  assert.equal(atlasShown(0, { atlas: false } as any), false, "no pi: no button");
+  assert.equal(atlasShown(0, null), false);
+});
+
+test("file editing on a phone: the editor's text is 16 px (iOS zooms the page into a field under 16 px) with its own line height", async () => {
+  const { codeMetrics } = await import("../src/app/phone.ts");
+  assert.deepEqual(codeMetrics(true), { cls: "code-edit phone", lineH: 22 });
+  assert.deepEqual(codeMetrics(false), { cls: "code-edit", lineH: 18 });
+});
+
+test("panels on a phone: a fold is that session's own, never another session's", async () => {
+  const { PanelFolds } = await import("../src/app/phone.ts");
+  const f = new PanelFolds();
+  f.toggle(1, "todos");
+  assert.equal(f.has(1, "todos"), true);
+  assert.equal(f.has(2, "todos"), false, "another session's Todos stay open");
+  f.toggle(1, "todos");
+  assert.equal(f.has(1, "todos"), false);
 });

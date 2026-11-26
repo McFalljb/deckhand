@@ -197,3 +197,107 @@ web_view_bars_section :: proc(t: ^testing.T) {
 	state.reload.from_save = false
 	testing.expect_value(t, web_bars_json(), "[]")
 }
+
+// A browser's filter and quick filters are its own (#196): set_filter from a browser narrows the
+// browser's tree and leaves the window's (state.sidebar) as it is; the window's never narrows the
+// browser's. Show hidden stays one setting.
+@(test)
+web_view_own_filter :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	defer web_filters_reset()
+	a := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-filter-alpha"}
+	b := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-filter-beta"}
+	append(&state.projects, a, b)
+	BROWSER :: Caller{kind = .UI, web = true}
+	tree_and_filter :: proc() -> (tree, filter: string) {
+		secs := state_sections(&state)
+		for x in web_view_cached(secs[:]) {
+			if x[0] == "webtree" do tree = strings.clone(x[1], context.temp_allocator)
+			if x[0] == "web" {
+				v, _ := json.parse_string(x[1], allocator = context.temp_allocator)
+				f := v.(json.Object)["filter"].(json.Object)
+				filter = fmt.tprintf("%s|%v|%v|%v", f["text"].(json.String), f["running"].(json.Boolean), f["waiting"].(json.Boolean), f["pinned"].(json.Boolean))
+			}
+		}
+		return
+	}
+	both := fmt.tprintf(`["%d","%d"]`, a.id, b.id)
+	tree, filter := tree_and_filter()
+	testing.expect_value(t, tree, both)
+	testing.expect_value(t, filter, "|false|false|false")
+	// the browser's: its tree narrows, the window's filter stays
+	r := run_command(Set_Filter{text = "alpha", pinned = true}, BROWSER)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, state.sidebar.filter, "")
+	testing.expect(t, !state.sidebar.only_pinned, "the window's quick filter stays off")
+	run_command(Set_Filter{pinned = false}, BROWSER)
+	tree, filter = tree_and_filter()
+	testing.expect_value(t, tree, fmt.tprintf(`["%d"]`, a.id))
+	testing.expect_value(t, filter, "alpha|false|false|false")
+	// the window's: its own, the browser's tree as it was
+	testing.expect(t, run_command(Set_Filter{text = "beta", running = true}, Caller{kind = .UI}).ok)
+	testing.expect_value(t, state.sidebar.filter, "beta")
+	testing.expect(t, state.sidebar.only_running)
+	tree, filter = tree_and_filter()
+	testing.expect_value(t, tree, fmt.tprintf(`["%d"]`, a.id))
+	testing.expect_value(t, filter, "alpha|false|false|false")
+	testing.expect_value(t, state.sidebar.filter, "beta") // the build put the window's back
+	// cleared in the browser: both its rows again, the window's filter still "beta"
+	testing.expect(t, run_command(Set_Filter{text = "", running = false, waiting = false, pinned = false}, BROWSER).ok)
+	tree, _ = tree_and_filter()
+	testing.expect_value(t, tree, both)
+	testing.expect_value(t, state.sidebar.filter, "beta")
+	// Show hidden is one setting (saved), from either
+	testing.expect(t, run_command(Set_Filter{show_hidden = true}, BROWSER).ok)
+	testing.expect(t, state.sidebar.show_hidden)
+}
+
+// Atlas's button in a browser before Atlas's first start (#196): "web".atlas is atlas_offered (pi
+// installed, or Atlas open or running), so a phone can start it (start_home) with no Home yet.
+@(test)
+web_view_atlas_offered :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	defer harness_installed_probe[.Pi] = nil
+	atlas :: proc() -> string {
+		secs := state_sections(&state)
+		for x in web_view_cached(secs[:]) do if x[0] == "web" {
+			v, _ := json.parse_string(x[1], allocator = context.temp_allocator)
+			b, ok := v.(json.Object)["atlas"].(json.Boolean)
+			return ok ? fmt.tprintf("%v", b) : "missing"
+		}
+		return "no web section"
+	}
+	harness_installed_probe[.Pi] = proc() -> bool {return true}
+	testing.expect_value(t, atlas(), "true")
+	harness_installed_probe[.Pi] = proc() -> bool {return false}
+	testing.expect_value(t, atlas(), "false")
+}
+
+// A browser's set_filter is its sender's (#198 review): the device rides on the Caller, so a command
+// still queued when another browser (or the window) takes the view never lands on that one.
+@(test)
+web_view_filter_is_the_senders :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	defer web_filters_reset()
+	a := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-sender-alpha"}
+	b := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-sender-beta"}
+	append(&state.projects, a, b)
+	A := Caller{kind = .UI, web = true, web_device = web_device_key("device-a")}
+	testing.expect(t, A.web_device != 0)
+	testing.expect(t, run_command(Set_Filter{text = "alpha"}, A).ok)
+	testing.expect_value(t, web_filters[A.web_device].text, "alpha")
+	// the view now (no browser attached here: another device's): not narrowed by A's filter
+	testing.expect_value(t, web_filter_now().text, "")
+	secs := state_sections(&state)
+	for x in web_view_cached(secs[:]) do if x[0] == "webtree" do testing.expect_value(t, x[1], fmt.tprintf(`["%d","%d"]`, a.id, b.id))
+	testing.expect_value(t, state.sidebar.filter, "") // nor the window's
+}

@@ -145,6 +145,14 @@ export interface WebView {
   here: { name: string; label: string };
   watch: number[];
   new?: WebNewChoices[]; // the New session picker's harnesses, per machine (web_view_new_choices)
+  atlas?: boolean; // Atlas is offered (pi installed, or Atlas open or running): its button before its first start
+  filter?: WebFilter; // this browser's own filter and quick filters (web_filters), never the Mac's
+}
+export interface WebFilter {
+  text: string;
+  running: boolean;
+  waiting: boolean;
+  pinned: boolean;
 }
 export interface WebNewChoice {
   harness: "pi" | "claude" | "codex";

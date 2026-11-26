@@ -696,6 +696,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "get_state":           cmd = Get_State{}
 	case "list_commands":       cmd = List_Commands{}
 	case "set_home":            cmd = Set_Home{open = get_bool(&r, "open")}
+	case "start_home":          cmd = Start_Home{}
 	case "set_chats_dir":       cmd = Set_Folder{kind = .Chats, path = get_str(&r, "path", optional = true)} // the old name
 	case "set_home_dir":        cmd = Set_Home_Dir{path = get_str(&r, "path", optional = true), create = opt_bool(&r, "create").? or_else false, setup = ui_flag(&r, "setup")}
 	case "set_folder":          cmd = Set_Folder{kind = get_enum(&r, "kind", FOLDER_NAMES), path = get_str(&r, "path", optional = true)}

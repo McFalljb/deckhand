@@ -1,6 +1,6 @@
 // The phone's choices that need no DOM (Phone.tsx, Palette.tsx, Files.tsx use them; tests too).
 
-import { tabKind, isTerminalTab, type Tab } from "../state.ts";
+import { tabKind, isTerminalTab, type Panel, type Tab, type WebView } from "../state.ts";
 import type { MenuItem, Overlay } from "./ctx.ts";
 
 // ---- typing ----
@@ -44,6 +44,7 @@ export function phoneSessionItems(o: {
   larger(): void;
   copy(): void;
   compose(): void;
+  select(): void; // the terminal's text in a sheet to select from (Phone.tsx SelectSheet)
   closeTab(): void;
   closeSession(): void;
 }): MenuItem[] {
@@ -52,7 +53,7 @@ export function phoneSessionItems(o: {
     { label: "Text larger", run: o.larger },
     { label: "Copy screen text", run: o.copy },
   ];
-  if (o.terminal) items.push({ label: "Type in a text box", run: o.compose });
+  if (o.terminal) items.push({ label: "Select text", run: o.select }, { label: "Type in a text box", run: o.compose });
   items.push({ sep: true });
   if (o.tab && tabKind(o.tab) !== "pi_tab") items.push({ label: "Close this tab", run: o.closeTab });
   items.push({ label: "Close session", run: o.closeSession });
@@ -90,13 +91,9 @@ const DESKTOP_ONLY = new Set([
   "focus_pane_up",
   "focus_pane_down",
   "dim_panes",
-  // a Changes tab placed in the Mac's panes; the left column's filters and sorts (the Mac's
-  // sidebar: the phone's own list has its filter box and chips)
+  // a Changes tab placed in the Mac's panes; the left column's sorts and Show hidden (the Mac's
+  // sidebar; the filter and its chips are each browser's own)
   "show_changes",
-  "clear_filter",
-  "quick_running",
-  "quick_waiting",
-  "quick_pinned",
   "show_hidden",
   "sort_projects",
   "sort_sessions",
@@ -130,7 +127,7 @@ export function insertPath(tabs: Tab[], active: number, path: string): InsertPat
 // into or scrolls a terminal's program under it. The drawer's own terminal (inDrawer) is not under
 // it: it types and scrolls (a menu over it still covers it).
 export function covering(o: Overlay, homeOpen: boolean, inDrawer = false): boolean {
-  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || (homeOpen && !inDrawer));
+  return !!(o.menu || o.sheet || o.palette || o.bell || o.link || o.copy || o.job || o.peek || o.panels || o.select !== null && o.select !== undefined || (homeOpen && !inDrawer));
 }
 
 // Whether the Atlas drawer shows. The core's home_open is one flag for the Mac's window (an agent
@@ -147,6 +144,58 @@ export function atlasToggle(phone: boolean, localOpen: boolean, homeOpen: boolea
   return { atlas: false, cmd: { type: "set_home", open: !homeOpen } };
 }
 
-// Atlas's pi is not running yet (never started, or restored and not started): only set_home starts
-// it, and set_home also opens the Mac's drawer, so on a phone that is a button saying so.
+// Atlas's pi is not running yet (never started, or restored and not started): a phone shows Start
+// Atlas, which sends ATLAS_START.
 export const atlasNeedsStart = (status: string | undefined): boolean => !status || status === "not_started";
+
+// Atlas's button (the phone's home bar, the desktop's top bar, the palette): once Atlas has a
+// session, or before its first start when the core offers it ("web".atlas: pi installed). With no
+// session yet the phone's Atlas screen shows Start Atlas, and the desktop's set_home makes it.
+export const atlasShown = (homeSession: number, web: WebView | null): boolean => !!homeSession || !!web?.atlas;
+
+// Start Atlas on a phone: the core's start_home starts Atlas's pi and leaves the Mac's drawer and
+// keyboard as they are (set_home would open the drawer at the Mac and take its keyboard).
+export const ATLAS_START = { type: "start_home" } as const;
+
+// ---- the right column's panels ----
+// What the session's agents publish (a pi bridge's panels; a Claude tab's Todos, Subagents and
+// Background: claude_panels.odin), as the desktop's right column lists them (Bars.tsx RightPanels):
+// each tab's in tab order, one per id (the first). A phone shows them in a sheet (Phone.tsx).
+export function sessionPanels(tabs: Tab[], panelsOf: (tabId: number) => Panel[]): Panel[] {
+  const out: Panel[] = [];
+  const seen = new Set<string>();
+  for (const t of tabs)
+    for (const p of panelsOf(t.id))
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        out.push(p);
+      }
+  return out;
+}
+
+// The phone's own folds in its panels sheet, per session (a fold in one session's sheet never
+// folds another's Todos), never sent to the core (the Mac's folds are set_panel_collapsed).
+export class PanelFolds {
+  private m = new Map<number, Set<string>>();
+  has(session: number, panel: string): boolean {
+    return !!this.m.get(session)?.has(panel);
+  }
+  toggle(session: number, panel: string): void {
+    const s = this.m.get(session) ?? new Set<string>();
+    if (s.has(panel)) s.delete(panel);
+    else s.add(panel);
+    this.m.set(session, s);
+  }
+}
+
+// A panel as drawn: a bridge's first head row is its title ("Todos 3/4"), as the window draws it.
+export function panelView(p: Panel): { head: string; rows: Panel["rows"] } {
+  return p.rows[0]?.head ? { head: p.rows[0].text, rows: p.rows.slice(1) } : { head: p.title, rows: p.rows };
+}
+
+// ---- file editing ----
+// The file editor (Code.tsx CodeEdit) on a phone: 16 px text (iOS and Chrome on iOS zoom the page
+// into a field whose text is smaller, and stay zoomed), so a taller line (.code-edit.phone).
+export function codeMetrics(phone: boolean): { cls: string; lineH: number } {
+  return phone ? { cls: "code-edit phone", lineH: 22 } : { cls: "code-edit", lineH: 18 };
+}

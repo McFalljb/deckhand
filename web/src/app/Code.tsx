@@ -11,6 +11,7 @@
 import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { highlightable, langForFence, langForPath, Lines, paintable, type Span } from "./highlight.ts";
+import { codeMetrics } from "./phone.ts";
 
 // The lexer's spans, or null (plain text) should it ever throw: a lexer bug never blanks the page.
 function lexed(lexer: Lines, lines: string[], upTo: number): Span[][] | null {
@@ -22,7 +23,6 @@ function lexed(lexer: Lines, lines: string[], upTo: number): Span[][] | null {
   }
 }
 
-const LINE_H = 18; // .code-edit's line-height
 const PAD_T = 8; // .code-text's top padding
 const OVERSCAN = 60; // lines painted above and below the ones in view
 const BLOCK_MAX_LINES = 2000; // a Markdown code block longer than this stays plain
@@ -42,7 +42,8 @@ export function paint(line: string, spans: Span[] | undefined): ComponentChildre
 }
 
 // Text with line numbers: a gutter beside a textarea, scrolled together, coloured by path's language.
-export function CodeEdit({ text, path, onEdit }: { text: string; path: string; onEdit: (t: string) => void }) {
+export function CodeEdit({ text, path, onEdit, phone = false }: { text: string; path: string; onEdit: (t: string) => void; phone?: boolean }) {
+  const { cls, lineH: LINE_H } = codeMetrics(phone); // .code-edit's line-height
   const gutter = useRef<HTMLDivElement>(null);
   const area = useRef<HTMLTextAreaElement>(null);
   const layer = useRef<HTMLPreElement>(null);
@@ -73,13 +74,16 @@ export function CodeEdit({ text, path, onEdit }: { text: string; path: string; o
   useLayoutEffect(follow);
   useLayoutEffect(() => {
     const t = area.current;
+    // no autocorrect (iOS): as an attribute, since a browser with an autocorrect property reads
+    // Preact's "off" as true
+    t?.setAttribute("autocorrect", "off");
     if (!t || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => setView({ top: t.scrollTop, h: t.clientHeight }));
     ro.observe(t);
     return () => ro.disconnect();
   }, []);
   return (
-    <div class="code-edit">
+    <div class={cls}>
       <div class="code-gutter" ref={gutter} aria-hidden="true">{nums.current}</div>
       <div class="code-main">
         {spans ? (

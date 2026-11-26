@@ -1176,7 +1176,7 @@ link_command_caller :: proc(obj: json.Object) -> Caller {
 			for n, k in SCRIPT_AS_NAMES do if n != "" && n == name do return {kind = k, tab_id = u64(max(tab, 0))}
 		}
 	}
-	return {kind = .UI, web = link.web}
+	return {kind = .UI, web = link.web, web_device = link.web ? web_device_key(link.web_device) : 0}
 }
 
 @(private = "file")

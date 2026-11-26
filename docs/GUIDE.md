@@ -2411,6 +2411,28 @@ Away from `localhost` the page is not a secure context for the browser, so:
   selected and a **Copy** button that tries the browser's older copy command; if that fails,
   copy it by hand.
 
+### HTTPS with Tailscale Serve
+
+If your devices are on a Tailscale network, Tailscale Serve can put Deckhand's page behind HTTPS,
+with a certificate the browser trusts, at `https://<the Mac's name>.<your tailnet>.ts.net/`:
+
+1. In Settings › Machines, set **Listen address…** to `127.0.0.1:7433`, so only Serve (and this
+   Mac) reaches the plain HTTP page.
+2. In Terminal on the Mac: `tailscale serve --bg 7433`. It prints the address; the first time,
+   it may ask you to turn on HTTPS certificates for your tailnet in Tailscale's admin console.
+3. On the phone (signed in to the same tailnet), open that `https://` address and pair it as
+   above. It is a new address, so it is a new pairing.
+
+`tailscale serve status` shows what Serve shares, and `tailscale serve --https=443 off` stops
+sharing it. Use Serve, never `tailscale funnel`, which publishes the page to the whole internet.
+Another HTTPS reverse proxy works the same way if it passes WebSocket upgrades and keeps the
+browser's `Host` header: the page refuses a connection whose origin is not the address it was
+opened at, so a proxy that rewrites `Host` shows the page but never connects.
+
+Over HTTPS the page is a secure context: **Copy** puts text on the clipboard directly, without
+the box. Notifications still show only in the page and the bell: Deckhand doesn't send system or
+push notifications to a browser yet.
+
 ### One view at a time
 
 A core shows its sessions in one place at a time. A browser that opens takes the view from the
@@ -2436,6 +2458,8 @@ shown; git letters and colours are the window's; an icon shows each file's kind;
 Drag rows (or the selection) onto a folder, a file (its folder) or the empty space below (the top folder) to move them there, without asking; a closed folder opens when you hover over it, and a name already there is refused, never renamed. On a phone, or from the keyboard, **Move to…** in the row's menu or the selection bar picks the folder. With a row focused, ⌘C / ⌘X / ⌘V / ⌘D (Ctrl off a Mac; also **Copy**, **Cut**, **Paste here**, **Duplicate** in the menu, sheet and selection bar) copy, cut, paste into the selected folder (else the selected file's folder, else the top) and duplicate in place; a copy's clash becomes `name copy`, a cut's clash is refused, and Option-dragging copies; this clipboard is the page's own (a Copy also puts the quoted paths on the system clipboard). ⌘Z in the tree, or a toast's **Undo**, undoes the page's last 20 tree operations (new item, rename, move, copy, a confirmed delete put back from the Trash), refused when the item changed since; it is cleared when the folder or session changes or the page reloads.
 **Filter files** (the field under the tree's header; on a phone the magnifier shows it) lists the project's files that match every word you type, as a flat list (name, then its folder), best first; ↑ ↓ and Enter open one, and Esc clears the filter and goes back to the tree with the file you opened shown. Ignored files are never searched; past 100 matches it says to type more.
 **Another checkout in a browser**: the tree's name (with its branch) opens the project's checkouts (a menu; on a phone a sheet). (Only for a project that is its repository's top folder.) Choosing one switches this page's tree only, never the window's, and the browser remembers it per project. There the tree is read-only (no New, Rename, Move, Trash, Copy, Cut, Paste, Duplicate or Undo; *Read-only here: open a session in this checkout to change files*): files open and read, but saving or changing them is refused until a session runs in that checkout (or the window's switcher shows it).
+The Sessions column's filter and its Running, Waiting and Pinned chips are each browser's own:
+they narrow that browser's list and never the Mac's (until the core restarts).
 The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
 peeks at that session. **New session** offers what the window's picker does there (the coding agents
@@ -2473,18 +2497,24 @@ the terminal, or **Show keyboard** under it, to type: each key goes straight in,
 menu, a sheet or another tab stops the typing until you tap again); the phone's keyboard may learn
 the words typed there, as in any text field. For dictation, autocorrect, a long message, or a
 long-press Paste, the session menu (⋯) has **Type in a text box**: a box under the terminal whose
-text goes in once with Enter, then the box closes. Drag a terminal up or down to scroll it as the
+text goes in once with Enter, then the box closes. To copy part of a terminal, **Select text** in
+the same menu shows its scrollback and screen (the last 5,000 rows, a wrapped line joined) as text:
+touch and hold to select with the phone's own handles, then **Copy** (or **Copy all** with nothing
+selected); **Copy screen text** copies the rows on screen. Drag a terminal up or down to scroll it as the
 mouse wheel would: its scrollback, or inside a full-screen program (less, an agent) what the wheel
 sends there. A tab whose program exited shows **Restart** (an agent's) and **Close** (any but
-pi's), as at the Mac. A long press on a Deck card peeks at that session; on a row of the Files view
+pi's), as at the Mac. When the session's agents publish panels (pi's, or a Claude tab's Todos,
+Subagents and Background), the panels button in the session's bar shows how many and opens them
+in a sheet, kept up to date; folding one there doesn't fold it at the Mac. A long press on a Deck card peeks at that session; on a row of the Files view
 (the folder button) it opens that row's menu as a sheet, where **Insert path** types that file's
 path into the tab as a drop on it does at the Mac (never Enter; a name with a control character
 is refused). **Atlas** (its button on the home screen, or the palette) opens full screen under its
 own bar, typed into like a session. It is the phone's own: opening or closing it never opens or
-closes Atlas's drawer at the Mac. When Atlas isn't running, **Start Atlas** starts it, and that
-opens it at the Mac too. The palette leaves out what would only change the Mac's window: split
-panes, the columns, dim panes, Show changes, and the left column's filters and sorts (the phone's
-list has its own filter box).
+closes Atlas's drawer at the Mac. When Atlas isn't running (or has never run, with pi
+installed), **Start Atlas** starts it, without opening it at the Mac or taking the Mac's keyboard. The filter box and its chips (Running,
+Waiting, Pinned) are the phone's own: they never change the Mac's left column, nor another
+browser's. The palette leaves out what would only change the Mac's window: split panes, the
+columns, dim panes, Show changes, Show hidden and the left column's sorts.
 
 ### From a terminal (Linux)
 

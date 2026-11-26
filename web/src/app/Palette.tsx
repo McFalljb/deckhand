@@ -7,6 +7,7 @@ import type { OpenSession } from "../state.ts";
 import { sessionView } from "../status.ts";
 import { keysLabel, keysMatch, useApp, type App, type Keys } from "./ctx.ts";
 import { score } from "./match.ts";
+import { ownFilter } from "./treefilter.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
 import { treeTakes } from "./fileops.ts";
 import { focusSession, newChat, newSession, openHarness } from "./Sidebar.tsx";
@@ -15,7 +16,7 @@ import { newTabItems } from "./Panes.tsx";
 import { setTermFont, termFontSize } from "./Term.tsx";
 import { openJobSheet } from "./JobSheet.tsx";
 import { toggleAtlas } from "./Bars.tsx";
-import { paletteShows } from "./phone.ts";
+import { paletteShows, atlasShown } from "./phone.ts";
 
 export interface Action {
   id: string;
@@ -82,7 +83,7 @@ export const ACTIONS: Action[] = [
     id: "toggle_agent",
     label: (app) => `Toggle ${app.store.settings.agent_name || "Atlas"}`,
     keys: { k: "j" },
-    when: (app) => !!app.store.homeSession,
+    when: (app) => atlasShown(app.store.homeSession, app.store.web),
     run: (app) => toggleAtlas(app),
   },
   { id: "notifications", label: "Notifications", run: (app) => app.setOverlay({ bell: true, palette: false }) },
@@ -117,9 +118,9 @@ export const ACTIONS: Action[] = [
   },
   { id: "filter", label: "Filter projects and sessions", keys: { k: "f", shift: true }, run: (app) => focusFilter(app) },
   { id: "clear_filter", label: "Clear filter", run: (app) => app.run({ type: "set_filter", text: "", running: false, waiting: false, pinned: false }) },
-  { id: "quick_running", label: "Filter: running", detail: (app) => onOff(!!app.store.sidebar.only_running), run: (app) => app.run({ type: "set_filter", running: !app.store.sidebar.only_running }) },
-  { id: "quick_waiting", label: "Filter: waiting for you", detail: (app) => onOff(!!app.store.sidebar.only_waiting), run: (app) => app.run({ type: "set_filter", waiting: !app.store.sidebar.only_waiting }) },
-  { id: "quick_pinned", label: "Filter: pinned", detail: (app) => onOff(!!app.store.sidebar.only_pinned), run: (app) => app.run({ type: "set_filter", pinned: !app.store.sidebar.only_pinned }) },
+  { id: "quick_running", label: "Filter: running", detail: (app) => onOff(ownFilter(app.store.web).running), run: (app) => app.run({ type: "set_filter", running: !ownFilter(app.store.web).running }) },
+  { id: "quick_waiting", label: "Filter: waiting for you", detail: (app) => onOff(ownFilter(app.store.web).waiting), run: (app) => app.run({ type: "set_filter", waiting: !ownFilter(app.store.web).waiting }) },
+  { id: "quick_pinned", label: "Filter: pinned", detail: (app) => onOff(ownFilter(app.store.web).pinned), run: (app) => app.run({ type: "set_filter", pinned: !ownFilter(app.store.web).pinned }) },
   { id: "show_hidden", label: "Show hidden projects and sessions", detail: (app) => onOff(!!app.store.sidebar.show_hidden), run: (app) => app.run({ type: "set_filter", show_hidden: !app.store.sidebar.show_hidden }) },
   { id: "sort_projects", label: "Sort projects (next order)", detail: (app) => app.store.sidebar.sort?.projects ?? "", run: (app) => nextSort(app, "projects") },
   { id: "sort_sessions", label: "Sort sessions (next order)", detail: (app) => app.store.sidebar.sort?.sessions ?? "", run: (app) => nextSort(app, "sessions") },

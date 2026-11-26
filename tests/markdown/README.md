@@ -12,6 +12,11 @@ Both files keep the spec's format: an example is the line
 ````````````````````````````````` example N Section`, the Markdown, a line with a single `.`,
 the HTML, and a closing line of 32 backticks; `→` stands for a tab.
 
+`corpus/` holds a few documents whose parse tree (the HTML, every block's source line and heading
+id, every link and image) is pinned in the `.golden` file next to each (`src/markdown_corpus_test.odin`;
+`DECKHAND_MD_GOLDEN=write` rewrites them, then read the diff). `corpus/safety.md` is also what the
+preview's safety test follows link by link (`src/markdown_view_test.odin`).
+
 Left out on purpose: CommonMark examples 606, 608, 611 and 612 (bare URLs and e-mail
 addresses that GFM's autolink extension links, which we follow), and the GFM spec's copies of
 the core examples (that file carries CommonMark 0.29, whose emphasis rules 0.31.2 changed).

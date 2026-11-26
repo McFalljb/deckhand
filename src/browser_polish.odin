@@ -840,8 +840,13 @@ browser_popup_refused :: proc(tab_id: u64, url: string) {
 
 @(private = "file")
 popup_report :: proc(tab_id: u64, p: ^Page_Extra) {
-	fmt.printfln("[browser] popup without a user gesture refused: %s (%d blocked)", p.popup_url, p.popups_blocked)
+	fmt.println(popup_report_line(p))
 	browser_report({tab_id = tab_id, what = {.Blocked}, blocked = p.popup_url})
+}
+
+// The log's line for a refused popup (temp-allocated).
+popup_report_line :: proc(p: ^Page_Extra) -> string {
+	return fmt.tprintf("[browser] popup without a user gesture refused: %s (%d blocked)", p.popup_url, p.popups_blocked)
 }
 
 download_find :: proc(id: u32) -> ^Page_Download {

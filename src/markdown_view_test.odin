@@ -91,6 +91,27 @@ markdown_links_by_caller :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.error, "no such file") // followed (not asked): b.md does not exist
 }
 
+// A web link with user:pass@ that another program asks to follow: the question (the bar's, the
+// event's and the log's summary, the snapshot's pending confirmation) shows the address
+// without them, and so the real host of https://good.example@evil.example.
+@(test)
+markdown_link_question_redacted :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, tab := md_setup(t, "a.md", "[a](https://user:pass@host.example/p?q=1) [b](https://good.example@evil.example/x)\n")
+	ctl := core.Caller{kind = .Control}
+	cmd := core.Markdown_Follow{tab_id = tab, url = "https://user:pass@host.example/p?q=1"}
+	r := core.run_command(cmd, ctl)
+	testing.expect_value(t, r.error, "needs_confirmation")
+	testing.expectf(t, strings.has_suffix(r.confirm_summary, ": open https://host.example/p?q=1?"), "%q", r.confirm_summary)
+	ev := core.event_json(core.Command_Event{caller = ctl, command = cmd, result = r})
+	testing.expectf(t, !strings.contains(ev, "user:pass"), "event holds user:pass: %s", ev)
+	snap := core.state_json()
+	testing.expectf(t, !strings.contains(snap, "user:pass"), "snapshot holds user:pass")
+	r = core.run_command(core.Markdown_Follow{tab_id = tab, url = "https://good.example@evil.example/x"}, ctl)
+	testing.expectf(t, strings.has_suffix(r.confirm_summary, ": open https://evil.example/x?"), "%q", r.confirm_summary)
+	testing.expect_value(t, len(opened), 0)
+}
+
 @(private = "file")
 md_tab_of :: proc(id: u64) -> core.Markdown_Tab {
 	_, tab, _ := core.find_tab(id)

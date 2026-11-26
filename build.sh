@@ -152,6 +152,14 @@ if [ ! -f build/ts.a ] || [ -n "$(find "$TS" -newer build/ts.a \( -name '*.c' -o
   ar rcs build/ts.a build/ts/*.o
 fi
 
+# md4c, the Markdown parser (vendor/md4c, src/markdown.odin): build/md4c.a, again only when its
+# vendored source changes
+if [ ! -f build/md4c.a ] || [ vendor/md4c/md4c.c -nt build/md4c.a ] || [ vendor/md4c/md4c.h -nt build/md4c.a ]; then
+  clang -c -O2 -Wall vendor/md4c/md4c.c -o build/md4c.o
+  rm -f build/md4c.a
+  ar rcs build/md4c.a build/md4c.o
+fi
+
 # stb_truetype (the text backend on other OSes; src/text_stb.odin), into build/
 if [ ! -f build/stb_truetype.a ]; then
   clang -c -O2 "$(odin root)/vendor/stb/src/stb_truetype.c" -o build/stb_truetype.o

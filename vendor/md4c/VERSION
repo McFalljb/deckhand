@@ -1,0 +1,8 @@
+md4c_tag=v0.6.0
+commit=7fc1815a5eeba2af7d6120a76202bf59f3b6e6e4
+tarball=https://github.com/mity/md4c/archive/7fc1815a5eeba2af7d6120a76202bf59f3b6e6e4.tar.gz
+tarball_sha256=924d9a5443b7fa44a341feb027ae7bfd5db7696278920b17474799dce06ed959
+files=src/md4c.c, src/md4c.h and LICENSE.md from the tarball, unchanged
+md4c.c_sha256=b9102e0ddfdfd494fdda903f79c554ffaab7e87b4eeb85b4c113057dee3e0728
+md4c.h_sha256=d0c14762f1eac3cd9d1c08c3a287b61d93ee2382e5a22ee48f5a6f3ad2c2349d
+licence=LICENSE.md (MIT)

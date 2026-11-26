@@ -199,7 +199,7 @@ cmd_write :: proc(b: ^strings.Builder, cmd: Command, mode: Cmd_Mode) {
 // One field as its tag says (command_codec.odin).
 @(private = "file")
 cmd_write_field :: proc(w: ^Jw, info: ^Cmd_Info, f: ^Cmd_Field, cmd: ^Command, mode: Cmd_Mode) {
-	if f.skip do return
+	if f.skip || (f.ui && mode != .Wire) do return // ui: only on the wire, whatever red= says
 	data := rawptr(uintptr(cmd) + f.offset)
 	t: Cmd_Transform
 	if mode != .Wire || !f.full {
@@ -430,7 +430,7 @@ write_command_hook :: proc(w: ^Jw, cmd: Command, mode: Cmd_Mode) -> bool {
 			kv_bool(w, "can_back", c.can_back)
 			kv_bool(w, "can_forward", c.can_forward)
 		}
-		if .Blocked in c.what do kv_str(w, "blocked_popup", c.blocked)
+		if .Blocked in c.what do kv_str(w, "blocked_popup", mode == .Red ? browser_url_redacted(c.blocked) : c.blocked)
 	case Restore_Session:
 		kv_u64(w, "project_id", c.project_id)
 		kv_str(w, "pi_session_id", c.pi_session_id)
@@ -444,7 +444,7 @@ write_command_hook :: proc(w: ^Jw, cmd: Command, mode: Cmd_Mode) -> bool {
 			o := obj_begin(w.b)
 			kv_str(&o, "kind", TAB_KIND_NAMES[t.kind])
 			kv_str(&o, "title", t.title)
-			kv_str(&o, "cwd", t.cwd)
+			kv_str(&o, "cwd", mode == .Red && t.kind == .Browser ? browser_url_redacted(t.cwd) : t.cwd) // a browser tab's: its URL
 			if t.active do kv_bool(&o, "active", true)
 			if len(c.layout.nodes) > 0 {
 				if pn, ok := t.pane.?; ok { // its saved pane (left out: not known)
@@ -483,6 +483,24 @@ write_command_hook :: proc(w: ^Jw, cmd: Command, mode: Cmd_Mode) -> bool {
 	return true
 }
 
+// get_state's pending_confirmations: each one's question, who asked, its class and its command
+// (redacted: no token).
+write_pending_confirmations :: proc(b: ^strings.Builder, list: []Pending_Confirmation) {
+	strings.write_byte(b, '[')
+	for p, i in list {
+		if i > 0 do strings.write_byte(b, ',')
+		o := obj_begin(b)
+		kv_str(&o, "summary", p.summary)
+		kv_str(&o, "caller", caller_kind_name(p.caller.kind))
+		kv_str(&o, "class", CLASS_NAMES[p.class])
+		kv_u64(&o, "id", p.id)
+		key(&o, "command")
+		write_command(b, p.command, redact = true)
+		obj_end(&o)
+	}
+	strings.write_byte(b, ']')
+}
+
 // ---- results and events ----
 
 write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {
@@ -497,6 +515,7 @@ write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {
 		if !redact && r.confirm_token != "" do kv_str(&c, "token", r.confirm_token)
 		kv_str(&c, "summary", r.confirm_summary)
 		kv_str(&c, "by", r.confirm_by_user ? "user" : "caller")
+		if r.confirm_id != 0 do kv_u64(&c, "id", r.confirm_id)
 		obj_end(&c)
 	}
 	if r.data != "" {
@@ -531,6 +550,7 @@ event_json :: proc(ev: Event, full := false) -> string {
 		kv_bool(&w, "changed", e.changed)
 		key(&w, "command")
 		write_command(&b, e.command, redact = true)
+		if e.confirmation != 0 do kv_u64(&w, "confirmation", e.confirmation) // the user's confirmed run of that pending confirmation
 		key(&w, "result")
 		write_result(&b, e.result, redact = true)
 	case Finished_Event:
@@ -853,7 +873,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_bool(&to, "loading", bt.loading)
 				kv_bool(&to, "can_back", bt.can_back)
 				kv_bool(&to, "can_forward", bt.can_forward)
-				if bt.blocked_popup != "" do kv_str(&to, "blocked_popup", bt.blocked_popup)
+				if bt.blocked_popup != "" do kv_str(&to, "blocked_popup", browser_url_public(bt.blocked_popup)) // State keeps it as asked (Browser_Popup opens it)
 				// its page: open | waiting (no slot free) | unloaded (opens when shown) | closed (see the tab)
 				if page := window_browser_page(t.id); page != "" do kv_str(&to, "page", page)
 			}
@@ -1051,18 +1071,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		obj_end(&f)
 	}
 	key(&w, "pending_confirmations")
-	strings.write_byte(b, '[')
-	for p, i in s.pending_confirmations {
-		if i > 0 do strings.write_byte(b, ',')
-		o := obj_begin(b)
-		kv_str(&o, "summary", p.summary)
-		kv_str(&o, "caller", caller_kind_name(p.caller.kind))
-		kv_str(&o, "class", CLASS_NAMES[p.class])
-		key(&o, "command")
-		write_command(b, p.command, redact = true)
-		obj_end(&o)
-	}
-	strings.write_byte(b, ']')
+	write_pending_confirmations(b, s.pending_confirmations[:])
 	// the close prompt (comments.odin): a tab, or a session (tab_id 0), closed with comments not sent
 	if s.comments_ask != {} {
 		key(&w, "comments_ask")

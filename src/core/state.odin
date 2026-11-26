@@ -261,6 +261,7 @@ Pending_Confirmation :: struct {
 	command: Command,
 	class:   Command_Class,
 	caller:  Caller,
+	id:      u64, // stable, unlike its redacted command: needs_confirmation's id, get_state's, the confirmed run's event's "confirmation"
 }
 
 // Destructive commands, grouped so confirmation policies are per class.

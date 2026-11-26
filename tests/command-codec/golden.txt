@@ -2165,7 +2165,7 @@ Set_Machines_Reachable.zero	p.wire	=dump
 Set_Machines_Reachable.zero	ui.wire	=p.wire
 Set_Machines_Reachable.zero	clone	same
 Set_Machines_Reachable.a	log	{"type":"set_machines_reachable","on":true,"confirm":"s205 \"q\\\" \n\t ✓"}
-Set_Machines_Reachable.a	red	=log
+Set_Machines_Reachable.a	red	{"type":"set_machines_reachable","on":true,"confirm":"<redacted>"}
 Set_Machines_Reachable.a	wire	=log
 Set_Machines_Reachable.a	var	{"set_machines_reachable":{"on":true,"confirm":"s205 \"q\\\" \n\t ✓"}}
 Set_Machines_Reachable.a	dump	Set_Machines_Reachable{on=true, confirm="s205 \"q\\\" \n\t ✓"}
@@ -2173,7 +2173,7 @@ Set_Machines_Reachable.a	p.wire	=dump
 Set_Machines_Reachable.a	ui.wire	=p.wire
 Set_Machines_Reachable.a	clone	same
 Set_Machines_Reachable.b	log	{"type":"set_machines_reachable","on":false,"confirm":"shell sh205: run it"}
-Set_Machines_Reachable.b	red	=log
+Set_Machines_Reachable.b	red	{"type":"set_machines_reachable","on":false,"confirm":"<redacted>"}
 Set_Machines_Reachable.b	wire	=log
 Set_Machines_Reachable.b	var	{"set_machines_reachable":{"on":false,"confirm":"shell sh205: run it"}}
 Set_Machines_Reachable.b	dump	Set_Machines_Reachable{on=false, confirm="shell sh205: run it"}
@@ -2181,7 +2181,7 @@ Set_Machines_Reachable.b	p.wire	=dump
 Set_Machines_Reachable.b	ui.wire	=p.wire
 Set_Machines_Reachable.b	clone	same
 Set_Machines_Reachable.c	log	{"type":"set_machines_reachable","on":false,"confirm":"https://user:pass@host205.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret205#frag"}
-Set_Machines_Reachable.c	red	=log
+Set_Machines_Reachable.c	red	{"type":"set_machines_reachable","on":false,"confirm":"<redacted>"}
 Set_Machines_Reachable.c	wire	=log
 Set_Machines_Reachable.c	var	{"set_machines_reachable":{"on":false,"confirm":"https://user:pass@host205.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret205#frag"}}
 Set_Machines_Reachable.c	dump	Set_Machines_Reachable{on=false, confirm="https://user:pass@host205.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret205#frag"}
@@ -2549,7 +2549,7 @@ Machine_Remove.zero	p.wire	=dump
 Machine_Remove.zero	ui.wire	=p.wire
 Machine_Remove.zero	clone	same
 Machine_Remove.a	log	{"type":"machine_remove","no":41,"confirm":"s241 \"q\\\" \n\t ✓"}
-Machine_Remove.a	red	=log
+Machine_Remove.a	red	{"type":"machine_remove","no":41,"confirm":"<redacted>"}
 Machine_Remove.a	wire	=log
 Machine_Remove.a	var	{"machine_remove":{"no":41,"confirm":"s241 \"q\\\" \n\t ✓"}}
 Machine_Remove.a	dump	Machine_Remove{no=41, confirm="s241 \"q\\\" \n\t ✓"}
@@ -2557,7 +2557,7 @@ Machine_Remove.a	p.wire	=dump
 Machine_Remove.a	ui.wire	=p.wire
 Machine_Remove.a	clone	same
 Machine_Remove.b	log	{"type":"machine_remove","no":5000000240,"confirm":"https://user:pw@host241.example/p?q=1#f"}
-Machine_Remove.b	red	=log
+Machine_Remove.b	red	{"type":"machine_remove","no":5000000240,"confirm":"<redacted>"}
 Machine_Remove.b	wire	=log
 Machine_Remove.b	var	{"machine_remove":{"no":5000000240,"confirm":"https://user:pw@host241.example/p?q=1#f"}}
 Machine_Remove.b	dump	Machine_Remove{no=5000000240, confirm="https://user:pw@host241.example/p?q=1#f"}
@@ -2565,7 +2565,7 @@ Machine_Remove.b	p.wire	=dump
 Machine_Remove.b	ui.wire	=p.wire
 Machine_Remove.b	clone	same
 Machine_Remove.c	log	{"type":"machine_remove","no":5000000240,"confirm":"https://user:pass@host241.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret241#frag"}
-Machine_Remove.c	red	=log
+Machine_Remove.c	red	{"type":"machine_remove","no":5000000240,"confirm":"<redacted>"}
 Machine_Remove.c	wire	=log
 Machine_Remove.c	var	{"machine_remove":{"no":5000000240,"confirm":"https://user:pass@host241.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret241#frag"}}
 Machine_Remove.c	dump	Machine_Remove{no=5000000240, confirm="https://user:pass@host241.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret241#frag"}
@@ -6677,7 +6677,7 @@ Markdown_Follow.zero	p.wire	=dump
 Markdown_Follow.zero	ui.wire	=p.wire
 Markdown_Follow.zero	clone	same
 Markdown_Follow.a	log	{"type":"markdown_link","tab_id":28,"url":"s628 \"q\\\" \n\t ✓","confirm":"s629 \"q\\\" \n\t ✓"}
-Markdown_Follow.a	red	=log
+Markdown_Follow.a	red	{"type":"markdown_link","tab_id":28,"url":"s628 \"q\\\" \n\t ✓","confirm":"<redacted>"}
 Markdown_Follow.a	wire	=log
 Markdown_Follow.a	var	{"markdown_follow":{"tab_id":28,"url":"s628 \"q\\\" \n\t ✓","confirm":"s629 \"q\\\" \n\t ✓"}}
 Markdown_Follow.a	dump	Markdown_Follow{tab_id=28, url="s628 \"q\\\" \n\t ✓", confirm="s629 \"q\\\" \n\t ✓"}
@@ -6685,7 +6685,7 @@ Markdown_Follow.a	p.wire	=dump
 Markdown_Follow.a	ui.wire	=p.wire
 Markdown_Follow.a	clone	same
 Markdown_Follow.b	log	{"type":"markdown_link","tab_id":5000000627,"url":"timer wk628: wait","confirm":"user:pw@bare629.example/x"}
-Markdown_Follow.b	red	=log
+Markdown_Follow.b	red	{"type":"markdown_link","tab_id":5000000627,"url":"timer wk628: wait","confirm":"<redacted>"}
 Markdown_Follow.b	wire	=log
 Markdown_Follow.b	var	{"markdown_follow":{"tab_id":5000000627,"url":"timer wk628: wait","confirm":"user:pw@bare629.example/x"}}
 Markdown_Follow.b	dump	Markdown_Follow{tab_id=5000000627, url="timer wk628: wait", confirm="user:pw@bare629.example/x"}
@@ -6693,7 +6693,7 @@ Markdown_Follow.b	p.wire	=dump
 Markdown_Follow.b	ui.wire	=p.wire
 Markdown_Follow.b	clone	same
 Markdown_Follow.c	log	{"type":"markdown_link","tab_id":5000000627,"url":"https://user:pass@host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag","confirm":"https://user:pass@host629.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret629#frag"}
-Markdown_Follow.c	red	=log
+Markdown_Follow.c	red	{"type":"markdown_link","tab_id":5000000627,"url":"https://host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag","confirm":"<redacted>"}
 Markdown_Follow.c	wire	=log
 Markdown_Follow.c	var	{"markdown_follow":{"tab_id":5000000627,"url":"https://user:pass@host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag","confirm":"https://user:pass@host629.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret629#frag"}}
 Markdown_Follow.c	dump	Markdown_Follow{tab_id=5000000627, url="https://user:pass@host628.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret628#frag", confirm="https://user:pass@host629.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret629#frag"}
@@ -7669,7 +7669,7 @@ Browser_Update.b	p.wire	err unknown command browser_update
 Browser_Update.b	ui.wire	=p.wire
 Browser_Update.b	clone	same
 Browser_Update.c	log	{"type":"browser_update","tab_id":5000000717,"title":"https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag","blocked_popup":"https://user:pass@host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}
-Browser_Update.c	red	=log
+Browser_Update.c	red	{"type":"browser_update","tab_id":5000000717,"title":"https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag","blocked_popup":"https://host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}
 Browser_Update.c	wire	=log
 Browser_Update.c	var	{"browser_update":{"tab_id":5000000717,"what":["title","blocked"],"url":"https://user:pass@host719.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret719#frag","title":"https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag","loading":false,"can_back":false,"can_forward":false,"blocked":"https://user:pass@host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}}
 Browser_Update.c	dump	Browser_Update{tab_id=5000000717, what=bits(10), url="https://user:pass@host719.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret719#frag", title="https://user:pass@host720.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret720#frag", loading=false, can_back=false, can_forward=false, blocked="https://user:pass@host724.example.com/a/long/path/past/every/cut/limit/of/the/log/and/more/still?token=secret724#frag"}

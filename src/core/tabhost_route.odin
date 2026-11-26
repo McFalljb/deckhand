@@ -482,6 +482,7 @@ tab_host_result_read :: proc(obj: json.Object, text: string) -> (r: Result, err:
 		r.confirm_token = string(nc["token"].(json.String) or_else "")
 		r.confirm_summary = string(nc["summary"].(json.String) or_else "")
 		r.confirm_by_user = string(nc["by"].(json.String) or_else "") == "user"
+		if id, iok := nc["id"].(json.Integer); iok && id > 0 do r.confirm_id = u64(id)
 	}
 	if _, has := ro["data"]; has {
 		// the data as the window wrote it (raw JSON), not re-marshalled
@@ -1258,7 +1259,9 @@ markdown_follow_act :: proc(c: Markdown_Follow, sid: u64, caller: Caller, reques
 		}
 		changed := false
 		if (caller.kind != .UI && caller.kind != .Internal) || c.confirm != "" {
-			what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", one_line(url[len("mailto:"):], context.temp_allocator)) : one_line(url, context.temp_allocator))
+			// the address without user:pass@ (the question goes to events and the log), and so the
+			// host it really goes to (https://good.example@evil.example)
+			what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", one_line(url[len("mailto:"):], context.temp_allocator)) : one_line(browser_url_public(url), context.temp_allocator))
 			gr, go_on, ch := confirm_gate(Markdown_Follow{tab_id = c.tab_id, url = url}, .Open_Link, caller, c.confirm, what)
 			if !go_on do return gr, ch
 			changed = ch

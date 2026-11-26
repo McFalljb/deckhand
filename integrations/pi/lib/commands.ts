@@ -93,15 +93,23 @@ export function sameCommand(theirs: unknown, ours: Record<string, unknown>): boo
 }
 
 /**
- * The command Deckhand parked for our confirmation (its canonical fields), from the snapshot: the
- * control caller's pending entry whose fields all equal ours (fields the model added are ignored).
+ * The command Deckhand parked for our confirmation, from the snapshot: the control caller's pending
+ * entry with the confirmation's `id` (needs_confirmation's). The snapshot's command is redacted (an
+ * address without user:pass@, a query's values…), so only a Deckhand without ids is matched by
+ * fields: the entry whose fields all equal ours (fields the model added are ignored).
  */
-export function parkedFor(state: any, ours: Record<string, unknown>): Record<string, unknown> | undefined {
+export function parkedFor(state: any, ours: Record<string, unknown>, id?: number): Record<string, unknown> | undefined {
 	const list = Array.isArray(state?.pending_confirmations) ? state.pending_confirmations : [];
+	if (typeof id === "number") return list.find((c: any) => c?.caller === "control" && c.command && c.id === id)?.command;
 	return list.find((c: any) => c?.caller === "control" && c.command && sameCommand(ours, c.command))?.command;
 }
 
-/** Whether a `command` event is the user's confirmed run of the parked command (not another try that needs confirmation). */
-export function confirmedBy(ev: any, parked: Record<string, unknown>): boolean {
-	return ev?.caller === "ui" && sameCommand(ev.command, parked) && ev.result?.error !== "needs_confirmation";
+/**
+ * Whether a `command` event is the user's confirmed run of the parked command (not another try that
+ * needs confirmation): by the event's `confirmation` (the id), else (a Deckhand without ids) by fields.
+ */
+export function confirmedBy(ev: any, parked: Record<string, unknown>, id?: number): boolean {
+	if (ev?.caller !== "ui" || ev.result?.error === "needs_confirmation") return false;
+	if (typeof id === "number") return ev.confirmation === id;
+	return sameCommand(ev.command, parked);
 }

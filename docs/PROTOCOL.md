@@ -666,8 +666,8 @@ tab and go to **that session's** pi, whichever session is on screen.
 {"ok": true, "created_id": 5}
 {"ok": false, "error": "no such tab"}
 {"ok": true, "pending": true}
-{"ok": false, "error": "needs_confirmation", "needs_confirmation": {"summary": "Close \"shell 1\"? Its process is still running.", "by": "user"}}
-{"ok": false, "error": "needs_confirmation", "needs_confirmation": {"token": "…", "summary": "…", "by": "caller"}}
+{"ok": false, "error": "needs_confirmation", "needs_confirmation": {"summary": "Close \"shell 1\"? Its process is still running.", "by": "user", "id": 31}}
+{"ok": false, "error": "needs_confirmation", "needs_confirmation": {"token": "…", "summary": "…", "by": "caller", "id": 32}}
 {"ok": true, "data": { …state… }}
 {"ok": false, "error": "no window: …", "data": {"code": "no_window"}}
 ```
@@ -709,7 +709,7 @@ The user (`ui`) always confirms in the UI; `internal` (Deckhand itself) is never
 Flow:
 
 1. Sent without `confirm`, a command that needs confirmation does nothing; Deckhand parks it in
-   `state.pending_confirmations` (summary, command, class, caller). The summary says who asks
+   `state.pending_confirmations` (summary, command, class, caller, id). The summary says who asks
    when it is not the user (`Home asks: …`, `A script asks: …`, `pi in <project> asks: …`) and
    what, with the project and session title (`close "shell 1" in app · Fix the build? …`).
    Asking again for the same target returns the same entry (and token); a caller other than the
@@ -726,7 +726,12 @@ Flow:
    the user just clicked (a double-click never confirms the next one).
 
 A caller that got `by: "user"` learns the outcome from the `command` event of the user's confirmed
-resend (caller `ui`) or from `get_state`.
+resend (caller `ui`) or from `get_state`. Each pending confirmation has an `id` (a number, never
+reused; not the token): in the `needs_confirmation` reply, in its `pending_confirmations` entry, and
+as `"confirmation": <id>` in the `command` event of the run that used it. Match on that id: the
+snapshot's and the event's command are redacted (§6: an address without `user:pass@`, …), so they
+need not equal the command the caller sent. (Added after v1's first release; a Deckhand without it
+has no `id`, and only then do the command's fields identify it.)
 
 **Modes are user-only.** `set_confirm_policy` and `set_close_confirm` are accepted only from the
 user (`ui`, and Deckhand itself); every other caller gets `not allowed for this caller`, so an agent
@@ -796,7 +801,7 @@ is an ordinary shell.
  "focus": {"kind": "terminal", "tab_id": 2},
  "layout": {"left_width": 300, "right_width": 320, "left_open": true, "right_open": true, "drawer_width": 420, "drawer_pinned": false, "panels": [], "collapsed": ["shells"], "left_tab": "sessions"},
  "files": {"filter": "", "expanded": [{"root": "/w/app", "dirs": ["src", "src/ui"]}]},
- "pending_confirmations": [{"summary": "…", "caller": "script", "class": "app_quit", "command": {"type": "quit"}}],
+ "pending_confirmations": [{"summary": "…", "caller": "script", "class": "app_quit", "id": 31, "command": {"type": "quit"}}],
  "settings": {"confirm": {"script": {"tab_close": "ask", "session_restart": "ask", "settings_write": "ask", "app_quit": "ask", "delete": "ask", "fs_write": "ask", "open_link": "ask"},
                           "control": {…}, "panel": {…}},
               "confirm_close": {"pi": "auto", "shell": "auto"},
@@ -1055,7 +1060,8 @@ A `panel` caller's subscription is always limited to its own session. Events:
   `status`: `ok`, `needs_you`, `failed`, `over_limit`, `timeout`, `looping`, `stalled`,
   `folder_missing`. Text fields are redacted.
 - One `command` event per command run (queries `get_state` and `list_commands` excepted), failures included; `changed` says
-  whether `version` moved. Clients re-query `get_state` when they need more than the event.
+  whether `version` moved. `confirmation`: the id of the pending confirmation the run used (the
+  user's confirmed resend; absent otherwise). Clients re-query `get_state` when they need more than the event.
 - `finished` closes a `pending` result; `request_id` is Deckhand's id for that request (the reply's
   `request_id` field, phase 1).
 - **Cancel.** `{"id", "v", "type": "cancel", "request_id": N}` ends one of this connection's own
@@ -1703,8 +1709,12 @@ has no cookie, so it can only guess codes while one is open (5 tries).
   (`comment_add`, `comment_edit`), `claude_prompt` text, `claude.turn` titles, `new_claude_tab`
   flags (only their count), `claude.todos`/`claude.task`/`claude.subagent` text (only counts,
   events and ids),
-  confirmation tokens, connection tokens.
-- Snapshots never contain confirmation tokens. Paths, project names and session titles are not
+  confirmation tokens, connection tokens, or the `user:pass@` of an address (a browser tab's, a
+  refused popup's, a Markdown link's also in its confirmation question, a restored browser tab's;
+  the query stays, as in State), or whom a `mailto:` link of a command mails
+  (`mailto:<redacted>@example.com`). A `markdown_link` confirmation question names the mail
+  address on purpose: the user confirms whom it mails.
+- Snapshots never contain confirmation tokens, nor a refused popup's `user:pass@`. Paths, project names and session titles are not
   redacted (the log lives in the user's own data dir, mode `0600`).
 - Panels and `pi.prompt` text are not logged in full: events and the log carry a `panel.set`'s
   panel id and title, and `"rows": "<redacted N rows>"`. Snapshots (`get_state`) carry the rows.

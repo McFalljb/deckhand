@@ -731,6 +731,7 @@ window_msg_parse :: proc(text: string) -> (m: Window_Msg, err: string) {
 			m.result.confirm_token = string(nc["token"].(json.String) or_else "")
 			m.result.confirm_summary = string(nc["summary"].(json.String) or_else "")
 			m.result.confirm_by_user = string(nc["by"].(json.String) or_else "") == "user"
+			if id, iok := nc["id"].(json.Integer); iok && id > 0 do m.result.confirm_id = u64(id)
 		}
 		if _, has := ro["data"]; has {
 			// the data as the core wrote it (raw JSON), not re-marshalled

@@ -49,9 +49,11 @@ package core
 //   cut:N      the string's first N bytes (whole UTF-8 characters)
 //   f3         a number with 3 decimals
 //
-// A tag the codec does not know, a codec on a field it does not fit, ui with log=, or a pointer
-// without borrow: a test build lists them (command_codec_tags fails), any other build panics at
-// startup. A field that holds a string with no say over its log (log=, red=, -, codec=, ui), or
+// A tag the codec does not know, a codec on a field it does not fit, a transform on a field of a
+// type it cannot read (url on a number), ui or - with log= or red=, or a pointer without borrow: a
+// test build lists them (command_codec_tags fails; the field is left out), any other build panics
+// at startup. A field that holds a string with no say over its log (log=, red=, -, ui, or a
+// codec= whose CMD_CODECS row redacts), or
 // a parsed field with no say over its parse (noparse, -, ui), must be in tests/command-codec/'s
 // lists (command_codec_test.odin): a new one is a decision, not a default.
 //
@@ -150,10 +152,11 @@ Cmd_Field :: struct {
 // The codecs a `codec=` tag may name: whether json_write.odin's cmd_write_codec and
 // json_read.odin's cmd_read_codec have a case for it (else that side is the generic one), the
 // field's type (nil: an enum with names=), and the sibling fields it reads or sets ("has_*": has_
-// and the field's name).
+// and the field's name). Only a codec that redacts spares its field the logged-as-is list.
 Cmd_Codec :: struct {
 	name:        string,
 	write, read: bool,
+	redacts:     bool, // the redacted log never holds the field's text as it is (a count, a bool)
 	type:        typeid,
 	siblings:    []Cmd_Sibling,
 }
@@ -165,7 +168,7 @@ Cmd_Sibling :: struct {
 
 CMD_CODECS := [?]Cmd_Codec {
 	{name = "act_target", write = true, read = true, type = Act_Target},
-	{name = "app_argv", write = true, type = []string, siblings = {{"command", string}}},
+	{name = "app_argv", write = true, redacts = true, type = []string, siblings = {{"command", string}}},
 	{name = "bell_macos", write = true, read = true, type = [Bell_Group]Maybe(Os_When)},
 	{name = "bell_sound", write = true, read = true, type = [Bell_Group]Maybe(Bell_Sound)},
 	{name = "bg_crons", read = true, type = []Claude_Cron_In},
@@ -175,7 +178,7 @@ CMD_CODECS := [?]Cmd_Codec {
 	{name = "enum_of", read = true},
 	{name = "exit", write = true, type = Exit_Info},
 	{name = "exit_code", write = true, type = int, siblings = {{"status", App_Status}}},
-	{name = "files", write = true, type = []string, siblings = {{"more", int}}},
+	{name = "files", write = true, redacts = true, type = []string, siblings = {{"more", int}}},
 	{name = "harness_ct", write = true, read = true, type = Harness},
 	{name = "harness_key", read = true, type = Harness},
 	{name = "has", write = true, read = true, type = string, siblings = {{"has_*", bool}}},
@@ -184,10 +187,10 @@ CMD_CODECS := [?]Cmd_Codec {
 	{name = "job_finished", write = true, type = Job_Finished},
 	{name = "model_word", read = true, type = string},
 	{name = "mods", write = true, read = true, type = int},
-	{name = "ok_if_empty", write = true, type = string},
+	{name = "ok_if_empty", write = true, redacts = true, type = string},
 	{name = "pane_dir", read = true, type = Pane_Dir},
 	{name = "prog_summary", write = true, type = Prog_Summary},
-	{name = "raw", write = true, read = true, type = string},
+	{name = "raw", write = true, read = true, redacts = true, type = string},
 	{name = "raw_list", write = true, read = true, type = []string},
 	{name = "rect", write = true, read = true, type = App_Rect, siblings = {{"has_rect", bool}}},
 	{name = "rows", write = true, read = true, type = []Panel_Row},
@@ -280,7 +283,8 @@ cmd_field :: proc(type_name: string, name: string, tag: string, offset: uintptr,
 	}
 	v, _ := reflect.struct_tag_lookup(reflect.Struct_Tag(tag), "cmd")
 	f.tag = string(v)
-	has_log := false
+	has_log, has_red := false, false
+	log_opt, red_opt: string
 	for opt in strings.split(v, ",", context.temp_allocator) {
 		k, _, arg := strings.partition(opt, "=")
 		switch k {
@@ -305,8 +309,8 @@ cmd_field :: proc(type_name: string, name: string, tag: string, offset: uintptr,
 				bad(type_name, name, opt)
 				t = {tx = .Drop} // fail closed: left out
 			}
-			if k == "log" do f.log, has_log = t, true
-			else do f.red = t
+			if k == "log" do f.log, has_log, log_opt = t, true, opt
+			else do f.red, has_red, red_opt = t, true, opt
 		case "def":
 			x, ok := strconv.parse_f64(arg)
 			if !ok do bad(type_name, name, opt)
@@ -323,9 +327,47 @@ cmd_field :: proc(type_name: string, name: string, tag: string, offset: uintptr,
 		case:           bad(type_name, name, opt)
 		}
 	}
+	// a ui or `-` field is never in the log: a log= or red= on one is a mistake, left out
 	if f.ui && has_log do bad(type_name, name, "ui with log= (ui fields are never in the log)")
+	if f.ui && has_red do bad(type_name, name, "ui with red= (ui fields are never in the log)")
+	if f.skip && has_log do bad(type_name, name, "- with log= (- fields are never written)")
+	if f.skip && has_red do bad(type_name, name, "- with red= (- fields are never written)")
+	if (f.ui || f.skip) && has_red do f.red = {tx = .Drop}
+	if f.skip && has_log do f.log = {tx = .Drop}
+	// a transform reads the field as its type (a Maybe's value): one that cannot is left out
+	if want := cmd_transform_wants(f.log.tx, ti); want != "" {
+		bad(type_name, name, strings.concatenate({log_opt, " wants ", want}))
+		f.log = {tx = .Drop}
+	}
+	if want := cmd_transform_wants(f.red.tx, ti); want != "" {
+		bad(type_name, name, strings.concatenate({red_opt, " wants ", want}))
+		f.red = {tx = .Drop}
+	}
 	if f.borrow == false && cmd_has_pointer(ti, nil) do bad(type_name, name, "holds a pointer: command_clone would share it (borrow, if that is meant)")
 	return f
+}
+
+// What a transform reads the field as ("" = the field's type fits): json_write.odin's
+// cmd_write_field takes a string as a string, a list as a list, f3 as an f32. A Maybe is its value.
+@(private = "file")
+cmd_transform_wants :: proc(tx: Cmd_Tx, ti: ^runtime.Type_Info) -> string {
+	bt := runtime.type_info_base(ti)
+	if u, is := bt.variant.(runtime.Type_Info_Union); is && len(u.variants) == 1 && !u.no_nil do bt = runtime.type_info_base(u.variants[0])
+	is_string := false
+	if s, is := bt.variant.(runtime.Type_Info_String); is do is_string = !s.is_cstring
+	is_list := false
+	#partial switch _ in bt.variant {
+	case runtime.Type_Info_Slice, runtime.Type_Info_Dynamic_Array: is_list = true
+	}
+	switch tx {
+	case .None, .Drop:
+	case .Bytes, .Token, .Url, .Path, .Cut: if !is_string do return "a string"
+	case .Len:      if !is_string && !is_list do return "a string or a list"
+	case .Items:    if !is_list do return "a list"
+	case .Blockers: if bt.id != typeid_of([]string) do return "a []string"
+	case .F3:       if bt.id != typeid_of(f32) do return "an f32"
+	}
+	return ""
 }
 
 // Whether a value of type ti holds a pointer (wire_clone copies a pointer, not what it points to).

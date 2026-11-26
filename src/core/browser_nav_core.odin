@@ -33,11 +33,12 @@ Browser_Field :: enum {
 Browser_Update :: struct {
 	tab_id:      u64,
 	what:        bit_set[Browser_Field],
-	url, title:  string,
+	url:         string `cmd:"red=url"`, // (write_command_hook carries out its tags)
+	title:       string, // as State's tab title: not redacted (PROTOCOL.md §6)
 	loading:     bool,
 	can_back:    bool,
 	can_forward: bool,
-	blocked:     string, // the refused popup's URL
+	blocked:     string `cmd:"red=url"`, // the refused popup's URL
 }
 
 // A page's popup (target=_blank, window.open, ⌘-click) with a user gesture, as the window reports

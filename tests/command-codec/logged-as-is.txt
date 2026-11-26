@@ -1,23 +1,31 @@
 # Command fields that hold a string and are logged as they are: their tag has none of log=, red=,
-# -, codec= or ui (command_codec_test.odin's command_codec_decisions). A field not listed here
-# fails that test until its tag says how it is logged, or it is added here on purpose.
+# - or ui, and no codec= that redacts (CMD_CODECS' redacts; command_codec_test.odin's
+# command_codec_decisions). A field not listed here fails that test until its tag says how it is
+# logged, or it is added here on purpose.
+# Browser_Update.title and Restore_Session.tabs' titles: as State's tab titles, not redacted
+# (PROTOCOL.md §6); Restore_Session.tabs' browser tabs' cwd (their URL) loses user:pass@
+# (json_write.odin's write_command_hook).
 Add_Claude_Account.dir
 Add_Claude_Account.label
 Add_Project.cwd
 App_Call.method
 App_Events.topic
 Bridge_Done.error
+Browser_Click.target
 Browser_Find.text
+Browser_Hover.target
+Browser_Page_Wait.value
 Browser_Page_Wait.what
 Browser_Press.keys
 Browser_Press.selector
 Browser_Read.mode
 Browser_Read.selector
+Browser_Scroll.target
+Browser_Select.label
 Browser_Select.selector
+Browser_Select.value
 Browser_Type.selector
-Browser_Update.blocked
 Browser_Update.title
-Browser_Update.url
 Browser_Upload.selector
 Changes_Discard.path
 Changes_Discard.status
@@ -49,6 +57,7 @@ Copy_Path.pi_session_id
 Core_Handover.to
 Create_Dir.path
 Create_File.path
+Delete_Path.path
 Delete_Path.paths
 File_List_Done.root
 File_Read.path
@@ -99,10 +108,7 @@ Machine_Add.name
 Machine_Add.target
 Machine_Add.via
 Machine_Open_Page.path
-Machine_Remove.confirm
 Machine_Rename.name
-Markdown_Follow.confirm
-Markdown_Follow.url
 Markdown_Open.anchor
 Markdown_Open.path
 Markdown_Scroll.anchor
@@ -115,6 +121,7 @@ New_Claude_Tab.account
 New_Claude_Tab.cwd
 New_Claude_Tab.resume
 New_Shell_Tab.cwd
+Notify_Post.job
 Open_File.path
 Open_Session_Cmd.pi_session_id
 Panel_Remove.panel
@@ -127,6 +134,10 @@ Pi_Rename.pi_session_id
 Pi_Session_Update.cwd
 Pi_Session_Update.pi_session_id
 Pi_Session_Update.session_file
+Pi_Status_Update.model
+Pi_Status_Update.provider
+Pi_Status_Update.thinking
+Program_Status.summary
 Reload_Watch.version
 Remove_Claude_Account.account
 Rename_Claude_Account.account
@@ -157,7 +168,6 @@ Set_Folder.path
 Set_Hidden.cwd
 Set_Hidden.pi_session_id
 Set_Home_Dir.path
-Set_Machines_Reachable.confirm
 Set_Panel.panel
 Set_Panel_Collapsed.panel
 Set_Pi_Extension.name

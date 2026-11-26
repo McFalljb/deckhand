@@ -59,6 +59,47 @@ Zz_Unknown :: struct {
 	text: string `cmd:"redact"`,
 }
 @(private = "file")
+Zz_Ui_Red :: struct {
+	text: string `cmd:"ui,red=cut:4"`,
+}
+@(private = "file")
+Zz_Skip_Red :: struct {
+	text: string `cmd:"-,red=bytes"`,
+}
+@(private = "file")
+Zz_Skip_Log :: struct {
+	text: string `cmd:"-,log=len"`,
+}
+@(private = "file")
+Zz_Url_On_Number :: struct {
+	n: u64 `cmd:"red=url"`,
+}
+@(private = "file")
+Zz_Cut_On_List :: struct {
+	list: []string `cmd:"log=cut:4"`,
+}
+@(private = "file")
+Zz_F3_On_String :: struct {
+	text: string `cmd:"log=f3"`,
+}
+@(private = "file")
+Zz_Blockers_On_String :: struct {
+	text: string `cmd:"red=blockers"`,
+}
+@(private = "file")
+Zz_Items_On_Int :: struct {
+	n: int `cmd:"red=items:rows"`,
+}
+@(private = "file")
+Zz_Fine_Transforms :: struct {
+	url:      Maybe(string) `cmd:"red=url"`,
+	text:     string `cmd:"red=cut:4"`,
+	list:     []string `cmd:"log=len,red=items:rows"`,
+	blockers: []string `cmd:"red=blockers"`,
+	ratio:    f32 `cmd:"log=f3"`,
+	n:        u64 `cmd:"log=-"`,
+}
+@(private = "file")
 Zz_Fine :: struct {
 	rect:     App_Rect `cmd:"codec=rect"`,
 	has_rect: bool `cmd:"-"`,
@@ -98,6 +139,21 @@ command_codec_refuses :: proc(t: ^testing.T) {
 	lg := check(t, Zz_Log_Typo, "log=byts")
 	testing.expect_value(t, lg.fields[0].log.tx, Cmd_Tx.Drop)
 	check(t, Zz_Fine, "")
+	// ui and - fields are never in the log: a red= or log= on one is a mistake, and is left out
+	ui := check(t, Zz_Ui_Red, "ui with red=")
+	testing.expect_value(t, ui.fields[0].red.tx, Cmd_Tx.Drop)
+	sk := check(t, Zz_Skip_Red, "- with red=")
+	testing.expect_value(t, sk.fields[0].red.tx, Cmd_Tx.Drop)
+	check(t, Zz_Skip_Log, "- with log=")
+	// a transform on a field of a type it cannot read: refused, and left out
+	nu := check(t, Zz_Url_On_Number, "red=url wants")
+	testing.expect_value(t, nu.fields[0].red.tx, Cmd_Tx.Drop)
+	cl := check(t, Zz_Cut_On_List, "log=cut:4 wants")
+	testing.expect_value(t, cl.fields[0].log.tx, Cmd_Tx.Drop)
+	check(t, Zz_F3_On_String, "log=f3 wants")
+	check(t, Zz_Blockers_On_String, "red=blockers wants")
+	check(t, Zz_Items_On_Int, "red=items:rows wants")
+	check(t, Zz_Fine_Transforms, "")
 	free_all(context.temp_allocator)
 }
 
@@ -152,8 +208,16 @@ cc_list_check :: proc(t: ^testing.T, file, about: string, got: []string) {
 	for w in want do testing.expectf(t, w in have, "tests/command-codec/%s lists %s, which no longer needs it", file, w)
 }
 
-// A field that holds a string and whose tag says nothing of the log (log=, red=, -, codec=,
-// ui), and a parsed field whose tag says nothing of its parse (noparse, -, ui), are listed:
+// Whether a field's codec= is one that redacts (a codec that writes the text as it is decides
+// nothing about the log).
+@(private = "file")
+cc_codec_redacts :: proc(f: ^Cmd_Field) -> bool {
+	for c in CMD_CODECS do if c.name == f.codec do return c.redacts
+	return false
+}
+
+// A field that holds a string and whose tag says nothing of the log (log=, red=, -, ui, or a
+// codec= that redacts), and a parsed field whose tag says nothing of its parse (noparse, -, ui), are listed:
 // a new one (a password, or a field the core sets) fails here until someone decides.
 @(test)
 command_codec_decisions :: proc(t: ^testing.T) {
@@ -163,7 +227,7 @@ command_codec_decisions :: proc(t: ^testing.T) {
 		type_name := info.ti.variant.(runtime.Type_Info_Named).name
 		for &f in info.fields {
 			seen := make(map[typeid]bool, context.temp_allocator)
-			if cc_holds_string(f.ti, &seen) && !cc_tag_has(&f, "log", "red", "-", "codec", "ui") do append(&logged, fmt.tprintf("%s.%s", type_name, f.name))
+			if cc_holds_string(f.ti, &seen) && !cc_tag_has(&f, "log", "red", "-", "ui") && !cc_codec_redacts(&f) do append(&logged, fmt.tprintf("%s.%s", type_name, f.name))
 			if info.parsed && !cc_tag_has(&f, "noparse", "-", "ui") do append(&parsed, fmt.tprintf("%s.%s", type_name, f.name))
 		}
 	}
@@ -255,4 +319,94 @@ command_codec_tags_matter :: proc(t: ^testing.T) {
 		free_all(context.temp_allocator)
 	}
 	testing.expect(t, checked > 50, "the tags were found")
+}
+
+// ---- what the redacted log never holds ----
+
+// Events and the command log (the redacted encoding) hold no user:pass@ of an address and no
+// confirmation token; a browser page's title and a path stay (PROTOCOL.md §6).
+@(test)
+command_redacted_leaks :: proc(t: ^testing.T) {
+	CRED :: "https://user:pass@host.example/p?q=1#f"
+	PUBLIC :: "https://host.example/p?q=1#f"
+	TOKEN :: "tok-5f0c2e9a"
+	red :: proc(cmd: Command) -> string {return command_json(cmd, redact = true)}
+	lacks :: proc(t: ^testing.T, js, what: string, loc := #caller_location) {
+		testing.expectf(t, !strings.contains(js, what), "%s holds %q", js, what, loc = loc)
+	}
+	holds :: proc(t: ^testing.T, js, what: string, loc := #caller_location) {
+		testing.expectf(t, strings.contains(js, what), "%s lacks %q", js, what, loc = loc)
+	}
+
+	js := red(Markdown_Follow{tab_id = 1, url = CRED, confirm = TOKEN})
+	lacks(t, js, "user:pass")
+	lacks(t, js, TOKEN)
+	holds(t, js, `"url":"` + PUBLIC + `"`)
+	holds(t, js, `"confirm":"<redacted>"`)
+	holds(t, command_json(Markdown_Follow{tab_id = 1, url = CRED, confirm = TOKEN}), TOKEN) // the unredacted log keeps it (a test's)
+
+	js = red(Browser_Update{tab_id = 1, what = {.Url, .Title, .Blocked}, url = CRED, title = "Inbox (3)", blocked = "user:pass@popup.example/x"})
+	lacks(t, js, "user:pass")
+	holds(t, js, `"blocked_popup":"popup.example/x"`)
+	holds(t, js, `"title":"Inbox (3)"`)
+
+	tabs := []Restore_Tab{{kind = .Browser, title = "Docs", cwd = CRED}, {kind = .Shell, title = "zsh", cwd = "/Users/u/p"}}
+	js = red(Restore_Session{project_id = 1, pi_session_id = "s", tabs = tabs})
+	lacks(t, js, "user:pass")
+	holds(t, js, `"cwd":"` + PUBLIC + `"`)
+	holds(t, js, `"cwd":"/Users/u/p"`)
+	holds(t, js, `"title":"Docs"`)
+
+	for cmd in ([]Command{Set_Machines_Reachable{on = true, confirm = TOKEN}, Machine_Remove{no = 1, confirm = TOKEN}}) {
+		js = red(cmd)
+		lacks(t, js, TOKEN)
+		holds(t, js, `"confirm":"<redacted>"`)
+	}
+	free_all(context.temp_allocator)
+}
+
+// A command field named confirm (a confirmation token) is a token in the redacted log, and one
+// named url (or Browser_Update's blocked popup's) loses its user:pass@: what the tag says (a
+// hooked command's hook carries it out, command_redacted_leaks).
+@(test)
+command_codec_secret_names :: proc(t: ^testing.T) {
+	for &info in command_infos {
+		for &f in info.fields {
+			if f.skip || f.ui do continue
+			r := f.red.tx != .None ? f.red.tx : f.log.tx
+			switch {
+			case f.name == "confirm":
+				testing.expectf(t, r == .Token || r == .Drop, "%s.confirm: in the redacted log as %v (red=token)", info.name, r)
+			case f.name == "url" || (info.id == Browser_Update && f.name == "blocked"):
+				testing.expectf(t, r == .Url || r == .Token || r == .Drop || r == .Bytes, "%s.%s: in the redacted log as %v (red=url)", info.name, f.name, r)
+			}
+		}
+	}
+}
+
+// A codec whose CMD_CODECS row says it redacts keeps its field's text out of the redacted log:
+// each such field set to a marker, in every sample.
+@(test)
+command_codec_redacting_codecs :: proc(t: ^testing.T) {
+	MARK :: "mark-7d1e"
+	checked := 0
+	for &info, i in command_infos {
+		for &f in info.fields {
+			if f.codec == "" || !cc_codec_redacts(&f) do continue
+			for seed in 0 ..= 3 {
+				cmd := cg_sample(i, seed)
+				data := rawptr(uintptr(&cmd) + f.offset)
+				switch f.ti.id {
+				case string:   (^string)(data)^ = MARK
+				case []string: (^[]string)(data)^ = []string{MARK, MARK}
+				case:          testing.expectf(t, false, "%s.%s: codec=%s on a %v (the test sets strings and lists of them)", info.name, f.name, f.codec, f.ti.id)
+				}
+				js := command_json(cmd, redact = true)
+				testing.expectf(t, !strings.contains(js, MARK), "%s.%s: codec=%s says it redacts, but %s", info.name, f.name, f.codec, js)
+				checked += 1
+			}
+		}
+		free_all(context.temp_allocator)
+	}
+	testing.expect(t, checked > 0, "the codecs that redact were found")
 }

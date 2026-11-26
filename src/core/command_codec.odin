@@ -154,6 +154,7 @@ Cmd_Field :: struct {
 Cmd_Codec :: struct {
 	name:        string,
 	write, read: bool,
+	redacts:     bool, // the redacted log never holds the field's text as it is (a count, a bool)
 	type:        typeid,
 	siblings:    []Cmd_Sibling,
 }

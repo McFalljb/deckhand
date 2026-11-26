@@ -9,15 +9,22 @@ import "core:testing"
 @(test)
 browser_url_redacted_shapes :: proc(t: ^testing.T) {
 	cases := [?][2]string {
-		{"https://user:pass@host.example/p?q=1#f", "https://host.example/p?q=1#f"},
+		{"https://user:pass@host.example/p?q=1#f", "https://host.example/p?q=<redacted>"},
 		{"user:pass@host.example/p", "host.example/p"},
 		// no scheme, an address with :// later in its query: still the user:pass@ before the host
-		{"user:pass@host.example/?next=https://x.example", "host.example/?next=https://x.example"},
-		{"user:pass@host.example?next=https://x.example", "host.example?next=https://x.example"},
-		{"https://host.example/?next=https://user:pw@x.example", "https://host.example/?next=https://user:pw@x.example"},
+		{"user:pass@host.example/?next=https://x.example", "host.example/?next=<redacted>"},
+		{"user:pass@host.example?next=https://x.example", "host.example?next=<redacted>"},
+		{"https://host.example/?next=https://user:pw@x.example", "https://host.example/?next=<redacted>"},
+		// a query's values (OAuth codes, access tokens, signatures, magic links) and the fragment
+		// (#access_token=…) are not kept; its keys are
+		{"https://app.example/cb?code=abc123&state=xyz", "https://app.example/cb?code=<redacted>&state=<redacted>"},
+		{"https://app.example/cb#access_token=abc&token_type=bearer", "https://app.example/cb"},
+		{"https://s3.example/o?X-Amz-Signature=f00&empty=&bare", "https://s3.example/o?X-Amz-Signature=<redacted>&empty=&<redacted>"},
+		{"https://host.example/?", "https://host.example/?"},
+		{"https://host.example/#", "https://host.example/"},
 		// a mail address keeps mailto: and its domain, not whom
 		{"mailto:alice@example.com", "mailto:<redacted>@example.com"},
-		{"MAILTO:alice@example.com?subject=hi", "MAILTO:<redacted>@example.com?subject=hi"},
+		{"MAILTO:alice@example.com?subject=hi", "MAILTO:<redacted>@example.com?subject=<redacted>"},
 		{"mailto:", "mailto:"},
 		// scheme-relative: as with a scheme
 		{"//user:pass@host.example/x", "//host.example/x"},

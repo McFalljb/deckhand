@@ -389,7 +389,7 @@ browser_credentials_not_in_events :: proc(t: ^testing.T) {
 	for c in cmds {
 		red := core.command_json(c, redact = true)
 		testing.expectf(t, !strings.contains(red, "hunter2") && !strings.contains(red, "alice"), "redacted: %s", red)
-		testing.expectf(t, strings.contains(red, "example.com/x?q=1"), "the address stays: %s", red)
+		testing.expectf(t, strings.contains(red, "example.com/x?q=<redacted>"), "the address stays, its query's values do not: %s", red)
 		line := core.event_json(core.Command_Event{caller = {kind = .UI}, command = c})
 		testing.expectf(t, !strings.contains(line, "hunter2"), "event: %s", line)
 		testing.expect(t, strings.contains(core.command_json(c), "hunter2"), "unredacted keeps it (the command itself)")

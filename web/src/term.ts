@@ -349,7 +349,16 @@ export function createTerm(opts: { light: boolean; fontSize: number }): TermView
     },
     allText(max) {
       const b = term.buffer.active;
-      return bufferText({ length: b.length, text: (y, trim) => b.getLine(y)?.translateToString(trim) ?? "", wrapped: (y) => !!b.getLine(y)?.isWrapped }, max);
+      return bufferText(
+        {
+          length: b.length,
+          text: (y, trim) => b.getLine(y)?.translateToString(trim) ?? "",
+          wrapped: (y) => !!b.getLine(y)?.isWrapped,
+          wideStart: (y) => b.getLine(y)?.getCell(0)?.getWidth() === 2,
+          lastEmpty: (y) => b.getLine(y)?.getCell(term.cols - 1)?.getChars() === "",
+        },
+        max,
+      );
     },
     paste(text) {
       // xterm wraps it in ESC[200~ … ESC[201~ when the program turned bracketed paste on

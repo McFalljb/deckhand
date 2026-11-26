@@ -28,6 +28,7 @@ the CEF distribution and are copied into the app bundle (see "In the app bundle"
 | [Odin](https://github.com/odin-lang/Odin) core and runtime libraries | the language's runtime, `core:` packages | linked in by the Odin compiler | zlib |
 | [stb_truetype, stb_image](https://github.com/nothings/stb) (via Odin's `vendor:stb`) | text on non-macOS backends; images | compiled from the Odin distribution by `build.sh` / linked from it | MIT OR Public Domain (Unlicense) |
 | [Zstandard (zstd)](https://github.com/facebook/zstd) 1.5.7, its decoder only | reading Codex's compressed conversation files (`src/core/codex_disk.odin`) | `vendor/zstd/zstddeclib.c`, zstd's single-file decoder generated unchanged by its `build/single_file_libs/create_single_file_decoder.sh` from the release tarball (version and sha256 in `vendor/zstd/VERSION`), compiled by `scripts/build-zstd.sh` into the core | BSD-3-Clause (zstd is BSD-3-Clause OR GPL-2.0; used under BSD-3-Clause) |
+| [md4c](https://github.com/mity/md4c) 0.6.0 | parsing Markdown for Markdown tabs (`src/markdown.odin`) | `vendor/md4c/md4c.c` and `md4c.h` from the release, unchanged (commit and sha256 in `vendor/md4c/VERSION`), compiled by `build.sh` into the app | MIT |
 | pi logo, Clawd (Claude Code's mascot) | which agent a session runs (rows, tabs, picker) | the marks' pixel grids and colours in `src/logos.odin`; reference copies and sources in `assets/harness/` (Clawd: from Claude Code 2.1.318's own terminal art) | pi: MIT (pi's licence); Clawd: © Anthropic, PBC, its marks under Anthropic's trademark guidelines, see `assets/harness/README.md` |
 | [Tomorrow theme](https://github.com/chriskempson/tomorrow-theme) colours | the `ghostty` look's light variant (`src/theme.odin`) | colour values only | MIT |
 | [xterm.js](https://github.com/xtermjs/xterm.js) (`@xterm/xterm` 6.0.0, `@xterm/addon-fit` 0.11.0) | the browser client's terminals (`web/`) | npm packages pinned in `web/package-lock.json`, bundled into `web/dist/app.js` by `web/build.mjs` and served by the core | MIT |
@@ -1914,6 +1915,14 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Other licenses
+
+See [./licenses](./licenses) for licenses of code being used in the repo:
+
+* [LICENSE_Bjoern_Hoehrmann](./licenses/LICENSE_Bjoern_Hoehrmann)
+* [LICENSE_unicode](./licenses/LICENSE_unicode)
+```
+
 ### xterm.js
 
 ```
@@ -2025,14 +2034,6 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-## Other licenses
-
-See [./licenses](./licenses) for licenses of code being used in the repo:
-
-* [LICENSE_Bjoern_Hoehrmann](./licenses/LICENSE_Bjoern_Hoehrmann)
-* [LICENSE_unicode](./licenses/LICENSE_unicode)
-```
-
 ### uucode: Bjoern Hoehrmann's UTF-8 decoder
 
 From uucode `licenses/LICENSE_Bjoern_Hoehrmann`.
@@ -2123,6 +2124,34 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+```
+
+### md4c
+
+From `vendor/md4c/LICENSE.md`.
+
+```text
+# The MIT License (MIT)
+
+Copyright © 2016-2026 Martin Mitáš
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the “Software”),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
 ```
 
 ### Odin

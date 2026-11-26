@@ -208,7 +208,7 @@ export function Peek() {
 
   if (gone) return null;
   const t = found!.tab;
-  const v = tabView(t);
+  const v = tabView(app.store, t);
   const open = () => {
     close();
     focusSession(app, p.session, p.tab);

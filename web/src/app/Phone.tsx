@@ -177,7 +177,7 @@ function PhoneTerminal(props: { tab: Tab; term: { current: TermHandle | null }; 
   const modsRef = useRef(mods);
   modsRef.current = mods;
   const field = useRef<HTMLTextAreaElement>(null);
-  const waiting = tabView(tab).dot === "waiting";
+  const waiting = tabView(app.store, tab).dot === "waiting";
   const covered = covering(app.overlay, drawerShown(app.phone, app.overlay, !!app.store.homeOpen), !!props.inDrawer);
   // the compose box takes the focus from the terminal's field once it shows
   useEffect(() => {
@@ -348,7 +348,7 @@ function PhoneStrip({ s, active }: { s: OpenSession; active: number }) {
     <div class="tabstrip phone" role="tablist" ref={strip}>
       <div class="tabs-scroll">
         {tabs.map((t) => {
-          const v = stripView(t);
+          const v = stripView(app.store, t);
           const h = tabHarness(t);
           const mode = modeBadge(t.kind);
           return (

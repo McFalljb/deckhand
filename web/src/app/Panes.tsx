@@ -180,7 +180,7 @@ function TabStrip({ s, paneId, tabs, active, only }: { s: OpenSession; paneId: n
     <div class="tabstrip" role="tablist">
       <div class="tabs-scroll">
         {tabs.map((t) => {
-          const v = stripView(t);
+          const v = stripView(app.store, t);
           const h = tabHarness(t);
           const on = t.id === active;
           const mode = modeBadge(t.kind);

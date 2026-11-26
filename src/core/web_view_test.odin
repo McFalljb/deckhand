@@ -66,8 +66,12 @@ web_view_section :: proc(t: ^testing.T) {
 	testing.expect_value(t, web_view_last.builds, n + 1)
 	changed := make([dynamic]string, context.temp_allocator)
 	for x in out2 do if snap[x[0]] != x[1] do append(&changed, x[0])
-	testing.expect_value(t, len(changed), 1)
-	if len(changed) == 1 do testing.expect_value(t, changed[0], "web")
+	// the small part and the session's status marks (webst)
+	testing.expect_value(t, len(changed), 2)
+	if len(changed) == 2 {
+		testing.expect_value(t, changed[0], "web")
+		testing.expect_value(t, changed[1], fmt.tprintf("webst:%d", s.id))
+	}
 	// a session file's new stamp (web_view_tick's read) is a change even with the sections alike
 	state.open_sessions[0].mtime._nsec = 1_700_000_000_000_000_000
 	_ = web_view_cached(secs2[:])
@@ -369,4 +373,61 @@ web_view_status_table :: proc(t: ^testing.T) {
 		pct := v.progress < 0 ? -1 : int(v.progress * 100 + 0.5)
 		testing.expectf(t, pct == c.progress, "%s: progress %d, want %d", c.row, pct, c.progress)
 	}
+
+	// and as a browser gets them: webst:<session>, each tab's [dot, mark, progress], and the tab
+	// the session's row shows (the strongest, the first of equals)
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	p := Project{id = new_id(), group = .Projects, cwd = "/tmp/web-view-status"}
+	append(&state.projects, p)
+	s := Open_Session{id = new_id(), project_id = p.id, pi_session_id = "pi-status", cwd = p.cwd}
+	cases := web_status_cases()
+	for &c in cases {
+		c.tab.id = new_id()
+		append(&s.tabs, c.tab)
+	}
+	s.active_tab = s.tabs[0].id
+	append(&state.open_sessions, s)
+	secs := state_sections(&state)
+	out := web_view_cached(secs[:])
+	j := ""
+	for x in out do if x[0] == fmt.tprintf("webst:%d", s.id) do j = x[1]
+	v, err := json.parse_string(j, allocator = context.temp_allocator)
+	testing.expect(t, err == nil, "webst parses")
+	if err != nil do return
+	o := v.(json.Object)
+	tabs := o["tabs"].(json.Object)
+	for c in cases {
+		row, has := tabs[fmt.tprintf("%d", c.tab.id)]
+		testing.expectf(t, has, "%s: in webst", c.row)
+		if !has do continue
+		a := row.(json.Array)
+		testing.expectf(t, a[0].(json.String) == ROW_STATUS_NAMES[c.dot], "%s: webst dot %v", c.row, a[0])
+		testing.expectf(t, a[1].(json.String) == STATUS_MARK_NAMES[c.mark], "%s: webst mark %v", c.row, a[1])
+		testing.expectf(t, int(a[2].(json.Float)) == c.progress, "%s: webst progress %v", c.row, a[2])
+	}
+	// the strongest: a waiting tab (rank 6), the first of them ("pi waiting")
+	want: u64
+	for c in cases do if c.row == "pi waiting" do want = c.tab.id
+	testing.expect_value(t, u64(o["from"].(json.Float)), want)
+}
+
+@(test)
+web_view_status_none :: proc(t: ^testing.T) {
+	// a session with nothing to show: from 0, every tab idle
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	defer state = State{}
+	s := Open_Session{id = new_id(), pi_session_id = "pi-quiet"}
+	append(&s.tabs, Tab{id = new_id(), kind = Shell_Tab{}, prog = {progress = -1}})
+	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, agent = .Idle})
+	append(&state.open_sessions, s)
+	secs := state_sections(&state)
+	out := web_view_cached(secs[:])
+	j := ""
+	for x in out do if x[0] == fmt.tprintf("webst:%d", s.id) do j = x[1]
+	testing.expect_value(t, j, fmt.tprintf(`{{"from":0,"tabs":{{"%d":["none","idle",-1],"%d":["none","idle",-1]}}}}`, s.tabs[0].id, s.tabs[1].id))
 }

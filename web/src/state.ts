@@ -96,7 +96,8 @@ export interface MachineView {
 //   web: the small part; webo:<id> an open session's row; webm other machines; webtree the
 //   Projects tree's order [[key, depth, kids, forced]]; webp:<key> a tree row; websl:<p> a
 //   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats;
-//   webbars the tabs' bars as text (app/bars.ts).
+//   webbars the tabs' bars as text (app/bars.ts); webst:<id> an open session's status marks
+//   {from, tabs {<tab>: [dot, mark, progress %]}} (status.ts).
 export interface WebProjectRow {
   key: string;
   id: number; // 0: a group row (its folder in path)
@@ -211,6 +212,7 @@ export class Store {
     if (!msg || typeof msg.state !== "object" || msg.state === null) return false;
     this.sections = new Map(Object.entries(msg.state));
     this.rowsStamp++;
+    this.marksStamp++;
     this.version = Number(msg.version) || 0;
     this.changed();
     return true;
@@ -223,6 +225,7 @@ export class Store {
     if (this.sections.size === 0) return false;
     for (const [k, v] of Object.entries(msg.sections)) {
       if (k.startsWith("webp:")) this.rowsStamp++;
+      if (k.startsWith("webst:")) this.marksStamp++;
       if (v === null) this.sections.delete(k);
       else this.sections.set(k, v);
     }
@@ -233,6 +236,7 @@ export class Store {
 
   clear(): void {
     this.sections.clear();
+    this.marksStamp++;
     this.version = 0;
     this.changed();
   }
@@ -370,6 +374,23 @@ export class Store {
   tabs(sessionId: number): Tab[] {
     return this.sections.get("tabs:" + sessionId) ?? [];
   }
+
+  // A tab's status mark as the core computed it (webst:<session>: [dot, mark, progress %]).
+  tabMark(tabId: number): [string, string, number] | undefined {
+    if (this.marksAt !== this.marksStamp) {
+      this.marks.clear();
+      for (const [k, v] of this.sections) if (k.startsWith("webst:") && v?.tabs) for (const [id, m] of Object.entries(v.tabs)) this.marks.set(Number(id), m as [string, string, number]);
+      this.marksAt = this.marksStamp;
+    }
+    return this.marks.get(tabId);
+  }
+  // The tab an open session's row shows the mark of (0: none).
+  markFrom(sessionId: number): number {
+    return this.sections.get("webst:" + sessionId)?.from ?? 0;
+  }
+  private marks = new Map<number, [string, string, number]>();
+  private marksAt = -1;
+  private marksStamp = 0;
 
   session(id: number): OpenSession | undefined {
     return this.openSessions.find((s) => s.id === id);

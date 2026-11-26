@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Store } from "../src/state.ts";
-import { attentionTier, sessionDot, tabDot } from "../src/status.ts";
+import { sessionView, tabView } from "../src/status.ts";
 
 const tab = (id: number, extra: object = {}) => ({
   id,
@@ -67,21 +67,16 @@ test("state.full replaces everything; state.delta changes and removes sections",
   assert.equal(s.applyDelta({ version: 13 }), false, "malformed");
 });
 
-test("status dots follow the core's rules", () => {
-  assert.equal(tabDot(tab(1, { kind: { pi_tab: {} }, agent: "working" }) as any), "working");
-  assert.equal(tabDot(tab(1, { kind: { pi_tab: {} }, agent: "idle", waiting: true }) as any), "waiting");
-  assert.equal(tabDot(tab(1, { kind: { pi_tab: {} }, agent: "idle", question: true }) as any), "question");
-  assert.equal(tabDot(tab(1, { kind: { pi_tab: {} }, agent: "idle", unseen: true }) as any), "unseen");
-  assert.equal(tabDot(tab(1, { prog: { state: "blocked", kind: "permission" } }) as any), "waiting");
-  assert.equal(tabDot(tab(1, { kind: { claude_tab: { turn: "working", ended: "none" } } }) as any), "working");
-  assert.equal(tabDot(tab(1, { kind: { claude_tab: { turn: "idle", ended: "question" } } }) as any), "question");
-  assert.equal(tabDot(tab(1) as any), "none");
-
+test("status dots: the core's (webst:<session>), kept across deltas, gone with their session", () => {
   const s = new Store();
   const f = full();
   (f.state as any)["tabs:3"] = [tab(4, { kind: { pi_tab: {} }, agent: "working" }), tab(5, { prog: { state: "error", kind: "none" } })];
+  (f.state as any)["webst:3"] = { from: 5, tabs: { "4": ["working", "working", -1], "5": ["error", "error", -1] } };
   s.applyFull(f);
-  const dot = sessionDot(s, s.session(3)!);
-  assert.equal(dot, "error", "the strongest tab wins");
-  assert.equal(attentionTier(dot), 3);
+  assert.equal(sessionView(s, s.session(3)!).dot, "error", "the tab the core says");
+  assert.equal(tabView(s, s.tabs(3)[0]).dot, "working");
+  assert.ok(s.applyDelta({ version: 11, sections: { "webst:3": { from: 4, tabs: { "4": ["working", "progress", 25], "5": ["none", "idle", -1] } } } }));
+  assert.deepEqual([sessionView(s, s.session(3)!).mark, sessionView(s, s.session(3)!).progress], ["progress", 0.25]);
+  assert.ok(s.applyDelta({ version: 12, sections: { "webst:3": null } }));
+  assert.equal(tabView(s, s.tabs(3)[0]).dot, "none", "no marks: none");
 });

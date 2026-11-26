@@ -30,6 +30,9 @@ package core
 //   webcl, webc:<id>  the Chats, the same way
 //   webbars       the tabs' bars as text, with the actions a browser may take (tab_bars.odin:
 //                 web_bars_json)
+//   webst:<id>    an open session's status marks (Atlas's too): {from (the tab its row's mark is
+//                 from: session_row_status; 0 = none), tabs {<tab id>: [dot, mark, progress
+//                 (percent, -1 = none)]}}: tab_status_view and status_mark, as the window draws them
 //
 // Computed only when something it reads changed (web_view_cached: a hash of the other sections,
 // the open sessions' file stamps and the watched lists), and never reading a disk on a flush:
@@ -320,6 +323,20 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 		json_quote(&b, place)
 		fmt.sbprintf(&b, `,"chat":%v,"at":%d}}`, ic == .Chat, web_view_stamp(&s))
 		put(out, fmt.tprintf("webo:%d", s.id), &b)
+	}
+
+	// ---- webst:<id>: an open session's status marks (each tab's, and which one its row shows) ----
+	for &s in state.open_sessions {
+		b = strings.builder_make(context.temp_allocator)
+		_, from := session_row_status(&s)
+		fmt.sbprintf(&b, `{{"from":%d,"tabs":{{`, from != nil ? from.id : 0)
+		for t, i in s.tabs {
+			v := tab_status_view(t)
+			pct := v.progress < 0 ? -1 : int(v.progress * 100 + 0.5)
+			fmt.sbprintf(&b, `%s"%d":["%s","%s",%d]`, i > 0 ? "," : "", t.id, ROW_STATUS_NAMES[v.dot], STATUS_MARK_NAMES[status_mark(v)], pct)
+		}
+		strings.write_string(&b, "}}")
+		put(out, fmt.tprintf("webst:%d", s.id), &b)
 	}
 
 	// ---- webm: other machines (few rows) ----

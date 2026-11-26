@@ -81,13 +81,13 @@ function Card({ r }: { r: WebAttention }) {
   if (!s) return null;
   const tabs = store.tabs(s.id);
   const from = r.tab ? tabs.find((t) => t.id === r.tab) : undefined;
-  const v = from ? tabView(from) : sessionView(store, s);
+  const v = from ? tabView(store, from) : sessionView(store, s);
   const w = store.webTitle(s.id);
   const need = r.group === "needs_you";
   const lines = r.group === "idle" ? 0 : need ? 3 : 1;
   const harness = openHarness(store, s);
   const age = v.dot !== "none" ? ago(v.since) : w ? (w.at ? ago(w.at) : "new") : "";
-  const others = tabs.length > 1 ? tabs.filter((t) => t !== from).map((t) => tabView(t).dot) : [];
+  const others = tabs.length > 1 ? tabs.filter((t) => t !== from).map((t) => tabView(store, t).dot) : [];
   const dots = (["waiting", "error", "unseen", "working"] as const).filter((d) => others.includes(d));
   return (
     <div

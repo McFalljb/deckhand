@@ -293,7 +293,7 @@ holder_client_start :: proc() -> bool {
 				log_ln("Deckhand: session holder: removing a dead holder's socket", path)
 				sock_unlink(path)
 			case .Other_Login:
-				_ = holder_replace_other_login(refused_code_pid, path) // not stopped: its socket stays, a new holder starts beside it
+				_ = holder_replace_other_login(refused_code_pid, other_login_start, path) // not stopped: its socket stays, a new holder starts beside it
 			}
 		}
 		if !quiet do break
@@ -399,6 +399,8 @@ Connect_Result :: enum {
 handshake_got: int // bytes the handshake read so far (Quiet: none)
 @(private = "file")
 refused_code_pid: i32 // holder_connect's Refused_Code: the peer's pid
+@(private = "file")
+other_login_start: i64 // holder_connect's Other_Login: the peer's start time, read while connected (0: gone)
 
 // The holder at path alone, while it still runs (holder_recover): retried on a refusal as
 // holder_client_start does (a full listen backlog), but its socket is never taken for a dead
@@ -448,6 +450,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	// nothing is sent to it; it is replaced. Any other session (an ssh login's): attached as before
 	if login_should_replace(tok, peer.pid) {
 		log_ln("Deckhand: session holder: pid", peer.pid, "runs in a GUI login that has ended")
+		other_login_start = holder_pid_start(peer.pid) // while the socket still ties the pid to it
 		sock_close(fd)
 		refused_code_pid = peer.pid
 		return .Other_Login

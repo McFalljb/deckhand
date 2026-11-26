@@ -54,9 +54,13 @@ login_stop_pid_by_start_time :: proc(t: ^testing.T) {
 	defer posix.kill(posix.pid_t(pid), .SIGKILL)
 	h, ok := lock_proc_ident(pid)
 	if !testing.expect(t, ok && h.start != 0) do return
-	// another start time: never this process (a reused pid), so nothing is signalled
-	testing.expect(t, !login_stop_pid(pid, h.start + 1, 100 * time.Millisecond), "a reused pid is not stopped")
-	testing.expect(t, posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK, "and it still runs")
+	// another start time: the process we meant is gone (its pid reused), so it counts as stopped
+	// and the new process is never signalled
+	testing.expect(t, login_stop_pid(pid, h.start + 1, 100 * time.Millisecond), "a reused pid: ours is gone")
+	testing.expect(t, posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK, "and the pid's new process still runs")
+	// no start time (the process had exited when it was read): gone, nothing signalled
+	testing.expect(t, login_stop_pid(pid, 0, 100 * time.Millisecond), "no start time: gone")
+	testing.expect(t, posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK, "and nothing was signalled")
 	// its own: SIGTERM (ignored), then SIGKILL; gone
 	testing.expect(t, login_stop_pid(pid, h.start, 200 * time.Millisecond), "stopped")
 	gone := false
@@ -85,20 +89,25 @@ holder_replace_other_login_keeps_a_live_socket :: proc(t: ^testing.T) {
 	if !testing.expect(t, pid > 0) do return
 	defer posix.kill(posix.pid_t(pid), .SIGKILL)
 
+	h, hok := lock_proc_ident(pid)
+	if !testing.expect(t, hok && h.start != 0) do return
 	_ = os.write_entire_file(sock, transmute([]u8)string("x"))
-	testing.expect(t, !holder_replace_other_login(pid, sock, ls_stop_fails), "not replaced: it still runs")
+	testing.expect(t, !holder_replace_other_login(pid, h.start, sock, ls_stop_fails), "not replaced: it still runs")
 	testing.expect(t, os.exists(sock), "a live holder's socket is never removed")
 
-	testing.expect(t, holder_replace_other_login(pid, sock, ls_stop_works), "replaced")
+	testing.expect(t, holder_replace_other_login(pid, h.start, sock, ls_stop_works), "replaced")
 	testing.expect(t, !os.exists(sock), "its socket goes with it")
 
-	// a pid that runs nothing (start time 0): gone, its socket removed, nothing stopped
-	posix.kill(posix.pid_t(pid), .SIGKILL)
-	for _ in 0 ..< 100 {
-		if _, ok := lock_proc_ident(pid); !ok do break
-		time.sleep(10 * time.Millisecond)
-	}
+	// the start time read at connect no longer matches (the holder exited and its pid was reused
+	// before the signal): the process on that pid now is never signalled (#204 round 2)
 	_ = os.write_entire_file(sock, transmute([]u8)string("x"))
-	testing.expect(t, holder_replace_other_login(pid, sock, ls_stop_fails), "a gone holder counts as replaced")
+	testing.expect(t, holder_replace_other_login(pid, h.start + 1, sock), "a reused pid: the holder is gone")
+	testing.expect(t, posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK, "and the pid's new process was not signalled")
 	testing.expect(t, !os.exists(sock), "a gone holder's socket is removed")
+
+	// no start time at connect (it had exited): gone, its socket removed, nothing stopped
+	_ = os.write_entire_file(sock, transmute([]u8)string("x"))
+	testing.expect(t, holder_replace_other_login(pid, 0, sock, ls_stop_fails), "a gone holder counts as replaced")
+	testing.expect(t, !os.exists(sock), "a gone holder's socket is removed")
+	testing.expect(t, posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK, "nothing was signalled")
 }

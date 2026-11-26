@@ -185,18 +185,17 @@ login_should_replace :: proc(tok: trust.Audit_Token, pid: i32) -> bool {
 }
 
 // SIGTERM to pid, SIGKILL after wait, then up to a second for it to go; only while pid is still the
-// process that started at start (a reused pid never is). true: it is gone (or was already).
+// process that started at start (a reused pid never is). true: it is gone (or was already: start 0,
+// or the pid runs another process now).
 login_stop_pid :: proc(pid: i32, start: i64, wait: time.Duration) -> bool {
 	same :: proc(pid: i32, start: i64) -> bool {
 		h, ok := lock_proc_ident(pid)
 		return ok && h.start == start
 	}
-	gone :: proc(pid: i32) -> bool {
-		_, ok := lock_proc_ident(pid)
-		return !ok
-	}
-	if pid <= 0 || start == 0 do return false
-	if !same(pid, start) do return gone(pid) // another process has the pid now: ours is gone
+	if pid <= 0 do return false
+	// no start time (it had exited when read), or another one now (it exited and the pid was
+	// reused, or nothing runs there): the process we meant is gone, and nothing is signalled
+	if start == 0 || !same(pid, start) do return true
 	posix.kill(posix.pid_t(pid), .SIGTERM)
 	deadline := time.tick_add(time.tick_now(), wait)
 	for same(pid, start) && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
@@ -282,8 +281,9 @@ when ODIN_OS == .Darwin {
 // is: it would be unreachable for good). The caller then starts a new holder in this login and the
 // tabs restore from workspace.json. The user is told once a window shows it. true: gone.
 HOLDER_OTHER_LOGIN_STOP_WAIT :: 3 * time.Second
-holder_replace_other_login :: proc(pid: i32, path: string, stop := login_stop_pid) -> bool {
-	start := holder_pid_start(pid)
+// start: the holder's start time, read in holder_connect while its connection was open (0: it
+// had exited), so a pid reused since is never signalled.
+holder_replace_other_login :: proc(pid: i32, start: i64, path: string, stop := login_stop_pid) -> bool {
 	if start == 0 {
 		log_ln("Deckhand: session holder: the one from another login (pid", pid, ") is gone")
 		sock_unlink(path)

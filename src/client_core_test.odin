@@ -115,4 +115,9 @@ client_core_other_login_once :: proc(t: ^testing.T) {
 	why = client_core_replace_other_login(4244, 99, &replaced, cc_stop_fails)
 	testing.expectf(t, strings.contains(why, "pid 4244") && strings.contains(why, "could not be stopped"), "one that won't stop: %q", why)
 	testing.expect(t, !replaced)
+	// no start time: it exited as the window connected; gone, never a "could not be stopped"
+	// (#204 round 2), and it counts as this dial's one replacement
+	why = client_core_replace_other_login(4245, 0, &replaced, cc_stop_fails)
+	testing.expect_value(t, why, "")
+	testing.expect(t, replaced)
 }

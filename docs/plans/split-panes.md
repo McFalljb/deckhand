@@ -458,6 +458,7 @@ Taken today: ⌘K ⌘P ⌘J ⌘, ⌘/ ⌘⇧F ⇧⌘N ⌘N ⌘⇧E ⌘C ⌘V ⌘
 (terminal/editor) ⌘F ⌥⌘F ⌘G ⇧⌘G ⌘S ⇧⌘V ⌘H ⌥⌘H ⌘M ⌃⌘F ⌃G.
 
 Proposed (all free today):
+
 | Keys | Action |
 |---|---|
 | ⌘D | Split right (iTerm's) |

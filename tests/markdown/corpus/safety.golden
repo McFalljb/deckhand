@@ -1,0 +1,90 @@
+<h1>Safety</h1>
+<p><a href="javascript:alert(1)">js</a>
+<a href="JAVASCRIPT:alert(1)">js upper</a>
+<a href="JaVaScRiPt:alert(1)">js mixed</a>
+<a href="javascript:alert(1)">js entity</a>
+<a href="javascript:alert(1)">js named entity</a>
+<a href="javascript:alert(1)">js escaped</a>
+<a href="javascript:alert(1)">js angle</a>
+<a href="javascript:alert(1)">js spaces</a>
+[js tab](java	script:alert(1))
+<a href="vbscript:msgbox(1)">vbscript</a>
+<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">data</a>
+<a href="DATA:text/html,%3Cscript%3Ealert(1)%3C/script%3E">data upper</a>
+<a href="file:///etc/passwd">file</a>
+<a href="deckhand://do-something">app scheme</a>
+<a href="%6Aavascript:alert(1)">percent scheme</a>
+[newline in dest](java
+script:alert(1))
+<a href="javascript:alert(&#x27;ref&#x27;)">ref js</a>
+<a href="javascript:alert(1)">javascript:alert(1)</a>
+<a href="data:text/html,x">data:text/html,x</a>
+<a href="file:///etc/passwd">file:///etc/passwd</a>
+javascript:alert(1) as bare text
+<a href="http://www.example.com/javascript:alert(1)">www.example.com/javascript:alert(1)</a></p>
+<p><img src="javascript:alert(1)" alt="img js" />
+<img src="data:image/png;base64,iVBORw0KGgo=" alt="img data" />
+<img src="https://tracker.example.com/pixel.gif" alt="img remote" />
+<img src="file:///etc/passwd" alt="img file" /></p>
+<p><a href="javascript:alert(1)">raw link</a>
+<img src=x onerror=alert(1)></p>
+<iframe src="https://example.com"></iframe>
+<script>alert(1)</script>
+<style>body{display:none}</style>
+<textarea>raw</textarea>
+<div onclick="alert(1)">
+<p><em>markdown inside an html block after a blank line</em></p>
+</div>
+<title>tag filter</title> <xmp>x</xmp> <noembed>y</noembed>
+<p><a href="mailto:a@example.invalid?subject=hi">mail</a>
+<a href="https://example.com/ok">https</a>
+<a href="http://example.com/ok">http</a>
+<a href="other.md">relative</a>
+<a href="/etc/hosts">absolute</a>
+<a href="../../outside.md">dotdot</a>
+<a href="#safety">anchor</a>
+<a href="other.md?x=1#frag">query</a></p>
+---- blocks
+Document line=1
+  Heading line=1 level=1 anchor="safety"
+  Paragraph line=3
+  Paragraph line=29
+  Paragraph line=34
+  Html_Block line=36
+  Html_Block line=41
+  Paragraph line=43
+  Html_Block line=45
+  Html_Block line=47
+  Paragraph line=49
+---- links
+Link url="javascript:alert(1)" title="" autolink=false text="js"
+Link url="JAVASCRIPT:alert(1)" title="" autolink=false text="js upper"
+Link url="JaVaScRiPt:alert(1)" title="" autolink=false text="js mixed"
+Link url="javascript:alert(1)" title="" autolink=false text="js entity"
+Link url="javascript:alert(1)" title="" autolink=false text="js named entity"
+Link url="javascript:alert(1)" title="" autolink=false text="js escaped"
+Link url="javascript:alert(1)" title="" autolink=false text="js angle"
+Link url="javascript:alert(1)" title="" autolink=false text="js spaces"
+Link url="vbscript:msgbox(1)" title="" autolink=false text="vbscript"
+Link url="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==" title="" autolink=false text="data"
+Link url="DATA:text/html,<script>alert(1)</script>" title="" autolink=false text="data upper"
+Link url="file:///etc/passwd" title="" autolink=false text="file"
+Link url="deckhand://do-something" title="" autolink=false text="app scheme"
+Link url="%6Aavascript:alert(1)" title="" autolink=false text="percent scheme"
+Link url="javascript:alert('ref')" title="" autolink=false text="ref js"
+Link url="javascript:alert(1)" title="" autolink=true text="javascript:alert(1)"
+Link url="data:text/html,x" title="" autolink=true text="data:text/html,x"
+Link url="file:///etc/passwd" title="" autolink=true text="file:///etc/passwd"
+Link url="http://www.example.com/javascript:alert(1)" title="" autolink=true text="www.example.com/javascript:alert(1)"
+Image url="javascript:alert(1)" title="" autolink=false text="img js"
+Image url="data:image/png;base64,iVBORw0KGgo=" title="" autolink=false text="img data"
+Image url="https://tracker.example.com/pixel.gif" title="" autolink=false text="img remote"
+Image url="file:///etc/passwd" title="" autolink=false text="img file"
+Link url="mailto:a@example.invalid?subject=hi" title="" autolink=false text="mail"
+Link url="https://example.com/ok" title="" autolink=false text="https"
+Link url="http://example.com/ok" title="" autolink=false text="http"
+Link url="other.md" title="" autolink=false text="relative"
+Link url="/etc/hosts" title="" autolink=false text="absolute"
+Link url="../../outside.md" title="" autolink=false text="dotdot"
+Link url="#safety" title="" autolink=false text="anchor"
+Link url="other.md?x=1#frag" title="" autolink=false text="query"

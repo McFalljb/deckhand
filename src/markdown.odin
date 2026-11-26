@@ -453,6 +453,8 @@ resolve_refs :: proc(p: ^Md_Parser, b: ^Md_Block) -> bool {
 		if n == 0 do break
 		s = s[n:]
 	}
+	// a paragraph's text starts without spaces or tabs (its next line's, once a definition went)
+	for len(s) > 0 && (s[0] == ' ' || s[0] == '\t') do s = s[1:]
 	b.text = s
 	for i in 0 ..< len(s) do if s[i] != ' ' && s[i] != '\t' && s[i] != '\n' && s[i] != '\r' do return true
 	return false

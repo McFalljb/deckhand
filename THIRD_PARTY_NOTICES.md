@@ -1914,6 +1914,14 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Other licenses
+
+See [./licenses](./licenses) for licenses of code being used in the repo:
+
+* [LICENSE_Bjoern_Hoehrmann](./licenses/LICENSE_Bjoern_Hoehrmann)
+* [LICENSE_unicode](./licenses/LICENSE_unicode)
+```
+
 ### xterm.js
 
 ```
@@ -2023,14 +2031,6 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
 ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-```
-
-## Other licenses
-
-See [./licenses](./licenses) for licenses of code being used in the repo:
-
-* [LICENSE_Bjoern_Hoehrmann](./licenses/LICENSE_Bjoern_Hoehrmann)
-* [LICENSE_unicode](./licenses/LICENSE_unicode)
 ```
 
 ### uucode: Bjoern Hoehrmann's UTF-8 decoder

@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[],
+"open_sessions":[],
+"home":{"pi_session_id":"3e743d94-634f-4e82-abe9-681ea86ff24e","model_applied":"opencode-go/deepseek-v4.1-flash:high"},
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"drawer_open":true,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"agent_model":"opencode-go/deepseek-v4.1-flash:high"}}

@@ -1,0 +1,6 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/pd-sb-alpha-1795698328223198000","name":"alpha"},{"cwd":"$ROOT/pd-sb-bravo-1795698328223276000","name":"bravo"},{"cwd":"$ROOT/pd-sb-charlie-1795698328223351000","name":"charlie"}],"selected_project":"$ROOT/pd-sb-charlie-1795698328223351000",
+"open_sessions":[],
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{"pinned_projects":["$ROOT/pd-sb-bravo-1795698328223276000","$ROOT/pd-sb-charlie-1795698328223351000"],"pinned_sessions":["c-1"],"hidden_projects":["$ROOT/pd-sb-alpha-1795698328223198000"],"sort":{"projects":"name","sessions":"created"},"folded":{"chats":true}},
+"settings":{"confirm":{},"confirm_close":{}}}

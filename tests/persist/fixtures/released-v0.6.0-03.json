@@ -1,0 +1,8 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/pd-home-496343000/proj"}],"selected_project":"$ROOT/pd-home-496343000/proj",
+"open_sessions":[{"pi_session_id":"aaaa-1","cwd":"$ROOT/pd-home-496343000/proj","session_dir":"","project":"$ROOT/pd-home-496343000/proj","tabs":[{"kind":"pi"}],"active_tab":0},
+{"pi_session_id":"bbbb-2","cwd":"$ROOT/pd-home-496343000/proj","session_dir":"","project":"$ROOT/pd-home-496343000/proj","tabs":[{"kind":"pi"}],"active_tab":0}],"current_session":1,
+"home":{"pi_session_id":"f62796d0-6b4e-4837-8f84-c19c9f7f97e2"},
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"drawer_open":true,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"remote_machines":false}}

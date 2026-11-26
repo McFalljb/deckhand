@@ -1,0 +1,6 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/pd-sb-dense kit-1795698309120303000","name":"dense kit","added":true},{"cwd":"$ROOT/pd-sb-desktop-tools-1795698309120202000","name":"desktop-tools","added":true},{"cwd":"$ROOT/pd-sb-pi-desk-1795698309120100000","name":"pi-desk","added":true},{"cwd":"$ROOT/pd-sb-other-1795698309119969000","name":"other","added":true}],"selected_project":"$ROOT/pd-sb-dense kit-1795698309120303000",
+"open_sessions":[],
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"folders":{"chats":"$ROOT/pd-folders-1795698309139844000/talks"},"setup_seen":true}}

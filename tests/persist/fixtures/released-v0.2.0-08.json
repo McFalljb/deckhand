@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/deckhand-cr-title-1795698192048947000","added":true}],"selected_project":"$ROOT/deckhand-cr-title-1795698192048947000",
+"open_sessions":[{"agent":"claude","claude_session_id":"a5a5a5a5-0000-4000-8000-000000000001","pi_session_id":"","cwd":"$ROOT/deckhand-cr-title-1795698192048947000","session_dir":"","project":"$ROOT/deckhand-cr-title-1795698192048947000","tabs":[{"kind":"claude","claude_session_id":"a5a5a5a5-0000-4000-8000-000000000001","cwd":"$ROOT/deckhand-cr-title-1795698192048947000","account":"$ROOT/deckhand-cr-no-claude-config"}],"active_tab":0}],"current_session":0,
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"claude_sessions":[{"id":"a5a5a5a5-0000-4000-8000-000000000001","cwd":"$ROOT/deckhand-cr-title-1795698192048947000","project":"$ROOT/deckhand-cr-title-1795698192048947000","title":"Auth refactor","used":1795698192,"named":true,"account":"$ROOT/deckhand-cr-no-claude-config"}],
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"claude_account_last":"$ROOT/deckhand-cr-no-claude-config"}}

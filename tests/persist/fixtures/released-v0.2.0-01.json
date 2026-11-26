@@ -1,0 +1,8 @@
+{"v":1,
+"projects":[],
+"open_sessions":[{"agent":"claude","claude_session_id":"c2c2c2c2-0000-4000-8000-000000000001","pi_session_id":"","cwd":"$ROOT/deckhand-ch-home-1795698192024760000/Chats","session_dir":"","project":"$ROOT/deckhand-ch-home-1795698192024760000/Chats","chat":true,"tabs":[{"kind":"claude","claude_session_id":"c2c2c2c2-0000-4000-8000-000000000001","cwd":"$ROOT/deckhand-ch-home-1795698192024760000/Chats","readonly":true,"account":"$ROOT/deckhand-ch-home-1795698192024760000/.claude","args":["--dangerously-skip-permissions","--model","opus"]}],"active_tab":0}],"current_session":0,
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"claude_readonly_ids":["c2c2c2c2-0000-4000-8000-000000000001"],
+"claude_sessions":[{"id":"c2c2c2c2-0000-4000-8000-000000000001","cwd":"$ROOT/deckhand-ch-home-1795698192024760000/Chats","project":"$ROOT/deckhand-ch-home-1795698192024760000/Chats","title":"later","used":1795698192,"readonly":true,"account":"$ROOT/deckhand-ch-home-1795698192024760000/.claude","args":["--dangerously-skip-permissions","--model","opus"]}],
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"chats_readonly":true,"separate_core":false,"claude_account_last":"$ROOT/deckhand-ch-home-1795698192024760000/.claude"}}

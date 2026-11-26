@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[],
+"open_sessions":[{"pi_session_id":"pi-alpha","no_file":true,"cwd":"$ROOT/repo/build/test-data/app-open-31491/alpha","session_dir":"","project":"$ROOT/repo/build/test-data/app-open-31491/alpha","tabs":[{"kind":"pi"},{"kind":"claude","cwd":"$ROOT/repo/build/test-data/app-open-31491/alpha"},{"kind":"app"},{"kind":"app"}],"active_tab":0}],
+"home":{"pi_session_id":""},
+"layout":{"left_width":0,"right_width":0,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"remote_machines":false}}

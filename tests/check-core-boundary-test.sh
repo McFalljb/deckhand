@@ -16,6 +16,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:sys/posix"
 import gh "../ghostty"
+import "../zstd"
 import jg "../jsonguard"
 import "../holderwire"
 
@@ -37,8 +38,8 @@ import "../holderwire"
 import "../trust"
 ODIN
 # the pure packages beside the core: their own imports are checked too (holderwire may use
-# jsonguard, ghostty its vendored library)
-mkdir -p "$T/src/ghostty" "$T/src/jsonguard" "$T/src/trust" "$T/src/corewire" "$T/src/updatesig" "$T/src/holderwire"
+# jsonguard, ghostty its vendored library, zstd the decoder build-zstd.sh builds)
+mkdir -p "$T/src/ghostty" "$T/src/zstd" "$T/src/jsonguard" "$T/src/trust" "$T/src/corewire" "$T/src/updatesig" "$T/src/holderwire"
 cat > "$T/src/ghostty/clean.odin" <<'ODIN'
 package ghostty
 
@@ -48,6 +49,7 @@ when ODIN_ARCH == .arm64 {
 	foreign import lib "../../vendor/libghostty-vt/aarch64-macos/lib/libghostty-vt.a"
 }
 ODIN
+printf 'package zstd\n\nforeign import lib "../../build/zstd/libzstddec.a"\n' > "$T/src/zstd/clean.odin"
 for p in jsonguard trust corewire updatesig; do
   printf 'package %s\n\nimport "core:fmt"\nforeign import libc "system:System"\n' $p > "$T/src/$p/clean.odin"
 done
@@ -78,6 +80,7 @@ plant core "a shim in a block" 'foreign import pdx {
 plant core "intrinsics.objc_*" 'x :: proc() { _ = intrinsics.objc_find_class("NSApp") }'
 plant core "an @(objc_*) attribute" '@(objc_type = NSThing, objc_name = "foo")'
 plant holder "ghostty" 'import gh "../ghostty"'
+plant holder "zstd" 'import "../zstd"'
 plant core "a window import with a quoted core: path after it" 'import sapp "../../vendor/sokol-odin/sokol/app" // not "core:fmt"'
 plant core "intrinsics.objc_* under an alias" 'import intr "base:intrinsics"
 x :: proc() { _ = intr.objc_find_class("NSApp") }'
@@ -92,13 +95,15 @@ plant core "a dh_ shim link_name" 'foreign libc {
 	@(link_name = "dh_frames_begin")
 	frames_begin :: proc() ---
 }'
-for p in ghostty jsonguard trust corewire updatesig holderwire; do
+for p in ghostty zstd jsonguard trust corewire updatesig holderwire; do
   plant $p "Foundation" 'import NS "core:sys/darwin/Foundation"'
   plant $p "sokol" 'import sapp "../../vendor/sokol-odin/sokol/app"'
   plant $p "a shim" 'foreign import dhframes "../../build/dh_frames.a"'
   plant $p "intrinsics.objc_*" 'x :: proc() { _ = intrinsics.objc_find_class("NSApp") }'
 done
 plant ghostty "another vendored library" 'foreign import cef "../../vendor/cef/libcef.a"'
+plant zstd "another library in build/" 'foreign import other "../../build/zstd/other.a"'
+plant zstd "an import" 'import "../jsonguard"'
 plant jsonguard "holderwire" 'import "../holderwire"'
 plant holder "sokol" 'import sapp "../../vendor/sokol-odin/sokol/app"'
 if [ $fails != 0 ]; then exit 1; fi

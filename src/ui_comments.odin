@@ -248,7 +248,7 @@ comments_agent_word :: proc(s: ^core.Open_Session) -> string {
 // Who the strip's comments go to now: the Claude or Codex tab on screen (comments_claude_target)
 // or a Claude-only session's, else pi.
 comments_to_word :: proc(s: ^core.Open_Session) -> string {
-	if s != nil do if tab := core.comments_claude_target(s); tab != nil do return core.claude_tab_is_codex(tab^) ? "Codex" : "Claude"
+	if s != nil do if tab := core.comments_claude_target(s); tab != nil do return core.tab_harness(tab^) == .Codex ? "Codex" : "Claude"
 	return comments_agent_word(s)
 }
 

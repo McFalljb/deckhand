@@ -32,6 +32,7 @@ import "core:fmt"
 import "core:mem/virtual"
 import "core:path/filepath"
 import "core:strings"
+import "core:time"
 import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -79,6 +80,7 @@ Sp_Edit_Kind :: enum u8 {
 	Rename_Machine,
 	Rename_Account,
 	Web_Listen, // web access's listen address
+	Harness_Flags, // a harness's Default flags (target: its HARNESS_KEYS; ui_flags.odin)
 	// a file row's menu (right click; settings_page_context): as the old Settings tab's name field
 	New_File, // target: the folder
 	New_Folder,
@@ -210,10 +212,12 @@ sp_edit_commit :: proc() {
 		if no, ok := core.machine_row_no(spage.edit.target); ok do r = ui_run(core.Machine_Rename{no = no, name = name})
 	case .Web_Listen: // "" = the default
 		r = ui_run(core.Set_Web_Listen{address = name})
+	case .Harness_Flags: // "" = none; the core says why it refuses
+		if h, ok := flags_edit_harness(spage.edit.target); ok do r = ui_run(core.Set_Harness_Flags{harness = h, flags = name})
 	case .Rename_Account:
 		if name == "" do break
-		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, codex = true})
-		else do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name})
+		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, harness = .Codex})
+		else do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name, harness = .Claude})
 	case .New_File, .New_Folder, .Rename_File:
 		if err := files_name_error(name); err != "" {
 			r = {error = err}
@@ -417,8 +421,7 @@ settings_page_event :: proc(e: ^sapp.Event) -> bool {
 		}
 	case .MOUSE_SCROLL:
 		if !inside(clay.ID("spage"), e.mouse_x, e.mouse_y) || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return false
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 		app.redraw = true
 		return true
 	}
@@ -458,6 +461,45 @@ SP_SECTION_WHY := [core.Setting_Section]string {
 	.Project       = "This project's own files. Deckhand opens them for you to edit, and makes a missing one only when you click Create.",
 }
 
+// The page's rows (core.settings_file_rows), built again only when what they show may have changed,
+// not on every frame (a build reads and parses pi's settings.json, lists pi's extensions/ and the
+// jobs folder, and stats and checks every path): settings_gen moved (this window's poll saw a
+// folder change, or one of its own commands), a state message came (the core changed something:
+// a machine's status, a toggle, an account), the project shown is another, or EDITOR_POLL passed
+// (an outside edit inside a file shows within it, as the poll's folders do). Unit tests draw no
+// frames and set State directly: there it builds every time (as core.pi_extras_outdated).
+Sp_Rows :: struct {
+	arena:     virtual.Arena, // the rows' strings
+	rows:      []core.Settings_File_Row,
+	project:   string, // in arena
+	gen:       u64, // core.settings_gen at the build
+	state_gen: u64, // client.state_gen at the build
+	at:        time.Tick,
+	built:     bool,
+	builds:    int, // how many builds (tests)
+}
+sp_rows: Sp_Rows
+
+sp_rows_now :: proc() -> []core.Settings_File_Row {
+	if core.app_frames_called == 0 do return core.settings_file_rows()
+	project := core.settings_project_cwd()
+	if sp_rows.built && sp_rows.gen == core.settings_gen && sp_rows.state_gen == client.state_gen && sp_rows.project == project && time.tick_since(sp_rows.at) < core.EDITOR_POLL {
+		return sp_rows.rows
+	}
+	virtual.arena_destroy(&sp_rows.arena)
+	_ = virtual.arena_init_growing(&sp_rows.arena)
+	a := virtual.arena_allocator(&sp_rows.arena)
+	{
+		// the build temp-allocates everything it returns: here, into the arena (kept until the next)
+		context.temp_allocator = a
+		sp_rows.rows = core.settings_file_rows()
+	}
+	sp_rows.project = strings.clone(project, a)
+	sp_rows.gen, sp_rows.state_gen, sp_rows.at, sp_rows.built = core.settings_gen, client.state_gen, time.tick_now(), true
+	sp_rows.builds += 1
+	return sp_rows.rows
+}
+
 settings_page_layout :: proc() {
 	th := theme()
 	virtual.arena_destroy(&spage.arena)
@@ -475,7 +517,7 @@ settings_page_layout :: proc() {
 		spage.query = strings.clone(query)
 		spage.sel = -1
 	}
-	rows := core.settings_file_rows()
+	rows := sp_rows_now()
 	project := core.settings_project_cwd()
 	if spage.section == .Project && project == "" do spage.section = .Appearance
 	total := centre_width()
@@ -876,6 +918,9 @@ sp_button_text :: proc(s: ^core.Setting) -> (button, hint: string) {
 	case "atlas_model":        return "Change…", action_detail("agent_model")
 	case "machine_add":        return "Add…", s.hint
 	case "web_listen":         return "Change…", fmt.tprintf("%s · %s", core.web_listen_address(), s.hint)
+	case "claude_default_flags": return "Change…", flags_default_hint(.Claude)
+	case "codex_default_flags":  return "Change…", flags_default_hint(.Codex)
+	case "pi_default_flags":     return "Change…", flags_default_hint(.Pi)
 	case "web_pair":           return "Pair…", web_pair_hint(s.hint)
 	case "setup":              return "Set up…", s.hint
 	case "shortcuts":          return "Show ⌘/", s.hint
@@ -956,13 +1001,14 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 		}
 		btn, hint := sp_button_text(s)
 		k := s.id == "machine_add" || strings.has_prefix(s.id, "web_") ? sp_item({do_ = .Row, path = s.row}) : sp_item({do_ = .Action, action = s.action})
-		if sp_row(label, hint, strings.has_prefix(s.id, "web_") ? nil : sp_badges(s), mono_hint = s.id == "chats_dir") { // web access's rows: its switch carries the badge
+		if sp_row(label, hint, strings.has_prefix(s.id, "web_") || strings.has_suffix(s.id, "_default_flags") ? nil : sp_badges(s), mono_hint = s.id == "chats_dir") { // web access's rows and Default flags: the card's switch carries the badge (no room beside Change…)
 			sp_button(k, btn)
 			if s.id == "chats_dir" && action_ok("chats_dir_default") do sp_button(sp_item({do_ = .Action, action = "chats_dir_default"}), "Default")
 			if s.id == "update_checks" do sp_button(sp_item({do_ = .Action, action = "check_updates"}), "Check now")
 		}
 		if s.id == "machine_add" && spage.edit.kind == .Add_Machine do sp_edit_row("Add a machine", "user@host or an ~/.ssh/config name")
 		if s.id == "web_listen" && spage.edit.kind == .Web_Listen do sp_edit_row("Listen address", core.WEB_LISTEN_DEFAULT)
+		if strings.has_suffix(s.id, "_default_flags") && spage.edit.kind == .Harness_Flags && strings.has_prefix(s.id, strings.concatenate({spage.edit.target, "_"}, context.temp_allocator)) do sp_edit_row("Default flags", "--model opus")
 		if s.id == "web_pair" && web_pair_open() do if sp_row(fmt.tprintf("Code: %s", web_pair.code), fmt.tprintf("Open http://%s/ in the browser and type it. It works once, for 2 minutes.", web_pair_address())) {}
 	case .Status:
 		has := false
@@ -985,8 +1031,24 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 			if n == 0 do if sp_row("No paired browsers", "") {}
 		case "claude_accounts":
 			for r in rows do if r.group == "claude-accounts" do sp_list_row(r)
+		case "claude_plugins", "claude_mcp": // read-only (claude_lists.odin): a heading, then the names
+			used := false // only once Claude Code has a config folder (its files' rows are there)
+			for r in rows do if r.group == "claude" || strings.has_prefix(r.group, "claude:") do used = true
+			if !used do break
+			n := 0
+			for r in rows do if strings.has_prefix(r.path, s.row) do n += 1
+			if sp_row(label, n == 0 ? fmt.tprintf("None · %s", s.hint) : s.hint) {}
+			for r in rows do if strings.has_prefix(r.path, s.row) do sp_list_row(r)
 		case "codex_accounts":
 			for r in rows do if r.group == "codex-accounts" do sp_list_row(r)
+		case "codex_plugins": // read-only (codex_plugins.odin): a heading, then the names
+			used := false // only once Codex has a home here (its files' rows are there)
+			for r in rows do if r.group == "codex" || strings.has_prefix(r.group, "codex:") do used = true
+			if !used do break
+			n := 0
+			for r in rows do if strings.has_prefix(r.path, s.row) do n += 1
+			if sp_row(label, n == 0 ? fmt.tprintf("None · %s", s.hint) : s.hint) {}
+			for r in rows do if strings.has_prefix(r.path, s.row) do sp_list_row(r)
 		case "subfolders":
 			for r in rows do if r.group == "folders" && r.path != core.FOLDER_MAIN_ROW do sp_list_row(r)
 		}

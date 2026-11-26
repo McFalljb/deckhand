@@ -108,15 +108,15 @@ Comments_Ask :: struct {
 // Internal only: a source adds a comment. crop is a PNG file it wrote at comments_crop_path();
 // the comment owns it from now on (removed on a refusal too).
 Comment_Add :: struct {
-	source: Comment_Source,
+	source: Comment_Source `cmd:"names=comment_source"`,
 	tab_id: u64,
 	what:   string,
-	text:   string,
-	crop:   string,
+	text:   string `cmd:"red=bytes"`,
+	crop:   string `cmd:"omit"`,
 }
 Comment_Edit :: struct {
 	comment_id: u64,
-	text:       string,
+	text:       string `cmd:"red=bytes"`,
 }
 Comment_Delete :: struct {
 	comment_id: u64,
@@ -127,12 +127,12 @@ Comments_Clear :: struct {
 // Sends the session's pending comments (only tab_id's, if set) to its pi as a message of their own.
 Comments_Send_Now :: struct {
 	session: u64,
-	tab_id:  u64,
+	tab_id:  u64 `cmd:"omit"`,
 }
 Comments_Ask_Cancel :: struct {} // the close prompt's Cancel
 // A pi tab's bridge: the user's message took this attachment (pi.attached).
 Pi_Attached :: struct {
-	tab_id:        u64,
+	tab_id:        u64 `cmd:"opt"`,
 	attachment_id: u64,
 }
 
@@ -540,6 +540,7 @@ comments_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Res
 		}
 		if tab == nil do return refuse(crop, "no such tab")
 		if s.home do return refuse(crop, "Home has only its pi tab")
+		if why := files_only_refusal(s, "comments to an agent"); why != "" do return refuse(crop, why) // no agent to take them
 		switch c.source {
 		case .Browser: if _, is := tab.kind.(Browser_Tab); !is do return refuse(crop, "not a browser tab")
 		case .App:     if _, is := tab.kind.(App_Tab); !is do return refuse(crop, "not an app tab")
@@ -830,7 +831,7 @@ comments_claude_target :: proc(s: ^Open_Session) -> ^Tab {
 	return tab
 }
 
-// Why Send now cannot go into the Claude tab now ("" = it can): the held-prompt rules (CLAUDE.md
+// Why Send now cannot go into the Claude tab now ("" = it can): the held-prompt rules (CLAUDE-TABS.md
 // §5): idle per its hooks and its OSC 7501 status, bracketed paste on, nothing typed, no Enter due.
 // Never into a dialog or a half-typed prompt.
 @(private = "file")
@@ -838,12 +839,12 @@ claude_send_refusal :: proc(tab: ^Tab) -> string {
 	ct := &tab.kind.(Claude_Tab)
 	ok, why := claude_ready(tab, ct)
 	if ok do return ""
-	if ct.codex && why == "sending" do return "Codex is working: wait for its turn to end"
+	if harness_is_codex(ct.harness) && why == "sending" do return "Codex is working: wait for its turn to end"
 	switch why {
 	case "Claude is working", "sending":           return "Claude is working: wait for its turn to end"
 	case "Claude is waiting for you":               return "Claude is waiting for you: answer Claude first"
 	case "Claude is starting":                      return "Claude is starting: wait until it is ready"
-	case "you are typing a message":                return ct.codex ? "you are typing a message in Codex: send or clear it first" : "you are typing a message in Claude: send or clear it first"
+	case "you are typing a message":                return harness_is_codex(ct.harness) ? "you are typing a message in Codex: send or clear it first" : "you are typing a message in Claude: send or clear it first"
 	case "Codex is working":                        return "Codex is working: wait for its turn to end"
 	case "Codex is waiting for you":                return "Codex is waiting for you: answer Codex first"
 	}

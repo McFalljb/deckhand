@@ -55,7 +55,7 @@ import usig "../updatesig"
 
 Machine_Install :: struct {
 	no:     u64,
-	cancel: bool,
+	cancel: bool `cmd:"omit"`,
 }
 
 Machine_Linger :: struct {

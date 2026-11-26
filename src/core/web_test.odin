@@ -314,7 +314,7 @@ web_caller_gate :: proc(t: ^testing.T) {
 		Copy_Control_Token{},
 		Set_Machines_Reachable{on = true},
 		Set_Remote_Machines{on = false},
-		Set_Claude_Default_Flags{skip_permissions = true},
+		Set_Claude_Default_Flags{skip_permissions = true, harness = .Claude},
 		Machine_Add{target = "x"},
 		Set_Bell{},
 	}

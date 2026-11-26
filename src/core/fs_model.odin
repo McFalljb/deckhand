@@ -102,7 +102,9 @@ fs_trash_or_fake :: proc(path: string) -> bool {
 	dir := "build/test-trash"
 	os.make_directory_all(dir)
 	to, _ := filepath.join({dir, fmt.tprintf("%d-%s", fs_model.gen, filepath.base(path))}, context.temp_allocator)
-	return os.rename(path, to) == nil
+	if os.rename(path, to) != nil do return false
+	fs_trash_where = fs_real(to) // restore_path can bring it back (fs_restore.odin)
+	return true
 }
 
 // The real path (symlinks resolved): realpath of the longest part that
@@ -158,7 +160,7 @@ fs_roots :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
 	base := fs_base_roots()
 	append(&out, ..base)
-	for c in state.files.checkouts do if list_index(base, c.base) >= 0 && list_index(out[:], c.path) < 0 do append(&out, c.path)
+	for c in state.files.checkouts do if list_index(base, c.base) >= 0 && list_index(out[:], c.path) < 0 && wt_sibling_err(c.base, c.path, listed = false) == "" do append(&out, c.path) // a choice saved before that rule: never a root
 	return out[:]
 }
 
@@ -251,15 +253,55 @@ fs_check :: proc(path: string, caller: Caller, allow_root := false) -> (abs, roo
 	parent := fs_real(filepath.dir(abs))
 	full, _ := filepath.join({parent, filepath.base(abs)}, context.temp_allocator)
 	if allow_root do full = fs_real(abs)
-	for r in fs_roots() {
+	roots := fs_roots()
+	// any project's own folder, also one inside another project (whose root would match first);
+	// but the user here may act on one inside another project like any folder (a folder a session
+	// once ran in is a project too), that project then its root
+	if !allow_root {
+		// the name as typed stays (a rename that changes only its case is the user's to make)
+		if r := fs_root_at(full, roots); r != "" && !(fs_user_here(caller) && fs_inside_other_root(r, roots)) do return "", "", "not on a project folder itself"
+	}
+	for r in roots {
 		if !within(full, r) do continue
-		if full == r && !allow_root do return "", "", "not on a project folder itself"
+		if full == r && !allow_root do continue // only the user here's nested one gets here: its outer project decides
 		rel := full[len(r):]
-		if strings.contains(strings.concatenate({rel, "/"}, context.temp_allocator), "/.git/") do return "", "", "not inside .git"
+		if fs_in_git(rel) do return "", "", "not inside .git"
 		if caller.kind == .Panel && fs_outside_own(full, caller) do return "", "", "only inside this session's project folder"
 		return full, r, ""
 	}
-	return "", "", "only inside a project folder"
+	return "", "", FS_NOT_IN_PROJECT
+}
+
+// The one of roots that full (its folder's real path and its name as typed) is ("" = none): by
+// the path, else by the file, so another spelling of the name (a volume that ignores case takes
+// INNER for inner) is that project folder too. A link is never the folder it leads to: renaming
+// or trashing it acts on the link. Only roots in the same folder (by name, any case) are looked at.
+fs_root_at :: proc(full: string, roots: []string) -> string {
+	for r in roots do if full == r do return r
+	dir_of :: proc(p: string) -> string {
+		i := strings.last_index_byte(p, '/')
+		return i <= 0 ? "/" : p[:i]
+	}
+	pd := dir_of(full)
+	st: posix.stat_t
+	looked, is_dir := false, false
+	for r in roots {
+		if !strings.equal_fold(dir_of(r), pd) do continue
+		if !looked {
+			looked = true
+			is_dir = posix.lstat(strings.clone_to_cstring(full, context.temp_allocator), &st) == .OK && posix.S_ISDIR(st.st_mode)
+		}
+		if !is_dir do return ""
+		rs: posix.stat_t
+		if posix.stat(strings.clone_to_cstring(r, context.temp_allocator), &rs) == .OK && rs.st_dev == st.st_dev && rs.st_ino == st.st_ino do return r
+	}
+	return ""
+}
+
+// Whether another of roots holds path strictly inside it.
+fs_inside_other_root :: proc(path: string, roots: []string) -> bool {
+	for r in roots do if r != path && within(path, r) do return true
+	return false
 }
 
 // fs_check for a command that creates, renames or deletes: the user's own
@@ -521,8 +563,8 @@ fs_root_of :: proc(path: string) -> string {
 // the core's file models (the Files tree's, git status, worktrees, the Changes tabs) follow, as
 // the window's own do. flags: the watcher's, per path.
 Fs_Changed :: struct {
-	paths: []string,
-	flags: []u32,
+	paths: []string `cmd:"log=len"`,
+	flags: []u32 `cmd:"-"`,
 }
 
 fs_model_tick :: proc() {
@@ -698,26 +740,42 @@ fs_model_changed :: proc(path: string, watcher_flags: Maybe(u32) = nil) {
 // window's when it is another process. Its watcher would tell it too, but behind whatever queued
 // first: a burst of thousands of events (a checkout, npm install) held the user's new file back
 // for seconds (the files scene under load).
-@(private = "file")
 fs_changed_ours :: proc(path: string) {
 	fs_model_changed(path)
 	window_path_changed(path)
 }
 
+// create_file's and create_dir's rules, nothing made: inside a project (fs_check_write), and for
+// anyone but the user here not at or inside a credential place (fs_credential_place, as rename
+// and delete: a file put there would sit with an agent's sign-in). p: the checked absolute path.
+fs_create_check :: proc(path: string, caller: Caller) -> (p: string, err: string) {
+	e: string
+	p, _, e = fs_check_write(path, caller)
+	if e != "" do return "", e
+	if !fs_user_here(caller) && fs_credential_place(p) do return "", CREDENTIAL_PLACE_REFUSED
+	return p, ""
+}
+
 fs_create_file :: proc(path: string, caller: Caller) -> (abs: string, err: string) {
-	p, _, e := fs_check_write(path, caller)
+	p, e := fs_create_check(path, caller)
 	if e != "" do return "", e
 	if os.exists(p) do return "", "already exists"
 	if os.make_directory_all(filepath.dir(p)) != nil && path_kind(filepath.dir(p)) != .Dir do return "", "cannot create its folder"
+	// in pi's config folders (settings_editable: prompts/, skills/, extensions/, themes/; never a
+	// credential's name) a private file is taken for a credential (settings_credential), so the
+	// file made there is 0644 whatever the umask; asked before it exists (by name and place only)
+	config := false
+	if _, ok := settings_editable(p); ok do config = true
 	f, ferr := os.open(p, {.Write, .Create, .Excl}, os.Permissions_Default_File)
 	if ferr != nil do return "", fmt.tprintf("cannot create: %v", ferr)
+	if config do os.fchmod(f, os.perm_number(0o644))
 	os.close(f)
 	fs_changed_ours(p)
 	return p, ""
 }
 
 fs_create_dir :: proc(path: string, caller: Caller) -> (abs: string, err: string) {
-	p, _, e := fs_check_write(path, caller)
+	p, e := fs_create_check(path, caller)
 	if e != "" do return "", e
 	if os.exists(p) do return "", "already exists"
 	if derr := os.make_directory_all(p); derr != nil do return "", fmt.tprintf("cannot create: %v", derr)
@@ -732,7 +790,13 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 	if e2 != "" do return e2
 	_, _ = ra, rb
 	if !os.exists(a) do return "no such file or folder"
-	if os.exists(b) do return "the new name already exists"
+	if os.exists(b) && !fs_case_only_rename(a, b) do return "the new name already exists"
+	if !fs_user_here(caller) {
+		if fs_credential_place(a) || fs_credential_place(b) do return CREDENTIAL_PLACE_REFUSED
+		// the target by its name as typed: on a volume that ignores case, AUTH.JSON still leads to auth.json
+		if fs_credential_named(a) && !settings_credential_name(b) && !show_secret(b) do return CREDENTIAL_RENAME_REFUSED
+	}
+	if who := fs_in_use_by(a, caller); who != "" do return who
 	if os.make_directory_all(filepath.dir(b)) != nil && path_kind(filepath.dir(b)) != .Dir do return "cannot create the target folder"
 	if rerr := os.rename(a, b); rerr != nil do return fmt.tprintf("cannot rename: %v", rerr)
 	fs_changed_ours(a)
@@ -744,13 +808,274 @@ fs_rename :: proc(from, to: string, caller: Caller) -> (err: string) {
 
 // Moves to the Trash (the platform's; fails where there is none).
 fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
-	p, _, e := fs_check_write(path, caller)
+	p, e := fs_delete_check(path, caller)
 	if e != "" do return e
-	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
-	if !fs_trash_fn(p) do return "could not move it to the Trash"
+	err, _ = fs_trash_checked(p)
+	return
+}
+
+// fs_delete's rules, nothing moved: inside a project (fs_check_write: never its folder, never .git),
+// there, not a credential place (but for the user here), no running terminal tab in it. p: the
+// checked absolute path.
+fs_delete_check :: proc(path: string, caller: Caller) -> (p: string, err: string) {
+	e: string
+	p, _, e = fs_check_write(path, caller)
+	if e != "" do return "", e
+	if path_kind(p) == .Missing && !os.exists(p) do return "", "no such file or folder" // os.exists: a dangling link
+	if !fs_user_here(caller) && fs_credential_place(p) do return "", CREDENTIAL_PLACE_REFUSED // a caller may delete without asking (confirm: auto)
+	if who := fs_in_use_by(p, caller); who != "" do return "", who
+	return p, ""
+}
+
+// At most this many paths in one delete_path (paths).
+FS_DELETE_MAX :: 500
+// Names a batch's confirmation shows before "and N more".
+FS_DELETE_NAMED :: 5
+// Bytes of one name, and of the project folder, a batch's confirmation shows (longer: cut, "…"),
+// so the whole summary stays within FS_DELETE_SUMMARY_MAX: the count, "and N more" and the
+// project fit the confirmation bar's lines.
+FS_DELETE_NAME_SHOWN :: 24
+FS_DELETE_ROOT_SHOWN :: 80
+FS_DELETE_SUMMARY_MAX :: 310
+
+// A batch delete's paths, checked: every one by fs_delete_check before anything moves (the first
+// refusal names its path, and nothing moves), then merged (fs_delete_merge). Temp allocator.
+fs_delete_plan :: proc(paths: []string, caller: Caller) -> (plan: []string, err: string) {
+	if len(paths) == 0 do return nil, "path or paths is needed"
+	if len(paths) > FS_DELETE_MAX do return nil, fmt.tprintf("too many at once: %d (at most %d); nothing was moved", len(paths), FS_DELETE_MAX)
+	checked := make([]string, len(paths), context.temp_allocator)
+	for path, i in paths {
+		p, e := fs_delete_check(path, caller)
+		if e != "" do return nil, fmt.tprintf("%s: %s; nothing was moved", path == "" ? "(an empty path)" : path, e)
+		checked[i] = p
+	}
+	return fs_delete_merge(checked), ""
+}
+
+// The outermost of paths, in their order: a path inside another one of them goes with it, and the
+// same file again (another spelling of it on a volume that ignores case) is moved once. By the file
+// itself (device and inode: lstat for the paths, stat for the folders above them), and by the
+// path as written for what cannot be looked at. Two hard links to one file are two names: both
+// go. Temp allocator.
+fs_delete_merge :: proc(paths: []string) -> []string {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	File_Id :: struct {
+		dev, ino: u64,
+	}
+	id_of :: proc(p: string, follow: bool) -> (id: File_Id, dir, ok: bool) {
+		st: posix.stat_t
+		c := strings.clone_to_cstring(p, context.temp_allocator)
+		if (follow ? posix.stat(c, &st) : posix.lstat(c, &st)) != .OK do return {}, false, false
+		return {u64(st.st_dev), u64(st.st_ino)}, posix.S_ISDIR(st.st_mode), true
+	}
+	Seen :: struct {
+		index:  int,
+		parent: File_Id,
+		name:   string,
+	}
+	folders := make(map[File_Id]int, context.temp_allocator) // a folder of the batch: its index
+	files := make(map[File_Id]Seen, context.temp_allocator) // the first of each file
+	keep := make([]bool, len(paths), context.temp_allocator)
+	for p, i in paths {
+		keep[i] = true
+		id, dir, ok := id_of(p, false)
+		if !ok do continue
+		parent, _, _ := id_of(filepath.dir(p), true)
+		if s, dup := files[id]; dup && s.parent == parent && strings.equal_fold(s.name, filepath.base(p)) {
+			keep[i] = false // the same name again, in any case
+			continue
+		}
+		if id not_in files do files[id] = {i, parent, filepath.base(p)}
+		if dir && id not_in folders do folders[id] = i
+	}
+	for p, i in paths {
+		if !keep[i] do continue
+		// inside a folder of the batch: by its path as written, else by the folders above it on disk
+		for q, j in paths do if i != j && keep[j] && within(p, q) && (p != q || j < i) do keep[i] = false
+		for a := filepath.dir(p); keep[i] && len(a) > 1; a = filepath.dir(a) {
+			id, _, ok := id_of(a, true)
+			if !ok do continue
+			if j, in_batch := folders[id]; in_batch && j != i && keep[j] do keep[i] = false
+		}
+	}
+	out := make([dynamic]string, context.temp_allocator)
+	for p, i in paths do if keep[i] do append(&out, p)
+	return out[:]
+}
+
+// A batch's confirmation: how many, folders and files apart, then folders' names first (relative
+// to their project when all are in one; folders end in /), at most FS_DELETE_NAMED, then "and N
+// more", then the project: "Move 8 items to the Trash (3 folders, 5 files)? src/, docs/, .github/,
+// a.txt, b.txt, and 3 more (in /proj)". Every name on one line, nothing hidden or reordering
+// (one_line), cut to FS_DELETE_NAME_SHOWN; a name with a space, comma or quote in quotes (a file
+// named "and 3 more" cannot pass for the tail). One path: as delete_path's.
+fs_delete_summary :: proc(plan: []string) -> string {
+	if len(plan) == 1 do return fmt.tprintf("move %s to the Trash?", plan[0])
+	root := ""
+	for r in fs_roots() do if within(plan[0], r) && len(r) > len(root) do root = r
+	for p in plan do if root != "" && !within(p, root) do root = ""
+	shown :: proc(s: string, max: int, tail := false) -> string {
+		s := one_line(s, context.temp_allocator)
+		if len(s) <= max do return s
+		if !tail do return strings.concatenate({cut_utf8(s, max - len("…")), "…"}, context.temp_allocator)
+		i := len(s) - (max - len("…"))
+		for i < len(s) && s[i] & 0xC0 == 0x80 do i += 1
+		return strings.concatenate({"…", s[i:]}, context.temp_allocator)
+	}
+	dirs, files := make([dynamic]string, context.temp_allocator), make([dynamic]string, context.temp_allocator)
+	for p in plan {
+		if path_kind(p) == .Dir do append(&dirs, p)
+		else do append(&files, p)
+	}
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "move %d items to the Trash (", len(plan))
+	if len(dirs) > 0 do fmt.sbprintf(&b, "%d folder%s", len(dirs), len(dirs) == 1 ? "" : "s")
+	if len(dirs) > 0 && len(files) > 0 do strings.write_string(&b, ", ")
+	if len(files) > 0 do fmt.sbprintf(&b, "%d file%s", len(files), len(files) == 1 ? "" : "s")
+	strings.write_string(&b, ")? ")
+	n := 0
+	for group, g in ([2][]string{dirs[:], files[:]}) do for p in group {
+		if n == FS_DELETE_NAMED do break
+		if n > 0 do strings.write_string(&b, ", ")
+		n += 1
+		name := shown(root != "" && p != root ? p[len(root) + 1:] : p, FS_DELETE_NAME_SHOWN)
+		if g == 0 do name = strings.concatenate({name, "/"}, context.temp_allocator)
+		if !strings.contains_any(name, " ,\"") {
+			strings.write_string(&b, name)
+			continue
+		}
+		strings.write_byte(&b, '"')
+		for r in name {
+			if r == '"' do strings.write_byte(&b, '\'')
+			else do strings.write_rune(&b, r)
+		}
+		strings.write_byte(&b, '"')
+	}
+	if len(plan) > FS_DELETE_NAMED do fmt.sbprintf(&b, ", and %d more", len(plan) - FS_DELETE_NAMED)
+	if root != "" do fmt.sbprintf(&b, " (in %s)", shown(root, FS_DELETE_ROOT_SHOWN, tail = true))
+	return strings.to_string(b)
+}
+
+// Moves a checked path (fs_delete_check) to the Trash; what changed is told. restore_id: what
+// restore_path takes to put it back ("" = the Trash did not say where it went; fs_restore.odin).
+fs_trash_checked :: proc(p: string) -> (err: string, restore_id: string) {
+	fs_trash_why, fs_trash_where = "", ""
+	st: posix.stat_t
+	known := posix.lstat(strings.clone_to_cstring(p, context.temp_allocator), &st) == .OK
+	if !fs_trash_fn(p) {
+		why := fs_trash_why
+		fs_trash_why, fs_trash_where = "", ""
+		return why != "" ? why : "could not move it to the Trash", ""
+	}
+	where_ := fs_trash_where
+	fs_trash_where = ""
+	if known do restore_id = fs_trashed_add(p, where_, u64(st.st_dev), u64(st.st_ino))
 	fs_changed_ours(p)
 	window_files_deleted(p) // open buffers of them say so
+	return "", restore_id
+}
+
+// Why the last fs_trash_fn failed, when it could say ("" = the plain message): the Linux core's
+// XDG Trash (trash_xdg.odin). A constant or temp string; fs_delete reads and clears it.
+fs_trash_why: string
+
+CREDENTIAL_RENAME_REFUSED :: "credentials file: only you, in Deckhand's window, may rename it to a name that is not a credential's"
+CREDENTIAL_PLACE_REFUSED :: "a coding agent's sign-in or state is there (by where it is): only you, in Deckhand's window, may move or delete it"
+FS_IN_USE :: "a running terminal tab is in it: close it first"
+
+// A name file_read and `deckhand show` refuse by itself (settings_credential: agents' sign-ins;
+// show_secret: keys, .netrc…). Renaming one to another name would make it readable.
+fs_credential_named :: proc(path: string) -> bool {return settings_credential(path) || show_secret(path)}
+
+// The user at this machine's own window: not a browser, not another machine's core.
+fs_user_here :: proc(caller: Caller) -> bool {return caller.kind == .UI && !caller_from_web(caller) && !caller_from_hub(caller)}
+
+// A rename that changes only the case of the name (readme.md to README.md) on a volume that
+// ignores case: b "exists" because it is a, spelled otherwise. True only when both name the same file (lstat:
+// device and inode) and no entry in the folder is spelled b exactly (two names of one file, a
+// hard link on a volume that keeps case, is a real collision).
+fs_case_only_rename :: proc(a, b: string) -> bool {
+	if a == b || filepath.dir(a) != filepath.dir(b) || !strings.equal_fold(filepath.base(a), filepath.base(b)) do return false
+	sa, sb: posix.stat_t
+	if posix.lstat(strings.clone_to_cstring(a, context.temp_allocator), &sa) != .OK do return false
+	if posix.lstat(strings.clone_to_cstring(b, context.temp_allocator), &sb) != .OK do return false
+	if sa.st_dev != sb.st_dev || sa.st_ino != sb.st_ino do return false
+	entries, err := os.read_all_directory_by_path(filepath.dir(b), context.temp_allocator)
+	if err != nil do return false
+	for e in entries do if e.name == filepath.base(b) do return false
+	return true
+}
+
+// The running terminal tab on this machine whose folder is at or inside path, said as the refusal
+// ("" = none): the tab and its session to the user here, FS_IN_USE to anyone else. A shell tab's
+// own folder, else its session's. Cheap: a realpath per running tab.
+fs_in_use_by :: proc(path: string, caller: Caller) -> string {
+	rp := fs_real(path) // another spelling of it (a volume that ignores case) is the same folder
+	for &s in state.open_sessions do for t in s.tabs {
+		if t.status != .Running || t.machine != 0 || !tab_is_terminal(t) do continue
+		cwd := s.cwd
+		if _, is := t.kind.(Shell_Tab); is && t.cwd != "" do cwd = t.cwd
+		if cwd == "" do continue
+		rc := fs_real(cwd)
+		if !within(cwd, path) && !within(rc, path) && !within(rc, rp) do continue
+		if !fs_user_here(caller) do return FS_IN_USE
+		return fmt.tprintf("the tab \"%s\" (%s) is running in it: close that tab first", t.title != "" ? t.title : "terminal", open_session_title(&s, refresh = false))
+	}
 	return ""
+}
+
+// Whether a project path is inside .git, in any case (a volume that ignores case opens .GIT as .git).
+fs_in_git :: proc(rel: string) -> bool {
+	return strings.contains(strings.to_lower(strings.concatenate({"/", rel, "/"}, context.temp_allocator), context.temp_allocator), "/.git/")
+}
+
+// Whether path is at, above or inside a place whose files are credentials by where they are, not
+// by their names: pi's agent folder, Claude's config folders (also any folder holding
+// .credentials.json or .claude.json), Codex's homes and its sign-in's folder, a .codex folder
+// holding auth.json. HOME and above are never one (~/.claude.json lives in HOME). Real paths too.
+fs_credential_place :: proc(path: string) -> bool {
+	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
+	homes := [2]string{home, fs_real(home)}
+	home_or_above :: proc(d: string, homes: [2]string) -> bool {
+		if d == "" || d == "/" || d == "." do return true
+		for h in homes do if h != "" && within(h, d) do return true
+		return false
+	}
+	places := fs_credential_place_paths()
+	for p in ([2]string{path, fs_real(path)}) {
+		for x in places do if within(x, p) || within(p, x) do return true // at, above or inside
+		// inside (or at) a folder that is a place by what it holds
+		for d := p; !home_or_above(d, homes); d = filepath.dir(d) do if fs_credential_holder(d) do return true
+	}
+	return false
+}
+
+// The places fs_credential_place knows by where they are, as written and real, HOME and above
+// left out. A walk through many folders (a Files drag out, files_drag_out.odin) reads them once.
+// Temp allocator.
+fs_credential_place_paths :: proc() -> []string {
+	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
+	homes := [2]string{home, fs_real(home)}
+	places := make([dynamic]string, context.temp_allocator)
+	append(&places, pi_agent_dir())
+	for d in claude_config_dirs() do append(&places, d)
+	for d in claude_account_dirs(harness = .Codex) do append(&places, d)
+	if a := codex_auth_file(); a != "" do append(&places, filepath.dir(a))
+	out := make([dynamic]string, context.temp_allocator)
+	for pl in places do for x in ([2]string{strings.trim_right(pl, "/"), fs_real(pl)}) {
+		if x == "" || x == "/" || x == "." do continue
+		above := false // HOME or above: never a place
+		for h in homes do if h != "" && within(h, x) do above = true
+		if !above do append(&out, x)
+	}
+	return out[:]
+}
+
+// Whether folder d is a place by what it holds: a .codex folder with auth.json, a Claude config
+// folder (.credentials.json or .claude.json in it). Not by where it is (fs_credential_place).
+fs_credential_holder :: proc(d: string) -> bool {
+	if strings.equal_fold(filepath.base(d), ".codex") && os.exists(strings.concatenate({d, "/auth.json"}, context.temp_allocator)) do return true
+	return claude_marked_folder(d)
 }
 
 fs_reveal_path :: proc(path: string, caller: Caller) -> string {
@@ -772,7 +1097,7 @@ fs_reveal_path :: proc(path: string, caller: Caller) -> string {
 
 // list_dir's data: {"path", "entries": [{name, kind, git?, ignored?}]}.
 fs_list_json :: proc(path: string, caller: Caller, with_ignored := false) -> (data: string, err: string) {
-	p, _, e := fs_check(path, caller, allow_root = true)
+	p, _, e := fs_check_read(path, caller, allow_root = true)
 	if e != "" do return "", e
 	if path_kind(p) != .Dir do return "", "not a folder"
 	entries, lerr, pending := fs_list_dir(p, with_ignored)
@@ -969,4 +1294,66 @@ editors_renamed :: proc(from, to: string) {
 		window_view_moved(tab.id, np) // its buffer follows (tab_views.odin)
 	}
 	window_watch_sync()
+}
+
+// ---- find_files ----
+
+FIND_FILES_DEFAULT :: 100 // results when limit is not given
+FIND_FILES_MAX :: 500
+
+// find_files's data: the project's files (as the Files tree's filter lists them: git's list,
+// ignored ones left out; else a walk that skips hidden folders) that match every word of query,
+// best first (files_filter_match), relative to root: {root, paths, more?}. root: a known project
+// folder ("" = the caller's, as relative paths start: fs_base_for). Never inside .git; a file
+// settings_credential flags is left out for everyone; for anyone but the user here also anything
+// at or inside a credential place (fs_credential_place). Temp allocator.
+fs_find_files :: proc(root, query: string, limit: int, caller: Caller) -> (data: string, err: string) {
+	if strings.trim_space(query) == "" do return "", "query is empty"
+	base := root != "" ? root : fs_base_for(caller)
+	if base == "" do return "", "no project here: give root"
+	p, top, e := fs_check_read(base, caller, allow_root = true) // a listed checkout of a known project too (fs_read.odin)
+	if e != "" do return "", e
+	if list_index(fs_roots(), p) < 0 && p != top do return "", "root must be a project folder"
+	n := limit <= 0 ? FIND_FILES_DEFAULT : min(limit, FIND_FILES_MAX)
+	user := fs_user_here(caller)
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"root":`)
+	json_quote(&b, p)
+	strings.write_string(&b, `,"paths":[`)
+	shown, more := 0, false
+	// a project that is itself in a credential place: nothing for anyone else
+	if user || !fs_credential_place(p) {
+		files := fs_project_files(p)
+		ids := credential_ids() // once for every result
+		none: [1]Cred_Id
+		if len(ids) == 0 do ids = none[:0]
+		// fs_credential_place by folder, once each (the results are files: a place is a folder)
+		places := make(map[string]bool, context.temp_allocator)
+		for i in files_filter_match(files, query) {
+			rel := files[i]
+			if fs_in_git(rel) do continue
+			full := strings.concatenate({p, "/", rel}, context.temp_allocator)
+			if !user {
+				dir := tdir(full)
+				in_place, seen := places[dir]
+				if !seen {
+					in_place = fs_credential_place(dir)
+					places[dir] = in_place
+				}
+				if in_place do continue
+			}
+			if settings_credential(full, ids) do continue
+			if shown == n {
+				more = true
+				break
+			}
+			if shown > 0 do strings.write_byte(&b, ',')
+			json_quote(&b, rel)
+			shown += 1
+		}
+	}
+	strings.write_byte(&b, ']')
+	if more do strings.write_string(&b, `,"more":true`)
+	strings.write_byte(&b, '}')
+	return strings.to_string(b), ""
 }

@@ -486,7 +486,10 @@ handle_backslash :: proc(sj: ^Subj) -> ^Md_Inline {
 		sj.pos += 1
 		return mk(sj, .Text, sj.s[sj.pos - 1:sj.pos])
 	}
-	if sj.pos < len(sj.s) && skip_line_end(sj) do return mk(sj, .Linebreak)
+	if sj.pos < len(sj.s) && skip_line_end(sj) {
+		skip_spaces(sj) // the next line's leading spaces are not text (a lazy line keeps them in the block)
+		return mk(sj, .Linebreak)
+	}
 	return mk(sj, .Text, "\\")
 }
 
@@ -538,7 +541,9 @@ closing_backticks :: proc(sj: ^Subj, n: int) -> int {
 			sj.pos += 1
 			k += 1
 		}
-		if k <= MAX_BACKTICKS {
+		// the last run of each length: a scan from a later span must not move it back (after a full
+		// scan, a span's closer would else hide the runs after it)
+		if k <= MAX_BACKTICKS && (m.bt_gen[k] != m.gen || m.backticks[k] < sj.pos - k) {
 			m.backticks[k] = sj.pos - k
 			m.bt_gen[k] = m.gen
 		}

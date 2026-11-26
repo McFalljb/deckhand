@@ -2,7 +2,8 @@
 // docs/plans/background-core.md §7.1, §10.3 M4-C): the core, headless.
 //
 //   deckhand-core-serve serve --run DIR --data DIR [--ready PATH]   the core (serve.odin)
-//   deckhand-core-serve __detach serve ...                          launchd job entry for serve
+//   deckhand-core-serve __detach serve ...                          an older launcher's job entry for serve
+//                                                   (a handover from a core before #202)
 //   deckhand-core-serve check                       this core's facts, one JSON line (core_versions.odin)
 //   deckhand-core-serve install --data DIR          this Core.app into DIR/core/<v>/, made current;
 //                                                   prints the installed serve binary

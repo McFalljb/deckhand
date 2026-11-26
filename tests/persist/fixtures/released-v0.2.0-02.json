@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/dhx-cs-rs-1795698197240329000","added":true}],"selected_project":"$ROOT/dhx-cs-rs-1795698197240329000",
+"open_sessions":[{"agent":"claude","claude_session_id":"c5c5c5c5-0000-4000-8000-000000000001","pi_session_id":"","cwd":"$ROOT/dhx-cs-rs-1795698197240329000","session_dir":"","project":"$ROOT/dhx-cs-rs-1795698197240329000","tabs":[{"kind":"claude","claude_session_id":"c5c5c5c5-0000-4000-8000-000000000001","cwd":"$ROOT/dhx-cs-rs-1795698197240329000","account":"$ROOT/deckhand-test-home-1795698195669481000/.claude","args":["--verbose"]},{"kind":"shell","title":"shell 1","cwd":"$ROOT/dhx-cs-rs-1795698197240329000"}],"active_tab":1}],"current_session":0,
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"claude_sessions":[{"id":"c5c5c5c5-0000-4000-8000-000000000001","cwd":"$ROOT/dhx-cs-rs-1795698197240329000","project":"$ROOT/dhx-cs-rs-1795698197240329000","title":"restore me","used":1795698197,"account":"$ROOT/deckhand-test-home-1795698195669481000/.claude","args":["--verbose"]}],
+"sidebar":{"pinned_sessions":["c5c5c5c5-0000-4000-8000-000000000001"]},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"claude_account_last":"$ROOT/deckhand-test-home-1795698195669481000/.claude"}}

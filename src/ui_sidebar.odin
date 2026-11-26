@@ -240,7 +240,7 @@ menu_open :: proc(target: Menu_Target, at: [2]f32) {
 		menu.target = m
 	}
 	if l, ok := target.(Menu_Term_Link); ok do menu.target = Menu_Term_Link{tab_id = l.tab_id, url = strings.clone(l.url)}
-	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd), run = strings.clone(n.run), folder = strings.clone(n.folder)}
+	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd), run = strings.clone(n.run), folder = strings.clone(n.folder), flags = n.flags}
 	menu.at = at
 	menu.selected = -1
 	menu.open = true
@@ -288,11 +288,20 @@ menu_items :: proc() -> []core.Menu_Item {
 		pin_moves(&items, at, len(state.sidebar.pinned_projects), p.id, "")
 		// one "New session": the installed harnesses' picker (harness.odin)
 		append(&items, core.Menu_Item{label = "New session", picker = core.Menu_New_Session{project_id = p.id}})
+		// the same with flags typed first (ui_flags.odin): the picker's flags rows
+		if flags_picker_any(p.id) do append(&items, core.Menu_Item{label = "New session with flags…", picker = core.Menu_New_Session{project_id = p.id, flags = true}})
 		handoff_items(&items, p.id) // New session on <machine> in <project> (ui_handoff.odin)
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
-		// else a new one), once per account while there are several; only while it is installed
-		if p.group == .Projects && core.claude_installed() do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
-		if p.group == .Projects && core.codex_offered(p.id) do core.claude_account_items(&items, "New Codex tab", core.New_Claude_Tab{project_id = p.id, codex = true}) // once per Codex account while there are several (codex.odin)
+		// else a new one), once per account while there are several; only while it is installed;
+		// then the same with flags typed first (ui_flags.odin)
+		if p.group == .Projects && core.claude_offered(p.id) {
+			core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id, harness = .Claude})
+			append(&items, core.Menu_Item{label = "New Claude tab with flags…", cmd = core.New_Claude_Tab{project_id = p.id, harness = .Claude}, flags = true})
+		}
+		if p.group == .Projects && core.codex_offered(p.id) { // once per Codex account while there are several (codex.odin)
+			core.claude_account_items(&items, "New Codex tab", core.New_Claude_Tab{project_id = p.id, harness = .Codex})
+			append(&items, core.Menu_Item{label = "New Codex tab with flags…", cmd = core.New_Claude_Tab{project_id = p.id, harness = .Codex}, flags = true})
+		}
 		if core.folder_of(.Jobs) != "" do append(&items, core.Menu_Item{label = "New job for this project…", cmd = core.Job_Sheet{open = true, for_project = core.path_tilde(p.cwd)}})
 		append(&items, core.Menu_Item{label = "Rename…", rename = true})
 		sep(&items)
@@ -325,9 +334,10 @@ menu_items :: proc() -> []core.Menu_Item {
 			append(&items, core.Menu_Item{label = at >= 0 ? "Unpin" : "Pin", cmd = core.Set_Pinned{pi_session_id = t.pi_session_id, pinned = at < 0}})
 			pin_moves(&items, at, len(state.sidebar.pinned_sessions), 0, t.pi_session_id)
 		}
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin
-		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_offered(id) do core.claude_account_items(&items, "New Codex tab here", core.New_Claude_Tab{session = id, codex = true}) // codex.odin
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id, harness = .Claude}) // claude.odin
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_offered(id) do core.claude_account_items(&items, "New Codex tab here", core.New_Claude_Tab{session = id, harness = .Codex}) // codex.odin
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
+		else if core.pi_rename_offered(t.pi_session_id) do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a pi session open here: its running pi names it (pi_rename.odin)
 		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
 		pi_handoff_items(&items, t.project_id, t.pi_session_id) // Continue this conversation on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)
@@ -353,8 +363,8 @@ menu_items :: proc() -> []core.Menu_Item {
 			append(&items, core.Menu_Item{label = "Close session", cmd = core.Close_Session{session = id}})
 		}
 	case Menu_New:
-		for id in ([]string{"new_shell_tab", "new_claude_tab", "new_browser_tab", "new_app_tab", "new_chat", "new_session"}) {
-			if t.pane != 0 && (id == "new_chat" || id == "new_session") do continue // a pane's "+": tabs only
+		for id in ([]string{"new_shell_tab", "new_claude_tab", "new_claude_tab_flags", "new_codex_tab_flags", "new_browser_tab", "new_app_tab", "new_chat", "new_session", "new_session_flags"}) {
+			if t.pane != 0 && (id == "new_chat" || id == "new_session" || id == "new_session_flags") do continue // a pane's "+": tabs only
 			a := action_by_id(id)
 			if a == nil || !action_ok(id) do continue
 			label := a.label
@@ -369,7 +379,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			}
 			if id == "new_claude_tab" do label = action_label(a)
 			// several Claude accounts: one row per account (claude_accounts.odin)
-			if strings.has_prefix(id, "new_claude_") && core.claude_accounts_many() && core.claude_installed() || id == "new_codex_tab" && core.claude_accounts_many(codex = true) && core.codex_installed() {
+			if strings.has_prefix(id, "new_claude_") && !strings.has_suffix(id, "_flags") && core.claude_accounts_many(.Claude) && core.claude_installed() || id == "new_codex_tab" && core.claude_accounts_many(harness = .Codex) && core.codex_installed() {
 				if c, ok := a.make(); ok {
 					core.claude_account_items(&items, strings.trim_suffix(label, core.CLAUDE_MISSING_NOTE), c)
 					continue
@@ -416,15 +426,24 @@ menu_run :: proc(i: int) {
 	it := items[i]
 	target := menu.target
 	if ns, ok := it.picker.?; ok {
+		// With flags… in another machine's picker: that machine's run and folder first, as its other rows
+		if t, in_picker := target.(core.Menu_New_Session); in_picker && ns.flags && handoff_picker_stale(t) do return
 		// another menu's "New session": the picker opens where that menu was (harness.odin)
 		at := menu.at
 		cwd := strings.clone(ns.cwd, context.temp_allocator)
 		menu_close()
-		if core.id_machine(ns.project_id) != 0 do handoff_run(i, at) // New session on <machine>…: what row i showed (ui_handoff.odin)
+		if ns.flags do new_session_ui(ns.project_id, cwd, at, flags = true) // "… with flags…": this window's own rows (ui_flags.odin)
+		else if core.id_machine(ns.project_id) != 0 do handoff_run(i, at) // New session on <machine>…: what row i showed (ui_handoff.odin)
 		else do new_session_ui(ns.project_id, cwd, at)
 		return
 	}
 	if t, ok := target.(core.Menu_New_Session); ok && handoff_picker_stale(t) do return // that machine restarted (ui_handoff.odin)
+	if it.flags && it.cmd != nil { // "… with flags…": the palette asks for them first (ui_flags.odin)
+		cmd := core.command_clone(it.cmd, context.temp_allocator)
+		menu_close()
+		flags_open(cmd)
+		return
+	}
 	if _, ok := target.(core.Menu_New_Session); ok do harness_used(it.cmd) // first next time
 	if n, ok := target.(Menu_New); ok && n.pane != 0 do ui_do(core.Focus_Pane{pane = n.pane}) // new tabs open in the focused pane
 	if it.peek != 0 {
@@ -434,11 +453,13 @@ menu_run :: proc(i: int) {
 	}
 	if it.rename {
 		if t, ok := target.(Menu_Session); ok {
-			// a Claude session's row: its field takes the row (claude_rename on Enter)
+			// a Claude session's row: its field takes the row (claude_rename on Enter); a pi
+			// session's: pi_rename on Enter (its running pi names it)
 			delete(rename_session)
 			rename_session = strings.clone(t.pi_session_id)
 			title := ""
 			if r, _ := core.claude_record(t.pi_session_id); r != nil do title = r.title
+			else do title = pi_session_name(t.pi_session_id)
 			tf_set(&rename_field, title)
 			tf_select_all(&rename_field) // typing replaces it
 			ui_do(core.Set_Focus{"rename_session"})
@@ -577,6 +598,7 @@ tree_sync :: proc() {
 project_row_click :: proc(id: u64) {
 	tree_sync()
 	if id == state.selected_project {
+		core.files_tree_pick_project() // the Files tab shows it again (another project's session on screen)
 		tree.folded = !tree.folded
 		app.redraw = true
 		return
@@ -919,7 +941,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		// which agent it runs (a Claude-only session, else pi), and the account of several
 		harness := core.open_session_harness(s)
 		tag := "" // another machine's account is that machine's, unknown here: never this Mac's label
-		if !remote && s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account, ct.codex)
+		if !remote && s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(core.Claude_Tab); is do tag = core.claude_account_tag(ct.account, ct.harness)
 		if tag != "" {
 			right += text_w(tag, FONT_UI_SMALL)
 			n += 1
@@ -962,7 +984,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 			clay.TextDynamic(clip(lead, pw), txt(elsewhere ? th.accent : th.text_muted))
 			room -= pw
 		}
-		icon(core.harness_row_icon(harness, !live), th.text_muted, HARNESS_ICON_SIZE)
+		icon(core.open_session_row_icon(s, !live), th.text_muted, HARNESS_ICON_SIZE) // a Files session's: none
 		clay.TextDynamic(clip(title, room), txt(live ? mix(th.text_secondary, th.text, em) : th.text_muted))
 		if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 		spacer()
@@ -1709,13 +1731,15 @@ add_project_dialog :: proc() {
 	})
 }
 
-// Files dropped on the window at (x, y) framebuffer px. On the left column
-// folders become projects (files are ignored; the last one is selected). On
+// Files dropped on the window at (x, y) framebuffer px. On the Files tab's list they are copied
+// into the folder under the drop (files_finder_drop, ui_files_drops.odin); elsewhere on the left
+// column folders become projects (files are ignored; the last one is selected). On
 // the current tab's terminal the paths are pasted shell-quoted,
 // as other terminals do. Anywhere else: nothing.
 sidebar_drop :: proc(paths: []string, x, y: f32) {
 	if job_sheet_open() do return // the job sheet is modal: nothing behind it takes files
 	if over_sidebar(x) {
+		if files_finder_drop(paths, x, y) do return
 		for p in paths do if os.is_dir(p) do ui_do(core.Add_Project{cwd = p})
 		return
 	}
@@ -2277,4 +2301,12 @@ attention_view_toggle :: proc() {
 	if state.focus_widget == "files" do ui_do(core.Set_Focus{""}) // the Files or Settings tree had the keyboard
 	if !state.layout.left_open || state.layout.left_tab != .Sessions do ui_do(core.Set_Left_Tab{tab = .Sessions})
 	ui_do(core.Set_Sidebar_View{view = v})
+}
+
+// A pi session's title as its row shows it (the rename field starts with it; "" = none).
+@(private = "file")
+pi_session_name :: proc(id: string) -> string {
+	for s in state.sessions do if s.id == id do return s.title
+	for s in state.chats do if s.id == id do return s.title
+	return ""
 }

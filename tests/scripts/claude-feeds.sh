@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude status feeds in quiet test mode (docs/CLAUDE.md §5a, §6a, §6b): never a real claude, never
+# Claude status feeds in quiet test mode (docs/CLAUDE-TABS.md §5a, §6a, §6b): never a real claude, never
 # the user's ~/.claude. A fake HOME with a fake Claude config folder and a fake `claude` install
 # that is too old (~/.local/bin/claude -> versions/2.1.250, DECKHAND_CLAUDE_BIN; never run), the
 # fake claude (tests/scripts/fake-claude.py) in Claude tabs: the minimum-version bar, dots from the

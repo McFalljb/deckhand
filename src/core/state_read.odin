@@ -529,6 +529,17 @@ wire_read_struct :: proc(v: json.Value, data: rawptr, name: string, st: runtime.
 	if !ok do return ": wants an object"
 	for k in 0 ..< int(st.field_count) {
 		if wire_skip(name, st.names[k]) != nil do continue
+		if wire_codex_bool(name, st.names[k]) {
+			// the codex bool it replaced (state_wire.odin): false or absent is Claude Code's
+			cx := false
+			if x, has := obj[STATE_WIRE_CODEX_KEY]; has {
+				b, is := x.(json.Boolean)
+				if !is do return strings.concatenate({".", st.names[k], ": wants true or false"}, context.temp_allocator)
+				cx = bool(b)
+			}
+			(^Harness)(rawptr(uintptr(data) + st.offsets[k]))^ = cx ? .Codex : .Claude
+			continue
+		}
 		x, has := obj[wire_key(st.names[k], st.tags[k])]
 		if !has do continue
 		if e := wire_read(x, rawptr(uintptr(data) + st.offsets[k]), st.types[k], a); e != "" do return strings.concatenate({".", st.names[k], e}, context.temp_allocator)
@@ -536,7 +547,6 @@ wire_read_struct :: proc(v: json.Value, data: rawptr, name: string, st: runtime.
 	return ""
 }
 
-@(private = "file")
 wire_put_int :: proc(data: rawptr, size: int, n: i64) {
 	switch size {
 	case 1: (^u8)(data)^ = u8(n)
@@ -575,6 +585,14 @@ wire_free :: proc(data: rawptr, ti: ^runtime.Type_Info, a: runtime.Allocator) {
 		return // scalars: nothing held
 	}
 	mem.zero(data, ti.size)
+}
+
+// wire_clone without the read budget (the inbox's copy of a command, inbox.odin).
+wire_clone_unlimited :: proc(src, dst: rawptr, ti: ^runtime.Type_Info, a: runtime.Allocator) {
+	saved := read_budget
+	read_budget = max(int)
+	wire_clone(src, dst, ti, a)
+	read_budget = saved
 }
 
 // Copies the value at src (type ti) into dst (zeroed), its strings and arrays allocated with a

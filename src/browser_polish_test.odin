@@ -537,3 +537,12 @@ browser_find_close_releases_focus :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.focus_widget, "sidebar_filter")
 	state.focus_widget = ""
 }
+
+// The log line of a refused popup: its address without user:pass@.
+@(test)
+popup_report_line_redacted :: proc(t: ^testing.T) {
+	p := Page_Extra{popup_url = "https://user:pass@popup.example/x", popups_blocked = 2}
+	line := popup_report_line(&p)
+	testing.expectf(t, !strings.contains(line, "user:pass"), "%s", line)
+	testing.expect(t, strings.contains(line, "https://popup.example/x (2 blocked)"), line)
+}

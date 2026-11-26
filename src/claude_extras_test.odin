@@ -36,7 +36,7 @@ x_reset :: proc() -> runtime.Allocator {
 	}
 	core.persist = {}
 	core.dead_tab_reset()
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	core.platform = {quit = proc() {}}
 	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
@@ -51,7 +51,7 @@ x_reset :: proc() -> runtime.Allocator {
 x_done :: proc() {
 	core.inbox_drain()
 	for _, t in core.terms do core.reader_stop_and_close(t)
-	core.claude_installed_probe = nil
+	core.harness_installed_probe[.Claude] = nil
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 }
 
@@ -121,7 +121,7 @@ claude_dead_tab_bar :: proc(t: ^testing.T) {
 	defer x_done()
 	_, sess := x_session(t, "dead")
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 3")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id), "the fake exited")
 	_, tab, _ := core.find_tab(id)
 	testing.expect(t, core.tab_is_dead(tab), "a dead Claude tab shows the bar")
@@ -146,7 +146,7 @@ claude_restart_resumes :: proc(t: ^testing.T) {
 	dir, sess := x_session(t, "restart")
 	args := fmt.tprintf("%s/args", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
-	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, X_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}, harness = .Claude}, X_UI).created_id
 	core.run_command(core.Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556666", source = "startup"}, X_SCRIPT)
 	testing.expect(t, x_wait_exit(id))
 	// refusals
@@ -176,7 +176,7 @@ claude_restart_resumes :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(cl_args(id)), 2)
 	// a tab without a session id: a plain claude
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
-	id2 := core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
+	id2 := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id2))
 	os.remove(args)
 	os.set_env("DECKHAND_CLAUDE_CMD", x_args_cmd(args))
@@ -206,12 +206,12 @@ claude_restart_not_installed :: proc(t: ^testing.T) {
 	defer x_done()
 	_, sess := x_session(t, "c127")
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 127")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id))
 	_, tab, _ := core.find_tab(id)
 	testing.expect_value(t, tab.exit, core.Exit_Info{known = true, code = 127})
 	old := core.term_of(id)
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	toast_clear()
 	r := core.run_command(core.Claude_Restart{tab_id = id}, X_UI)
 	testing.expect(t, !r.ok)
@@ -229,7 +229,7 @@ claude_restart_not_installed :: proc(t: ^testing.T) {
 	testing.expect_value(t, tab.status, core.Tab_Status.Exited)
 	testing.expect_value(t, toast.text, "")
 	// installed since: Restart starts it
-	core.claude_installed_probe = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	testing.expect(t, core.run_command(core.Claude_Restart{tab_id = id}, X_UI).ok)
 	_, tab, _ = core.find_tab(id)
@@ -245,7 +245,7 @@ claude_dead_reopen_and_bell :: proc(t: ^testing.T) {
 	dir, sess := x_session(t, "reopen")
 	args := fmt.tprintf("%s/args", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 2")
-	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}}, X_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, args = {"--verbose"}, harness = .Claude}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id))
 	os.set_env("DECKHAND_CLAUDE_CMD", x_args_cmd(args))
 	core.run_command(core.Focus_Session{session = sess}, X_UI)
@@ -287,7 +287,7 @@ claude_restart_waits_for_old :: proc(t: ^testing.T) {
 	context.allocator = x_reset()
 	defer x_done()
 	_, sess := x_session(t, "hung")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, X_UI).created_id
 	core.drop_term(id)
 	tm := new(core.Term)
 	core.term_init(tm, 80, 24)
@@ -348,7 +348,7 @@ x_tone :: proc(tab_id: u64, id: string, row: int) -> core.Panel_Tone {
 @(private = "file")
 x_claude :: proc(t: ^testing.T, tag: string) -> (sess, id: u64) {
 	_, sess = x_session(t, tag)
-	id = core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
+	id = core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, X_UI).created_id
 	return
 }
 
@@ -564,7 +564,7 @@ x_comment_setup :: proc(t: ^testing.T, tag: string) -> (sess, br, id: u64, got: 
 	core.pane_add_tab(s, b) // in the session's pane (panes.odin)
 	br = b.id
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
-	id = core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
+	id = core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, X_UI).created_id
 	crop := core.comments_crop_path()
 	png := []u8{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3}
 	_ = os.write_entire_file(crop, png)
@@ -711,9 +711,9 @@ claude_restart_refused_unchanged :: proc(t: ^testing.T) {
 	defer x_done()
 	_, sess := x_session(t, "rrefused")
 	os.set_env("DECKHAND_CLAUDE_CMD", "exit 127")
-	id := core.run_command(core.New_Claude_Tab{session = sess}, X_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id))
-	core.claude_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	v := state.version
 	testing.expect(t, !core.run_command(core.Claude_Restart{tab_id = id}, X_UI).ok)
 	testing.expect_value(t, state.version, v)

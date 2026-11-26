@@ -31,7 +31,7 @@ DECKHAND_HOLDER_HOOKS"
 #     to change itself: SOCKET, TOKEN, CONTROL_TOKEN (pi and control; `deckhand --ctl` reads
 #     SOCKET and TOKEN, as Settings › Copy a control token gives them), CLAUDE_TOKEN, CLAUDE_TAB,
 #     CLAUDE_ACCOUNT and CODEX_ACCOUNT (read by the tab's own launch shell), CLI, SHOTS_DIR
-#     (deckhand-cli reads SOCKET, CLAUDE_TOKEN and SHOTS_DIR: docs/CLAUDE.md)
+#     (deckhand-cli reads SOCKET, CLAUDE_TOKEN and SHOTS_DIR: docs/CLAUDE-TABS.md)
 #   set for an app tab (APP) and a job run (JOB, RUN, RUN_DIR, SCHEDULED_AT: docs/ATLAS.md)
 #   the user's documented workarounds, read by the app: GUI_LAUNCH (=0 turns off the login-shell
 #     environment import, docs/DEVELOPING.md) and CEF_SHARED_TEXTURE (=0 the slower CPU paint

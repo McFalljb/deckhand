@@ -327,7 +327,7 @@ tab_drop_input :: proc(s: ^core.Open_Session, tab_id: u64) -> Tab_Drop_Input {
 	}
 	input := Tab_Drop_Input {
 		tab      = tab_id,
-		main     = len(s.tabs) > 0 ? s.tabs[0].id : 0,
+		main     = core.session_main_tab(s), // a Files session's: none
 		at_max   = len(s.panes) >= core.PANES_MAX,
 		edge_min = px(TAB_DROP_EDGE_MIN),
 		edge_max = px(TAB_DROP_EDGE_MAX),

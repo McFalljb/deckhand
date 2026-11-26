@@ -22,7 +22,7 @@ import "core:strings"
 import "core:time"
 
 Set_Left_Tab :: struct {
-	tab: Left_Tab,
+	tab: Left_Tab `cmd:"names=left_tab"`,
 }
 // Expands or collapses a folder in its tree (collapsing keeps the folders
 // below expanded for the next time, as file managers do).
@@ -39,7 +39,11 @@ Files_Reveal :: struct {
 	path: string,
 }
 Set_Files_Filter :: struct {
-	text: string,
+	text: string `cmd:"opt"`,
+}
+// Gitignored rows leave the tree (hide) or show again, dimmed (the default). Saved.
+Set_Files_Hide_Ignored :: struct {
+	hide: bool,
 }
 
 LEFT_TAB_NAMES := [Left_Tab]string {
@@ -82,6 +86,11 @@ files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 		state.files.filter = strings.clone(text)
 		files_state_gen += 1
 		return {ok = true}, true
+	case Set_Files_Hide_Ignored:
+		if c.hide == state.files.hide_ignored do return {ok = true}, false
+		state.files.hide_ignored = c.hide
+		files_state_gen += 1 // the rows are built again (and hidden ones leave the selection: files_rows)
+		return {ok = true}, true
 	case Files_Expand:
 		// keyed by the path as the tree shows it: a symlinked folder opens in
 		// place (fs_check would follow the link, out of the project or onto
@@ -101,7 +110,7 @@ files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 			if !c.expanded do return fail("a tree's root is always open"), false
 			return {ok = true}, false // already open: a tree's root always is
 		}
-		if strings.contains(strings.concatenate({"/", rel, "/"}, context.temp_allocator), "/.git/") do return fail("not inside .git"), false
+		if fs_in_git(rel) do return fail("not inside .git"), false
 		if c.expanded && path_kind(p) != .Dir do return fail("not a folder"), false
 		if !files_set_expanded(root, rel, c.expanded) do return {ok = true}, false
 		return {ok = true}, true
@@ -217,8 +226,18 @@ files_set_expanded :: proc(root, rel: string, on: bool) -> bool {
 // follow, within the same tree; so does the selection.
 files_renamed :: proc(from, to: string) {
 	root := fs_root_longest(from)
-	if root != "" && root == fs_root_longest(to) && from != root && to != root do files_renamed_in(root, from, to)
-	else if r := settings_tree_root(from); r != "" && r == settings_tree_root(to) do files_renamed_in(r, from, to)
+	nested := root != "" && root == from // a project folder inside another (the user's own move): its outer tree's
+	if nested do root = fs_root_above(from)
+	if root != "" && root == fs_root_longest(to) && from != root && to != root {
+		files_renamed_in(root, from, to)
+		// the folders open inside it were kept under its own folder (files_expand_key): now under the outer one
+		if nested {
+			rt := to[len(root) + 1:]
+			dirs := make([dynamic]string, context.temp_allocator)
+			for fr in state.files.expanded do if fr.root == from do for d in fr.dirs do append(&dirs, strings.concatenate({rt, "/", d}, context.temp_allocator))
+			for d in dirs do files_set_expanded(root, d, true)
+		}
+	} else if r := settings_tree_root(from); r != "" && r == settings_tree_root(to) do files_renamed_in(r, from, to)
 	for v in ([]^Files_View{&files_ui}) {
 		if v.cursor == from || strings.has_prefix(v.cursor, strings.concatenate({from, "/"}, context.temp_allocator)) {
 			files_select_in(v, strings.concatenate({to, v.cursor[len(from):]}, context.temp_allocator))
@@ -250,9 +269,10 @@ files_expanded_dirs :: proc(root: string) -> []string {
 // ---- the tree's root ----
 
 // The folder the Files tab is for: the session on screen's, else the
-// selected project's ("" = none). Real path.
+// selected project's ("" = none). Real path. A project selected after the session was shown
+// wins (files_tree_follows_session, files_session.odin).
 files_base :: proc() -> string {
-	if cs := cur(); cs != nil && !cs.home && cs.cwd != "" do return fs_real(cs.cwd)
+	if cs := cur(); cs != nil && !cs.home && cs.cwd != "" && files_tree_follows_session(cs) do return fs_real(cs.cwd)
 	if p := find_project(state.selected_project); p != nil && p.machine == 0 do return fs_real(p.cwd) // another machine's folder is not this Mac's
 	return ""
 }
@@ -305,6 +325,10 @@ walked: map[string]bool // folders the last rebuild listed (keys borrowed from f
 
 @(private = "file")
 walk_roots: []string // the known folders, while files_rows walks (temp allocator)
+@(private = "file")
+walk_hide: bool // ignored entries are left out while files_rows walks (hidden then lists them)
+@(private = "file")
+walk_hidden: map[string]bool // temp allocator
 
 // Bumped whenever a listing is (re)loaded or marked stale.
 files_cache_gen: u64
@@ -401,7 +425,9 @@ Files_View :: struct {
 	built:        bool,
 	repo_checked: string, // the root whose repository was registered (owned)
 	// UI state (ui_files.odin)
-	cursor:       string, // selected row's path (owned)
+	cursor:       string, // selected row's path (owned); the keyboard's row
+	selected:     map[string]bool, // the selection (owned keys; empty: the cursor alone): files_sel_*
+	anchor:       string, // where a shift-click or shift-arrow range starts (owned)
 	scroll:       f32, // logical px from the top of the rows
 	reveal:       bool, // scroll the cursor into view at the next layout
 	active_file:  string, // the editor file last revealed (owned)
@@ -418,12 +444,200 @@ tree_rows :: proc() -> []Files_Row {return files_rows(files_root())}
 files_select :: proc(path: string) {files_select_in(&files_ui, path)}
 
 files_select_in :: proc(v: ^Files_View, path: string) {
-	if v.cursor != path {
-		delete(v.cursor)
-		v.cursor = strings.clone(path)
-	}
+	files_sel_cursor(v, path)
+	files_sel_set(v, {path})
+	files_sel_anchor(v, path)
 	v.reveal = true
 	window_state_changed()
+}
+
+// ---- the selection (several rows: ⌘-click, shift-click, shift-arrows, ⌘A; the window's only) ----
+
+@(private = "file")
+files_sel_cursor :: proc(v: ^Files_View, path: string) {
+	if v.cursor == path do return
+	delete(v.cursor)
+	v.cursor = strings.clone(path)
+}
+
+@(private = "file")
+files_sel_anchor :: proc(v: ^Files_View, path: string) {
+	if v.anchor == path do return
+	delete(v.anchor)
+	v.anchor = strings.clone(path)
+}
+
+// The selection becomes paths (cloned).
+files_sel_set :: proc(v: ^Files_View, paths: []string) {
+	// cloned before the old ones go: paths may be (or point into) them
+	next := make(map[string]bool, max(len(paths), 1))
+	for p in paths do if p != "" && p not_in next do next[strings.clone(p)] = true
+	for k in v.selected do delete(k)
+	delete(v.selected)
+	v.selected = next
+}
+
+// Whether path is selected (the cursor alone, while nothing else is).
+files_sel_has :: proc(v: ^Files_View, path: string) -> bool {
+	if path == "" do return false
+	if len(v.selected) == 0 do return path == v.cursor
+	return path in v.selected
+}
+
+// A row a selection may hold: a file or folder (not "N more…" or a folder's error).
+files_sel_row_ok :: proc(r: Files_Row) -> bool {return r.more == 0 && r.error == "" && r.path != ""}
+
+// The selected paths that show, in row order (temp allocator); the cursor's when nothing else is.
+files_sel_paths :: proc(v: ^Files_View, rows: []Files_Row) -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	for r in rows do if files_sel_row_ok(r) && files_sel_has(v, r.path) do append(&out, r.path)
+	return out[:]
+}
+
+// A click on row i (press): alone, it selects only that row; ⌘ adds it or takes it out; shift
+// selects from the anchor to it (⌘⇧ adds that range). The cursor goes to the row; the anchor too,
+// but for shift.
+files_sel_click :: proc(v: ^Files_View, rows: []Files_Row, i: int, shift, cmd: bool) {
+	if i < 0 || i >= len(rows) || !files_sel_row_ok(rows[i]) do return
+	p := rows[i].path
+	switch {
+	case shift:
+		files_sel_range(v, rows, i, keep = cmd)
+	case cmd:
+		if len(v.selected) == 0 && v.cursor != "" do files_sel_set(v, {v.cursor}) // the cursor alone was the selection
+		if p in v.selected {
+			k, _ := delete_key(&v.selected, p)
+			delete(k)
+		} else {
+			v.selected[strings.clone(p)] = true
+		}
+		files_sel_anchor(v, p)
+		files_sel_cursor(v, p)
+		if len(v.selected) == 0 do v.selected[strings.clone(p)] = true // never nothing: the cursor's row stays
+	case:
+		files_sel_set(v, {p})
+		files_sel_anchor(v, p)
+		files_sel_cursor(v, p)
+	}
+	window_state_changed()
+}
+
+// The anchor's row to row i, selected (keep: added to what was); the cursor goes to i. An anchor
+// that does not show: the cursor's row, else i.
+files_sel_range :: proc(v: ^Files_View, rows: []Files_Row, i: int, keep := false) {
+	if i < 0 || i >= len(rows) do return
+	a := files_row_of(rows, v.anchor)
+	if a < 0 {
+		a = files_row_of(rows, v.cursor)
+		if a < 0 do a = i
+		files_sel_anchor(v, rows[a].path)
+	}
+	lo, hi := min(a, i), max(a, i)
+	out := make([dynamic]string, context.temp_allocator)
+	if keep {
+		if len(v.selected) == 0 && v.cursor != "" do append(&out, v.cursor)
+		for s in v.selected do append(&out, s)
+	}
+	for k in lo ..= hi do if files_sel_row_ok(rows[k]) do append(&out, rows[k].path)
+	files_sel_set(v, out[:])
+	files_sel_cursor(v, rows[i].path)
+	window_state_changed()
+}
+
+// ⌘A: every row that shows.
+files_sel_all :: proc(v: ^Files_View, rows: []Files_Row) {
+	out := make([dynamic]string, context.temp_allocator)
+	for r in rows do if files_sel_row_ok(r) do append(&out, r.path)
+	if len(out) == 0 do return
+	files_sel_set(v, out[:])
+	if files_row_of(rows, v.cursor) < 0 do files_sel_cursor(v, out[0])
+	window_state_changed()
+}
+
+// The ignored rows left out of the tree (hidden: their paths; anything below one is hidden too)
+// leave the selection; a hidden cursor (and anchor) goes to its nearest shown folder, "" at the
+// root. True: something changed.
+files_sel_drop_hidden :: proc(v: ^Files_View, root: string, hidden: map[string]bool) -> bool {
+	if len(hidden) == 0 do return false
+	is_hidden :: proc(p, root: string, hidden: map[string]bool) -> bool {
+		if p == "" || !within(p, root) do return false
+		for q := p; len(q) > len(root); q = filepath.dir(q) do if q in hidden do return true
+		return false
+	}
+	changed := false
+	if is_hidden(v.cursor, root, hidden) {
+		c := filepath.dir(v.cursor)
+		for is_hidden(c, root, hidden) do c = filepath.dir(c)
+		files_sel_cursor(v, c == root ? "" : c)
+		changed = true
+	}
+	if is_hidden(v.anchor, root, hidden) {
+		files_sel_anchor(v, v.cursor)
+		changed = true
+	}
+	keep := make([dynamic]string, context.temp_allocator)
+	dropped := false
+	for p in v.selected {
+		if is_hidden(p, root, hidden) do dropped = true
+		else do append(&keep, p)
+	}
+	if dropped {
+		if len(keep) == 0 && v.cursor != "" do append(&keep, v.cursor) // never nothing: the cursor's row
+		files_sel_set(v, keep[:])
+		changed = true
+	}
+	if changed do window_state_changed()
+	return changed
+}
+
+// Whether path is in the tree at root but hidden: ignored rows are hidden and it, or a folder above
+// it, is listed as ignored (by the listings cached now). The root never is.
+files_path_hidden :: proc(root, path: string) -> bool {
+	if !state.files.hide_ignored || path == "" || path == root || !within(path, root) do return false
+	for q := path; len(q) > len(root); q = filepath.dir(q) {
+		d := files_cache[filepath.dir(q)]
+		if d == nil do continue
+		if d.ignored do return true // listed inside an ignored folder
+		name := filepath.base(q)
+		for e in d.entries do if e.name == name {
+			if e.ignored do return true
+			break
+		}
+	}
+	return false
+}
+
+// Esc: the cursor's row alone. False: it was already (Esc then gives the keyboard back).
+files_sel_collapse :: proc(v: ^Files_View) -> bool {
+	if len(v.selected) <= 1 do return false
+	files_sel_set(v, {v.cursor})
+	files_sel_anchor(v, v.cursor)
+	window_state_changed()
+	return true
+}
+
+// Type-to-select: the row whose name starts with prefix (any case), from row `from` on, round to
+// the top; -1 = none. Typing the same letter again moves on to the next row with that letter.
+files_type_match :: proc(rows: []Files_Row, from: int, prefix: string) -> int {
+	if prefix == "" || len(rows) == 0 do return -1
+	starts :: proc(name, prefix: string) -> bool {
+		return len(name) >= len(prefix) && strings.equal_fold(name[:len(prefix)], prefix)
+	}
+	look :: proc(rows: []Files_Row, from: int, prefix: string) -> int {
+		n := len(rows)
+		start := clamp(from, 0, n - 1)
+		for k in 0 ..< n {
+			j := (start + k) % n
+			if files_sel_row_ok(rows[j]) && starts(rows[j].name, prefix) do return j
+		}
+		return -1
+	}
+	if j := look(rows, from, prefix); j >= 0 do return j
+	// "aaa" with no name starting so: the next row starting with "a" after the one at from
+	same := true
+	for k in 1 ..< len(prefix) do if prefix[k] != prefix[0] do same = false
+	if same && len(prefix) > 1 do return look(rows, from + 1, prefix[:1])
+	return -1
 }
 
 // The rows of the tree at root, rebuilt if anything they show changed.
@@ -449,8 +663,13 @@ files_rows :: proc(root: string) -> []Files_Row {
 		open := make(map[string]bool, context.temp_allocator)
 		for d in files_expanded_dirs(root) do open[d] = true
 		walk_roots = fs_roots() // once per rebuild (realpath per project)
+		walk_hide = state.files.hide_ignored
+		walk_hidden = make(map[string]bool, context.temp_allocator)
 		files_walk(&files_ui, root, "", 0, false, open, a)
 		walk_roots = nil
+		// rows the user cannot see are never selected (nothing hidden is trashed or moved)
+		if walk_hide do files_sel_drop_hidden(&files_ui, root, walk_hidden)
+		walk_hide, walk_hidden = false, nil
 		// listings of folders no longer shown are dropped: memory follows what is open
 		drop := make([dynamic]string, context.temp_allocator)
 		for k, _ in files_cache do if !(k in walked) do append(&drop, k)
@@ -479,8 +698,18 @@ files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, 
 	}
 	shown := 0
 	for e, i in d.entries {
+		if e.ignored && walk_hide {
+			walk_hidden[strings.concatenate({dir, "/", e.name}, context.temp_allocator)] = true
+			continue
+		}
 		if len(v.rows) >= FILES_ROWS_MAX || shown >= FILES_DIR_MAX {
-			append(&v.rows, Files_Row{path = strings.clone(dir, a), depth = depth, more = len(d.entries) - i})
+			// "N more…": the entries left that would show (hidden ignored ones are not counted)
+			more := 0
+			for x in d.entries[i:] {
+				if x.ignored && walk_hide do walk_hidden[strings.concatenate({dir, "/", x.name}, context.temp_allocator)] = true
+				else do more += 1
+			}
+			append(&v.rows, Files_Row{path = strings.clone(dir, a), depth = depth, more = more})
 			return
 		}
 		full := strings.concatenate({dir, "/", e.name}, a)
@@ -518,7 +747,22 @@ files_cached_dirs :: proc(dir: string) -> []string {
 @(private = "file")
 files_filter_rows :: proc(root: string, a: runtime.Allocator) {
 	files := fs_project_files(root)
-	words := strings.fields(state.files.filter, context.temp_allocator)
+	hits := files_filter_match(files, state.files.filter)
+	for i, n in hits {
+		if n >= FILES_FILTER_MAX {
+			append(&files_ui.rows, Files_Row{path = strings.clone(root, a), more = len(hits) - n})
+			break
+		}
+		rel := files[i]
+		full := strings.concatenate({root, "/", rel}, a)
+		append(&files_ui.rows, Files_Row{path = full, name = full[len(full) - len(filepath.base(rel)):], rel = full[len(root) + 1:], kind = .File})
+	}
+}
+
+// The indexes of the files (relative paths) that match every word of query, best first (a word
+// in the name counts double; ties in list order). The Files tree's filter and find_files. Temp.
+files_filter_match :: proc(files: []string, query: string) -> []int {
+	words := strings.fields(query, context.temp_allocator)
 	Hit :: struct {
 		i, score: int,
 	}
@@ -545,15 +789,9 @@ files_filter_rows :: proc(root: string, a: runtime.Allocator) {
 		if x.score != y.score do return x.score > y.score
 		return x.i < y.i
 	})
-	for h, n in hits {
-		if n >= FILES_FILTER_MAX {
-			append(&files_ui.rows, Files_Row{path = strings.clone(root, a), more = len(hits) - n})
-			break
-		}
-		rel := files[h.i]
-		full := strings.concatenate({root, "/", rel}, a)
-		append(&files_ui.rows, Files_Row{path = full, name = full[len(full) - len(filepath.base(rel)):], rel = full[len(root) + 1:], kind = .File})
-	}
+	out := make([]int, len(hits), context.temp_allocator)
+	for h, n in hits do out[n] = h.i
+	return out
 }
 
 // The row index of path (-1 = not shown).
@@ -562,12 +800,127 @@ files_row_of :: proc(rows: []Files_Row, path: string) -> int {
 	return -1
 }
 
+// Where New file / New folder's name field goes (ui_files.odin draws it as a row of its own): the
+// first child of dir, one level below its row; at the root, the first row. index: the row it
+// goes before; -1 = dir's row is not shown (a folder whose parent is closed, filter results).
+files_new_row_at :: proc(rows: []Files_Row, root, dir: string) -> (index, depth: int) {
+	if dir == root do return 0, 0
+	i := files_row_of(rows, dir)
+	if i < 0 || rows[i].kind != .Dir || rows[i].rel != "" do return -1, 0
+	return i + 1, rows[i].depth + 1
+}
+
 // The row of path's nearest shown folder above it, for a path not shown.
 files_parent_row :: proc(rows: []Files_Row, path: string) -> int {
 	for p := filepath.dir(path); len(p) > 1; p = filepath.dir(p) {
 		if i := files_row_of(rows, p); i >= 0 do return i
 	}
 	return -1
+}
+
+// ---- moving by drag (ui_files.odin: each move is a rename_path; the core keeps its rules) ----
+
+Files_Drop_Input :: struct {
+	sources:  []string, // what is dragged: paths captured at the press (never row indices)
+	root:     string, // the tree's root
+	over:     string, // the row under the pointer; "" = the empty space below the rows (the root)
+	over_dir: bool, // that row is a folder
+	exists:   proc(path: string) -> bool, // a name taken (os.exists; tests: a fake)
+}
+
+// Where a drop lands: dir, the folder the sources go into ("" = nowhere: no indicator). noop:
+// nothing moves (each is in dir already, or a lone item onto its own row); refused: why not (no
+// indicator; said on release).
+Files_Drop :: struct {
+	dir:     string,
+	noop:    bool,
+	refused: string,
+}
+
+Files_Move :: struct {
+	from, to: string,
+}
+
+// Where a drop at the row `over` lands, for the dragged sources: into a folder row, into a file
+// row's folder, below the rows into the root. Refused: into one of them or below it, or a name
+// taken in the folder (or two of them with one name). Temp allocator.
+files_drop_at :: proc(input: Files_Drop_Input) -> Files_Drop {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	if input.root == "" || len(input.sources) == 0 do return {}
+	dir := input.root
+	if input.over != "" do dir = input.over_dir ? input.over : filepath.dir(input.over)
+	if !within(dir, input.root) do return {}
+	srcs := files_drop_sources(input.sources)
+	// only this tree's items (the tree may show another root since the press), never the root
+	for s in srcs do if s == input.root || !within(s, input.root) {
+		return {dir = dir, refused = fmt.tprintf("%s is not in this tree", filepath.base(s))}
+	}
+	if len(srcs) == 1 && srcs[0] == input.over do return {dir = dir, noop = true}
+	for s in srcs do if within(dir, s) {
+		return {dir = dir, refused = fmt.tprintf("cannot move %s into itself", filepath.base(s))}
+	}
+	moves := files_drop_moves(srcs, dir)
+	if len(moves) == 0 do return {dir = dir, noop = true}
+	label := files_drop_dir_label(input.root, dir)
+	names := make(map[string]bool, len(moves), context.temp_allocator)
+	for m in moves {
+		name := filepath.base(m.to)
+		if name in names do return {dir = dir, refused = fmt.tprintf("two of them are named %s", name)}
+		names[name] = true
+		if input.exists != nil && input.exists(m.to) do return {dir = dir, refused = fmt.tprintf("%s already has %s", label, name)}
+	}
+	return {dir = dir}
+}
+
+// The sources without those inside another of them (a folder moves what is in it), in order.
+// Temp allocator.
+files_drop_sources :: proc(sources: []string) -> []string {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	set := make(map[string]bool, len(sources))
+	for s in sources do if s != "" do set[s] = true
+	taken := make(map[string]bool, len(sources))
+	out := make([dynamic]string)
+	outer: for s in sources {
+		if s == "" || s in taken do continue // a repeat: the first was taken
+		for d := filepath.dir(s); len(d) > 1 && d != "."; d = filepath.dir(d) do if d in set do continue outer
+		append(&out, s)
+		taken[s] = true
+	}
+	return out[:]
+}
+
+// The renames a drop into dir makes: each source (nested ones left out) not in dir already, to
+// dir/its name. Temp allocator.
+files_drop_moves :: proc(sources: []string, dir: string) -> []Files_Move {
+	context.allocator = context.temp_allocator // filepath.dir's copies
+	out := make([dynamic]Files_Move, context.temp_allocator)
+	for s in files_drop_sources(sources) {
+		if filepath.dir(s) == dir do continue
+		append(&out, Files_Move{from = s, to = strings.concatenate({dir, "/", filepath.base(s)}, context.temp_allocator)})
+	}
+	return out[:]
+}
+
+// What a drag dropped on a terminal pastes: every item it carries (nested ones once) when the
+// pressed row is among them, else that row alone. Temp allocator.
+files_drag_paste_paths :: proc(pressed: string, sources: []string) -> []string {
+	for s in sources do if s == pressed do return files_drop_sources(sources)
+	out := make([]string, 1, context.temp_allocator)
+	out[0] = pressed
+	return out
+}
+
+// A folder as a drop's toast and refusal name it: relative to the root, with "/" ("src/x/");
+// the root by its name ("proj/"). Temp allocator.
+files_drop_dir_label :: proc(root, dir: string) -> string {
+	if dir == root || !within(dir, root) do return strings.concatenate({filepath.base(dir), "/"}, context.temp_allocator)
+	return strings.concatenate({dir[len(root) + 1:], "/"}, context.temp_allocator)
+}
+
+// Whether the row at path is in the band a drop highlights: the target folder's row and what is
+// below it (the root: every row). Nothing while the drop moves nothing or is refused.
+files_drop_band :: proc(d: Files_Drop, path: string) -> bool {
+	return d.dir != "" && !d.noop && d.refused == "" && within(path, d.dir)
 }
 
 // "M", "A", "U", "D", "R", "!" for a porcelain code (and the folder mark "•").

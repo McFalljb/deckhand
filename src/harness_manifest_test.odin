@@ -349,7 +349,7 @@ harness_checklist_states :: proc(t: ^testing.T) {
 	// shows this row); New session still offers pi (unchecked counts as there)
 	f = facts_both(root)
 	f.bin[.Pi], f.real[.Pi], f.version[.Pi] = "", "", ""
-	f.pi_asking = true
+	f.asking[.Pi] = true
 	pi = item_of(core.harness_checklist(f), "pi")
 	testing.expect(t, pi.state == .Unchecked && pi.action == .None && pi.version == "" && core.harness_item_text(pi) == pi.note && pi.note != "", core.harness_item_text(pi))
 }

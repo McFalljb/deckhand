@@ -3,8 +3,8 @@ package main
 
 // deckhand-core-serve on Linux (docs/plans/background-core.md §10.4 M6-L1): no Obj-C shim. No
 // banners of its own (with no window attached, the hub raises them: §8.6), no App Nap, and no
-// Trash (platform.trash false: nothing is moved, fs_model.odin). platform_darwin.odin is the
-// macOS side.
+// Trash but the XDG one (core.trash_xdg: ~/.local/share/Trash, as file managers keep it).
+// platform_darwin.odin is the macOS side.
 
 import "core:c"
 import "core:fmt"
@@ -15,7 +15,13 @@ import "core:path/filepath"
 import "../core"
 
 dh_core_activity :: proc(on: c.int) {}
-dh_core_trash :: proc(path: cstring) -> c.int {return 0}
+// The XDG home trash; why it failed goes to fs_delete (core.fs_trash_why)
+// where_ is unused: trash_xdg sets core.fs_trash_where itself.
+dh_core_trash :: proc(path: cstring, where_: [^]u8, where_len: c.int) -> c.int {
+	why := core.trash_xdg(string(path))
+	core.fs_trash_why = why
+	return why == "" ? 1 : 0
+}
 dh_core_notify :: proc(title, body: cstring) -> c.int {return 0}
 
 // --ready is the launchd launcher's handshake (launchd_darwin.odin): never on Linux.

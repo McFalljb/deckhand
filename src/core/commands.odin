@@ -26,7 +26,7 @@ import "core:time"
 
 Add_Project :: struct {
 	cwd:     string, // added at the top if not listed yet (and shown again if hidden), then selected
-	machine: u64, // another machine's number (0 = this Mac): added there, by its core (machine_route.odin)
+	machine: u64 `cmd:"omit"`, // another machine's number (0 = this Mac): added there, by its core (machine_route.odin)
 }
 Select_Project :: struct {
 	project_id: u64,
@@ -41,10 +41,11 @@ Open_Session_Cmd :: struct {
 }
 New_Chat :: struct {
 	project_id: u64,
+	args:       []string `cmd:"omit,red=len:argc"`, // pi's extra flags (pi_args_check); the user's (and scripts') only
 }
 Focus_Session :: struct {
 	session: u64, // open session id
-	reopen:  bool, // the user opened it (its row, the palette): its pi starts again if it exited (UI only)
+	reopen:  bool `cmd:"ui,omit"`, // the user opened it (its row, the palette): its pi starts again if it exited (UI only)
 }
 // No session in the centre: the open sessions stay open and run on, none is current (the window's
 // Deck view shows them all there; ui_deck.odin), and the one that was is remembered (shown_before:
@@ -53,58 +54,58 @@ Show_No_Session :: struct {}
 // The next open session that needs the user, on any online machine, and its tab that does
 // (needing_you.odin: the order), focused as a click on that tab would. back: the previous one.
 Next_Needing_You :: struct {
-	back: bool,
+	back: bool `cmd:"omit"`,
 }
 // Stops an open session's tabs and forgets it (open sessions, saved
 // workspace); pi's session file stays. Confirms (class tab_close) while any
 // of its tabs would ask to close.
 Close_Session :: struct {
 	session:  u64,
-	confirm:  string,
-	ask:      bool, // always confirm, even with nothing running (the pi tab's × and ⌘W: UI only, not on the wire)
-	comments: Comments_Choice, // its pending comments (comments.odin): ask (the user's close prompt), drop; send is refused
+	confirm:  string `cmd:"omit,red=token"`,
+	ask:      bool `cmd:"ui,omit"`, // always confirm, even with nothing running (the pi tab's × and ⌘W: UI only, not on the wire)
+	comments: Comments_Choice `cmd:"omit,names=comments,codec=comments"`, // its pending comments (comments.odin): ask (the user's close prompt), drop; send is refused
 }
 New_Shell_Tab :: struct {
 	session: u64,
-	cwd:     string, // where the shell starts: a folder inside a project ("" = the session's folder)
-	pane:    u64, // the pane of the session it opens in (0 = the focused one; panes.odin)
+	cwd:     string `cmd:"omit"`, // where the shell starts: a folder inside a project ("" = the session's folder)
+	pane:    u64 `cmd:"omit"`, // the pane of the session it opens in (0 = the focused one; panes.odin)
 }
 Close_Tab :: struct {
 	tab_id:   u64, // a session's pi tab cannot be closed
-	confirm:  string, // token from a needs_confirmation result
-	comments: Comments_Choice, // the comments made on it (comments.odin): ask (the user's close prompt), send, drop
+	confirm:  string `cmd:"omit,red=token"`, // token from a needs_confirmation result
+	comments: Comments_Choice `cmd:"omit,names=comments,codec=comments"`, // the comments made on it (comments.odin): ask (the user's close prompt), send, drop
 }
 Focus_Tab :: struct {
 	tab_id: u64, // also makes its session current
 }
 // Panes (panes_commands.odin; docs/plans/split-panes.md).
 Split_Pane :: struct {
-	pane:      u64, // 0 = the current session's focused pane
-	direction: Pane_Dir, // where the new pane goes
-	tab_id:    u64, // moved into the new pane (0: a new shell tab there)
-	no_focus:  bool, // the wire's focus: false (the new pane gets the keyboard by default)
+	pane:      u64 `cmd:"omit"`, // 0 = the current session's focused pane
+	direction: Pane_Dir `cmd:"first,names=pane_dir,codec=pane_dir"`, // where the new pane goes
+	tab_id:    u64 `cmd:"omit"`, // moved into the new pane (0: a new shell tab there)
+	no_focus:  bool `cmd:"key=focus,omit,codec=inverse"`, // the wire's focus: false (the new pane gets the keyboard by default)
 }
 Close_Pane :: struct {
 	pane: u64, // its tabs join the neighbouring pane
 }
 Focus_Pane :: struct {
-	pane:      u64, // a pane, or 0 with a direction from the current session's focused pane
-	direction: string, // left, right, up, down, next, prev ("" with a pane)
+	pane:      u64 `cmd:"omit"`, // a pane, or 0 with a direction from the current session's focused pane
+	direction: string `cmd:"omit"`, // left, right, up, down, next, prev ("" with a pane)
 }
 Move_Tab :: struct {
 	tab_id: u64,
 	pane:   u64, // a pane of the tab's session (its own: a reorder)
-	index:  int, // strip position there (-1 = the end)
+	index:  int `cmd:"opt,def=-1,max=1073741824,nonneg"`, // strip position there (-1 = the end)
 }
 Set_Split :: struct {
 	split: u64, // a divider: a split node's id (the snapshot's layout)
-	ratio: f32, // its first child's share
+	ratio: f32 `cmd:"log=f3,full,opt,def=-1"`, // its first child's share
 }
 Equalize_Panes :: struct {
-	session: u64, // 0 = the current session
+	session: u64 `cmd:"omit"`, // 0 = the current session
 }
 Zoom_Pane :: struct {
-	pane: u64, // 0 = the current session's focused pane
+	pane: u64 `cmd:"omit"`, // 0 = the current session's focused pane
 	zoom: Maybe(bool), // true: it fills the panes' area; false: the layout comes back; unset: toggle
 }
 Copy_Selection :: struct {
@@ -112,11 +113,11 @@ Copy_Selection :: struct {
 }
 Send_Text :: struct {
 	tab_id:    u64,
-	text:      string, // pasted into the tab (bracketed if the app asked)
-	generated: bool, // Deckhand's text, not the user's (the window's file drop): a Codex composer's rule applies (codex.odin)
+	text:      string `cmd:"red=bytes"`, // pasted into the tab (bracketed if the app asked)
+	generated: bool `cmd:"omit"`, // Deckhand's text, not the user's (the window's file drop): a Codex composer's rule applies (codex.odin)
 }
 Set_Focus :: struct {
-	widget: string, // "" = the current tab's terminal; else a widget id (FOCUS_WIDGETS)
+	widget: string `cmd:"opt"`, // "" = the current tab's terminal; else a widget id (FOCUS_WIDGETS)
 }
 // Deckhand itself moves the keyboard (a sheet it opened, a new tab's URL field, an install's
 // setup sheet), without set_focus's caller rules: the window's former direct writes.
@@ -130,7 +131,7 @@ Focus_Release :: struct {
 }
 // The harness the New session picker lists first (harness.odin).
 Set_Last_Harness :: struct {
-	harness: Harness,
+	harness: Harness `cmd:"names=harness"`,
 }
 Set_Layout :: struct {
 	left_width:    Maybe(f32), // unset fields keep their value
@@ -145,13 +146,13 @@ Set_Panel :: struct {
 	open:  bool,
 }
 Cancel_Confirmation :: struct {
-	token: string,
+	token: string `cmd:"red=token"`,
 }
 Rescan :: struct {} // long-running: returns pending, finishes with an event
 Refresh_Shell_Env :: struct {} // long-running: asks the login shell again (login_env.odin); new tabs get it
 Quit :: struct {
-	confirm:       string,
-	stop_sessions: bool, // "Quit Deckhand and Stop All Sessions…": the session holder hangs up everything too
+	confirm:       string `cmd:"omit,red=token"`,
+	stop_sessions: bool `cmd:"omit"`, // "Quit Deckhand and Stop All Sessions…": the session holder hangs up everything too
 }
 Get_State :: struct {} // query: Result.data is the state JSON
 List_Commands :: struct {} // query: the commands this caller may send (command_table.odin)
@@ -160,34 +161,37 @@ List_Commands :: struct {} // query: the commands this caller may send (command_
 Set_Home :: struct {
 	open: bool,
 }
+// Starts the agent's pi (Home, as set_home's open does) without showing its drawer or moving the
+// keyboard: a phone's Start Atlas leaves the Mac's window as it is.
+Start_Home :: struct {}
 
 // The left column (sidebar.odin). A target is a project (project_id) or a
 // session (pi_session_id: a project's or a chat), not both.
 Set_Pinned :: struct {
-	cwd:           string, // a project by its folder (unpinning one that is not listed any more)
-	project_id:    u64,
-	pi_session_id: string,
+	cwd:           string `cmd:"omit"`, // a project by its folder (unpinning one that is not listed any more)
+	project_id:    u64 `cmd:"omit"`,
+	pi_session_id: string `cmd:"omit"`,
 	pinned:        bool,
-	index:         Maybe(int), // place among the pinned (also moves a pinned one); unset = last, or where it is
+	index:         Maybe(int) `cmd:"max=1073741824,pos"`, // place among the pinned (also moves a pinned one); unset = last, or where it is
 }
 Set_Hidden :: struct {
-	cwd:           string, // a project by its folder (showing one that is not listed any more)
-	project_id:    u64,
-	pi_session_id: string,
+	cwd:           string `cmd:"omit"`, // a project by its folder (showing one that is not listed any more)
+	project_id:    u64 `cmd:"omit"`,
+	pi_session_id: string `cmd:"omit"`,
 	hidden:        bool, // hidden items are left out of the list unless show_hidden; nothing is deleted
 }
 Set_Sort :: struct {
-	section: Sort_Section,
-	by:      Sort_By,
+	section: Sort_Section `cmd:"names=sort_section"`,
+	by:      Sort_By `cmd:"names=sort_by"`,
 }
 Set_Sidebar_Folded :: struct {
-	section: Sidebar_Fold,
+	section: Sidebar_Fold `cmd:"names=fold"`,
 	folded:  bool,
 }
 // The Sessions column's view: By project (the tree) or Attention (one list by what needs you).
 // The user's at this Mac only (a layout setting); saved.
 Set_Sidebar_View :: struct {
-	view: Sidebar_View,
+	view: Sidebar_View `cmd:"names=sidebar_view"`,
 }
 // Opens or collapses a parent or group row of the Projects tree (its folder
 // path; project_tidy.odin). Saved; collapsed by default.
@@ -206,12 +210,12 @@ Set_Filter :: struct {
 // Shows a project's folder, or a session's file, in the file manager.
 Reveal_Path :: struct {
 	project_id:    u64,
-	pi_session_id: string, // "" = the project's folder
+	pi_session_id: string `cmd:"omit"`, // "" = the project's folder
 }
 // Copies the same path to the clipboard.
 Copy_Path :: struct {
 	project_id:    u64,
-	pi_session_id: string,
+	pi_session_id: string `cmd:"omit"`,
 }
 
 // Removed (Start chats read-only): kept on the grow-only wire (schema/released-v1.json), always refused.
@@ -219,11 +223,11 @@ Set_Chats_Readonly :: struct {
 	on: bool,
 }
 // The default Claude Code flags for the tabs the user starts (user-only; claude_with_defaults), or
-// with codex (harness "codex") Codex's (codex_with_defaults).
+// with harness .Codex (wire: harness "codex") Codex's (codex_with_defaults).
 Set_Claude_Default_Flags :: struct {
 	skip_permissions: bool, // --dangerously-skip-permissions; Codex: --dangerously-bypass-approvals-and-sandbox
-	codex:            bool,
-	confirm:          string, // turning it on: the user's confirmation (confirm_gate)
+	harness:          Harness `cmd:"codec=harness_ct"`, // .Claude or .Codex (wire: harness "codex")
+	confirm:          string `cmd:"omit,red=token"`, // turning it on: the user's confirmation (confirm_gate)
 }
 Set_Agent_Name :: struct {
 	name: string, // "" = the default
@@ -231,7 +235,7 @@ Set_Agent_Name :: struct {
 // The agent's model (agent.odin): "provider/id", optionally ":thinking";
 // "" = pi's default. Passed as --model when Atlas starts.
 Set_Agent_Model :: struct {
-	model: string,
+	model: string `cmd:"opt"`,
 }
 // Shows the drawer and opens pi's model selector in Atlas's terminal.
 Agent_Model_Picker :: struct {}
@@ -341,18 +345,18 @@ Copy_Control_Token :: struct {}
 
 // User-only (caller ui or internal): settings that bound what agents may do.
 Set_Confirm_Policy :: struct {
-	caller: Caller_Kind, // script, control or panel
-	class:  Command_Class,
-	mode:   Confirm_Mode,
+	caller: Caller_Kind `cmd:"names=caller"`, // script, control or panel
+	class:  Command_Class `cmd:"names=class"`,
+	mode:   Confirm_Mode `cmd:"names=mode"`,
 }
 Set_Close_Confirm :: struct {
-	tab_kind: Tab_Kind_Id,
-	rule:     Close_Confirm,
+	tab_kind: Tab_Kind_Id `cmd:"names=tab_kind"`,
+	rule:     Close_Confirm `cmd:"names=close"`,
 }
 
 // Appearance (any caller but panels).
 Set_Theme :: struct {
-	name: Theme_Id,
+	name: Theme_Id `cmd:"names=theme"`,
 }
 Set_Reduce_Motion :: struct {
 	on: bool,
@@ -363,42 +367,46 @@ Set_Dim_Panes :: struct {
 }
 // The terminal and editor text size in points (0 = the look's own).
 Set_Terminal_Text_Size :: struct {
-	pt: int,
+	pt: int `cmd:"max=1000"`,
 }
 Set_Appearance :: struct {
-	mode: Appearance,
+	mode: Appearance `cmd:"names=appearance"`,
 }
 Set_Text_Size :: struct {
-	size: Text_Size,
+	size: Text_Size `cmd:"names=text_size"`,
 }
 
 // From a pi tab's bridge (docs/PROTOCOL.md §4). Over the socket the tab is
 // the caller's own (tab_id 0 = the token's tab); a pi tab may only report
 // for itself.
 Pi_Session_Update :: struct {
-	tab_id:        u64,
+	tab_id:        u64 `cmd:"opt"`,
 	pi_session_id: string,
-	session_file:  string,
-	cwd:           string,
+	session_file:  string `cmd:"opt"`,
+	cwd:           string `cmd:"opt"`,
 }
 Pi_Status_Update :: struct {
-	tab_id:   u64,
-	agent:    Agent_State,
+	tab_id:   u64 `cmd:"opt"`,
+	agent:    Agent_State `cmd:"names=agent"`,
 	waiting:  bool,
-	question: bool,
-	blockers: []string,
+	question: bool `cmd:"opt"`,
+	blockers: []string `cmd:"red=blockers,last"`,
+	// pi's model (a newer bridge; absent = not said: shown as none): its id, provider, thinking level
+	model:    string `cmd:"omit,codec=model_word"`,
+	provider: string `cmd:"omit,codec=model_word"`,
+	thinking: string `cmd:"omit,codec=model_word"`,
 }
 
 // A pi tab's panels (docs/PROTOCOL.md §5). Only the tab's own bridge may
 // publish them (tab_id 0 over the socket = the token's tab).
 Panel_Set :: struct {
-	tab_id: u64,
+	tab_id: u64 `cmd:"opt"`,
 	panel:  string,
-	title:  string,
-	rows:   []Panel_Row,
+	title:  string `cmd:"opt"`,
+	rows:   []Panel_Row `cmd:"red=items:rows,codec=rows"`,
 }
 Panel_Remove :: struct {
-	tab_id: u64,
+	tab_id: u64 `cmd:"opt"`,
 	panel:  string,
 }
 // Folds or unfolds a panel's section in the right column (any tab's).
@@ -411,22 +419,22 @@ Set_Panel_Collapsed :: struct {
 // `pending`, then a `finished` event with the bridge's result.
 Pi_Prompt :: struct {
 	tab_id: u64,
-	text:   string, // submitted as a user message; refused while pi is waiting
-	images: []Prompt_Image, // sent with it (comments.odin; Send now); at most COMMENT_IMAGES_MAX
+	text:   string `cmd:"red=bytes"`, // submitted as a user message; refused while pi is waiting
+	images: []Prompt_Image `cmd:"omit,red=items:images,codec=images"`, // sent with it (comments.odin; Send now); at most COMMENT_IMAGES_MAX
 }
 Pi_Reload :: struct {
 	tab_id:  u64,
-	confirm: string, // class session_restart
+	confirm: string `cmd:"omit,red=token"`, // class session_restart
 }
 // A pi tab whose process exited: pi starts again in it, on its session
 // (dead_tab.odin). pick_model: pi's model selector opens once it is up.
 Pi_Restart :: struct {
 	tab_id:     u64,
-	pick_model: bool,
+	pick_model: bool `cmd:"omit"`,
 }
 Pi_Wait_Idle :: struct {
 	tab_id:     u64,
-	timeout_ms: u64,
+	timeout_ms: u64 `cmd:"opt"`,
 }
 
 // Internal only (never parsed from JSON): posted by the app itself.
@@ -435,16 +443,16 @@ System_Appearance :: struct {
 }
 Tab_Exited :: struct {
 	tab_id: u64,
-	exit:   Exit_Info, // how it ended (waitpid), if reaped
+	exit:   Exit_Info `cmd:"codec=exit"`, // how it ended (waitpid), if reaped
 }
 Rescan_Done :: struct {
 	request_id: u64,
-	scan:       ^Scan_Result,
+	scan:       ^Scan_Result `cmd:"-,borrow"`, // handed over: apply_scan takes it
 }
 Refresh_Shell_Env_Done :: struct {
 	request_id: u64,
 	ok:         bool,
-	env:        []string, // the merged environment (heap, handed over; never logged)
+	env:        []string `cmd:"-,borrow"`, // the merged environment (heap, handed over; never logged)
 }
 // Internal only: one saved session back into State (persist.odin) with its
 // tabs not started. Focusing the session starts them (lazy restore).
@@ -456,7 +464,7 @@ Restore_Tab :: struct {
 	claude_id: string, // Claude tabs: the Claude session to resume ("" = a new one)
 	args:  []string, // Claude tabs: the user's extra flags
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
-	codex: bool, // Claude tabs: a Codex tab (codex.odin; saved as kind "codex")
+	harness: Harness, // Claude tabs: .Claude, or .Codex: a Codex tab (codex.odin; saved as kind "codex")
 	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
 	pane_active: bool, // with a layout: the tab its pane showed
 	held:  u32, // its process runs in the session holder's terminal `held` (adopted at launch)
@@ -492,7 +500,7 @@ Restore_Session :: struct {
 Bridge_Done :: struct { 	// a bridge answered (or dropped) a Pi_Prompt/Pi_Reload/Pi_Wait_Idle
 	request_id: u64,
 	ok:         bool,
-	error:      string,
+	error:      string `cmd:"omit"`,
 }
 
 // Internal only: the saved pins and hidden items back into State.
@@ -545,6 +553,7 @@ Command :: union {
 	Get_State,
 	List_Commands,
 	Set_Home,
+	Start_Home,
 	Set_Pinned,
 	Set_Hidden,
 	Set_Sort,
@@ -561,6 +570,7 @@ Command :: union {
 	Setup_Sheet,
 	Set_Chats_Readonly,
 	Set_Claude_Default_Flags,
+	Set_Harness_Flags, // harness_flags.odin
 	Set_Pi_Extension, // pi_integration.odin
 	Set_Agent_Name,
 	Set_Agent_Model,
@@ -616,6 +626,7 @@ Command :: union {
 	Pi_Reload,
 	Pi_Restart,
 	Pi_Wait_Idle,
+	Pi_Rename, // pi_rename.odin
 	Panel_Set,
 	Panel_Remove,
 	Set_Panel_Collapsed,
@@ -644,12 +655,17 @@ Command :: union {
 	Delete_Path,
 	Reveal_In_Finder,
 	Keep_Tab,
+	Fs_Copy,
+	Fs_Copy_Done,
+	Restore_Path,
+	Find_Files,
 	// the Files tab (files.odin)
 	Set_Left_Tab,
 	Files_Expand,
 	Files_Collapse_All,
 	Files_Reveal,
 	Set_Files_Filter,
+	Set_Files_Hide_Ignored,
 	// worktrees and branches (worktrees.odin)
 	List_Worktrees,
 	Files_Set_Root,
@@ -807,6 +823,7 @@ Command :: union {
 	Claude_Reload_Later,
 	Claude_Reload_Watch,
 	Claude_Reload_Kick,
+	Claude_Restart_Anyway,
 }
 
 // Widgets that can take keyboard focus (editor_*: the editor's find,
@@ -821,6 +838,7 @@ Result :: struct {
 	confirm_token:   string, // set with error "needs_confirmation" if this caller may confirm: resend with it
 	confirm_summary: string,
 	confirm_by_user: bool, // needs_confirmation: only the user can confirm (in the UI)
+	confirm_id:      u64, // needs_confirmation: the pending confirmation's id (Pending_Confirmation.id)
 	data:            string, // query results (JSON)
 	remote:          u64, // the machine that answered (machine_route.odin's route_result only; 0 = this one): "machine" beside data, never in it, so no local command's data can claim it
 }
@@ -842,6 +860,7 @@ Caller :: struct {
 	claude: bool, // kind panel: a Claude tab's plugin and CLI (claude.odin), not a pi tab's bridge
 	hub:    bool, // it came over a hub link (another machine's core, on_behalf): kept with a queued command, so a hub that is gone by the time it runs still counts (caller_from_hub)
 	web:    bool, // kind ui: a paired browser's (web access, web.odin): the user, with a hub's caps and no User_Here (web_may_run)
+	web_device: u64, // with web: which paired browser (web_device_key of its device id), kept with a queued command: its own filter (web_filters)
 }
 
 // The command came from another machine's core: its own link said so (kept with it in the inbox),
@@ -884,6 +903,9 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 			log_fln("Deckhand: BUG: the window process ran %s on its replica (it is the core's to run)", command_type(cmd))
 		}
 	}
+	outer_consumed := confirmation_consumed // a command run inside another's: its own
+	confirmation_consumed = 0
+	defer confirmation_consumed = outer_consumed
 	if !caller_may(caller, cmd) {
 		r = fail("not allowed for this caller")
 	} else if mr, routed := machine_route(cmd, caller, request_id); routed {
@@ -933,7 +955,8 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	}
 	_, q4 := cmd.(Editor_State)
 	_, q5 := cmd.(List_Dir)
-	if !q1 && !q2 && !q3 && !q4 && !q5 do emit_event(Command_Event{request_id = request_id, caller = caller, version = state.version, changed = changed, command = cmd, result = r})
+	_, q6 := cmd.(Find_Files) // a project's paths: its caller's only, as list_dir
+	if !q1 && !q2 && !q3 && !q4 && !q5 && !q6 do emit_event(Command_Event{request_id = request_id, caller = caller, version = state.version, changed = changed, command = cmd, result = r, confirmation = confirmation_consumed})
 	return r
 }
 
@@ -1149,14 +1172,18 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case New_Chat:
 		p := find_project(c.project_id)
 		if p == nil do return fail("no such project"), false
-		return open_new_session(p^, new_uuid(), "")
+		// pi's flags (harness_flags.odin): the user's own, then the defaults at the user's start
+		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail("only the user sets pi's flags"), false
+		if e := pi_args_check(c.args); e != "" do return fail(e), false
+		return open_new_session(p^, new_uuid(), "", extra = caller.kind == .UI ? harness_with_defaults(.Pi, c.args) : c.args)
 	case Worktree_Session:
 		p := find_project(c.project_id)
 		at, err := wt_session_check(p, c.path, listed = true)
 		if err != "" do return fail(err), false
-		if at == fs_real(p.cwd) do return open_new_session(p^, new_uuid(), "")
+		extra := caller.kind == .UI ? harness_with_defaults(.Pi, nil) : nil // the user's: pi's default flags
+		if at == fs_real(p.cwd) do return open_new_session(p^, new_uuid(), "", extra = extra)
 		// kept with the project's sessions (its store), running in the checkout
-		return open_new_session(p^, new_uuid(), "", cwd = at, session_dir = p.dir != "" ? p.dir : pi_store_dir(p.cwd))
+		return open_new_session(p^, new_uuid(), "", cwd = at, session_dir = p.dir != "" ? p.dir : pi_store_dir(p.cwd), extra = extra)
 	case Focus_Session:
 		s := find_session(c.session)
 		if s == nil do return fail("no such session"), false
@@ -1223,7 +1250,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Close_Tab:
 		s, tab, i := find_tab(c.tab_id)
 		if tab == nil do return fail("no such tab"), false
-		if i == 0 do return fail(s.agent == .Claude ? "a Claude session's main tab cannot be closed: close the session" : "a session's pi tab cannot be closed"), false
+		if i == 0 && s.agent != .Files do return fail(s.agent == .Claude ? "a Claude session's main tab cannot be closed: close the session" : "a session's pi tab cannot be closed"), false
 		// (an app tab in its own session: app_close, a session's agents closing what they opened)
 		_, is_app := tab.kind.(App_Tab)
 		if owns_tab(caller, c.tab_id) && !(is_app && c.tab_id != caller.tab_id) do return fail("a caller cannot close its own tab"), false
@@ -1247,6 +1274,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		shown := session_tab_shown(s, c.tab_id)
 		pane_tab_gone(s, c.tab_id) // its pane's next tab takes over (panes.odin)
 		ordered_remove(&s.tabs, i)
+		if files_session_close_if_empty(s.id, caller) do return {ok = true}, true // a Files session's last tab: the session goes (files_session.odin)
 		if shown && s.id == state.current_session do status_seen(s) // the tab that shows now is seen (agent_status.odin)
 		return {ok = true}, true
 	case Focus_Tab:
@@ -1381,6 +1409,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		claude_accounts_refresh() // Claude Code's config folders again, then each one's projects/ (claude_disk.odin)
 		claude_scan_prepare()
 		scan_thread = thread.create_and_start_with_poly_data(request_id, scan_worker)
+		rescan_at = time.tick_now()
 		return {ok = true, pending = true}, false
 	case Refresh_Shell_Env:
 		if !login_env.gui {
@@ -1394,6 +1423,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Refresh_Shell_Env_Done:
 		login_env_refresh_done(c.ok, c.env)
 		claude_recheck() // Claude Code may be on the new PATH (claude.odin)
+		codex_recheck() // and Codex (codex.odin)
 		pi_recheck() // and pi (harness.odin)
 		claude_accounts_refresh() // and CLAUDE_CONFIG_DIR may name another default (claude_accounts.odin)
 		harness_checklist_forget() // the coding agents checklist looks again when it next shows (harness_manifest.odin)
@@ -1452,43 +1482,22 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if state.focus_widget == "agent_input" do state.focus_widget = ""
 			return {ok = true}, true
 		}
-		// Atlas runs on pi (harness.odin): without it nothing starts and the user is told how to install it
-		if !agent_running() && !(caller.kind == .UI ? pi_installed_now() : pi_installed()) {
-			if caller.kind == .UI do window_toast(ATLAS_NEEDS_PI, err = true)
-			return fail(ATLAS_NEEDS_PI), false
-		}
-		if state.home == 0 {
-			if home_root == "" do return fail("the agent is not available (no data dir)"), false
-			s := Open_Session {
-				id            = new_id(),
-				pi_session_id = new_uuid(),
-				session_dir   = home_dir(),
-				cwd           = home_cwd(),
-				home          = true,
-			}
-			append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started})
-			s.active_tab = s.tabs[0].id
-			session_panes_init(&s)
-			append(&state.open_sessions, s)
-			state.home = s.id
-		}
-		hs := home_session()
-		ht := session_pi_tab(hs)
+		ht, sr := home_start(caller)
+		if ht == nil do return sr, false
 		state.agent.unread = 0
-		if ht.status == .Exited {
-			drop_term(ht.id) // starts again, resuming its session
-			forget_confirmations_for(ht.id) // the old agent's requests die with it
-			agent_picker = {} // the selector asked of the old pi
-			ht.status = .Not_Started
-			ht.agent, ht.waiting = .Unknown, false
-		}
-		start_restored_tabs(hs)
 		state.home_open = true
 		// its terminal has the keyboard, when the user opens it (only the user
 		// moves the keyboard there; a script's open leaves it where it is)
 		if (caller.kind == .UI || caller.kind == .Internal) && !harness_run_holds_sheet() do state.focus_widget = "agent_input"
 		if ht.status != .Running do return {ok = false, error = "could not start the agent's pi", created_id = ht.id}, true
 		return {ok = true, created_id = ht.id}, true
+	case Start_Home:
+		// the drawer and the keyboard stay as they are (a phone starts Atlas for itself)
+		running := home_tab() != nil && home_tab().status == .Running
+		ht, sr := home_start(caller)
+		if ht == nil do return sr, false
+		if ht.status != .Running do return {ok = false, error = "could not start the agent's pi", created_id = ht.id}, true
+		return {ok = true, created_id = ht.id}, !running
 	case Set_Pinned:
 		key, is_project, err := sidebar_target(c.cwd, c.project_id, c.pi_session_id, !c.pinned)
 		if err != "" do return fail(err), false
@@ -1543,6 +1552,15 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Set_Filter:
 		sb := &state.sidebar
 		ch := false
+		if caller_from_web(caller) {
+			// a browser's filter is its own (web_view.odin web_filters); Show hidden is one setting
+			ch = web_filter_apply(c, caller.web_device != 0 ? caller.web_device : web_device_key(window_link_web_device()))
+			if b, ok := c.show_hidden.?; ok && b != sb.show_hidden {
+				sb.show_hidden = b
+				ch = true
+			}
+			return {ok = true}, ch
+		}
 		if text, ok := c.text.?; ok {
 			text = cut_utf8(one_line(text, context.temp_allocator), FILTER_MAX)
 			if text != sb.filter {
@@ -1593,16 +1611,19 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Set_Chats_Readonly:
 		return fail(CHATS_READONLY_REMOVED), false
 	case Set_Claude_Default_Flags:
-		on := c.codex ? &state.settings.codex_full_access : &state.settings.claude_skip_permissions
+		claude_harness_check(c.harness)
+		on := harness_is_codex(c.harness) ? &state.settings.codex_full_access : &state.settings.claude_skip_permissions
 		if on^ == c.skip_permissions do return {ok = true}, false
 		// on: the user confirms first, with the warning (a saved setting coming back does not ask)
 		if c.skip_permissions && caller.kind != .Internal {
-			gr, go_on, ch := confirm_gate(cmd, .Settings_Write, caller, c.confirm, c.codex ? CODEX_FULL_ACCESS_CONFIRM : CLAUDE_SKIP_CONFIRM, force_ask = true)
+			gr, go_on, ch := confirm_gate(cmd, .Settings_Write, caller, c.confirm, harness_is_codex(c.harness) ? CODEX_FULL_ACCESS_CONFIRM : CLAUDE_SKIP_CONFIRM, force_ask = true)
 			if !go_on do return gr, ch
 		}
 		on^ = c.skip_permissions
 		settings_gen += 1 // the Settings tab's row
 		return {ok = true}, true
+	case Set_Harness_Flags:
+		return harness_flags_apply(c) // harness_flags.odin
 	case Set_Agent_Name:
 		name := strings.clone(cut_utf8(strings.trim_space(one_line(c.name, context.temp_allocator)), AGENT_NAME_MAX))
 		if name == state.settings.agent_name {
@@ -1796,8 +1817,11 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if tab_held_away(tab) == 0 do socket_forget_tab(tab.id)
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi do comments_pi_exited(ts) // pending comments wait for the next pi
 		claude_tab_gone(tab) // a Claude tab: what it held goes
-		// claude not found (the tab's command exits 127): look for it again before the next start
-		if _, is_cl := tab.kind.(Claude_Tab); is_cl && c.exit.known && c.exit.code == 127 do claude_recheck()
+		// claude (or codex) not found (the tab's command exits 127): look for it again before the next start
+		if ct, is_cl := tab.kind.(Claude_Tab); is_cl && c.exit.known && c.exit.code == 127 {
+			if harness_is_codex(ct.harness) do codex_recheck()
+			else do claude_recheck()
+		}
 		if _, is_pi := tab.kind.(Pi_Tab); is_pi && c.exit.known && c.exit.code == 127 do pi_recheck()
 		return {ok = true}, true
 	case Pi_Restart:
@@ -1867,6 +1891,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		clear(&tab.blockers)
 		for b in c.blockers do append(&tab.blockers, strings.clone(b))
 		reload_status_changed(tab) // a reload or restart waiting for idle goes now (reload.odin)
+		pi_tab_model_set(tab, c) // its model, for the tab's tooltip
 		// unknown = the last bridge connection is gone: its panels go too
 		// (the bridge publishes them again after it reconnects)
 		if c.agent == .Unknown do tab_clear_panels(tab)
@@ -1942,6 +1967,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if !socket_bridge_send(c.tab_id, request_id, cmd) do return fail("no bridge connected for this tab"), ch
 		reload_sent(tab, request_id) // hot reload's bookkeeping (reload.odin)
 		return {ok = true, pending = true}, true
+	case Pi_Rename:
+		return pi_rename_apply(c, caller, request_id) // through the tab's bridge (pi_rename.odin)
 	case Pi_Wait_Idle:
 		_, tab := pi_tab(c.tab_id)
 		if r, bad := bridge_target(tab, caller); bad do return r, false
@@ -1952,9 +1979,9 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		sent := comments_bridge_done(c.request_id, c.ok) // Send now's pi.prompt (comments.odin)
 		emit_event(Finished_Event{request_id = c.request_id, result = {ok = c.ok, error = c.error}})
 		return {ok = true}, sent
-	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done:
+	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done, Fs_Copy, Fs_Copy_Done, Restore_Path, Find_Files:
 		return tab_host_apply(cmd, caller, request_id) // editor: the window hosts it (tabhost_route.odin)
-	case Set_Left_Tab, Files_Expand, Files_Collapse_All, Files_Reveal, Set_Files_Filter:
+	case Set_Left_Tab, Files_Expand, Files_Collapse_All, Files_Reveal, Set_Files_Filter, Set_Files_Hide_Ignored:
 		return files_apply(cmd, caller)
 	case List_Worktrees, Files_Set_Root, Worktree_Cleanup, Worktree_Cleanup_Done, Worktrees_Done:
 		return worktrees_apply(cmd, caller, request_id)
@@ -1979,7 +2006,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			claude_disk_rescan()
 			// an added account's projects (scan_projects: on the Rescan worker)
 			// (one running: once more after it, so every account added at once is scanned)
-			if a, is := cmd.(Add_Claude_Account); is && !a.codex && caller.kind == .UI { // a Codex home holds no projects
+			if a, is := cmd.(Add_Claude_Account); is && !harness_is_codex(a.harness) && caller.kind == .UI { // a Codex home holds no projects
 				if scan_thread == nil do run_command(Rescan{}, {kind = .Internal})
 				else do claude_rescan_again = true
 			}
@@ -2019,7 +2046,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return reload_apply(cmd, caller, request_id)
 	case Set_Pi_Extension:
 		return pi_integration_apply(cmd, caller)
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick, Claude_Restart_Anyway:
 		return claude_reload_apply(cmd, caller, request_id)
 	case Restore_Session:
 		if c.home {
@@ -2105,25 +2132,30 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 		return pane_add_tab(s, Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(url)}, title = strings.clone(rt.title != "" ? rt.title : "Browser"), status = .Not_Started}).id
 	}
 	if rt.kind == .Claude {
-		if rt.claude_id != "" && !(rt.codex ? codex_id_ok(rt.claude_id) : claude_id_ok(rt.claude_id)) do return 0
-		if claude_args_check(rt.args) != "" || (rt.codex && len(rt.args) > 0) do return 0
+		claude_harness_check(rt.harness)
+		if rt.claude_id != "" && !(harness_is_codex(rt.harness) ? codex_id_ok(rt.claude_id) : claude_id_ok(rt.claude_id)) do return 0
+		if (harness_is_codex(rt.harness) ? codex_args_check(rt.args) : claude_args_check(rt.args)) != "" do return 0
 		args := make([]string, len(rt.args))
 		for a, i in rt.args do args[i] = strings.clone(a)
 		// its account: an absolute folder; checked again at its start (claude_start: configured only)
 		acct := filepath.is_abs(rt.account) ? rt.account : ""
-		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, account = strings.clone(acct), codex = rt.codex}, title = strings.clone(rt.codex ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
+		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, account = strings.clone(acct), harness = rt.harness}, title = strings.clone(harness_is_codex(rt.harness) ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 	}
 	if rt.kind != .Shell do return 0
 	title := rt.title != "" ? strings.clone(rt.title) : fmt.aprintf("shell %d", len(s.tabs))
 	return pane_add_tab(s, Tab{id = new_id(), kind = Shell_Tab{}, title = title, status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 }
 
+// The pending confirmation the command now running consumed (confirm_gate), for its event.
+confirmation_consumed: u64
+
 // Policy check for a destructive command of `class`. Auto: go ahead.
 // Without a token: park it and ask; the token goes only to a caller that may
 // use it (the user, or a caller trusted for this class). With a token: it must
 // match a parked command with the same target, and the resending caller must
 // be the user or that same trusted caller.
-confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false) -> (r: Result, proceed: bool, changed: bool) {
+confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false, skip := false) -> (r: Result, proceed: bool, changed: bool) {
+	if skip && token == "" && !force_ask do return {}, true, false // the command's own rule says no confirmation (files_delete_unasked)
 	mode := force_ask ? Confirm_Mode.Ask : confirm_mode(caller, class) // force_ask: the user confirms, whatever the policy
 	if mode == .Auto do return {}, true, false
 	summary := asked_by(caller, what)
@@ -2134,7 +2166,7 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 			if p.caller != caller do continue
 			mine += 1
 			if !same_target(p.command, cmd) do continue
-			r = {error = "needs_confirmation", confirm_summary = p.summary}
+			r = {error = "needs_confirmation", confirm_summary = p.summary, confirm_id = p.id}
 			if caller.kind == .UI || mode == .Trusted do r.confirm_token = p.token
 			else do r.confirm_by_user = true
 			return r, false, false
@@ -2146,9 +2178,10 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 			command = command_clone(cmd, context.allocator),
 			class   = class,
 			caller  = caller,
+			id      = new_id(),
 		}
 		append(&state.pending_confirmations, p)
-		r = {error = "needs_confirmation", confirm_summary = p.summary}
+		r = {error = "needs_confirmation", confirm_summary = p.summary, confirm_id = p.id}
 		if caller.kind == .UI || mode == .Trusted do r.confirm_token = p.token
 		else do r.confirm_by_user = true
 		window_confirmation_parked(p.summary, r.confirm_by_user) // the bar shows it (window_link.odin)
@@ -2159,6 +2192,7 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 		by_user := caller.kind == .UI
 		by_trusted := !force_ask && caller == p.caller && confirm_mode(p.caller, p.class) == .Trusted
 		if !by_user && !by_trusted do return fail("only the user can confirm this, in Deckhand"), false, false
+		confirmation_consumed = p.id // the run's command event says which (run_command)
 		ordered_remove(&state.pending_confirmations, i)
 		window_state_changed() // consumed: callers that go on (Quit) may answer "not changed"
 		return {}, true, true
@@ -2303,7 +2337,7 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok
 	case Set_Claude_Default_Flags:
 		y, ok := b.(Set_Claude_Default_Flags)
-		return ok && x.skip_permissions == y.skip_permissions && x.codex == y.codex
+		return ok && x.skip_permissions == y.skip_permissions && x.harness == y.harness
 	case Update_Install:
 		_, ok := b.(Update_Install)
 		return ok
@@ -2318,7 +2352,10 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok
 	case Claude_Restart_Changed:
 		y, ok := b.(Claude_Restart_Changed)
-		return ok && x.update == y.update && x.all == y.all
+		return ok && x.update == y.update && x.all == y.all && harness_is_codex(x.harness) == harness_is_codex(y.harness)
+	case Claude_Restart_Anyway:
+		y, ok := b.(Claude_Restart_Anyway)
+		return ok && x.tab_id == y.tab_id
 	// file commands are parked with absolute paths (editor_apply resolves them first)
 	case Machine_Remove:
 		y, ok := b.(Machine_Remove)
@@ -2331,7 +2368,9 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok && x.on == y.on
 	case Delete_Path:
 		y, ok := b.(Delete_Path)
-		return ok && x.path == y.path
+		if !ok || x.path != y.path || len(x.paths) != len(y.paths) do return false
+		for p, i in x.paths do if p != y.paths[i] do return false
+		return true
 	case Create_File:
 		y, ok := b.(Create_File)
 		return ok && x.path == y.path
@@ -2341,6 +2380,9 @@ same_target :: proc(a, b: Command) -> bool {
 	case Rename_Path:
 		y, ok := b.(Rename_Path)
 		return ok && x.from == y.from && x.to == y.to
+	case Fs_Copy:
+		y, ok := b.(Fs_Copy)
+		return ok && x.from == y.from && x.to == y.to && x.unique == y.unique
 	case Worktree_Cleanup:
 		y, ok := b.(Worktree_Cleanup)
 		return ok && x.path == y.path
@@ -2360,6 +2402,42 @@ same_target :: proc(a, b: Command) -> bool {
 HOME_NOT_A_SESSION :: "the agent is not a session tab: show it with set_home"
 CHATS_NOT_A_PROJECT :: "Chats is not a project: its sessions are in state.chats (new_chat with its project_id starts one)"
 
+// Makes Home's session on first use and starts its pi when it is not running (set_home's open,
+// start_home). nil: it cannot start (the Result says why).
+home_start :: proc(caller: Caller) -> (^Tab, Result) {
+	// Atlas runs on pi (harness.odin): without it nothing starts and the user is told how to install it
+	if !agent_running() && !(caller.kind == .UI ? pi_installed_now() : pi_installed()) {
+		if caller.kind == .UI && !caller_from_web(caller) do window_toast(ATLAS_NEEDS_PI, err = true) // a browser shows the result's error itself
+		return nil, fail(ATLAS_NEEDS_PI)
+	}
+	if state.home == 0 {
+		if home_root == "" do return nil, fail("the agent is not available (no data dir)")
+		s := Open_Session {
+			id            = new_id(),
+			pi_session_id = new_uuid(),
+			session_dir   = home_dir(),
+			cwd           = home_cwd(),
+			home          = true,
+		}
+		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started})
+		s.active_tab = s.tabs[0].id
+		session_panes_init(&s)
+		append(&state.open_sessions, s)
+		state.home = s.id
+	}
+	hs := home_session()
+	ht := session_pi_tab(hs)
+	if ht.status == .Exited {
+		drop_term(ht.id) // starts again, resuming its session
+		forget_confirmations_for(ht.id) // the old agent's requests die with it
+		agent_picker = {} // the selector asked of the old pi
+		ht.status = .Not_Started
+		ht.agent, ht.waiting = .Unknown, false
+	}
+	start_restored_tabs(hs)
+	return ht, {ok = true}
+}
+
 // The caller is the agent itself (its control token is bound to Home's tab).
 home_bound :: proc(caller: Caller) -> bool {
 	ht := home_tab()
@@ -2367,6 +2445,20 @@ home_bound :: proc(caller: Caller) -> bool {
 }
 
 PENDING_PER_CALLER :: 3 // confirmations one caller (not the user) may have waiting at once
+
+// A Files session left without tabs (its last one closed, or the file it was made for did not
+// open) closes (files_session.odin). True: it did.
+files_session_close_if_empty :: proc(id: u64, caller: Caller) -> bool {
+	s := find_session(id)
+	if s == nil || s.agent != .Files || len(s.tabs) > 0 do return false
+	if files_open_pending(id) { 	// an open on its way: its tab comes; no pane meanwhile (whole without one)
+		session_panes_free(s)
+		s.active_tab = 0
+		return false
+	}
+	close_session(id, caller)
+	return true
+}
 
 // Stops an open session's tabs and removes it (and its pending
 // confirmations); the current session moves to the last other open one.
@@ -2397,7 +2489,7 @@ close_session :: proc(id: u64, caller: Caller) {
 	if state.shown_before == id do state.shown_before = 0
 	if state.current_session == id {
 		state.current_session = 0
-		#reverse for o in state.open_sessions do if !o.home {
+		#reverse for o in state.open_sessions do if !o.home && !(o.agent == .Files && len(o.tabs) == 0) { // never an empty Files session (its open on the way)
 			focus_session(o.id, caller) // an agent's close never starts the next one's Claude tabs
 			break
 		}
@@ -2462,7 +2554,7 @@ refresh_listing :: proc(s: ^Open_Session) {
 }
 
 // caller: who brings it up. An agent's (control) never starts restored Claude tabs: they would
-// run with the user's saved flags (docs/CLAUDE.md §3, §4); they stay not started until the user
+// run with the user's saved flags (docs/CLAUDE-TABS.md §3, §4); they stay not started until the user
 // (or Deckhand itself, or a test script) shows the session.
 focus_session :: proc(id: u64, caller: Caller) {
 	// a session made current is laid out again; until then its panes' rects come from its tree
@@ -2541,8 +2633,14 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 			if !claude_tab_installed_now(&tab) { // installed since it was restored: looked up again (its harness's: codex.odin)
 				// not installed (any more): nothing starts, the tab says why and shows as exited; no
 				// bell entry, no retry (Restart, once it is installed)
-				term_note(t, tab.kind.(Claude_Tab).codex ? CODEX_MISSING : CLAUDE_MISSING)
+				term_note(t, harness_is_codex(tab.kind.(Claude_Tab).harness) ? CODEX_MISSING : CLAUDE_MISSING)
 				tab.status, tab.exit = .Exited, {known = true, code = 127}
+				continue
+			}
+			// a Codex Desktop chat whose folder is gone: nothing starts (never in the chats folder)
+			if codex_chat_cwd(find_project(s.project_id), tab.kind.(Claude_Tab).harness, tab.cwd) && !os.is_dir(tab.cwd) {
+				term_note(t, "Not restarted: the chat's folder is gone.")
+				tab.status, tab.exit = .Exited, {known = true, code = 1}
 				continue
 			}
 			// Claude Code again, resuming its session (--resume) when its plugin reported one
@@ -2598,7 +2696,8 @@ find_session_file :: proc(p: Project, pi_session_id: string, session_dir := "") 
 
 // path = "" starts a new chat with `pi --session-id <id>`, so Deckhand knows
 // which file it will be; otherwise resumes the file.
-open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "", fork := "") -> (Result, bool) {
+// extra: pi's flags for this start (the user's, harness_flags.odin), after Deckhand's.
+open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "", fork := "", extra: []string = nil) -> (Result, bool) {
 	tab := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi"}
 	// the bridge in this pi finds Deckhand with these (token = this tab, panel)
 	env := socket_pi_env({kind = .Panel, tab_id = tab.id})
@@ -2608,7 +2707,7 @@ open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd :=
 		os.make_directory_all(p.cwd) // made on the first chat, with its instructions (folders.odin)
 		chats_instructions_ensure(date_stamp())
 	}
-	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env, fork = fork) {
+	if !start_pi(new_term(tab.id), &tab, pi_session_id, path, session_dir, at, env, extra, fork = fork) {
 		socket_forget_tab(tab.id)
 		drop_term(tab.id)
 		return fail("could not start pi"), false
@@ -2665,6 +2764,7 @@ pi_readonly_too_old :: proc() -> bool {
 // argv: what runs in place of the login shell (machine_login), title its tab's.
 shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0, argv: []string = nil, title := "") -> (u64, string) {
 	if s.machine != 0 do return 0, "this session runs on another machine" // never a local shell in it (machine_mirror.odin)
+	if why := files_only_refusal(s, "a terminal"); why != "" do return 0, why // a Files session runs nothing (files_session.odin)
 	tab := Tab{id = new_id(), kind = Shell_Tab{}, title = title != "" ? strings.clone(title) : fmt.aprintf("shell %d", len(s.tabs))}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)
@@ -2738,7 +2838,7 @@ shell_script_argv :: proc(shell, script, name: string) -> [dynamic]string {
 // ~/.pi/agent/bin; absolute folders only, never one relative to the project;
 // pi_managed_path) runs, after a line saying where it was
 // found and that PATH lacks it. Neither: what to do, exit 127 (dead_tab.odin).
-PI_TAB_CMD :: `_pa=${PI_CODING_AGENT_DIR:-}; case "$_pa" in "~") _pa=$HOME;; "~/"*) _pa=$HOME/${_pa#"~/"};; esac; command -v pi >/dev/null 2>&1 || for d in "${_pa:+$_pa/bin}" "$HOME/.pi/agent/bin"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/pi" ] && [ -x "$d/pi" ]; then printf '%s\n' "Deckhand: pi is installed at $d/pi but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v pi >/dev/null 2>&1 || { printf '%s\n' "pi was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.pi/agent/bin (pi's managed install)." "Install pi, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh; for bash ~/.bash_profile if you have one, else ~/.profile), then open this tab again."; exit 127; }; exec pi "$@"`
+PI_TAB_CMD :: `_pa=${PI_CODING_AGENT_DIR:-}; case "$_pa" in "~") _pa=$HOME;; "~/"*) _pa=$HOME/${_pa#"~/"};; esac; command -v pi >/dev/null 2>&1 || for d in "${_pa:+$_pa/bin}" "$HOME/.pi/agent/bin"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/pi" ] && [ -x "$d/pi" ]; then printf '%s\n' "Deckhand: pi is installed at $d/pi but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; ` + HARNESS_FOUND_PI_SH + `command -v pi >/dev/null 2>&1 || { printf '%s\n' "pi was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.pi/agent/bin (pi's managed install)." "Install pi, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh; for bash ~/.bash_profile if you have one, else ~/.profile), then open this tab again."; exit 127; }; exec pi "$@"`
 
 // Test mode (DECKHAND_SCRIPT) fails closed: without a stand-in a tab runs this instead of the real
 // pi or claude (docs/DEVELOPING.md "Test mode"). Deckhand's own log says so too (test_mode_refused).
@@ -2758,7 +2858,7 @@ test_mode_refused :: proc(what: string) {
 
 // What a pi tab runs: DECKHAND_CMD (tests, benchmarks), else pi (PI_TAB_CMD); in test mode the
 // real pi only with DECKHAND_REAL_PI=1 (real-pi scenes), else TEST_NO_PI_CMD.
-pi_tab_cmd :: proc() -> string {
+pi_tab_cmd :: proc(bin := "") -> string {
 	if c := hook_env(.Cmd); c != "" do return c
 	when TEST_HOOKS {
 		if test_mode() && hook_env(.Real_Pi) != "1" {
@@ -2766,7 +2866,7 @@ pi_tab_cmd :: proc() -> string {
 			return TEST_NO_PI_CMD
 		}
 	}
-	return PI_TAB_CMD
+	return strings.concatenate({harness_found_sh(bin), PI_TAB_CMD}, context.temp_allocator)
 }
 
 @(private = "file")
@@ -2775,7 +2875,11 @@ start_pi :: proc(t: ^Term, tab: ^Tab, pi_session_id, path, session_dir, cwd: str
 	// A login shell finds pi on the user's PATH (from Finder or the Dock, PATH
 	// is the interactive shell's: login_env.odin). DECKHAND_CMD replaces pi (benchmarks: e.g.
 	// "cat big.log"); it sees the pi arguments as "$@". Test mode fails closed (pi_tab_cmd).
-	argv = shell_script_argv(login_shell(), pi_tab_cmd(), "pi") // fish and co.: /bin/sh
+	// the pi this start runs, decided once: its version decides `-e` and the tab starts it
+	bin := hook_env(.Cmd) != "" ? "" : harness_path(.Pi) // DECKHAND_CMD replaces pi: none
+	pi_start_bin = bin
+	defer pi_start_bin = ""
+	argv = shell_script_argv(login_shell(), pi_tab_cmd(bin), "pi") // fish and co.: /bin/sh
 	append(&argv, ..pi_integration_args()) // first: Deckhand's pi integration, `-e` per extension (pi_integration.odin)
 	tab.reload.extras = pi_integration_extras() // which optional ones: a later change offers a restart (reload_outdated)
 	if session_dir != "" do append(&argv, "--session-dir", session_dir)
@@ -2807,8 +2911,30 @@ close_all :: proc() {
 
 scan_thread: ^thread.Thread
 
+// Sessions started outside Deckhand (pi or Claude Code in a terminal) show without a manual
+// Rescan: the window coming to the front (window.facts active) or a paired browser attaching
+// runs one, at most once every RESCAN_ON_ACTIVE since the last scan began, never while one runs.
+// Test mode and unit tests: only when a test asks (rescan_on_active_tests).
+RESCAN_ON_ACTIVE :: 3 * time.Minute
+rescan_at: time.Tick // the last scan's start: the launch's (main.odin, serve.odin), each Rescan
+when TEST_HOOKS {
+	rescan_on_active_tests: bool
+}
+
+// True: a Rescan started.
+rescan_when_active :: proc() -> bool {
+	when TEST_HOOKS {
+		if (ODIN_TEST || test_mode()) && !rescan_on_active_tests do return false
+	}
+	if scan_thread != nil do return false
+	if rescan_at != {} && time.tick_since(rescan_at) < RESCAN_ON_ACTIVE do return false
+	run_command(Rescan{}, {kind = .Internal})
+	return scan_thread != nil
+}
+
 @(private = "file")
 scan_worker :: proc(request_id: u64) {
+	claude_scan_on_worker = true // a Codex pass may run here (claude_disk.odin)
 	scan := new(Scan_Result)
 	scan_projects(scan)
 	inbox_submit(Rescan_Done{request_id = request_id, scan = scan}, {kind = .Internal})

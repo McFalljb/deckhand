@@ -314,17 +314,30 @@ def check_map(scenes, special):
     return bad == 0
 
 
+def scene_core(cmd, root=ROOT):
+    """(--run dir, --data dir) when cmd is a background core or session holder of a scene's: this
+    checkout's program, with its data under build/ (a scene's build/<name>/..., test mode's
+    build/test-data). None otherwise: a Deckhand the developer runs from this checkout's build
+    (./build.sh run) keeps its own data dir, and its core and holder are never the runner's to kill."""
+    m = re.search(r"deckhand-core(?:-serve)? (?:serve|hold) --run (.+?) --data (.+?)(?: --|$)", cmd)
+    if not m or root not in cmd:
+        return None
+    run, data = m.group(1), m.group(2)
+    if not os.path.normpath(os.path.join(root, data)).startswith(os.path.join(root, "build") + os.sep):
+        return None
+    return run, data
+
+
 def core_procs():
-    """This checkout's background cores and session holders (deckhand-core-serve serve, deckhand-core
-    hold): {pid: (their --run dir, --data dir)}. Started with setsid, they leave the runner's
-    process group."""
+    """This checkout's scenes' background cores and session holders (deckhand-core-serve serve,
+    deckhand-core hold; scene_core): {pid: (their --run dir, --data dir)}. Started with setsid,
+    they leave the runner's process group."""
     out = subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True).stdout
     found = {}
     for line in out.splitlines():
         pid, _, cmd = line.strip().partition(" ")
-        m = re.search(r"deckhand-core(?:-serve)? (?:serve|hold) --run (.+?) --data (.+?)(?: --|$)", cmd)
-        if m and ROOT in cmd:
-            found[int(pid)] = (m.group(1), m.group(2))
+        if (dirs := scene_core(cmd)) is not None:
+            found[int(pid)] = dirs
     return found
 
 

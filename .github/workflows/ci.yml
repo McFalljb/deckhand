@@ -57,6 +57,8 @@ jobs:
         with: { persist-credentials: false }
       - name: No window imports in src/core or src/holder; the M2-B verifier refuses what it must
         run: scripts/check-core-boundary.sh && sh tests/check-core-boundary-test.sh && sh tests/core-move-verify-test.sh
+      - name: Tests stop only the processes they started (no unscoped pkill or killall)
+        run: python3 -I scripts/check-scoped-kills.py && sh tests/check-scoped-kills-test.sh
 
   # The browser client (web/): its types, unit tests and bundle (docs/PROTOCOL.md §5b)
   web:
@@ -95,6 +97,7 @@ jobs:
       - name: Build the core and the session holder
         run: |
           mkdir -p build
+          scripts/build-zstd.sh # the zstd decoder the core links (src/zstd)
           odin build src/coremain -out:build/deckhand-core-serve -o:speed
           odin build src/holder -out:build/deckhand-core -o:speed
           odin build src/holder -out:build/deckhand-core-hooks -define:DECKHAND_TEST_HOOKS=true

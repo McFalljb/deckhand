@@ -209,7 +209,7 @@ tab_kind_bare :: proc(k: Tab_Kind) -> Tab_Kind {
 		// its hooks' turn and how its last turn ended: what its dot is made of (claude_status_dot,
 		// tab_status_view), so its row and next_needing_you see a permission or an error
 		ct := k.(Claude_Tab)
-		return Claude_Tab{turn = ct.turn <= max(Claude_Turn) ? ct.turn : .Unknown, ended = ct.ended <= max(Claude_Ended) ? ct.ended : .None, codex = ct.codex}
+		return Claude_Tab{turn = ct.turn <= max(Claude_Turn) ? ct.turn : .Unknown, ended = ct.ended <= max(Claude_Ended) ? ct.ended : .None, harness = ct.harness}
 	}
 	return Shell_Tab{}
 }
@@ -283,7 +283,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 
 	for &os in r.open_sessions {
 		if state_mirrored_sessions(no) >= MIRROR_SESSIONS_MAX do break
-		if os.home do continue
+		if os.home || os.agent == .Files do continue // a Files session is that machine's window's own (files_session.odin)
 		id, ok := id_pack(no, os.id)
 		if !ok do continue
 		pid, _ := id_pack(no, os.project_id)

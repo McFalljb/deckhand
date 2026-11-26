@@ -7,6 +7,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
@@ -218,10 +219,10 @@ pi_too_old_says_so :: proc(t: ^testing.T) {
 	tab.status = .Exited
 	testing.expect_value(t, core.pi_status_message(&tab), "")
 	// the setup sheet's harness line
-	defer core.claude_installed_probe = nil
-	defer core.pi_installed_probe = nil
-	core.pi_installed_probe = proc() -> bool {return true}
-	core.claude_installed_probe = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Claude] = nil
+	defer core.harness_installed_probe[.Pi] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
 	state.reload.pi_version = "1.3.2"
 	line := core.setup_claude_line()
 	testing.expect(t, strings.contains(line, "pi 1.3.2 is older than 1.4.0"), line)
@@ -319,15 +320,15 @@ pi_extensions_are_the_users :: proc(t: ^testing.T) {
 	testing.expect(t, core.run_command(core.Set_Pi_Extension{name = "extra", on = true}, {kind = .UI}).ok)
 	testing.expect_value(t, strings.join(core.pi_integration_args(), " ", context.temp_allocator), fmt.tprintf("-e %s/extensions/bridge -e %s/extensions/desk -e %s/extensions/extra", pin, pin, pin))
 	// the Settings tab's rows (pi installed only) and get_state
-	defer core.pi_installed_probe = nil
-	core.pi_installed_probe = proc() -> bool {return true}
+	defer core.harness_installed_probe[.Pi] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
 	rows := make([dynamic]string, context.temp_allocator)
 	for x in core.settings_file_rows() do if x.group == "pi-ext" do append(&rows, fmt.tprintf("%s|%s|%s", x.label, x.detail, x.button))
 	testing.expect_value(t, strings.join(rows[:], "\n", context.temp_allocator), "extra|ON · an optional one (default off; pi tabs, not jobs)|Turn off\nguard|off · on by default (default on; pi tabs, not jobs)|Turn on")
 	// jobs never load them (pi --mode json gets no -e)
 	for a in core.job_argv("/bin/pi", "/s", "uuid", "", "", "/pre.md", "x", .Full) do testing.expect(t, a != "-e", "a job loads no pi extensions")
 	testing.expect_value(t, core.settings_group_label("pi-ext", ""), "pi extensions (Deckhand's)")
-	core.pi_installed_probe = proc() -> bool {return false}
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
 	for x in core.settings_file_rows() do testing.expect(t, x.group != "pi-ext", "no pi: no pi extensions group")
 	st := core.state_json()
 	testing.expect_value(t, core.json_path(st, "settings.pi_extensions.guard"), "false")
@@ -403,4 +404,55 @@ pi_status_blockers_redacted_in_events :: proc(t: ^testing.T) {
 	// events (the command log and socket subscribers both write Command_Event through event_json)
 	ev := core.event_json(core.Command_Event{request_id = 1, caller = {kind = .Panel, tab_id = 3}, version = 1, command = cmd, result = {ok = true}})
 	testing.expect(t, strings.contains(ev, `"blockers":["shell sh1","timer wk2","subagent","<redacted>"]`), ev)
+}
+
+// Audit: before a pi tab has run, pi's version is not probed yet (reload.odin): a pi found by
+// stat as new tabs find it (harness_version_of, never run) that is too old still gets no -e.
+@(test)
+pi_too_old_before_the_probe :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	old := state.reload.pi_version
+	defer state.reload.pi_version = old
+	state.reload.pi_version = ""
+	home := fmt.aprintf("%s/pd-pi-old-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	defer os.remove_all(home)
+	bin := fmt.tprintf("%s/.pi/agent/bin", home)
+	os.make_directory_all(bin)
+	_ = os.write_entire_file(fmt.tprintf("%s/pi", bin), transmute([]u8)string("#!/bin/sh\nexit 1\n"))
+	posix.chmod(strings.clone_to_cstring(fmt.tprintf("%s/pi", bin), context.temp_allocator), transmute(posix.mode_t)u16(0o755))
+	pkg := fmt.tprintf("%s/package.json", bin)
+	_ = os.write_entire_file(pkg, transmute([]u8)string(`{"name":"@earendil-works/pi-coding-agent","version":"1.3.0"}`))
+	// only this HOME's managed pi: no PATH, pi not replaced
+	Saved :: struct {
+		name, value: string,
+		had:         bool,
+	}
+	saved: [4]Saved
+	for n, i in ([]string{"HOME", "PATH", "DECKHAND_CMD", "PI_CODING_AGENT_DIR"}) {
+		v, had := os.lookup_env(n, context.allocator)
+		saved[i] = {n, v, had}
+	}
+	defer for s in saved {
+		if s.had do os.set_env(s.name, s.value)
+		else do os.unset_env(s.name)
+	}
+	os.set_env("HOME", home)
+	os.set_env("PATH", "/nonexistent")
+	os.unset_env("DECKHAND_CMD")
+	os.unset_env("PI_CODING_AGENT_DIR")
+	testing.expect(t, core.pi_too_old(), "pi 1.3.0 by stat, not probed yet")
+	dir := pin_dir(t)
+	defer os.remove_all(dir)
+	core.pi_integration_override = dir
+	defer core.pi_integration_override = ""
+	core.pi_integration_forget()
+	defer core.pi_integration_forget()
+	testing.expect_value(t, len(core.pi_integration_args()), 0)
+	// new enough by stat: loaded
+	_ = os.write_entire_file(pkg, transmute([]u8)string(`{"name":"@earendil-works/pi-coding-agent","version":"1.4.0"}`))
+	testing.expect(t, !core.pi_too_old())
+	testing.expect(t, len(core.pi_integration_args()) > 0)
+	// the probe's answer, once there, is the one
+	state.reload.pi_version = "1.3.9"
+	testing.expect(t, core.pi_too_old())
 }

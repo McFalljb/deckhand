@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/pi-desk-ws-hand-1795698342813188000","added":true},{"cwd":"$ROOT/pi-desk-ws-a-1795698342813037000"},{"cwd":"$ROOT/pi-desk-ws-b-1795698342813120000","name":"Bee ✓"}],"selected_project":"$ROOT/pi-desk-ws-hand-1795698342813188000",
+"open_sessions":[{"pi_session_id":"aaaa-1","cwd":"$ROOT/pi-desk-ws-a-1795698342813037000","session_dir":"","project":"$ROOT/pi-desk-ws-a-1795698342813037000","tabs":[{"kind":"pi"},{"kind":"shell","title":"shell 1","cwd":"$ROOT/pi-desk-ws-a-1795698342813037000"},{"kind":"shell","title":"shell 2","cwd":"$ROOT/pi-desk-ws-a-1795698342813037000"}],"active_tab":2},
+{"pi_session_id":"bbbb-2","cwd":"$ROOT/pi-desk-ws-b-1795698342813120000","session_dir":"","project":"$ROOT/pi-desk-ws-b-1795698342813120000","tabs":[{"kind":"pi"}],"active_tab":0}],"current_session":0,
+"layout":{"left_width":280,"right_width":333,"left_open":false,"right_open":false,"panels":["todos"],"collapsed":["shells"]},
+"sidebar":{},
+"settings":{"confirm":{"control":{"tab_close":"trusted"}},"confirm_close":{"shell":"always"},"theme":"warm","reduce_motion":true,"terminal_text_size":17,"appearance":"light"}}

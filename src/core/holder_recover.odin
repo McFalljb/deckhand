@@ -44,7 +44,7 @@ holder_lost_view :: proc() -> Holder_Lost_Live {
 }
 
 Holder_Recover :: struct {
-	stop: bool, // the old holder still runs but did not answer: stop it first (its sessions end)
+	stop: bool `cmd:"omit"`, // the old holder still runs but did not answer: stop it first (its sessions end)
 }
 
 // Holder_Recover (main thread). See the top.

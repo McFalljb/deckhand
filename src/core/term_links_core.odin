@@ -8,8 +8,8 @@ import "core:unicode/utf8"
 
 Terminal_Link :: struct {
 	tab_id:   u64, // a pi or shell tab (Home's Atlas too)
-	url:      string,
-	external: bool, // the default browser even for http(s) (⌘-click, Open link; ⇧⌘-click: a browser tab)
+	url:      string `cmd:"red=url"`,
+	external: bool `cmd:"omit"`, // the default browser even for http(s) (⌘-click, Open link; ⇧⌘-click: a browser tab)
 }
 
 // A link on the grid: its URL and its first and last cells (viewport col,

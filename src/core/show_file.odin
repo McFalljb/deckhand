@@ -17,7 +17,9 @@ package core
 //   credentials file (settings_credential, as open_file). fs_check's project boundary is for
 //   listing and changing files, which this does not do.
 // - What it shows: what the editor can (disk_read): binary files, files over 20 MB, folders,
-//   pipes and missing files are refused with a hint, and no tab opens.
+//   pipes and missing files are refused with a hint, and no tab opens. An image (image_file.odin:
+//   PNG, JPEG, GIF, BMP, WebP by extension and first bytes, up to IMAGE_FILE_MAX) opens in an
+//   editor tab that shows the picture; nothing of it goes to the agent.
 // - The tab is an ordinary editor tab for the user; no agent has a command that edits it (save_file, reload_file… are not for panel callers).
 
 import "core:fmt"
@@ -28,14 +30,14 @@ import "core:sys/posix"
 
 Show_File :: struct {
 	path:    string, // absolute, ~/, or relative to the session's folder
-	line:    int, // 1-based; 0 = none
-	anchor:  string, // a Markdown heading id, "#" optional ("" = none)
-	session: u64, // a pi or Claude tab: 0 or its own; the user, scripts: 0 = the one on screen
+	line:    int `cmd:"omit,nonneg,max=1073741824"`, // 1-based; 0 = none
+	anchor:  string `cmd:"omit"`, // a Markdown heading id, "#" optional ("" = none)
+	session: u64 `cmd:"omit"`, // a pi or Claude tab: 0 or its own; the user, scripts: 0 = the one on screen
 }
 
 // The session a caller's show_file goes to, or why not.
 @(private = "file")
-show_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
+show_session :: proc(caller: Caller, session: u64, path := "") -> (^Open_Session, string) {
 	s: ^Open_Session
 	switch caller.kind {
 	case .Panel:
@@ -45,6 +47,7 @@ show_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
 		s = own
 	case .UI, .Script:
 		s = session != 0 ? find_session(session) : cur()
+		if s == nil && session == 0 && caller.kind == .UI do return nil, no_session_for_file(path) // the user's over a hub link (else a Files session: show_file_apply)
 		if s == nil do return nil, session != 0 ? "no such session" : "no session on screen"
 	case .Control, .Internal:
 		if session != 0 do s = find_session(session)
@@ -66,8 +69,12 @@ refuse :: proc(code, msg, hint: string) -> Result {
 }
 
 show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bool) {
-	s, serr := show_session(caller, c.session)
-	if s == nil {
+	s, serr := show_session(caller, c.session, c.path)
+	// the user's (this window, a paired browser's Files tree) with no session on screen, or a
+	// Files session's: by the file's project, in its Files session (made below, once the file
+	// passed every check; files_session.odin)
+	files := files_session_may_create(caller) && c.session == 0
+	if s == nil && !files {
 		if caller.kind == .Panel && c.session != 0 do return refuse("other_session", serr, "leave session out: the file opens next to your own tab"), false
 		return fail(serr), false
 	}
@@ -76,7 +83,11 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	agent := caller.kind == .Panel || caller.kind == .Control
 	p := c.path
 	if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
-	if !filepath.is_abs(p) do p, _ = filepath.join({s.cwd, p}, context.temp_allocator)
+	base := s != nil ? s.cwd : fs_base_dir()
+	if !filepath.is_abs(p) {
+		if base == "" do return fail(serr), false
+		p, _ = filepath.join({base, p}, context.temp_allocator)
+	}
 	p, _ = filepath.clean(p, context.temp_allocator)
 	// before anything touches the file system: devices, and for agents the volumes that can hang
 	if show_device(p) do return refuse("device", "a device (/dev)", "only regular text files are shown"), false
@@ -84,11 +95,11 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	rp := fs_real(p)
 	if show_device(rp) do return refuse("device", "a device (/dev)", "only regular text files are shown"), false
 	if agent && show_slow_path(rp) do return refuse("slow_path", "on a network or removable volume (/net, /Volumes)", SLOW_HINT), false
-	CRED_HINT :: "sign-ins and .env files are never shown: tell the user which file to open themselves"
+	CRED_HINT :: "a coding agent's sign-ins and state are never shown: tell the user which file to open themselves"
 	if settings_credential(p) || settings_credential(rp) do return refuse("credentials", CREDENTIAL_REFUSED, CRED_HINT), false
 	if agent && (show_secret(p) || show_secret(rp)) do return refuse("secret", "it looks like a secret (keys, tokens, sign-ins)", "an agent never shows keys, tokens or sign-ins: tell the user the file's path if they want to open it themselves"), false
 	switch path_kind(p) {
-	case .Missing: return refuse("no_such_file", fmt.tprintf("no such file: %s", p), fmt.tprintf("a relative path is from the session's folder, %s; check the path, or give an absolute one", s.cwd)), false
+	case .Missing: return refuse("no_such_file", fmt.tprintf("no such file: %s", p), fmt.tprintf("a relative path is from the session's folder, %s; check the path, or give an absolute one", base)), false
 	case .Dir:     return refuse("folder", "that is a folder", "show a file in it"), false
 	case .Other:   return refuse("not_a_file", "not a regular file (a pipe, device or socket)", "only regular text files are shown"), false
 	case .File:
@@ -102,10 +113,15 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 	if refused := show_file_peek(p); refused != "" {
 		switch {
 		case refused == CREDENTIALS_NOT_OPENED:      return refuse("credentials", CREDENTIAL_REFUSED, CRED_HINT), false
-		case strings.has_prefix(refused, "Binary"):    return refuse("binary", refused, "only text files are shown (an image, PDF or other binary file is not): tell the user the file's path instead"), false
+		case strings.has_prefix(refused, "Binary"):    return refuse("binary", refused, "only text files and images (PNG, JPEG, GIF, BMP, WebP) are shown (a PDF or other binary file is not): tell the user the file's path instead"), false
 		case strings.has_prefix(refused, "Too large"): return refuse("too_large", refused, "tell the user the file's path, or show a smaller excerpt saved as its own text file"), false
 		}
 		return refuse("unreadable", refused, "only readable text files are shown"), false
+	}
+	if files {
+		fp := file_project(p)
+		if fp == nil && s == nil do return fail(no_session_for_file(p)), false
+		if fp != nil && (s == nil || !session_holds_file(s, p)) do s = files_session_ensure(fp) // one the session holds stays in it
 	}
 	kind := md ? "markdown" : "editor"
 	data :: proc(kind, path: string, session: u64, again: bool) -> string {
@@ -197,7 +213,8 @@ show_slow_path :: proc(p: string) -> bool {
 // What an agent never shows (users opening files themselves are unaffected): keys, tokens and
 // sign-ins by name (as worktree_cleanup's wt_secret_name, without its "secret"/"credential"
 // substrings, which docs share) and the folders that hold them in the home folder.
-show_secret :: proc(p: string) -> bool {
+// real_home: the home folder's real path, when the caller has it already (fs_copy: once per tree).
+show_secret :: proc(p: string, real_home := "") -> bool {
 	base := strings.to_lower(filepath.base(p), context.temp_allocator)
 	switch base {
 	case ".envrc", ".netrc", ".npmrc", ".pypirc", ".htpasswd", ".git-credentials", ".pgpass":
@@ -206,7 +223,7 @@ show_secret :: proc(p: string) -> bool {
 	for pre in ([]string{"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}) do if strings.has_prefix(base, pre) do return true
 	for ext in ([]string{".pem", ".key", ".p12", ".pfx", ".keystore", ".jks", ".keychain", ".keychain-db"}) do if strings.has_suffix(base, ext) do return true
 	if strings.contains(p, "/Library/Keychains/") do return true
-	for home in ([]string{os.get_env("HOME", context.temp_allocator), fs_real(os.get_env("HOME", context.temp_allocator))}) {
+	for home in ([]string{os.get_env("HOME", context.temp_allocator), real_home != "" ? real_home : fs_real(os.get_env("HOME", context.temp_allocator))}) {
 		h := strings.trim_right(home, "/")
 		if h == "" do continue
 		for d in ([]string{".ssh", ".aws", ".gnupg", ".kube", ".docker/config.json", ".config/gh/hosts.yml"}) {
@@ -227,15 +244,19 @@ show_file_peek :: proc(path: string) -> string {
 	case .Other:   return "Not a regular file (a pipe, device or socket): not opened"
 	case .File:
 	}
-	too_large :: proc(size: i64) -> string {return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), EDITOR_MAX_BYTES >> 20)}
-	if st.size > EDITOR_MAX_BYTES do return too_large(st.size)
+	// an image (by extension and its first bytes: image_file.odin) shows as one, up to IMAGE_FILE_MAX
+	img := image_file(path)
+	limit := img ? i64(IMAGE_FILE_MAX) : i64(EDITOR_MAX_BYTES)
+	too_large :: proc(size, limit: i64) -> string {return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), limit >> 20)}
+	if st.size > limit do return too_large(st.size, limit)
 	f, oerr := os.open(path, {.Read, .Non_Blocking})
 	if oerr != nil do return fmt.tprintf("Cannot read: %v", oerr)
 	defer os.close(f)
 	sb: posix.stat_t
 	if posix.fstat(posix.FD(os.fd(f)), &sb) != .OK || !posix.S_ISREG(sb.st_mode) do return "Not a regular file (a pipe, device or socket): not opened"
 	if credential_inode(u64(sb.st_dev), u64(sb.st_ino)) do return CREDENTIALS_NOT_OPENED
-	if i64(sb.st_size) > EDITOR_MAX_BYTES do return too_large(i64(sb.st_size))
+	if i64(sb.st_size) > limit do return too_large(i64(sb.st_size), limit)
+	if img do return ""
 	buf: [8192 + 8]u8 // a little past looks_binary's window: a cut sequence at its end is fine
 	n, rerr := disk_read_chunk(f, buf[:])
 	if rerr != nil && rerr != .EOF do return fmt.tprintf("Cannot read: %v", rerr)

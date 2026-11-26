@@ -225,12 +225,15 @@ collect_types :: proc(ti: ^runtime.Type_Info, out: ^map[string]string) {
 			strings.write_string(&b, `{"kind": "struct", "fields": [`)
 			n := 0
 			for k in 0 ..< int(x.field_count) {
+				// a harness on the stream as the codex bool it replaced (state_wire.odin)
+				codex_bool := wire_codex_bool(v.name, x.names[k])
 				sk := wire_skip(v.name, x.names[k])
-				if sk == nil || sk.why == .Section do collect_types(x.types[k], out)
+				if !codex_bool && (sk == nil || sk.why == .Section) do collect_types(x.types[k], out)
 				if sk != nil do continue
 				if n > 0 do strings.write_string(&b, ", ")
 				n += 1
-				fmt.sbprintf(&b, `{{"name": "%s", "type": "%s"}}`, wire_key(x.names[k], x.tags[k]), type_ref(x.types[k]))
+				if codex_bool do fmt.sbprintf(&b, `{{"name": "%s", "type": "bool"}}`, STATE_WIRE_CODEX_KEY)
+				else do fmt.sbprintf(&b, `{{"name": "%s", "type": "%s"}}`, wire_key(x.names[k], x.tags[k]), type_ref(x.types[k]))
 			}
 			strings.write_string(&b, "]}")
 		case runtime.Type_Info_Enum:

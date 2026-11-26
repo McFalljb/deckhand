@@ -10,6 +10,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
@@ -49,8 +50,8 @@ setup :: proc() -> (home, proj: string) {
 	os.unset_env("XDG_CONFIG_HOME")
 	os.unset_env("PI_KIT_NOTES_DIR") // the Folders group shows the user's own as a row
 	// pi's files and the Coding agents rows are listed as on a machine with pi and Claude Code
-	core.pi_installed_probe = stand_in_installed
-	core.claude_installed_probe = stand_in_installed
+	core.harness_installed_probe[.Pi] = stand_in_installed
+	core.harness_installed_probe[.Claude] = stand_in_installed
 	ad = fmt.tprintf("%s/.pi/agent", home)
 	write_mode(fmt.tprintf("%s/settings.json", ad), `{"defaultModel": "x", "packages": ["npm:pi-subagents@1.2.3", {"source": "../../pkgs/pi-kit"}]}`, 0o644)
 	write_mode(fmt.tprintf("%s/models.json", ad), `{"providers": {}}`, 0o600) // pi may make it private: still a config file
@@ -134,7 +135,7 @@ settings_files_credentials_refused :: proc(t: ^testing.T) {
 	}
 	env := fmt.tprintf("%s/.env", proj)
 	write_mode(env, "TOKEN=x", 0o644)
-	testing.expect(t, !core.run_command(core.Open_File{path = env}, ui).ok, ".env refused")
+	testing.expect(t, core.run_command(core.Open_File{path = env}, ui).ok, ".env opens (an ordinary file)")
 	write_mode(fmt.tprintf("%s/.env.example", proj), "TOKEN=", 0o644)
 	testing.expect(t, core.run_command(core.Open_File{path = fmt.tprintf("%s/.env.example", proj)}, ui).ok, "examples open")
 	// through a symlink too
@@ -347,6 +348,13 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	os.make_directory_all(fmt.tprintf("%s/.pi/prompts", proj))
 	write_mode(fmt.tprintf("%s/.pi/prompts/p.md", proj), "p", 0o644)
 	write_mode(fmt.tprintf("%s/.pi/.env", proj), "K=v", 0o644)
+	// the Coding agents rows look at this HOME only: no claude or pi of this machine's PATH (its
+	// version would show), no stand-in binary named by another test
+	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
+	defer os.set_env("PATH", old_path)
+	os.set_env("PATH", "/usr/bin:/bin")
+	os.unset_env("DECKHAND_CLAUDE_BIN")
+	os.unset_env("DECKHAND_CODEX_BIN")
 	core.harness_checklist_forget() // the Coding agents rows look at this HOME (another test's are cached)
 	core.settings_watch = true // as while the Settings page shows: its folders are polled
 	defer core.settings_watch = false
@@ -366,7 +374,7 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	defer delete(found)
 	for q in ([]string{"skill", "json", "fix", "index", "notes", "token", "env", "secret"}) do for h in core.settings_search(q, deep = true) do if h.kind == .File do found[filepath.base(h.row.path)] = true
 	testing.expectf(t, found["SKILL.md"] && found["fix.md"] && found["index.ts"], "the page's search finds files inside folders: %v", found)
-	for never in ([]string{"notes.json", "token.json", ".env", "secret.json", "auth.json"}) do testing.expectf(t, !found[never], "the page's search shows %s", never)
+	for never in ([]string{"notes.json", "token.json", "secret.json", "auth.json"}) do testing.expectf(t, !found[never], "the page's search shows %s", never)
 	searched :: proc(q, name: string) -> bool {
 		for h in core.settings_search(q, deep = true) do if h.kind == .File && filepath.base(h.row.path) == name do return true
 		return false
@@ -413,6 +421,98 @@ settings_tree_menu_restrictions :: proc(t: ^testing.T) {
 	// Reveal in Finder: the tree's paths, for the user
 	testing.expect(t, core.run_command(core.Reveal_In_Finder{path = fmt.tprintf("%s/settings.json", ad)}, ui).ok, "reveal a config file")
 	testing.expect(t, !core.run_command(core.Reveal_In_Finder{path = fmt.tprintf("%s/settings.json", ad)}, {kind = .Control}).ok, "not for the agent")
+}
+
+// Claude Code's plugins (enabledPlugins of the account's settings.json) and user MCP servers (the
+// account file's top-level mcpServers) listed by name: never a value, never another key of the
+// account file, which itself stays unlisted and unopenable.
+@(test)
+settings_files_claude_lists :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, proj := setup()
+	cfg := claude_setup(home, proj)
+	defer os.unset_env("CLAUDE_CONFIG_DIR")
+	core.claude_lists_reset()
+	defer core.claude_lists_reset()
+	write_mode(fmt.tprintf("%s/settings.json", cfg), fmt.tprintf(`{{"env": {{"API_KEY": "%s"}}, "enabledPlugins": {{"zed@mk": true, "able@mk": false, "odd@mk": "x", "li\u2028ne@mk": true}}, "extraKnownMarketplaces": {{"mk": {{"source": {{"source": "github", "repo": "o/mk"}}}}}}}}`, SECRET), 0o644)
+	account := fmt.tprintf(`{{"oauthAccount": {{"emailAddress": "who@example.com"}}, "mcpServers": {{"github": {{"type": "http", "url": "https://mcp.example.com/?token=%s", "headers": {{"Authorization": "Bearer %s"}}}}, "local": {{"command": "npx", "args": ["srv"], "env": {{"KEY": "%s"}}}}, "odd": {{"type": "stdio; rm -rf"}}, "bi\u202edi\u2066": {{"command": "x"}}, "notone": 3}}, "projects": {{"/p": {{"mcpServers": {{"projsrv": {{"command": "x"}}}}}}}}}}`, SECRET, SECRET, SECRET)
+	write_mode(fmt.tprintf("%s/.claude.json", cfg), account, 0o600)
+	testing.expect_value(t, core.claude_account_file(cfg), fmt.tprintf("%s/.claude.json", cfg))
+	testing.expect_value(t, core.claude_account_file(fmt.tprintf("%s/.claude", home)), fmt.tprintf("%s/.claude.json", home))
+	core.claude_lists_refresh_now()
+	testing.expect(t, core.claude_lists_tick(), "the page is told")
+	b := strings.builder_make(context.temp_allocator)
+	for r in core.settings_file_rows() do fmt.sbprintf(&b, "%s|%s|%s|%v\n", r.group, r.label, r.detail, r.button)
+	got := strings.to_string(b)
+	for w in ([]string{"claude-plugin|able@mk|disabled|", "claude-plugin|zed@mk|enabled|", "claude-mcp|github|http|", "claude-mcp|local|stdio|", "claude-mcp|odd|server|", "claude-plugin|line@mk|enabled|", "claude-mcp|bidi|stdio|"}) {
+		testing.expectf(t, strings.contains(got, w), "missing %q in\n%s", w, got)
+	}
+	testing.expectf(t, strings.index(got, "able@mk") < strings.index(got, "zed@mk"), "sorted:\n%s", got)
+	for r in got do testing.expectf(t, r == '\n' || core.text_rune_ok(r), "a name keeps %U:\n%s", r, got) // bidi controls, line separators
+	for never in ([]string{SECRET, "odd@mk", "projsrv", "notone", "who@example", "token", "Bearer", "npx", "mcp.example", "rm -rf", ".claude.json", "API_KEY"}) {
+		testing.expectf(t, !strings.contains(got, never), "%s shown:\n%s", never, got)
+	}
+	// each row stands for its read-only list, which sends nothing
+	for r in core.settings_file_rows() do if r.group == "claude-plugin" || r.group == "claude-mcp" {
+		s := core.setting_for_row(r.path)
+		testing.expectf(t, s != nil && s.read_only && s.command == "" && r.button == "", "%s: a read-only row", r.label)
+		sec, card, ok := core.settings_group_section(r.group)
+		testing.expect(t, ok && sec == .Agents && card == "Claude Code", "under Claude Code")
+	}
+	// the account file is still never opened nor shown
+	testing.expect(t, core.settings_credential(fmt.tprintf("%s/.claude.json", cfg)), "a credential file")
+	testing.expect(t, !core.run_command(core.Open_File{path = fmt.tprintf("%s/.claude.json", cfg), session = state.open_sessions[0].id}, ui).ok, "not opened")
+	// read again only once a file changed
+	testing.expect(t, !core.claude_lists_tick(), "nothing new")
+	core.claude_lists_refresh_now()
+	testing.expect(t, !core.claude_lists_tick(), "the same stamps: not read again")
+	// a browser's Settings page (web_settings.odin) shows them, and is built again when they change
+	// (its cache key hashes state sections, which a list change does not touch)
+	core.web_set_open_for(true, 7)
+	defer core.web_settings_reset()
+	web := make([dynamic][2]string, context.temp_allocator)
+	core.web_settings_sections_for(&web, 7)
+	testing.expect(t, len(web) == 1 && strings.contains(web[0][1], "zed@mk"), "the browser's page lists them")
+	before := core.web_settings_builds()
+	write_mode(fmt.tprintf("%s/settings.json", cfg), `{"enabledPlugins": {"zed@mk": false}}`, 0o644)
+	core.claude_lists_refresh_now()
+	gen := core.settings_gen
+	core.settings_poll() // the window's tick: claude_lists_tick
+	testing.expect(t, core.settings_gen != gen, "a changed settings.json")
+	clear(&web)
+	core.web_settings_sections_for(&web, 7)
+	testing.expect_value(t, core.web_settings_builds(), before + 1)
+	testing.expect(t, len(web) == 1 && !strings.contains(web[0][1], "able@mk"), "the browser's page is built again")
+	plugins, mcp, ok := core.claude_lists_of(cfg)
+	testing.expect(t, ok)
+	testing.expect_value(t, len(plugins), 1)
+	if len(plugins) == 1 do testing.expect(t, plugins[0].id == "zed@mk" && !plugins[0].enabled, "zed@mk off")
+	testing.expect_value(t, len(mcp), 4) // the account file was not read again: the same four
+	// a broken account file lists nothing (and never crashes: json_guard_test's hostile inputs)
+	write_mode(fmt.tprintf("%s/.claude.json", cfg), strings.repeat("[", 100_000, context.temp_allocator), 0o600)
+	core.claude_lists_refresh_now()
+	_, mcp, _ = core.claude_lists_of(cfg)
+	testing.expect_value(t, len(mcp), 0)
+}
+
+// pi's themes/ folder (custom themes, ~/.pi/agent/themes/*.json) shows beside prompts/, skills/
+// and extensions/, opens in the tree, and takes the same file commands.
+@(test)
+settings_files_pi_themes :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	os.make_directory_all(fmt.tprintf("%s/themes", ad))
+	write_mode(fmt.tprintf("%s/themes/dusk.json", ad), `{"name":"dusk"}`, 0o644)
+	b := strings.builder_make(context.temp_allocator)
+	for r in core.settings_file_rows() do fmt.sbprintf(&b, "%s|%s|%s|%v|%v\n", r.group, r.label, core.fs_display(r.path), r.exists, r.kind)
+	got := strings.to_string(b)
+	testing.expectf(t, strings.contains(got, "pi|themes|~/.pi/agent/themes|true|Folder"), "themes/ listed:\n%s", got)
+	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/themes/dusk.json", ad)), ad)
+	_, ok := core.settings_editable(fmt.tprintf("%s/themes/dusk.json", ad))
+	testing.expect(t, ok, "a theme file is the user's to rename and delete")
+	r := core.run_command(core.Create_File{path = fmt.tprintf("%s/themes/new.json", ad)}, ui)
+	testing.expect(t, r.ok, r.error)
 }
 
 // Review round 1 (coordinator): each fix's failing test first.
@@ -598,7 +698,7 @@ settings_files_claude_default_flags :: proc(t: ^testing.T) {
 	if len(state.pending_confirmations) == 1 {
 		p := state.pending_confirmations[0]
 		testing.expect_value(t, p.summary, core.CLAUDE_SKIP_CONFIRM)
-		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, confirm = p.token}, ui).ok)
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, confirm = p.token, harness = .Claude}, ui).ok)
 	}
 	testing.expect(t, state.settings.claude_skip_permissions)
 	got = rows()
@@ -710,6 +810,109 @@ settings_files_claude_every_config_folder :: proc(t: ^testing.T) {
 	testing.expect(t, core.settings_credential(fmt.tprintf("%s/projects/-p/s.jsonl", dflt)), "~/.claude still")
 }
 
+// Codex's config files (codex.odin's allowlist) are listed once Codex is installed and edited like
+// Claude's; its hooks show read-only; its sign-in, state and plugins/ are never listed, opened or
+// saved over (by any name), and nothing is offered for Create or New there. Under a temp HOME:
+// never the real ~/.codex.
+@(test)
+settings_files_codex_rows :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, proj := setup()
+	os.unset_env("CODEX_HOME")
+	cx := fmt.tprintf("%s/.codex", home)
+	os.make_directory_all(fmt.tprintf("%s/sessions/2026/11/16", cx))
+	os.make_directory_all(fmt.tprintf("%s/prompts", cx))
+	os.make_directory_all(fmt.tprintf("%s/skills/s1", cx))
+	os.make_directory_all(fmt.tprintf("%s/plugins/p", cx))
+	write_mode(fmt.tprintf("%s/config.toml", cx), "model = \"x\"\n", 0o644)
+	write_mode(fmt.tprintf("%s/AGENTS.md", cx), "# mine\n", 0o644)
+	write_mode(fmt.tprintf("%s/hooks.json", cx), "{}\n", 0o644)
+	write_mode(fmt.tprintf("%s/skills/s1/SKILL.md", cx), "# s1\n", 0o644)
+	write_mode(fmt.tprintf("%s/plugins/p/x.json", cx), "{}\n", 0o644)
+	write_mode(fmt.tprintf("%s/auth.json", cx), fmt.tprintf(`{{"key":"%s"}}`, SECRET), 0o600)
+	write_mode(fmt.tprintf("%s/history.jsonl", cx), "{}\n", 0o600)
+	write_mode(fmt.tprintf("%s/sessions/2026/11/16/rollout-x.jsonl", cx), "{}\n", 0o600)
+	text :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for r in core.settings_file_rows() do if strings.has_prefix(r.group, "codex") && r.group != "codex-accounts" do fmt.sbprintf(&b, "%s|%s|%s|%v|%v\n", r.group, r.label, core.fs_display(r.path), r.exists, r.create)
+		return strings.to_string(b)
+	}
+	// not installed: none
+	core.harness_installed_probe[.Codex] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Codex] = nil
+	testing.expect_value(t, text(), "")
+	core.harness_installed_probe[.Codex] = proc() -> bool {return true}
+	testing.expect_value(t, text(), "codex|config.toml|~/.codex/config.toml|true|false\ncodex|AGENTS.md|~/.codex/AGENTS.md|true|false\ncodex|prompts|~/.codex/prompts|true|false\ncodex|skills|~/.codex/skills|true|false\ncodex|hooks.json|~/.codex/hooks.json|true|false\n")
+	got := text()
+	for never in ([]string{"auth.json", "history", "sessions", "plugins", "AGENTS.override.md", "rules"}) do testing.expectf(t, !strings.contains(got, never), "%s listed:\n%s", never, got)
+	testing.expect_value(t, core.settings_group_label("codex", ""), "Codex (global)")
+	testing.expect_value(t, core.settings_group_label("codex:work", ""), "Codex · work (global)")
+	for g in ([]string{"codex", "codex:work"}) {
+		_, card, ok := core.settings_group_section(g)
+		testing.expectf(t, ok && card == "Codex", "%s: %s", g, card)
+	}
+	// the folders open in the tree; nothing may be made, renamed or deleted there
+	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/skills/s1", cx)), cx)
+	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/hooks", cx)), cx)
+	testing.expect_value(t, core.settings_tree_root(fmt.tprintf("%s/sessions", cx)), "")
+	testing.expect(t, !core.settings_new_ok(fmt.tprintf("%s/prompts", cx)), "no New in Codex's prompts/")
+	testing.expect(t, !core.settings_row_editable(fmt.tprintf("%s/skills/s1/SKILL.md", cx)), "no Rename or Delete in Codex's skills/")
+	core.settings_create(fmt.tprintf("%s/AGENTS.override.md", cx))
+	testing.expect(t, !os.exists(fmt.tprintf("%s/AGENTS.override.md", cx)), "never a Create in a Codex home")
+	// the sign-in, the state and plugins/ stay refused, by anyone
+	for p in ([]string{"auth.json", "history.jsonl", "sessions/2026/11/16/rollout-x.jsonl", "plugins/p/x.json"}) {
+		for c in ([]core.Caller{ui, {kind = .Control}}) {
+			r := core.run_command(core.Open_File{path = fmt.tprintf("%s/%s", cx, p)}, c)
+			testing.expectf(t, !r.ok && r.error == core.CREDENTIAL_REFUSED, "%s opened: %v", p, r)
+		}
+	}
+	// the user's config: edited and saved, as Claude's
+	for p in ([]string{fmt.tprintf("%s/config.toml", cx), fmt.tprintf("%s/skills/s1/SKILL.md", cx)}) {
+		r := core.run_command(core.Open_File{path = p}, ui)
+		testing.expect(t, r.ok, r.error)
+		e := editor_of(r.created_id)
+		if e == nil do continue
+		testing.expect(t, !e.readonly && !e.codex_view_only, p)
+		ed_goto(e, 1, 1)
+		ed_insert(e, "# edited\n")
+		r = core.run_command(core.Save_File{e.tab_id}, ui)
+		testing.expect(t, r.ok, r.error)
+		testing.expectf(t, strings.has_prefix(read(p), "# edited\n"), "%s: %q", p, read(p))
+	}
+	// its hooks: shown read-only, never saved
+	{
+		p := fmt.tprintf("%s/hooks.json", cx)
+		r := core.run_command(core.Open_File{path = p}, ui)
+		testing.expect(t, r.ok, r.error)
+		if e := editor_of(r.created_id); e != nil {
+			testing.expect(t, e.readonly && e.codex_view_only, "hooks.json read-only")
+			ed_insert(e, "x")
+			testing.expect(t, !core.run_command(core.Save_File{e.tab_id}, ui).ok)
+		}
+		testing.expect_value(t, read(p), "{}\n")
+	}
+	// a project file swapped for a link to Codex's state (or its hooks) after it was opened: never
+	// saved over
+	for target in ([]string{"history.jsonl", "hooks.json"}) {
+		f := fmt.tprintf("%s/notes-%s.txt", proj, target)
+		write_mode(f, "mine\n", 0o644)
+		r := core.run_command(core.Open_File{path = f}, ui)
+		testing.expect(t, r.ok, r.error)
+		e := editor_of(r.created_id)
+		if e == nil do continue
+		ed_insert(e, "x")
+		real := fmt.tprintf("%s/%s", cx, target)
+		before := read(real)
+		os.remove(f)
+		os.symlink(real, f)
+		testing.expectf(t, editor_save(e) != "", "%s: saved over", target)
+		testing.expect_value(t, read(real), before)
+	}
+	testing.expect(t, core.codex_view_only(fmt.tprintf("%s/hooks/pre.sh", cx)))
+	testing.expect(t, !core.codex_view_only(fmt.tprintf("%s/config.toml", cx)))
+	testing.expect(t, !core.codex_view_only(fmt.tprintf("%s/hooks.json", proj)), "a project's own hooks.json is the project's")
+}
+
 // The settings registry (core/settings_registry.odin) and the window's actions agree: every action
 // a setting names exists, takes its label from the registry, and sends the setting's command.
 @(test)
@@ -770,4 +973,150 @@ sf_text :: proc() -> string {
 		strings.write_byte(&b, '\n')
 	}
 	return strings.to_string(b)
+}
+
+// New file… in pi's config folders under a strict umask (077): the file Deckhand makes is 0644,
+// so it is not taken for a credential (a private file in the agent dir is one) and opens. A
+// credential's name stays refused, and a private file Deckhand did not make stays a credential.
+@(test)
+settings_files_new_file_strict_umask :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	for sub in ([]string{"prompts", "skills", "themes", "extensions"}) do os.make_directory_all(fmt.tprintf("%s/%s", ad, sub))
+	old := posix.umask(posix.S_IRWXG | posix.S_IRWXO) // 077
+	defer posix.umask(old)
+	for sub in ([]string{"prompts", "skills", "themes", "extensions"}) {
+		p := fmt.tprintf("%s/%s/new-%s.md", ad, sub, sub)
+		r := core.run_command(core.Create_File{path = p}, ui)
+		testing.expectf(t, r.ok, "%s: %s", sub, r.error)
+		_, st := core.path_stat(p)
+		testing.expectf(t, st.mode & 0o777 == 0o644, "%s: made %o", sub, st.mode & 0o777)
+		testing.expectf(t, !core.settings_credential(p), "%s: not a credential", sub)
+		_, editable := core.settings_editable(p)
+		testing.expectf(t, editable, "%s: the user's to rename and delete", sub)
+		o := core.run_command(core.Open_File{path = p}, ui)
+		testing.expectf(t, o.ok, "%s: opens: %s", sub, o.error)
+	}
+	// a .env made there is an ordinary file (0644, readable), not a credential
+	env := fmt.tprintf("%s/prompts/.env", ad)
+	if core.run_command(core.Create_File{path = env}, ui).ok {
+		_, st := core.path_stat(env)
+		testing.expectf(t, st.mode & 0o777 == 0o644 && !core.settings_credential(env), ".env made %o", st.mode & 0o777)
+	}
+	// a private file the user (or pi) made there is still a credential
+	mine := fmt.tprintf("%s/prompts/mine.md", ad)
+	write_mode(mine, "x", 0o600)
+	testing.expect(t, core.settings_credential(mine), "a private file Deckhand did not make")
+	// outside pi's config folders the umask is the user's: a project file stays as made
+	os.make_directory_all(fmt.tprintf("%s/proj/notes", home))
+	pf := fmt.tprintf("%s/proj/notes/x.md", home)
+	if core.run_command(core.Create_File{path = pf}, ui).ok {
+		_, st := core.path_stat(pf)
+		testing.expectf(t, st.mode & 0o077 == 0, "a project file keeps the umask: %o", st.mode & 0o777)
+	}
+}
+
+// Codex's installed plugins (codex_plugins.odin): a read-only list under the Codex card, from the
+// names of plugins/cache/<marketplace>/<plugin>/<version>/ folders only. No file under plugins/ is
+// opened or listed (a secret in one never shows), a symlink at any level is not followed (nothing
+// outside the Codex home), odd names are left out. Under a temp HOME: never the real ~/.codex.
+@(test)
+settings_files_codex_plugins :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	os.unset_env("CODEX_HOME")
+	core.codex_plugins_forget()
+	defer core.codex_plugins_forget()
+	core.harness_installed_probe[.Codex] = proc() -> bool {return true}
+	defer core.harness_installed_probe[.Codex] = nil
+	cx := fmt.tprintf("%s/.codex", home)
+	cache := fmt.tprintf("%s/plugins/cache", cx)
+	os.make_directory_all(fmt.tprintf("%s/openai-curated/github/1a2b3c4/.codex-plugin", cache))
+	write_mode(fmt.tprintf("%s/config.toml", cx), "[plugins.\"github@openai-curated\"]\nenabled = true\n", 0o644)
+	write_mode(fmt.tprintf("%s/openai-curated/github/1a2b3c4/.mcp.json", cache), fmt.tprintf(`{{"token":"%s"}}`, SECRET), 0o600)
+	os.make_directory_all(fmt.tprintf("%s/openai-curated/linear/0.2.0", cache))
+	os.make_directory_all(fmt.tprintf("%s/openai-curated/linear/0.3.0", cache))
+	os.make_directory_all(fmt.tprintf("%s/mine/notes/local", cache))
+	os.make_directory_all(fmt.tprintf("%s/mine/.hidden/1", cache))
+	os.make_directory_all(fmt.tprintf("%s/mine/bad name/1", cache))
+	write_mode(fmt.tprintf("%s/mine/file-not-folder", cache), SECRET, 0o644)
+	// symlinks out of the Codex home: a marketplace, a plugin, a version, never followed
+	out := fmt.tprintf("%s/outside", home)
+	os.make_directory_all(fmt.tprintf("%s/evilplug/9.9.9", out))
+	os.symlink(out, fmt.tprintf("%s/linkedmk", cache))
+	os.symlink(fmt.tprintf("%s/evilplug", out), fmt.tprintf("%s/mine/linkedplug", cache))
+	os.symlink(fmt.tprintf("%s/evilplug/9.9.9", out), fmt.tprintf("%s/mine/notes/6.6.6", cache))
+	text :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for r in core.settings_file_rows() do if r.group == "codex-plugin" do fmt.sbprintf(&b, "%s|%s|%v\n", r.label, r.detail, r.button)
+		return strings.to_string(b)
+	}
+	got := text()
+	testing.expect_value(t, got, "github@openai-curated|version 1a2b3c4|\nlinear@openai-curated|versions 0.2.0, 0.3.0|\nnotes@mine|version local|\n")
+	for never in ([]string{SECRET, "evilplug", "9.9.9", "6.6.6", "linkedmk", "hidden", "bad name", "file-not-folder", "token", "enabled"}) do testing.expectf(t, !strings.contains(got, never), "%s shown:\n%s", never, got)
+	// each row stands for the Codex card's read-only list, which sends nothing
+	n := 0
+	for r in core.settings_file_rows() do if r.group == "codex-plugin" {
+		n += 1
+		s := core.setting_for_row(r.path)
+		testing.expectf(t, s != nil && s.id == "codex_plugins" && s.read_only && s.command == "" && r.button == "", "%s: a read-only row", r.label)
+		_, card, ok := core.settings_group_section(r.group)
+		testing.expect(t, ok && card == "Codex", "under Codex")
+	}
+	testing.expect_value(t, n, 3)
+	testing.expect_value(t, core.settings_group_label("codex-plugin", ""), "Codex plugins")
+	// plugins/ itself stays refused to open, as before
+	r := core.run_command(core.Open_File{path = fmt.tprintf("%s/openai-curated/github/1a2b3c4/.mcp.json", cache)}, ui)
+	testing.expect(t, !r.ok, "a plugin's file is not opened")
+	// plugins/ a symlink itself: nothing listed
+	core.codex_plugins_forget()
+	os.rename(fmt.tprintf("%s/plugins", cx), fmt.tprintf("%s/plugins-real", home))
+	os.symlink(fmt.tprintf("%s/plugins-real", home), fmt.tprintf("%s/plugins", cx))
+	testing.expect_value(t, text(), "")
+	// Codex not installed: none
+	core.codex_plugins_forget()
+	core.harness_installed_probe[.Codex] = proc() -> bool {return false}
+	testing.expect_value(t, text(), "")
+}
+
+// Review round 1 (#171): a folder name that looks like a token is never shown; a big marketplace
+// folder is read only up to the cap; nothing is walked again while no folder's stamp changed.
+@(test)
+settings_files_codex_plugins_guarded :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	os.unset_env("CODEX_HOME")
+	core.codex_plugins_forget()
+	defer core.codex_plugins_forget()
+	cache := fmt.tprintf("%s/.codex/plugins/cache", home)
+	for name in ([]string{"ghp_abcdefghijklmnopqrstuvwxyz0123456789", "sk-proj-abc", "xoxb-123-456", "0123456789abcdef0123456789abcdef", "aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1dF3h", "okplugin"}) do os.make_directory_all(fmt.tprintf("%s/mk/%s/1.0.0", cache, name))
+	os.make_directory_all(fmt.tprintf("%s/mk/okplugin/0123456789abcdef0123456789abcdef01234567", cache))
+	got := core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+	b := strings.builder_make(context.temp_allocator)
+	for e in got do fmt.sbprintf(&b, "%s|%s\n", e.name, core.codex_plugin_detail(e))
+	testing.expect_value(t, strings.to_string(b), "okplugin@mk|version 1.0.0\n")
+when core.TEST_HOOKS { // codex_plugins_expire
+		// many plugins: at most the cap listed, and a walk reads at most CODEX_PLUGINS_SCAN entries a folder
+		core.codex_plugins_forget()
+		for i in 0 ..< 300 do os.make_directory_all(fmt.tprintf("%s/zbig/p%03d", cache, i)) // after mk: mk is listed first
+		n0 := core.codex_plugins_walks
+		got = core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+		testing.expect(t, len(got) <= 200, "capped")
+		testing.expect_value(t, core.codex_plugins_walks, n0 + 1)
+		testing.expect(t, core.codex_plugins_entries_read <= 3 * core.CODEX_PLUGINS_SCAN, "read up to the cap")
+		// again, nothing changed: not walked again, even once the throttle has passed
+		core.codex_plugins_expire()
+		_ = core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+		testing.expect_value(t, core.codex_plugins_walks, n0 + 1)
+		// a new plugin: its marketplace folder's stamp changed, walked again
+		time.sleep(20 * time.Millisecond)
+		os.make_directory_all(fmt.tprintf("%s/mk/newone/2.0.0", cache))
+		core.codex_plugins_expire()
+		got = core.codex_plugins_of(fmt.tprintf("%s/.codex", home))
+		testing.expect_value(t, core.codex_plugins_walks, n0 + 2)
+		found := false
+		for e in got do if e.name == "newone@mk" do found = true
+		testing.expect(t, found, "the new one listed")
+	}
 }

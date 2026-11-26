@@ -3,6 +3,7 @@ package main
 // The window's side of a separate core (client_core.odin): a command's result is waited for at
 // most CLIENT_WAIT, then it shows as pending and the late one is dropped (design Q9).
 
+import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
@@ -61,4 +62,62 @@ client_path_changed_redraws :: proc(t: ^testing.T) {
 	window_request_run({op = .Path_Changed, path = "/tmp/dh-path-changed/n.md"})
 	testing.expect(t, app.redraw, "an idle window was not asked to draw the Files tree again")
 	client.sock = nil
+}
+
+// A separate core's Changes action ended (path_changed, count 1: the checkout's root): this
+// window's own list of that checkout is read again at once (now), as in process, not after its
+// watcher's event and the debounce; another checkout's is left alone (#160).
+@(test)
+client_changes_action_reads_list_now :: proc(t: ^testing.T) {
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer posix.close(fds[1])
+	saved, saved_redraw, saved_repos := client, app.redraw, core.changes_repos
+	defer {
+		client = saved
+		app.redraw = saved_redraw
+		core.changes_repos = saved_repos
+	}
+	client = {}
+	sock: cw.Sock_Transport
+	cw.sock_open(&sock, fds[0])
+	defer cw.sock_destroy(&sock)
+	client.sock = &sock // a separate core's window
+	a := core.Changes_Repo{root = "/tmp/dh-changes-a", loaded = true}
+	b := core.Changes_Repo{root = "/tmp/dh-changes-b", loaded = true}
+	core.changes_repos = make([dynamic]^core.Changes_Repo, context.temp_allocator)
+	append(&core.changes_repos, &a, &b)
+	window_request_run({op = .Path_Changed, path = "/tmp/dh-changes-a", count = 1})
+	testing.expect(t, a.stale && a.now, "the action's checkout is not read again at once")
+	testing.expect(t, !b.now, "another checkout is read at once too")
+	b.stale = false
+	window_request_run({op = .Path_Changed, path = "/tmp/dh-changes-b"}) // a file command's path: the debounce as before
+	testing.expect(t, !b.now, "a plain path_changed reads the list at once")
+	client.sock = nil
+}
+
+// #204 review, item 1: a core from another login is replaced at most once per dial, and one that
+// can't be stopped is a reason, never a loop.
+@(private = "file")
+cc_stop_ok :: proc(pid: i32, start: i64, wait: time.Duration) -> bool {return true}
+@(private = "file")
+cc_stop_fails :: proc(pid: i32, start: i64, wait: time.Duration) -> bool {return false}
+
+@(test)
+client_core_other_login_once :: proc(t: ^testing.T) {
+	replaced := false
+	why := client_core_replace_other_login(4242, 99, &replaced, cc_stop_ok)
+	testing.expect_value(t, why, "")
+	testing.expect(t, replaced, "the first one is replaced")
+	why = client_core_replace_other_login(4243, 99, &replaced, cc_stop_ok)
+	testing.expectf(t, strings.contains(why, "pid 4243") && strings.contains(why, "earlier login"), "a second one in the same dial: %q", why)
+	replaced = false
+	why = client_core_replace_other_login(4244, 99, &replaced, cc_stop_fails)
+	testing.expectf(t, strings.contains(why, "pid 4244") && strings.contains(why, "could not be stopped"), "one that won't stop: %q", why)
+	testing.expect(t, !replaced)
+	// no start time: it exited as the window connected; gone, never a "could not be stopped"
+	// (#204 round 2), and it counts as this dial's one replacement
+	why = client_core_replace_other_login(4245, 0, &replaced, cc_stop_fails)
+	testing.expect_value(t, why, "")
+	testing.expect(t, replaced)
 }

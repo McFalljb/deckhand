@@ -7,7 +7,7 @@ is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PR
 (§2 tokens, §3 "Claude Code tabs"). Code: `src/core/claude.odin`, `src/ui_claude.odin`, `src/core/claude_panels.odin`, `src/core/claude_status.odin`, `src/core/dead_tab.odin`,
 `src/core/claude_reload.odin`, `src/ui_claude_reload.odin`, `src/core/claude_accounts.odin`, `src/core/claude_disk.odin`,
 `integrations/claude-code/`, `tools/deckhand-cli/`. Codex tabs reuse this machinery (a Claude tab
-record with `codex` set); what differs is in [CODEX.md](CODEX.md).
+record with harness `.Codex`); what differs is in [CODEX.md](CODEX.md).
 
 **Where it runs.** A Claude tab's process is a child of the session holder, like every terminal
 tab. The core runs everything else: tokens and the socket, the hooks' reports, held prompts and
@@ -64,14 +64,46 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   turning it off takes it from every later start. Not when the flags name it or set
   `--permission-mode` or `--allow-dangerously-skip-permissions`, nor past `CLAUDE_ARGS_MAX`.
   Agents, scripts, panels and apps never get it.
+- **The user's flags from the window** (`ui_flags.odin`, `core/harness_flags.odin`). **New Claude
+  tab with flags…** (the tab strip's **+**, the palette) and **New session with flags…** →
+  **Claude Code with flags…** open the palette as a one-line field, prefilled with the
+  flags last used from that window; Enter splits the line as a shell splits words (quotes
+  honoured, nothing expanded: `flags_split`) and sends them as `args`. The row shows
+  `claude_args_check`'s reason (or an open quote) before anything starts. A project's menu has
+  **New session with flags…** and **New Claude tab with flags…**, the New session picker ends with
+  **With flags…**. Another machine's start takes them as typed: only the quoting is checked here,
+  that machine's core checks them by its own rule and adds its own defaults, never this Mac's
+  (`machine_takes_flags`: refused to a core before 0.7.0). The same entries exist for
+  Codex (CODEX.md §1a) and pi (`pi_args_check`: `--provider`, `--model`, `--thinking`, `--models`,
+  `--tui-mode`, `--use-theme`, `--offline`, `--verbose`, `--no-mcp`; never a session, extension,
+  print, RPC or tool-switching flag; a pi session uses them when it starts, and pi keeps the
+  session's model when it resumes).
+- **Default Claude Code flags** (`set_harness_flags` with `"harness": "claude"`, Settings › Coding
+  agents › Claude Code › **Default flags…**, the palette's **Default Claude Code flags…**; `User_Here`, like the switch
+  above). One line, checked by `claude_args_check` when set and again when used, put BEFORE the
+  tab's own flags at the same starts as skip-permissions (`harness_with_defaults`): a default whose
+  flag the tab's flags name too is left out (with the words after it), so the tab's own wins; all
+  of them past `CLAUDE_ARGS_MAX`. Skip-permissions still comes after, and not when a default sets
+  `--permission-mode`. Never saved into a tab's or a record's flags; never an agent's, a script's,
+  a panel's or an app's start. Not in `get_state`'s snapshot nor a hub's or a browser's state stream (flags may hold a secret), and the
+  log has its length only.
+- **Refusals name the flag, never its value** (`flag_shown`: the text before `=` when it looks like
+  a flag), and a word that is not a flag is not quoted: errors reach the log and agents' events.
+- **Flags that turn hooks off are not refused.** `--settings` is allowed (the user's own
+  `settings.json` can do the same): `--settings '{"disableAllHooks":true}'` leaves the tab without
+  Deckhand's hooks, so no status from them, no row or resume for a new session, no comments, held
+  messages or panels; the "hooks aren't running" bar (`claude_status_message`) appears as for any
+  tab whose hooks never report, and names this flag as a likely cause.
 - **On another machine.** A Claude tab there runs on that machine's core: its `claude`, plugin,
   accounts and default flags, never this Mac's. A start this Mac forwards as the user's is the
   user's there (that machine's default flags apply). Only the tab's kind and status come back
   (`machine_mirror.odin`): that core's bars are not shown here. The shared rules: CODEX.md §8.
 - **Claude Code not installed.** `claude_installed()` looks for an executable `claude` (stat and
-  `access(X_OK)`, never run) on the PATH new tabs get and in `~/.local/bin` and `~/.claude/local`.
+  `access(X_OK)`, never run) on the PATH new tabs get and in `~/.local/bin` and `~/.claude/local`,
+  else asks the login shell (`command -v claude`, on a worker; there meanwhile): the one lookup
+  pi and Codex use too (`harness_installed`, [HARNESSES.md §6](HARNESSES.md#6-the-harness-manifest)).
   Cached; looked up again after **Refresh shell environment**, after a Claude tab exits 127, and at
-  the user's click while the cache says "no". While missing, every command that would start
+  the user's click while the cache says "no" (by stat: the login shell's answer is kept). While missing, every command that would start
   claude is refused with how to install it (`CLAUDE_MISSING`, a toast for the user); the menu,
   **+** and palette rows read "… — Claude Code not installed"; past Claude sessions still list;
   and a restored Claude tab shows as exited (127) with why, no bell entry and no retry. The
@@ -115,8 +147,9 @@ inherits the login environment. Deckhand stores folders and names, never a secre
   sheet). Labels come from the folder's name (`.claude-work` → `Work`); the user renames,
   removes (not the default) and chooses the **default for new sessions**
   (`set_claude_account_default`). No alias or folder name is assumed.
-- **One account**: no account UI at all (no picker, no tags, no Settings rows but **Add
-  account…** and **Scan again**), and starts set no account.
+- **One account**: no account UI at all (no picker, no tags, no Settings rows but one quiet
+  **More accounts…**; **Add account…** and **Scan again** show once there are several), and
+  starts set no account.
 - **Starting.** A tab and a history entry keep their account's folder, written at a start (an
   entry without one uses the default as resolved then). Every start (new, resume, restore,
   restart) sets it: nothing for the default; else
@@ -326,16 +359,24 @@ is valid; it learns nothing it can use from outside the tab.
   in the tab's folder and above it and the config folder's `CLAUDE.md`; `rules/`, `output-styles/`,
   `commands/` (config folder and the cwd's `.claude/`); the cwd's `.mcp.json`; `agents/` and
   `skills/` folders appearing (Claude Code only watches those that existed at its start); Deckhand's
-  plugin. Settings files, `keybindings.json` and skills/subagents in existing folders are applied
-  live by Claude Code: never watched, no bar (`claude_file_class`: Live / Restart / Ignored). The
-  config folder is `$CLAUDE_CONFIG_DIR` (as the children get it), else `~/.claude`. A stat poll
-  every 2 s while a Claude tab runs; folders by their entries' names, times and sizes. No file is
-  read.
+  plugin; and `enabledPlugins` in the config folder's `settings.json` and the cwd's
+  `.claude/settings.json` and `settings.local.json` (`CLAUDE_RESTART_KEYS`: plugins load at start).
+  The rest of the settings files, `keybindings.json` and skills/subagents in existing folders are
+  applied live by Claude Code: no bar (`claude_file_class`: Live / Restart / Ignored). The config
+  folder is `$CLAUDE_CONFIG_DIR` (as the children get it), else `~/.claude`. A stat poll every 2 s
+  while a Claude tab runs; folders by their entries' names, times and sizes. The only file read is
+  a settings file whose stamp changed, for `enabledPlugins` alone (a file that does not parse
+  changes nothing).
 - **Restart** (`claude_restart_changed`; `all`: every running Claude tab, changed or not, as pi's
   **Reload all pi tabs**; the palette's **Restart all Claude tabs** and the gear's row): idle tabs (hooks' turn idle, OSC 7501 not working or
   blocked, nothing typed or held, no subagent running) are stopped (hung up on, as a pi restart)
   and started again once the old process exited, through the dead tab's restart wait, with
   `--resume <session id>` and a new token; busy ones queue and go from the core's tick once idle.
+  A subagent counts as running until its SubagentStop, however long it is silent (one long step
+  looks the same as a lost stop). When every running subagent of a queued tab has reported nothing
+  for `CLAUDE_AGENT_STALE` (2 h), its note says so ("a subagent silent for 2h 05m") and the bar
+  offers **Restart anyway** (`claude_restart_anyway`: the user's, always confirmed) for that tab;
+  nothing restarts it by itself, and the other queued tabs go without it.
   A tab without a Claude session id is never restarted (no `--resume`: it would lose the
   conversation). Always confirmed: Claude's background shells and monitors stop; the confirmation
   names those Claude's last turn reported (§6b; a Claude Code without them: none named). Only the
@@ -372,9 +413,21 @@ is valid; it learns nothing it can use from outside the tab.
 - **Settings page**: Claude Code's files under Coding agents › Claude Code and This project (once
   the config folder exists; ui_settings_page.odin); Claude's settings JSON is saved only when valid (strict); a save of a
   restart-class file shows the Claude bar at once.
+- **Plugins and MCP servers (user)** (`claude_lists.odin`): two read-only lists in the Claude Code
+  card, per account. Plugins: the ids of `enabledPlugins` in `<config>/settings.json` with
+  enabled/disabled (an entry that is not true or false is left out); `plugins/` stays unlisted.
+  MCP servers: the names under the top-level `mcpServers` of the account file (`~/.claude.json`
+  for `~/.claude`, else `<config>/.claude.json`) and each one's `type` when it is a short word
+  (stdio when there is none and it has a `command`). Nothing else of that file is kept: no
+  command, args, env, headers or URL, no project's servers, no account data; it stays a
+  credential file for everything else (never listed, opened, watched or given to an agent), and
+  it is read member by member (`json_members_raw`, its depth guard first), at most 64 MB. Both
+  are read on a worker, at most every 2 s while the rows are built, and only again once a file's
+  time, size or inode changed; the page is told when a list changed (`claude_lists_tick` in
+  `settings_poll`). Names are shown without control characters, at most 100 bytes, 200 per list.
 - **First run**: the notes folder may also be found in the config folder's `CLAUDE.md` (after
   pi's `AGENTS.md`; only the path is shown; the config folder itself never qualifies); step 3 says
-  whether Claude Code is installed (`claude_installed`, stat only).
+  whether Claude Code is installed (`claude_installed`, never run).
 
 ## 4b. Rows and tabs at parity with pi's
 
@@ -420,7 +473,16 @@ its files):
   in front; without Claude Code, the toast says how to install it). If DIR cannot be added
   (Chats' folder, say) nothing starts, never in the project selected before; the same for a
   plain `deckhand DIR`'s chat.
-- **Not done:** a permission-mode badge (optional; not built).
+- **Permission mode** (`src/core/claude_mode.odin`): a quiet word after the tab's title (and
+  "· plan mode" in its tooltip, the browser's tab too) when it is not the default: **plan**,
+  **accept edits**, **don't ask**; **auto**, **bypass** and any mode word Deckhand does not know
+  in the warning colour; `Claude_Tab.permission_mode` on the state stream, `permission_mode` in
+  the snapshot. From the hooks' `permission_mode` (`claude.session`, `claude.turn`: Shift+Tab's
+  switch shows at the next prompt or turn's end; `default` clears it), else the start's flags
+  (`--permission-mode`, `--dangerously-skip-permissions`, the defaults as they went); never
+  guessed. A tab started with skip-permissions keeps **bypass** until its process starts again.
+  The badge is information, not a security boundary: any process in the tab holds its token and
+  can report a mode.
 
 ## 4c. Sessions found on disk
 
@@ -437,11 +499,16 @@ work only from Deckhand's own record, so a found row gives them nothing).
   as Claude does: only with `CLAUDE_CONFIG_DIR` set, 1–64 of `[A-Za-z0-9_-]`). Names are lossy, so
   a file counts only when the `cwd` it records is the project's folder; a name is **never turned
   back into a path**. Projects where only Claude ran come from the same `cwd` (the newest files of
-  each folder, on the Rescan worker).
+  each folder, on the Rescan worker); never the home folder itself (`found_project`, shared with Codex's:
+  a project added at `~` by hand is left as it is).
 - **Rows.** Only `<uuid>.jsonl` files (never `agent-*` or side-chain ones); title: a
   `custom-title` or the first real prompt (meta, command and reminder lines skipped), else
-  `ai-title` or `summary`; read from the first and last 64 KB only, within a per-frame budget
-  (the rest on a worker, cached by size and date), so scanning never blocks a frame. Sorted by the
+  `ai-title` or `summary`; read from the first and last 64 KB only. A line is parsed only when it
+  can still change something: in the tail, a title line; in the head, until the cwd, the side-chain
+  flag and the first prompt are known, then only title lines. At most 256 KB a listing is read on
+  the main thread (`CLAUDE_DISK_INLINE_BUDGET`: two transcripts), the rest on a worker (cached
+  by size and date), which has the rows made again when it has drained, or every 250 ms while it
+  drains (`FOUND_PUBLISH_EVERY`), never once per transcript. Sorted by the
   file's date; created from the file. Merged by id with Deckhand's record (one row each), under
   the MAX_SESSIONS cap. A line goes to the JSON
   parser only when it is at most 64 KB and nested at most 64 deep (the parser recurses). The

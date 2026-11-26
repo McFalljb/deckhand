@@ -73,11 +73,13 @@ cx_reset :: proc(version := "0.167.2") -> runtime.Allocator {
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/deckhand-cx-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
-	core.claude_found = .Yes
-	core.codex_found = .Yes
+	core.harness_found[.Claude] = .Yes
+	core.harness_found[.Codex] = .Yes
 	core.codex_login_set(.Signed_In) // never asks (a stand-in would only sleep)
 	core.claude_cli_override = CX_CLI
 	core.claude_status_reset()
+	cx_cache_clear() // the found Codex rows (codex_disk.odin): every test reads its own CODEX_HOME
+	core.codex_disk_gap = 0
 	return runtime.heap_allocator()
 }
 
@@ -94,7 +96,7 @@ cx_done :: proc() {
 cx_codex_session :: proc(t: ^testing.T, tag: string) -> (dir: string, sess, tab: u64) {
 	dir = cx_dir(tag)
 	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_UI)
 	testing.expect(t, r.ok, r.error)
 	s := core.find_session(r.created_id)
 	if s == nil do return dir, 0, 0
@@ -198,10 +200,12 @@ codex_user_flags :: proc(t: ^testing.T) {
 	ok := [][]string{
 		{"-m", "o3"}, {"-mo3"}, {"--model=o3"}, {"-s", "danger-full-access", "-a", "never"}, {"--dangerously-bypass-approvals-and-sandbox"},
 		{"-c", `model="o3"`}, {"--config=mcp_servers.mine.command=\"x\""}, {"--search", "--oss"},
+		// a profile by its plain name: $CODEX_HOME/<name>.config.toml over the base, under Deckhand's -c
+		{"-p", "work"}, {"-pwork"}, {"--profile", "fast_o3.v2"}, {"--profile=Team-1"},
 	}
 	for a in ok do testing.expectf(t, core.codex_args_check(a) == "", "%v: %s", a, core.codex_args_check(a))
 	refused := [][2]string{
-		{"exec", `"exec" is not a flag: Codex would take it for a command or a prompt`},
+		{"exec", core.CODEX_NOT_A_FLAG},
 		{"--no-daemon", "--no-daemon is refused: Deckhand sets it (its hooks must run under the tab's own Codex)"},
 		{"-C", "-C is refused: Deckhand sets the tab's folder"},
 		{"--cd=/tmp", "--cd is refused: Deckhand sets the tab's folder"},
@@ -216,18 +220,26 @@ codex_user_flags :: proc(t: ^testing.T) {
 		{"-c features.daemon_auto_start=true", "-c features… is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
 		{"--disable=codex_hooks", "--disable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
 		{"--enable", "--enable is refused: Codex features are set in your ~/.codex/config.toml, not per tab"},
-		{"-p", "-p is refused: profiles are not supported per tab yet"},
-		{"--profile=work", "--profile is refused: profiles are not supported per tab yet"},
-		{"-cprofile=\"work\"", "-c profile… is refused: profiles are not supported per tab yet"},
-		{"-c profiles.work.model=\"o3\"", "-c profile… is refused: profiles are not supported per tab yet"},
+		{"-p", "--profile needs a value"},
+		{"--profile=../x", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"-p/etc/x", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"--profile=.hidden", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"--profile=", "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"},
+		{"-cprofile=\"work\"", "-c profile… is refused: " + core.CODEX_PROFILES_WHY},
+		{"-c profiles.work.model=\"o3\"", "-c profile… is refused: " + core.CODEX_PROFILES_WHY},
 		{"--frobnicate", "--frobnicate is not a Codex flag Deckhand passes on"},
 		{"-m", "--model needs a value"},
 		{"--search=yes", "--search takes no value"},
 	}
 	for r in refused do testing.expect_value(t, core.codex_args_check({r[0]}), r[1])
 	testing.expect_value(t, core.codex_args_check({"-m", "--no-daemon"}), "--model needs a value") // never eats Deckhand's next flag
+	testing.expect_value(t, core.codex_args_check({"-p", "--no-daemon"}), "--profile needs a value")
+	testing.expect_value(t, core.codex_args_check({"--profile", "a/b"}), "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)")
+	// a profile goes before Deckhand's own flags, as the user's other flags
+	pargs, pwhy := core.codex_args(CX_CLI, "/w/p", "", {"-p", "work"})
+	testing.expectf(t, pwhy == "" && len(pargs) > 4 && pargs[0] == "-p" && pargs[1] == "work" && pargs[2] == "--no-daemon", "%v %s", pargs, pwhy)
 	testing.expect_value(t, core.codex_args_check({"-c", "mcp_servers={}"}), "-c mcp_servers.deckhand is Deckhand's own MCP server")
-	testing.expect_value(t, core.codex_args_check({"-m", "o3", "login"}), `"login" is not a flag: Codex would take it for a command or a prompt`)
+	testing.expect_value(t, core.codex_args_check({"-m", "o3", "login"}), core.CODEX_NOT_A_FLAG)
 	// Deckhand's own arguments come after the user's: --no-daemon, -C and every -c of Deckhand's last
 	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad530"
 	args, why := core.codex_args(CX_CLI, "/w/p", sid, {"-m", "o3", "-c", `model_reasoning_effort="high"`})
@@ -252,17 +264,17 @@ codex_full_access_default :: proc(t: ^testing.T) {
 	if len(state.pending_confirmations) == 1 {
 		p := state.pending_confirmations[0]
 		testing.expect_value(t, p.summary, core.CODEX_FULL_ACCESS_CONFIRM)
-		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, codex = true, confirm = p.token}, CX_UI).ok)
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, harness = .Codex, confirm = p.token}, CX_UI).ok)
 	}
 	testing.expect(t, state.settings.codex_full_access && !state.settings.claude_skip_permissions, "Codex's, not Claude's")
 	// never from an agent (User_Here)
-	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = false, codex = true}, CX_CONTROL).ok)
+	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = false, harness = .Codex}, CX_CONTROL).ok)
 	dir := cx_dir("full")
 	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
 	argv_of :: proc(t: ^testing.T, pid: u64, args: []string, caller: core.Caller) -> string {
 		f := fmt.tprintf("%s/argv-%d", cx_dir("fa"), time.now()._nsec)
 		os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, f))
-		r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true, args = args}, caller)
+		r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex, args = args}, caller)
 		testing.expect(t, r.ok, r.error)
 		for _ in 0 ..< 50 {
 			data, _ := os.read_entire_file(f, context.temp_allocator)
@@ -320,7 +332,7 @@ codex_session_start_and_row :: proc(t: ^testing.T) {
 	s := core.find_session(sess)
 	testing.expect_value(t, s.agent, core.Session_Agent.Claude)
 	_, tb, ct := core.claude_tab_of(tab)
-	testing.expect(t, ct != nil && ct.codex && tb.title == "Codex" && ct.account == core.codex_home() && len(ct.args) == 0) // the default account
+	testing.expect(t, ct != nil && ct.harness == .Codex && tb.title == "Codex" && ct.account == core.codex_home() && len(ct.args) == 0) // the default account
 	snap := core.state_json()
 	testing.expect_value(t, core.json_path(snap, "open_sessions.0.tabs.0.harness"), "codex")
 	testing.expect_value(t, core.json_path(snap, "codex_installed"), "true")
@@ -351,13 +363,13 @@ codex_session_start_and_row :: proc(t: ^testing.T) {
 	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", title = "Fix the login bug"}, CX_SCRIPT)
 	testing.expect_value(t, len(state.claude_history), 1)
 	rec := state.claude_history[0]
-	testing.expect(t, rec.codex && rec.id == sid && rec.account == core.codex_home() && rec.transcript == "" && rec.title == "Fix the login bug", "the row: a Codex conversation")
+	testing.expect(t, rec.harness == .Codex && rec.id == sid && rec.account == core.codex_home() && rec.transcript == "" && rec.title == "Fix the login bug", "the row: a Codex conversation")
 	testing.expect_value(t, core.find_session(sess).pi_session_id, sid)
 	snap = core.state_json()
 	testing.expect_value(t, core.json_path(snap, "claude_sessions.0.harness"), "codex")
 	testing.expect(t, strings.contains(core.claude_tab_tip(core.find_session(sess).tabs[0]), "Codex · model gpt-5.5"))
 	// a Claude tab's report never names a Codex conversation (one record, one harness)
-	cl := core.run_command(core.New_Claude_Tab{session = sess}, CX_UI)
+	cl := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CX_UI)
 	testing.expect(t, cl.ok, cl.error)
 	core.run_command(core.Close_Tab{tab_id = tab}, core.Caller{kind = .Internal})
 	testing.expect_value(t, core.run_command(core.Claude_Session_Report{tab_id = cl.created_id, session_id = sid}, CX_SCRIPT).error, "that id is another harness's conversation")
@@ -386,7 +398,7 @@ codex_claude_ids_not_claimed :: proc(t: ^testing.T) {
 	r := core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = id_a}, CX_SCRIPT)
 	testing.expect_value(t, r.error, "that id is another harness's conversation")
 	testing.expect_value(t, len(state.claude_history), 0)
-	r = core.run_command(core.New_Claude_Tab{session = sess, codex = true, resume = id_a}, CX_SCRIPT)
+	r = core.run_command(core.New_Claude_Tab{session = sess, harness = .Codex, resume = id_a}, CX_SCRIPT)
 	testing.expect_value(t, r.error, "that id is another harness's conversation")
 	testing.expect_value(t, len(state.claude_history), 0)
 	// the reverse: a Codex claim first (no transcript yet), then Claude Code's own transcript and
@@ -394,13 +406,13 @@ codex_claude_ids_not_claimed :: proc(t: ^testing.T) {
 	id_b := "0c1a0de0-1111-4222-8333-444455557777"
 	r = core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = id_b}, CX_SCRIPT)
 	testing.expect(t, r.ok, r.error)
-	cl := core.run_command(core.New_Claude_Tab{session = sess}, CX_UI)
+	cl := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, CX_UI)
 	testing.expect(t, cl.ok, cl.error)
 	transcript(d, p.cwd, id_b)
 	r = core.run_command(core.Claude_Session_Report{tab_id = cl.created_id, session_id = id_b}, CX_SCRIPT)
 	testing.expect(t, r.ok, r.error)
 	rec, _ := core.claude_record(id_b)
-	testing.expect(t, rec != nil && !rec.codex, "Claude Code's conversation now")
+	testing.expect(t, rec != nil && rec.harness != .Codex, "Claude Code's conversation now")
 	_, _, ct := core.claude_tab_of(tab)
 	testing.expect(t, ct != nil && ct.session_id == "", "the Codex claim is gone")
 	testing.expect_value(t, core.claude_tab_of_session(id_b), cl.created_id)
@@ -419,7 +431,7 @@ codex_claude_ids_not_claimed :: proc(t: ^testing.T) {
 	r = core.run_command(core.Open_Session_Cmd{project_id = opid, pi_session_id = id_c}, CX_UI)
 	testing.expect(t, r.ok, r.error)
 	rc, _ := core.claude_record(id_c)
-	testing.expect(t, rc != nil && !rc.codex, "Claude Code's row opens it")
+	testing.expect(t, rc != nil && rc.harness != .Codex, "Claude Code's row opens it")
 	_, _, ct2 := core.claude_tab_of(tab2)
 	testing.expect(t, ct2 != nil && ct2.session_id == "", "the claim is gone")
 	_ = sess2
@@ -438,10 +450,10 @@ codex_claude_ids_not_claimed :: proc(t: ^testing.T) {
 	r = core.run_command(core.Open_Session_Cmd{project_id = pid4, pi_session_id = id_e}, CX_UI)
 	testing.expect(t, r.ok, r.error)
 	re, _ := core.claude_record(id_e)
-	testing.expect(t, re != nil && !re.codex, "Claude Code's conversation")
+	testing.expect(t, re != nil && re.harness != .Codex, "Claude Code's conversation")
 	if tid := core.claude_tab_of_session(id_e); tid != 0 {
 		_, tb4, _ := core.find_tab(tid)
-		testing.expect(t, tb4 != nil && !core.claude_tab_is_codex(tb4^), "a Claude tab, never codex resume")
+		testing.expect(t, tb4 != nil && core.tab_harness(tb4^) != .Codex, "a Claude tab, never codex resume")
 	} else do testing.fail_now(t, "no tab resumed it")
 	// a Codex conversation is never a Claude row whose transcript is gone (no Claude transcript)
 	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", title = "codex work"}, CX_SCRIPT)
@@ -477,12 +489,12 @@ codex_hub_starts :: proc(t: ^testing.T) {
 	}
 	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
 	hub := core.Caller{kind = .UI, hub = true}
-	r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, hub)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, hub)
 	testing.expect(t, r.ok, r.error)
 	s := core.find_session(r.created_id)
 	if s == nil do testing.fail_now(t, "no session")
 	sess, tab := s.id, s.tabs[0].id
-	testing.expect(t, core.claude_tab_is_codex(s.tabs[0]), "a Codex tab")
+	testing.expect(t, core.tab_harness(s.tabs[0]) == .Codex, "a Codex tab")
 	got := read_argv(argf)
 	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("--no-daemon\n-C\n%s\n", dir)), "%q", got)
 	hook := core.codex_hook_command(CX_CLI, "codex-stop")
@@ -491,12 +503,12 @@ codex_hub_starts :: proc(t: ^testing.T) {
 	// flags under this machine's rule, an account refused
 	state.settings.codex_full_access = true
 	os.remove(argf)
-	testing.expect(t, core.run_command(core.New_Claude_Tab{session = sess, codex = true}, hub).ok)
+	testing.expect(t, core.run_command(core.New_Claude_Tab{session = sess, harness = .Codex}, hub).ok)
 	state.settings.codex_full_access = false
 	got = read_argv(argf)
 	testing.expectf(t, strings.has_prefix(got, "--dangerously-bypass-approvals-and-sandbox\n--no-daemon\n"), "this machine's default: %q", got)
-	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, codex = true, args = {"--no-daemon"}}, hub).ok, "Codex's flag rule")
-	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, codex = true, account = "/x"}, hub).ok)
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, harness = .Codex, args = {"--no-daemon"}}, hub).ok, "Codex's flag rule")
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = sess, harness = .Codex, account = "/x"}, hub).ok)
 	// its row (open_session with its id, as a hub's click sends it): resumed in Codex
 	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad5aa"
 	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid}, CX_SCRIPT)
@@ -506,7 +518,7 @@ codex_hub_starts :: proc(t: ^testing.T) {
 	testing.expect(t, r.ok, r.error)
 	if tid := core.claude_tab_of_session(sid); tid != 0 {
 		_, tb, _ := core.find_tab(tid)
-		testing.expect(t, tb != nil && core.claude_tab_is_codex(tb^), "resumed in Codex")
+		testing.expect(t, tb != nil && core.tab_harness(tb^) == .Codex, "resumed in Codex")
 	} else do testing.fail_now(t, "no tab resumed it")
 	got = read_argv(argf)
 	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n--no-daemon\n", sid)), "%q", got)
@@ -619,7 +631,7 @@ codex_resume_from_row :: proc(t: ^testing.T) {
 	r := core.run_command(core.Claude_Resume{claude_session_id = sid}, CX_UI)
 	testing.expect(t, r.ok, r.error)
 	_, tb, ct := core.claude_tab_of(r.created_id)
-	testing.expect(t, ct != nil && ct.codex && ct.session_id == sid && tb.title == "Codex")
+	testing.expect(t, ct != nil && ct.harness == .Codex && ct.session_id == sid && tb.title == "Codex")
 	got := ""
 	for _ in 0 ..< 50 {
 		data, _ := os.read_entire_file(argf, context.temp_allocator)
@@ -633,12 +645,12 @@ codex_resume_from_row :: proc(t: ^testing.T) {
 	testing.expect_value(t, r2.created_id, r.created_id)
 	// harness mismatch: a Claude tab never resumes a Codex conversation, nor the reverse
 	s, _, _ := core.find_tab(r.created_id)
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, resume = sid}, CX_UI).error, "that id is another harness's conversation")
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, resume = sid, harness = .Claude}, CX_UI).error, "that id is another harness's conversation")
 	// accounts: refused for Codex; flags: Codex's own rule (codex_user_flags)
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"exec"}}, CX_UI).error, `"exec" is not a flag: Codex would take it for a command or a prompt`)
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, args = {"-m", "o3"}}, CX_CONTROL).error, "only the user sets Codex's flags")
-	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = s.id, codex = true, account = "/x"}, CX_UI).ok)
-	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, codex = true, resume = "--last"}, CX_UI).error, "resume must be a Codex session id")
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, harness = .Codex, args = {"exec"}}, CX_UI).error, core.CODEX_NOT_A_FLAG)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, harness = .Codex, args = {"-m", "o3"}}, CX_CONTROL).error, "only the user sets Codex's flags")
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = s.id, harness = .Codex, account = "/x"}, CX_UI).ok)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = s.id, harness = .Codex, resume = "--last"}, CX_UI).error, "resume must be a Codex session id")
 }
 
 // Held prompts: only at Codex's idle per OSC 7501 (and the hooks once they report), bracketed paste,
@@ -777,23 +789,83 @@ codex_status_bars :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.claude_status_message(tb, later), "")
 }
 
-// Too old (no OSC 7501), not installed: never started, with what to do.
+// Too old to start at all (no --no-daemon, before 0.157), not installed: never started, with what
+// to do.
 @(test)
 codex_too_old_and_missing :: proc(t: ^testing.T) {
-	context.allocator = cx_reset(version = "0.160.0")
+	context.allocator = cx_reset(version = "0.156.0")
 	defer cx_done()
-	testing.expect_value(t, core.codex_version(), "0.160.0")
+	testing.expect_value(t, core.codex_version(), "0.156.0")
 	dir := cx_dir("old")
 	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_UI)
 	// #135: the reason, not only "could not start Codex" (a hub forwarding the start sees only this)
-	testing.expect_value(t, r.error, fmt.tprintf("Codex 0.160.0 is older than %s: update it with `npm install -g @openai/codex@latest`", core.CODEX_MIN_VERSION))
+	testing.expect_value(t, r.error, fmt.tprintf("Codex 0.156.0 is older than %s: update it with `npm install -g @openai/codex@latest`", core.CODEX_PLAIN_MIN_VERSION))
 	testing.expect_value(t, len(state.open_sessions), 0)
-	core.codex_installed_probe = proc() -> bool {return false}
-	defer core.codex_installed_probe = nil
-	r = core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, CX_SCRIPT)
+	core.harness_installed_probe[.Codex] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Codex] = nil
+	r = core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_SCRIPT)
 	testing.expect_value(t, r.error, core.CODEX_MISSING)
 	testing.expect_value(t, core.codex_label("New Codex tab"), "New Codex tab — Codex not installed")
+}
+
+// Old enough to start (--no-daemon, 0.157) but without OSC 7501 (before 0.163): a plain tab, as an
+// old pi starts without the integration. Only `--no-daemon -C <cwd>` and the user's flags: no
+// hooks, no MCP server, no token in its environment; a bar says what is missing and how to update;
+// Deckhand types nothing into it.
+@(test)
+codex_too_old_plain :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	// the socket runs, so a Codex tab new enough gets its token (the control for what follows)
+	rt := cx_dir("rt")
+	os.set_env("DECKHAND_RUNTIME_DIR", rt)
+	rdir, rok := core.sock_runtime_dir(context.temp_allocator)
+	testing.expect(t, rok && core.socket_start(rdir), "socket_start")
+	defer core.socket_stop(proc() {core.inbox_drain()})
+	cmd :: proc(dir: string) -> string {
+		args := fmt.tprintf("%s/args", dir)
+		return fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; env > '%s/env'; mv '%s.tmp' '%s'; exec sleep 30`, args, dir, args, args)
+	}
+	newer := cx_dir("newer")
+	os.set_env("DECKHAND_CODEX_CMD", cmd(newer))
+	np := core.run_command(core.Add_Project{cwd = newer}, CX_UI).created_id
+	testing.expect(t, core.run_command(core.New_Claude_Session{project_id = np, harness = .Codex}, CX_UI).ok)
+	testing.expect(t, strings.contains(cx_read_after(fmt.tprintf("%s/args", newer), 300), "hooks.SessionStart"), "the hooks")
+	testing.expect(t, strings.contains(cx_read_after(fmt.tprintf("%s/env", newer), 0), "DECKHAND_CLAUDE_TOKEN="), "a token")
+	// 0.160.0
+	os.set_env("DECKHAND_CODEX_BIN", cx_fake_install(cx_dir("oldbin"), "0.160.0"))
+	dir := cx_dir("plain")
+	args := fmt.tprintf("%s/args", dir)
+	envf := fmt.tprintf("%s/env", dir)
+	os.set_env("DECKHAND_CODEX_CMD", cmd(dir))
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	s := core.find_session(r.created_id)
+	testing.expect(t, s != nil)
+	if s == nil do return
+	tab := s.tabs[0].id
+	core.run_command(core.Focus_Session{session = s.id}, CX_UI)
+	got := cx_read_after(args, 300)
+	testing.expect_value(t, got, fmt.tprintf("--no-daemon\n-C\n%s\n", dir))
+	envs := cx_read_after(envf, 0)
+	for no in ([]string{"DECKHAND_CLAUDE_TOKEN", "DECKHAND_SOCKET", "PI_DESK_", "DECKHAND_CLAUDE_TAB"}) do testing.expectf(t, !strings.contains(envs, no), "%s in a plain tab's environment", no)
+	_, tb, _ := core.claude_tab_of(tab)
+	testing.expect_value(t, core.codex_plain_version(tab), "0.160.0")
+	msg := core.claude_status_message(tb)
+	testing.expectf(t, strings.contains(msg, "Codex 0.160.0 is older than 0.163.0") && strings.contains(msg, "npm install -g @openai/codex@latest"), "%q", msg)
+	testing.expect(t, strings.contains(core.state_json(), `"codex_version_old":"0.160.0"`), "in the snapshot")
+	// never silent hooks (it has none), even after a long while
+	later := time.tick_add(time.tick_now(), core.CLAUDE_HOOKS_GRACE + time.Second)
+	core.claude_status_tick(later)
+	testing.expect(t, !core.claude_hooks_silent(tb, later))
+	// Deckhand types nothing into it: no held prompts, no pastes
+	testing.expect_value(t, core.run_command(core.Claude_Prompt{tab_id = tab, text = "hello"}, CX_CONTROL).error, core.CODEX_PLAIN_REFUSAL)
+	testing.expect_value(t, core.codex_paste_refusal(tb, "hello"), core.CODEX_PLAIN_REFUSAL)
+	// Dismiss: gone for this run
+	core.claude_status_dismiss(tb)
+	testing.expect_value(t, core.claude_status_message(tb), "")
 }
 
 // #135: a standalone install (no npm or Homebrew path) gets its version from `codex --version`,
@@ -871,7 +943,7 @@ codex_version_detection :: proc(t: ^testing.T) {
 	// checklists stay as they were): only DECKHAND_CODEX_BIN's
 	os.unset_env("DECKHAND_CODEX_BIN")
 	core.codex_recheck()
-	testing.expect_value(t, core.codex_binary(), "")
+	testing.expect_value(t, core.harness_binary(.Codex), "")
 	testing.expect(t, !core.codex_installed(), "no codex in a unit test without DECKHAND_CODEX_BIN")
 	os.set_env("DECKHAND_CODEX_BIN", link)
 	core.codex_recheck()
@@ -890,10 +962,10 @@ codex_credential_guard :: proc(t: ^testing.T) {
 	defer os.set_env("HOME", old)
 	os.make_directory_all(fmt.tprintf("%s/.codex/sessions/2026/11/12", home))
 	_ = os.write_entire_file(fmt.tprintf("%s/.codex/auth.json", home), transmute([]u8)string("{}"))
-	for p in ([]string{"/.codex/auth.json", "/.codex/sessions/2026/11/12/rollout-x.jsonl", "/.codex/history.jsonl", "/.codex/state_5.sqlite", "/.codex/log/codex-tui.log"}) {
+	for p in ([]string{"/.codex/auth.json", "/.codex/sessions/2026/11/12/rollout-x.jsonl", "/.codex/history.jsonl", "/.codex/state_5.sqlite", "/.codex/log/codex-tui.log", "/.codex/plugins/cache/x.json", "/.codex/hooks.json/x"}) {
 		testing.expectf(t, core.settings_credential(strings.concatenate({home, p}, context.temp_allocator)), "%s refused", p)
 	}
-	for p in ([]string{"/.codex/config.toml", "/.codex/AGENTS.md", "/.codex/prompts/x.md", "/proj/.codex/config.toml", "/proj/notes.md"}) {
+	for p in ([]string{"/.codex/config.toml", "/.codex/AGENTS.md", "/.codex/prompts/x.md", "/.codex/hooks.json", "/.codex/hooks/pre.sh", "/proj/.codex/config.toml", "/proj/notes.md"}) {
 		testing.expectf(t, !core.settings_credential(strings.concatenate({home, p}, context.temp_allocator)), "%s allowed", p)
 	}
 	// a repo's own .codex/auth.json, and a hard link to the sign-in elsewhere
@@ -915,7 +987,7 @@ codex_credential_guard :: proc(t: ^testing.T) {
 
 // The wire: harness "codex" on new_claude_session and new_claude_tab (anything else refused); the
 // workspace keeps a Codex tab as kind "codex" (an older Deckhand drops it, never starting claude on
-// its id) and its record with codex: true.
+// its id) and its record with harness .Codex.
 @(test)
 codex_wire_and_persist :: proc(t: ^testing.T) {
 	context.allocator = cx_reset()
@@ -923,25 +995,25 @@ codex_wire_and_persist :: proc(t: ^testing.T) {
 	cmd, err := core.parse_command(`{"type":"new_claude_session","project_id":1,"harness":"codex"}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
 	c, is := cmd.(core.New_Claude_Session)
-	testing.expect(t, is && c.codex)
+	testing.expect(t, is && c.harness == .Codex)
 	cmd, err = core.parse_command(`{"type":"new_claude_tab","session":1,"harness":"claude"}`, context.temp_allocator)
-	testing.expect(t, err == "" && !cmd.(core.New_Claude_Tab).codex)
+	testing.expect(t, err == "" && cmd.(core.New_Claude_Tab).harness == .Claude)
 	_, err = core.parse_command(`{"type":"new_claude_tab","session":1,"harness":"gpt"}`, context.temp_allocator)
 	testing.expect_value(t, err, "harness must be claude or codex")
-	testing.expect(t, strings.contains(core.command_json(core.New_Claude_Session{project_id = 3, codex = true}, true), `"harness":"codex"`))
-	testing.expect(t, !strings.contains(core.command_json(core.New_Claude_Session{project_id = 3}, true), `harness`), "Claude's wire is unchanged")
+	testing.expect(t, strings.contains(core.command_json(core.New_Claude_Session{project_id = 3, harness = .Codex}, true), `"harness":"codex"`))
+	testing.expect(t, !strings.contains(core.command_json(core.New_Claude_Session{project_id = 3, harness = .Claude}, true), `harness`), "Claude's wire is unchanged")
 	// the window's commands to its core (command_wire_json): the harness crosses, both commands
-	for c in ([]core.Command{core.New_Claude_Session{project_id = 3, codex = true}, core.New_Claude_Tab{session = 2, codex = true}}) {
+	for c in ([]core.Command{core.New_Claude_Session{project_id = 3, harness = .Codex}, core.New_Claude_Tab{session = 2, harness = .Codex}}) {
 		js := core.command_wire_json(c)
 		back, perr := core.parse_command(js, context.temp_allocator)
 		testing.expect_value(t, perr, "")
 		#partial switch x in back {
-		case core.New_Claude_Session: testing.expect(t, x.codex, js)
-		case core.New_Claude_Tab:     testing.expect(t, x.codex, js)
+		case core.New_Claude_Session: testing.expect(t, x.harness == .Codex, js)
+		case core.New_Claude_Tab:     testing.expect(t, x.harness == .Codex, js)
 		case:                         testing.fail_now(t, js)
 		}
 	}
-	testing.expect(t, !strings.contains(core.command_wire_json(core.New_Claude_Session{project_id = 3}), "harness"), "Claude's wire is unchanged")
+	testing.expect(t, !strings.contains(core.command_wire_json(core.New_Claude_Session{project_id = 3, harness = .Claude}), "harness"), "Claude's wire is unchanged")
 	_, sess, tab := cx_codex_session(t, "persist")
 	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad530"
 	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid}, CX_SCRIPT)
@@ -953,31 +1025,47 @@ codex_wire_and_persist :: proc(t: ^testing.T) {
 	core.run_command(core.Close_Session{session = sess}, core.Caller{kind = .Internal})
 	clear(&state.claude_history)
 	testing.expect_value(t, core.workspace_restore(saved), "")
-	testing.expect(t, len(state.claude_history) == 1 && state.claude_history[0].codex, "its record")
+	testing.expect(t, len(state.claude_history) == 1 && state.claude_history[0].harness == .Codex, "its record")
 	found := false
 	for &o in state.open_sessions do if o.project_id == pid && o.pi_session_id == sid {
-		testing.expect(t, core.claude_tab_is_codex(o.tabs[0]) && o.tabs[0].status == .Not_Started && o.tabs[0].title == "Codex")
+		testing.expect(t, core.tab_harness(o.tabs[0]) == .Codex && o.tabs[0].status == .Not_Started && o.tabs[0].title == "Codex")
 		found = true
 	}
 	testing.expect(t, found, "restored")
 	// shown, it starts with Codex installed and Claude Code not (its harness's check, not Claude's)
-	core.claude_installed_probe = proc() -> bool {return false}
-	defer core.claude_installed_probe = nil
-	core.claude_found = .No
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
+	defer core.harness_installed_probe[.Claude] = nil
+	core.harness_found[.Claude] = .No
 	for &o in state.open_sessions do if o.project_id == pid && o.pi_session_id == sid {
 		core.focus_session(o.id, core.Caller{kind = .UI})
 		testing.expect(t, o.tabs[0].status != .Not_Started && o.tabs[0].status != .Exited, "started")
 	}
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	// a saved Codex tab with flags or a non-UUID id is not restored
-	r := core.run_command(core.Restore_Session{project_id = pid, pi_session_id = "abc-1", agent = .Claude, tabs = {{kind = .Claude, claude_id = "abc-1", codex = true}}}, core.Caller{kind = .Internal})
+	r := core.run_command(core.Restore_Session{project_id = pid, pi_session_id = "abc-1", agent = .Claude, tabs = {{kind = .Claude, claude_id = "abc-1", harness = .Codex}}}, core.Caller{kind = .Internal})
 	testing.expect(t, !r.ok, "not a Codex session id")
-	// a saved Codex main tab with flags (a Codex tab has none) is skipped cleanly:
-	// refused before anything is restored, never a session without its main tab
+	// a saved Codex main tab with the user's flags comes back with them (Codex's own rule)
 	n := len(state.open_sessions)
+	fid := "01a1d0d6-5353-7ff3-9308-ff91070ad5fe"
+	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = fid, agent = .Claude, tabs = {{kind = .Claude, claude_id = fid, harness = .Codex, args = {"-m", "o3"}}, {kind = .Claude, harness = .Codex, args = {"--search"}}}}, core.Caller{kind = .Internal})
+	testing.expect(t, r.ok, r.error)
+	if s := core.find_session(r.created_id); s != nil && len(s.tabs) == 2 {
+		testing.expect_value(t, strings.join(s.tabs[0].kind.(core.Claude_Tab).args, " ", context.temp_allocator), "-m o3")
+		testing.expect_value(t, strings.join(s.tabs[1].kind.(core.Claude_Tab).args, " ", context.temp_allocator), "--search")
+	} else do testing.fail_now(t, "restored with both tabs")
+	testing.expect_value(t, len(state.open_sessions), n + 1)
+	// a Codex record with its flags: kept; one with a flag Codex's rule refuses: not
+	core.run_command(core.Claude_Restore_History{records = {{id = "01a1d0d6-5353-7ff3-9308-ff91070ad5fd", project = "/w/p", cwd = "/w/p", harness = .Codex, args = {"-m", "o3"}}, {id = "01a1d0d6-5353-7ff3-9308-ff91070ad5fc", project = "/w/p", cwd = "/w/p", harness = .Codex, args = {"--no-daemon"}}}}, core.Caller{kind = .Internal})
+	rec, _ := core.claude_record("01a1d0d6-5353-7ff3-9308-ff91070ad5fd")
+	testing.expect(t, rec != nil && len(rec.args) == 2, "a Codex record keeps its flags")
+	bad, _ := core.claude_record("01a1d0d6-5353-7ff3-9308-ff91070ad5fc")
+	testing.expect(t, bad == nil, "a refused flag: not restored")
+	// a saved Codex main tab with a flag Codex refuses is skipped cleanly: refused before anything
+	// is restored, never a session without its main tab
+	n = len(state.open_sessions)
 	bid := "01a1d0d6-5353-7ff3-9308-ff91070ad5ff"
-	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, args = {"-m", "o3"}}, {kind = .Shell}}}, core.Caller{kind = .Internal})
-	testing.expect(t, !r.ok, "flags")
+	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, harness = .Codex, args = {"--no-daemon"}}, {kind = .Shell}}}, core.Caller{kind = .Internal})
+	testing.expect(t, !r.ok, "a refused flag")
 	testing.expect_value(t, len(state.open_sessions), n)
 }
 
@@ -1007,7 +1095,7 @@ codex_sessions_on_disk :: proc(t: ^testing.T) {
 	write(day, ids[2], meta(ids[3], dir, `"cli"`)) // an id that is not its file's
 	write(day, ids[3], meta(ids[3], "/elsewhere", `"cli"`)) // another folder's
 	write(day, ids[4], meta(ids[4], dir, `"cli"`)) // Deckhand's own (its history row)
-	core.run_command(core.Claude_Restore_History{records = {{id = ids[4], cwd = dir, project = dir, title = "mine", used = 1, codex = true}}}, core.Caller{kind = .Internal})
+	core.run_command(core.Claude_Restore_History{records = {{id = ids[4], cwd = dir, project = dir, title = "mine", used = 1, harness = .Codex}}}, core.Caller{kind = .Internal})
 	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
 	core.run_command(core.Select_Project{project_id = pid}, CX_UI)
 	core.claude_disk_wait()
@@ -1015,7 +1103,7 @@ codex_sessions_on_disk :: proc(t: ^testing.T) {
 	for f in state.claude_disk do if f.listed {
 		listed += 1
 		testing.expect_value(t, f.id, ids[0])
-		testing.expect(t, f.codex && f.path == "", "a Codex row, no path kept")
+		testing.expect(t, f.harness == .Codex && f.path == "", "a Codex row, no path kept")
 	}
 	testing.expect_value(t, listed, 1)
 	js := core.state_json()
@@ -1036,7 +1124,7 @@ codex_sessions_on_disk :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n--no-daemon\n-C\n", ids[0])), "%q", got)
 	rec, _ := core.claude_record(ids[0])
-	testing.expect(t, rec != nil && rec.codex, "the history keeps it")
+	testing.expect(t, rec != nil && rec.harness == .Codex, "the history keeps it")
 }
 
 // A planted rollout's cwd never costs a path walk: one over CODEX_CWD_MAX bytes (or with a NUL)
@@ -1051,13 +1139,373 @@ codex_disk_long_cwd_skipped :: proc(t: ^testing.T) {
 	for c in ([]string{long, "/tmp/x\\u0000y", "/tmp/ok"}) {
 		path := fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id)
 		_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":"cli"}}}}`+"\n", id, c))
-		cwd, skip := core.codex_first_line(path)
+		cwd, source, skip, _ := core.codex_first_line(path)
 		testing.expectf(t, skip == (c != "/tmp/ok"), "%d bytes: skip %v", len(c), skip)
-		if c == "/tmp/ok" do testing.expect_value(t, cwd, "/tmp/ok")
+		if c == "/tmp/ok" do testing.expect(t, cwd == "/tmp/ok" && source == "cli", cwd)
 	}
 }
 
-// ---- Codex accounts (claude_accounts.odin with codex; docs/CODEX.md §6a) ----
+// Folders where only Codex ran are projects, as folders where only Claude ran are
+// (claude_scan_projects): by the cwd of an interactive rollout (source "cli" or "vscode"; never
+// `codex exec`'s or a subagent's); a folder pi knows stays one row; the launch's scan reads no
+// rollout; a Rescan that no longer finds the folder drops it.
+@(test)
+codex_only_folders_are_projects :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("codexproj")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	day := fmt.tprintf("%s/sessions/2026/11/12", home)
+	os.make_directory_all(day)
+	cli, ide, ex, sub := cx_dir("p-cli"), cx_dir("p-ide"), cx_dir("p-exec"), cx_dir("p-sub")
+	rollout :: proc(day, n, cwd, source: string) -> string {
+		id := fmt.tprintf("01a1d0d6-5353-7ff3-9308-ff91070ad5%s", n)
+		path := fmt.tprintf("%s/rollout-2026-11-12T10-00-00-%s.jsonl", day, id)
+		_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":%s}}}}`+"\n", id, cwd, source))
+		return path
+	}
+	cli_path := rollout(day, "a1", cli, `"cli"`)
+	rollout(day, "a2", ide, `"vscode"`)
+	rollout(day, "a3", ex, `"exec"`)
+	rollout(day, "a4", sub, `{"subagent":"review"}`)
+	has :: proc(cwd: string) -> bool {
+		p := core.project_by_cwd(cwd)
+		return p != nil && p.group == .Projects
+	}
+	// the launch's scan: no rollout read (a Rescan follows: claude_startup_rescan_due)
+	before := core.claude_disk_bytes_read
+	core.rescan_now(claude = false)
+	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
+	testing.expect(t, !has(cli), "the launch reads no rollout")
+	testing.expect(t, core.claude_startup_rescan_due(), "a Codex home with sessions/")
+	cx_rescan() // the Rescan's worker (rescan_now on the main thread takes the cache as it is)
+	testing.expect(t, has(cli) && has(ide), "interactive threads' folders")
+	testing.expect(t, !has(ex) && !has(sub), "never codex exec's or a subagent's")
+	if p := core.project_by_cwd(cli); p != nil do testing.expect(t, p.claude && p.dir == "", "found on disk only")
+	// one row a folder, merged with the scan's others by cwd
+	projects := make([dynamic]core.Project, context.temp_allocator)
+	append(&projects, core.Project{cwd = cli, dir = "/pi/store"})
+	core.claude_scan_prepare()
+	core.claude_scan_projects(&projects)
+	n := 0
+	for p in projects do if p.cwd == cli do n += 1
+	testing.expect_value(t, n, 1)
+	testing.expect(t, !projects[0].claude, "pi's folder stays pi's")
+	// the rollout gone: the next Rescan drops the folder
+	os.remove(cli_path)
+	cx_rescan()
+	testing.expect(t, !has(cli) && has(ide), "dropped once no rollout records it")
+}
+
+// Folders where only Codex ran come from the found rows' saved cache: a Rescan reads no rollout the
+// cache knows (the rows' pass read it, or an earlier run saved it); never the home folder; a cwd
+// written with a trailing slash is the same folder for the project and its rows.
+@(test)
+codex_projects_from_cache :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("projcache")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	fake_home := cx_dir("fakehome")
+	os.set_env("HOME", fake_home)
+	data := cx_dir("projcache-data")
+	core.codex_disk_cache_at(data)
+	a, b := cx_dir("pc-a"), cx_dir("pc-b")
+	cx_rollout(home, "2026/11/12", cx_id(1), a, `"cli"`)
+	cx_rollout(home, "2026/11/11", cx_id(2), strings.concatenate({b, "/"}), `"vscode"`) // a trailing slash
+	cx_rollout(home, "2026/11/10", cx_id(3), fake_home, `"cli"`)
+	link := fmt.tprintf("%s/homelink", cx_dir("links")) // a link to the home folder: the same folder
+	posix.symlink(strings.clone_to_cstring(fake_home, context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator))
+	cx_rollout(home, "2026/11/09", cx_id(4), link, `"cli"`)
+	// the rows' pass reads every rollout once; the Rescan after it reads none
+	pid := core.run_command(core.Add_Project{cwd = a}, CX_UI).created_id
+	cx_disk_show(pid)
+	before := core.claude_disk_bytes_read
+	cx_rescan()
+	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
+	testing.expect(t, core.project_by_cwd(b) != nil, "a Codex-only folder (its cwd cleaned)")
+	testing.expect(t, core.project_by_cwd(fake_home) == nil, "never the home folder")
+	testing.expect(t, core.project_by_cwd(link) == nil, "never a link to the home folder")
+	// b's row: its rollout's cwd had a trailing slash
+	if p := core.project_by_cwd(b); p != nil {
+		cx_disk_show(p.id)
+		testing.expectf(t, cx_id(2) in cx_found(), "b's row: %v", cx_found())
+	}
+	// a relaunch: the saved cache, still nothing read
+	cx_cache_clear()
+	core.codex_disk_cache_at(data)
+	before = core.claude_disk_bytes_read
+	cx_rescan()
+	testing.expect_value(t, core.claude_disk_bytes_read - before, 0)
+	testing.expect(t, core.project_by_cwd(b) != nil, "from the saved cache")
+}
+
+// A Rescan on its worker (the Rescan command), waited for.
+@(private = "file")
+cx_rescan :: proc() {
+	core.run_command(core.Rescan{}, CX_UI)
+	for _ in 0 ..< 2000 {
+		core.inbox_drain()
+		if core.scan_thread == nil do break
+		time.sleep(5 * time.Millisecond)
+	}
+}
+
+// The synchronous scan on the main thread (a new Chats or main folder: rescan_now) never reads a
+// rollout: Codex's folders come from the cache as it is, and a pass is started on the worker; the
+// next Rescan (its worker) has what that pass read.
+@(test)
+codex_rescan_now_uses_cache :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("syncscan")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	a := cx_dir("sync-a")
+	cx_rollout(home, "2026/11/12", cx_id(1), a, `"cli"`)
+	inline := core.codex_disk_passes_inline
+	core.rescan_now()
+	testing.expect_value(t, core.codex_disk_passes_inline - inline, 0)
+	core.claude_disk_wait() // the pass it started, on the worker
+	cx_rescan()
+	testing.expect(t, core.project_by_cwd(a) != nil, "the next Rescan has it")
+}
+
+// The lister looks at no more than codex_disk_dir_entries_max entries of any folder (a folder of
+// junk is read no further), and a saved cache row longer than a row can be is not used.
+@(test)
+codex_disk_lister_bounded :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	defer cx_cache_clear()
+	home := cx_dir("bounded")
+	old := core.codex_disk_dir_entries_max
+	core.codex_disk_dir_entries_max = 50
+	defer core.codex_disk_dir_entries_max = old
+	cx_rollout(home, "2026/11/12", cx_id(1), "/x", `"cli"`)
+	for i in 0 ..< 300 {
+		_ = os.write_entire_file(fmt.tprintf("%s/sessions/2026/11/12/junk-%d", home, i), nil)
+		os.make_directory_all(fmt.tprintf("%s/sessions/2026/%d", home, 100 + i)) // numbered month folders
+	}
+	before := core.codex_disk_entries_seen
+	_ = core.disk_files(.Codex, {{account = home, root = fmt.tprintf("%s/sessions", home)}})
+	seen := core.codex_disk_entries_seen - before
+	testing.expectf(t, seen <= 50 * 60, "%d entries looked at", seen) // ≤ 50 a folder, each folder walked
+	testing.expectf(t, seen < 600, "%d entries looked at (a folder of 300 is read no further than 50)", seen)
+	// a saved row: at most 16 KB, exactly 8 fields
+	file := fmt.tprintf("%s/codex-sessions.tsv", cx_dir("rows"))
+	row :: proc(path: string) -> string {
+		return fmt.tprintf("10\t20\t30\tcli\t%s\t/acct\t/cwd\t%s\n", cx_id(7), path)
+	}
+	text := strings.concatenate({"deckhand codex sessions 1\n", row("/ok/path"), row(strings.concatenate({"/", strings.repeat("a", 20_000, context.temp_allocator)})), strings.repeat("\t", 100_000, context.temp_allocator), "\n"})
+	_ = os.write_entire_file(file, transmute([]u8)text)
+	when core.TEST_HOOKS do testing.expect_value(t, core.codex_disk_cache_rows(file), 1)
+}
+
+// A rollout that cannot be read now (permissions, an I/O error) is not remembered as not a
+// conversation: the next pass reads it again (its size and mtime unchanged).
+@(test)
+codex_disk_unreadable_retried :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("unreadable")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	dir := cx_dir("unreadable-proj")
+	path := cx_rollout(home, "2026/11/12", cx_id(1), dir, `"cli"`)
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	posix.chmod(cpath, {})
+	defer posix.chmod(cpath, {.IRUSR, .IWUSR})
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	cx_disk_show(pid)
+	testing.expect_value(t, len(cx_found()), 0)
+	posix.chmod(cpath, {.IRUSR, .IWUSR})
+	cx_disk_show(pid)
+	testing.expectf(t, cx_id(1) in cx_found(), "read again once readable: %v", cx_found())
+}
+
+// A Codex rollout under home's sessions/<day> (a "YYYY/MM/DD" path) whose session_meta says cwd and
+// source (raw JSON). Its path.
+@(private = "file")
+cx_rollout :: proc(home, day, id, cwd, source: string) -> string {
+	d := fmt.tprintf("%s/sessions/%s", home, day)
+	os.make_directory_all(d)
+	stamp, _ := strings.replace_all(day, "/", "-", context.temp_allocator)
+	path := fmt.tprintf("%s/rollout-%s-%s.jsonl", d, stamp, id)
+	_ = os.write_entire_file(path, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":%s}}}}`+"\n"+`{{"type":"response_item"}}`+"\n", id, cwd, source))
+	return path
+}
+
+// A Codex id numbered n.
+@(private = "file")
+cx_id :: proc(n: int) -> string {
+	return fmt.tprintf("01a1d0d6-5353-7ff3-9308-%012x", n)
+}
+
+// The Codex rows listed for the selected project: id -> title.
+@(private = "file")
+cx_found :: proc() -> map[string]string {
+	out := make(map[string]string, context.temp_allocator)
+	for f in state.claude_disk do if f.listed && f.harness == .Codex do out[f.id] = f.title
+	return out
+}
+
+// A Codex home (CODEX_HOME) and a project selected in a fresh state; the found-row cache forgotten.
+@(private = "file")
+cx_disk_setup :: proc(tag: string) -> (home, dir: string, pid: u64) {
+	home = cx_dir(tag)
+	os.set_env("CODEX_HOME", home)
+	dir = cx_dir(fmt.tprintf("%s-proj", tag))
+	pid = core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	return
+}
+
+@(private = "file")
+cx_disk_show :: proc(pid: u64) {
+	core.run_command(core.Select_Project{project_id = pid}, CX_UI)
+	core.claude_disk_wait()
+	core.claude_disk_wait()
+}
+
+// Every rollout is looked at, however old or many (no day or file cap): one in the oldest of 70 day
+// folders, and the oldest of 450 in one day, are rows.
+@(test)
+codex_disk_no_caps :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("nocaps")
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	for d in 0 ..< 70 do cx_rollout(home, fmt.tprintf("2026/%02d/%02d", 1 + d / 28, 1 + d % 28), cx_id(1000 + d), d == 0 ? dir : "/elsewhere", `"cli"`)
+	for i in 0 ..< 450 do cx_rollout(home, "2026/10/01", cx_id(i), i == 0 ? dir : "/elsewhere", `"cli"`)
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expectf(t, cx_id(1000) in found, "the oldest day's: %v", found)
+	testing.expectf(t, cx_id(0) in found, "the oldest of 450: %v", found)
+	testing.expect_value(t, len(found), 2)
+}
+
+// Which rollouts are rows, by session_meta's source: the CLI's ("cli") and Codex Desktop's
+// ("vscode"); never `codex exec`'s, a sub-agent's (an object) or a source Deckhand does not know.
+@(test)
+codex_disk_source_filter :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("source")
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	sources := []string{`"cli"`, `"vscode"`, `"exec"`, `{"subagent":"review"}`, `"mcp"`, `"CLI"`, `""`, `7`}
+	for s, i in sources do cx_rollout(home, "2026/11/12", cx_id(i), dir, s)
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expect(t, cx_id(0) in found && cx_id(1) in found, "cli and vscode listed")
+	testing.expectf(t, len(found) == 2, "only cli and vscode: %v", found)
+}
+
+// The saved meta cache (data dir, codex-sessions.tsv, 0600, versioned): a relaunch reads no rollout
+// it has read before, only a new or changed one; a vanished file's entry goes from the file too;
+// a corrupt or foreign file is ignored, never a crash.
+@(test)
+codex_disk_cache_saved :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("saved")
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	data := cx_dir("saved-data")
+	core.codex_disk_cache_at(data)
+	a := cx_rollout(home, "2026/11/10", cx_id(1), dir, `"cli"`)
+	b := cx_rollout(home, "2026/11/11", cx_id(2), dir, `"vscode"`)
+	c := cx_rollout(home, "2026/11/12", cx_id(3), dir, `"exec"`)
+	cx_disk_show(pid)
+	testing.expect_value(t, len(cx_found()), 2)
+	file := fmt.tprintf("%s/codex-sessions.tsv", data)
+	st: posix.stat_t
+	testing.expect(t, posix.stat(strings.clone_to_cstring(file, context.temp_allocator), &st) == .OK && st.st_mode & {.IRGRP, .IWGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH} == {}, "saved, 0600")
+	text, _ := os.read_entire_file(file, context.temp_allocator)
+	testing.expectf(t, strings.has_prefix(string(text), "deckhand codex sessions 1\n") && strings.count(string(text), "\n") == 4, "%q", string(text))
+
+	// a relaunch: nothing read again; then only what changed or is new
+	cx_cache_clear()
+	core.codex_disk_gap = 0
+	core.codex_disk_cache_at(data)
+	before := core.claude_disk_bytes_read
+	cx_disk_show(pid)
+	testing.expect_value(t, core.claude_disk_bytes_read, before)
+	testing.expect_value(t, len(cx_found()), 2)
+	os.remove(c)
+	_ = os.write_entire_file(b, transmute([]u8)fmt.tprintf(`{{"type":"session_meta","payload":{{"id":"%s","cwd":"%s","source":"exec"}}}}`+"\n", cx_id(2), dir))
+	cx_rollout(home, "2026/11/13", cx_id(4), dir, `"cli"`)
+	before = core.claude_disk_bytes_read
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expectf(t, len(found) == 2 && cx_id(1) in found && cx_id(4) in found, "%v", found)
+	testing.expect(t, core.claude_disk_bytes_read > before && core.claude_disk_bytes_read - before < 1000, "only the changed and the new one read")
+	text, _ = os.read_entire_file(file, context.temp_allocator)
+	testing.expect(t, !strings.contains(string(text), c) && strings.contains(string(text), a), "the vanished one's entry is gone")
+
+	// corrupt, foreign or truncated: ignored (each file read again), never a crash
+	for junk in ([]string{"garbage\x00\xff\n\t\t\t", "deckhand codex sessions 1\n1\t2\n\t\t\t\t\t\t\t\nx\ty\tz\tcli\tid\t/a\t/b\t/c\n", "deckhand codex sessions 99\n", ""}) {
+		_ = os.write_entire_file(file, transmute([]u8)junk)
+		cx_cache_clear()
+		core.codex_disk_gap = 0
+		core.codex_disk_cache_at(data)
+		cx_disk_show(pid)
+		testing.expectf(t, len(cx_found()) == 2, "after %q: %v", junk, cx_found())
+	}
+}
+
+// Titles: <home>/session_index.jsonl names a listed row (its last line for the id wins), sanitised
+// as other titles are; a line too long is skipped; read again when it changes; never written.
+@(test)
+codex_disk_titles :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home, dir, pid := cx_disk_setup("titles")
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	for i in 1 ..= 4 do cx_rollout(home, "2026/11/12", cx_id(i), dir, `"cli"`)
+	index := fmt.tprintf("%s/session_index.jsonl", home)
+	line :: proc(id, name: string) -> string {
+		return fmt.tprintf(`{{"id":"%s","thread_name":"%s","updated_at":"2026-11-12T10:00:00.000Z"}}`+"\n", id, name)
+	}
+	text := strings.concatenate({line(cx_id(1), "First name"), line(cx_id(1), "Renamed"), line(cx_id(2), `Two\u0007\nlines‮ here`), line(cx_id(3), strings.repeat("x", 40_000)), "not json\n", line(cx_id(9), "not listed")})
+	_ = os.write_entire_file(index, transmute([]u8)text)
+	cx_disk_show(pid)
+	found := cx_found()
+	testing.expect_value(t, found[cx_id(1)], "Renamed")
+	testing.expect_value(t, found[cx_id(2)], "Two  lines here")
+	testing.expect_value(t, found[cx_id(3)], "")
+	testing.expect_value(t, found[cx_id(4)], "")
+	testing.expect(t, !(cx_id(9) in found), "an index line names no row of its own")
+	time.sleep(1100 * time.Millisecond) // a new mtime
+	text2 := strings.concatenate({text, line(cx_id(4), "Four")})
+	_ = os.write_entire_file(index, transmute([]u8)text2)
+	cx_disk_show(pid)
+	testing.expect_value(t, cx_found()[cx_id(4)], "Four")
+	got, _ := os.read_entire_file(index, context.temp_allocator)
+	testing.expect(t, string(got) == text2, "never written")
+	// resumed: the history keeps the row's title, as a Claude row's
+	r := core.run_command(core.Open_Session_Cmd{project_id = pid, pi_session_id = cx_id(1)}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	rec, _ := core.claude_record(cx_id(1))
+	testing.expect(t, rec != nil && rec.title == "Renamed", rec != nil ? rec.title : "no record")
+}
+
+// ---- Codex accounts (claude_accounts.odin with harness .Codex; docs/CODEX.md §6a) ----
 
 // A fresh HOME with a login profile that sets CODEX_HOME elsewhere, a project, and a Codex home
 // added as the account "Work"; codex's argv and environment go to files at each start.
@@ -1082,7 +1530,7 @@ cx_acct_setup :: proc(t: ^testing.T, a: ^Cx_Acct) {
 	a.envf = fmt.aprintf("%s/env", out)
 	a.argf = fmt.aprintf("%s/argv", out)
 	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; env > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, a.argf, a.argf, a.argf, a.envf, a.envf, a.envf))
-	r := core.run_command(core.Add_Claude_Account{dir = a.work, codex = true}, CX_UI)
+	r := core.run_command(core.Add_Claude_Account{dir = a.work, harness = .Codex}, CX_UI)
 	testing.expect(t, r.ok, r.error)
 	core.codex_login_set(.Signed_In, a.work) // never asks (a stand-in would only sleep)
 	a.pid_dir = cx_dir("acct-proj")
@@ -1115,10 +1563,10 @@ codex_accounts_start_env :: proc(t: ^testing.T) {
 	a: Cx_Acct
 	cx_acct_setup(t, &a)
 	defer cx_acct_done(&a)
-	testing.expect_value(t, len(core.claude_accounts(codex = true)), 2)
+	testing.expect_value(t, len(core.claude_accounts(harness = .Codex)), 2)
 	snap := core.state_json()
 	testing.expectf(t, strings.contains(snap, fmt.tprintf(`"codex_accounts":[{{"label":"Codex","dir":"%s/.codex"`, a.home)), "the snapshot lists them: %s", snap[max(0, strings.index(snap, "codex_accounts")):][:200])
-	r := core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = "Work"}, CX_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = a.pid, harness = .Codex, account = "Work"}, CX_UI)
 	testing.expect(t, r.ok, r.error)
 	e := cx_wait_file(a.envf)
 	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
@@ -1131,16 +1579,16 @@ codex_accounts_start_env :: proc(t: ^testing.T) {
 	testing.expect(t, rec != nil && rec.account == a.work, "the record keeps its account")
 	// the default account: nothing set (CODEX_HOME as the login profile leaves it)
 	os.remove(a.envf)
-	r2 := core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = "Codex"}, CX_UI)
+	r2 := core.run_command(core.New_Claude_Session{project_id = a.pid, harness = .Codex, account = "Codex"}, CX_UI)
 	testing.expect(t, r2.ok, r2.error)
 	e = cx_wait_file(a.envf)
 	testing.expect(t, strings.contains(e, "\nCODEX_HOME=/wrong\n") && !strings.contains(e, a.work), e)
 	// agents and a hub: a configured account only, never a folder of their own
 	other := cx_dir("acct-other")
-	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = other}, CX_CONTROL).ok, "an agent's folder")
-	hr := core.run_command(core.New_Claude_Session{project_id = a.pid, codex = true, account = other}, core.Caller{kind = .UI, hub = true})
+	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = a.pid, harness = .Codex, account = other}, CX_CONTROL).ok, "an agent's folder")
+	hr := core.run_command(core.New_Claude_Session{project_id = a.pid, harness = .Codex, account = other}, core.Caller{kind = .UI, hub = true})
 	testing.expect(t, !hr.ok && strings.contains(hr.error, "no such Codex account"), hr.error)
-	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = r2.created_id, codex = true, account = "nope"}, CX_CONTROL).ok)
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = r2.created_id, harness = .Codex, account = "nope"}, CX_CONTROL).ok)
 	// a resume of the record (its session closed) runs under its account
 	core.run_command(core.Close_Session{session = r.created_id}, core.Caller{kind = .Internal})
 	os.remove(a.envf)
@@ -1150,7 +1598,7 @@ codex_accounts_start_env :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
 	// removed: its record no longer starts anywhere else
 	if rs, _, _ := core.find_tab(rr.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", codex = true}, CX_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", harness = .Codex}, CX_UI).ok)
 	gr := core.run_command(core.Claude_Resume{claude_session_id = sid}, CX_UI)
 	testing.expect(t, !gr.ok && strings.contains(gr.error, "Codex accounts"), gr.error)
 }
@@ -1176,36 +1624,36 @@ codex_accounts_guard :: proc(t: ^testing.T) {
 	// homes that cannot be accounts
 	for d in ([]string{a.home, "/", fmt.tprintf("%s/sub", a.work), fmt.tprintf("%s/.codex", a.home)}) {
 		os.make_directory_all(d)
-		testing.expectf(t, !core.run_command(core.Add_Claude_Account{dir = d, codex = true}, CX_UI).ok, "%s refused", d)
+		testing.expectf(t, !core.run_command(core.Add_Claude_Account{dir = d, harness = .Codex}, CX_UI).ok, "%s refused", d)
 	}
 	testing.expect(t, !core.run_command(core.Add_Project{cwd = fmt.tprintf("%s/sub", a.work)}, CX_UI).ok, "no project inside a Codex home")
 	// one harness's folder is never the other's account: a Claude config folder as a Codex home,
 	// a Codex home as a Claude account
 	cw := fmt.tprintf("%s/.claude-work", a.home)
 	os.make_directory_all(cw)
-	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = cw}, CX_UI).ok, "a Claude account")
-	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = cw, codex = true}, CX_UI).ok, "a Claude config folder is no Codex home")
-	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = a.work}, CX_UI).ok, "a Codex home is no Claude account")
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = cw, harness = .Claude}, CX_UI).ok, "a Claude account")
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = cw, harness = .Codex}, CX_UI).ok, "a Claude config folder is no Codex home")
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = a.work, harness = .Claude}, CX_UI).ok, "a Codex home is no Claude account")
 	clear(&state.settings.claude_accounts)
 	// a home inside another home's config folder (skills/) is still guarded once that other is the
 	// default: any home that says "Codex's state" wins
 	outer := fmt.tprintf("%s/outer", a.home)
 	inner := fmt.tprintf("%s/skills/b", outer)
 	os.make_directory_all(fmt.tprintf("%s/sessions", inner))
-	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = inner, codex = true}, CX_UI).ok)
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = inner, harness = .Codex}, CX_UI).ok)
 	os.set_env("CODEX_HOME", outer)
 	testing.expect(t, core.settings_credential(fmt.tprintf("%s/sessions/x.jsonl", inner)), "the inner home's sessions")
 	testing.expect(t, !core.settings_credential(fmt.tprintf("%s/skills/notes.md", outer)), "the outer home's skills are the user's")
 	os.unset_env("CODEX_HOME")
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = inner, codex = true}, CX_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = inner, harness = .Codex}, CX_UI).ok)
 	// removed while it holds auth.json: still guarded; one that holds nothing of Codex's is free
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = a.work, codex = true}, CX_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = a.work, harness = .Codex}, CX_UI).ok)
 	testing.expect(t, core.settings_credential(fmt.tprintf("%s/auth.json", a.work)), "removed, still guarded")
 	empty := fmt.tprintf("%s/.codex-empty", a.home)
 	os.make_directory_all(empty)
-	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = empty, codex = true}, CX_UI).ok)
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = empty, harness = .Codex}, CX_UI).ok)
 	testing.expect(t, core.settings_credential(fmt.tprintf("%s/notes.md", empty)), "an account's home")
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = empty, codex = true}, CX_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = empty, harness = .Codex}, CX_UI).ok)
 	testing.expect(t, !core.settings_credential(fmt.tprintf("%s/notes.md", empty)), "given back")
 }
 
@@ -1234,4 +1682,543 @@ codex_accounts_found_session :: proc(t: ^testing.T) {
 	e := cx_wait_file(a.envf)
 	testing.expect(t, strings.contains(e, fmt.tprintf("\nCODEX_HOME=%s\n", a.work)), e)
 	testing.expect(t, strings.has_prefix(cx_wait_file(a.argf), fmt.tprintf("resume\n%s\n", id)))
+}
+
+// The found Codex rows' cache forgotten (a test hook: a release build's tests have none).
+@(private = "file")
+cx_cache_clear :: proc() {
+	when core.TEST_HOOKS do core.codex_disk_cache_clear()
+}
+
+// Audit: codex not found (a Codex tab's command exits 127) and Refresh shell environment drop
+// Codex's cached answer, not Claude Code's.
+@(test)
+codex_recheck_on_127_and_refresh :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	_, _, tab := cx_codex_session(t, "recheck")
+	testing.expect(t, tab != 0)
+	core.harness_found[.Claude] = .Yes
+	core.harness_found[.Codex] = .Yes
+	core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 127}}, {kind = .Internal})
+	testing.expect_value(t, core.harness_found[.Codex], core.Claude_Found.Unknown)
+	testing.expect_value(t, core.harness_found[.Claude], core.Claude_Found.Yes) // a Codex tab says nothing about claude
+	core.harness_found[.Codex] = .No
+	core.run_command(core.Refresh_Shell_Env_Done{ok = false}, {kind = .Internal})
+	testing.expect_value(t, core.harness_found[.Codex], core.Claude_Found.Unknown)
+}
+
+// Reopen closed tab (⇧⌘T; closed_tabs.odin) brings a closed Codex tab back as a Codex tab
+// resuming its conversation, never as Claude Code (its harness is kept with the entry).
+@(test)
+codex_reopen_closed_tab :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	closed_tabs_clear()
+	defer closed_tabs_clear()
+	state.settings.confirm_close[.Claude] = .Never
+	dir := cx_dir("reopen")
+	defer os.remove_all(dir)
+	pid := core.run_command(core.Add_Project{cwd = dir}, CX_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	sess := r.created_id
+	r = core.run_command(core.New_Claude_Tab{session = sess, harness = .Codex}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := r.created_id
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad5ab"
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid}, CX_SCRIPT)
+	close_tab_click(tab)
+	core.inbox_drain()
+	closed_tabs_settle()
+	_, gone, _ := core.find_tab(tab)
+	testing.expect(t, gone == nil, "closed")
+	testing.expect_value(t, len(closed_tabs), 1)
+	state.current_session = sess
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	if tid := core.claude_tab_of_session(sid); tid != 0 {
+		_, tb, _ := core.find_tab(tid)
+		testing.expect(t, tb != nil && core.tab_harness(tb^) == .Codex, "reopened in Codex")
+	} else do testing.fail(t)
+}
+
+// Codex Desktop's Chat mode runs each conversation in a folder it makes under
+// ~/Documents/Codex/<date>/<slug>: such a conversation is a chat (listed in Chats with its title,
+// never a found project), resumed in its own folder (Codex needs it), from its found row and from
+// the history; a project the user added there stays a project; ~/Documents/Codex itself is not a chat.
+@(test)
+codex_app_chats_in_chats :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("appchats")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("appchats-nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	fake_home := cx_dir("appchats-home")
+	os.set_env("HOME", fake_home)
+	old_root := core.home_root
+	defer core.home_root = old_root
+	core.home_root = cx_dir("appchats-data")
+	root := fmt.tprintf("%s/Documents/Codex", fake_home)
+	chat := fmt.tprintf("%s/2026-11-16/we-had-a-chat-a-while", root)
+	mine := fmt.tprintf("%s/2026-11-15/kept-as-a-project", root)
+	for d in ([]string{chat, mine}) do os.make_directory_all(d)
+	cx_rollout(home, "2026/11/16", cx_id(1), chat, `"vscode"`)
+	cx_rollout(home, "2026/11/15", cx_id(2), mine, `"vscode"`)
+	cx_rollout(home, "2026/11/14", cx_id(3), root, `"vscode"`)
+	// a chat folder that is a link to the user's project: its text is no project's, so Chats lists it
+	// (the project's own scan matches by text too: never hidden from both, never listed twice)
+	link := fmt.tprintf("%s/2026-11-13/a-link", root)
+	os.make_directory_all(fmt.tprintf("%s/2026-11-13", root))
+	posix.symlink(strings.clone_to_cstring(mine, context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator))
+	cx_rollout(home, "2026/11/13", cx_id(4), link, `"vscode"`)
+	_ = os.write_entire_file(fmt.tprintf("%s/session_index.jsonl", home), transmute([]u8)fmt.tprintf(`{{"id":"%s","thread_name":"We had a chat","updated_at":"2026-11-16T10:00:00.000Z"}}`+"\n", cx_id(1)))
+	core.rescan_now()
+	pid := core.run_command(core.Add_Project{cwd = mine}, CX_UI).created_id
+	cx_rescan()
+	cx_disk_show(pid)
+	testing.expect(t, core.project_by_cwd(chat) == nil, "a Codex Desktop chat's folder is no project")
+	testing.expect(t, core.project_by_cwd(mine) != nil, "the user's project stays")
+	testing.expect(t, core.project_by_cwd(root) != nil, "~/Documents/Codex itself is a folder like any other")
+	testing.expectf(t, cx_id(2) in cx_found(), "the user's project lists its own: %v", cx_found())
+	chats := core.chats_project()
+	testing.expect(t, chats != nil)
+	if chats == nil do return
+	in_chats := make(map[string]string, context.temp_allocator)
+	for f in state.claude_disk_chats do if f.listed && f.harness == .Codex do in_chats[f.id] = f.title
+	testing.expectf(t, in_chats[cx_id(1)] == "We had a chat", "in Chats with its title: %v", in_chats)
+	testing.expect(t, !(cx_id(2) in in_chats) && !(cx_id(3) in in_chats), "only chats' folders")
+	testing.expectf(t, cx_id(4) in in_chats, "a link to a project is listed by its own text: %v", in_chats)
+	testing.expect(t, !(cx_id(4) in cx_found()), "and not under the project")
+	js := core.state_json()
+	testing.expect(t, strings.contains(js, fmt.tprintf(`"id":"%s","project":"%s"`, cx_id(1), chats.cwd)), "the browser's Chats too")
+	// its click: `codex resume` in the chat's own folder, not the chats folder
+	argf := fmt.tprintf("%s/argv", cx_dir("appchats-out"))
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, argf))
+	r := core.run_command(core.Open_Session_Cmd{project_id = chats.id, pi_session_id = cx_id(1)}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	want := fmt.tprintf("resume\n%s\n--no-daemon\n-C\n%s\n", cx_id(1), chat)
+	got := cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, want), "%q", got)
+	rec, _ := core.claude_record(cx_id(1))
+	testing.expect(t, rec != nil && rec.project == chats.cwd && rec.cwd == chat, "the history: a chat that ran in its folder")
+	// closed and resumed from the history: its folder again
+	core.run_command(core.Close_Session{session = r.created_id}, core.Caller{kind = .Internal})
+	os.remove(argf)
+	rr := core.run_command(core.Claude_Resume{claude_session_id = cx_id(1)}, CX_UI)
+	testing.expect(t, rr.ok, rr.error)
+	got = cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, want), "%q", got)
+	// its folder gone: a Restart and a resume from the history refuse, never the chats folder
+	core.run_command(core.Tab_Exited{tab_id = rr.created_id, exit = {known = true, code = 1}}, {kind = .Internal})
+	os.remove(argf)
+	testing.expect(t, os.remove(chat) == nil, "an empty folder")
+	testing.expect_value(t, core.run_command(core.Claude_Restart{tab_id = rr.created_id}, CX_UI).error, "the chat's folder is gone")
+	if rs, _, _ := core.find_tab(rr.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
+	testing.expect_value(t, core.run_command(core.Claude_Resume{claude_session_id = cx_id(1)}, CX_UI).error, "the chat's folder is gone")
+	// a relaunch: its saved tab, shown, starts nothing (the chats folder there: it would run there)
+	os.make_directory_all(chats.cwd)
+	rs :=core.run_command(core.Restore_Session{project_id = chats.id, pi_session_id = cx_id(1), agent = .Claude, tabs = {{kind = .Claude, claude_id = cx_id(1), harness = .Codex, cwd = chat}}}, core.Caller{kind = .Internal})
+	testing.expect(t, rs.ok, rs.error)
+	core.run_command(core.Focus_Session{session = rs.created_id}, CX_UI)
+	if s := core.find_session(rs.created_id); s != nil && len(s.tabs) > 0 {
+		testing.expect(t, s.tabs[0].status == .Exited, "not started")
+	} else do testing.fail(t)
+	time.sleep(200 * time.Millisecond)
+	testing.expect(t, !os.exists(argf), "nothing started")
+	core.run_command(core.Close_Session{session = rs.created_id}, core.Caller{kind = .Internal})
+}
+
+// A Codex Desktop chat 0.7.0 resumed from its folder's project (its history entry filed under that
+// folder): once the scan drops that project, the entry is Chats' (listed there, in the browser's
+// too) and resumes in its own folder; one filed under a project the user added stays there.
+@(test)
+codex_app_chat_history_refiled :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_dir("refile")
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	defer cx_cache_clear()
+	os.set_env("PI_CODING_AGENT_DIR", cx_dir("refile-nopi"))
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	fake_home := cx_dir("refile-home")
+	os.set_env("HOME", fake_home)
+	old_root := core.home_root
+	defer core.home_root = old_root
+	core.home_root = cx_dir("refile-data")
+	chat := fmt.tprintf("%s/Documents/Codex/2026-11-16/an-old-chat", fake_home)
+	open := fmt.tprintf("%s/Documents/Codex/2026-11-16/open-in-a-tab", fake_home)
+	mine := fmt.tprintf("%s/Documents/Codex/2026-11-15/kept-as-a-project", fake_home)
+	for d in ([]string{chat, open, mine}) do os.make_directory_all(d)
+	cx_rollout(home, "2026/11/16", cx_id(1), chat, `"vscode"`)
+	cx_rollout(home, "2026/11/15", cx_id(2), mine, `"vscode"`)
+	cx_rollout(home, "2026/11/14", cx_id(3), open, `"vscode"`)
+	// a relaunch: the projects (the user's, and 0.7.0's found one for `open`), then the history
+	core.run_command(core.Add_Project{cwd = mine}, CX_UI)
+	core.rescan_now()
+	append(&state.projects, core.Project{id = core.new_id(), cwd = strings.clone(open), label = strings.clone("open-in-a-tab"), claude = true})
+	core.run_command(core.Claude_Restore_History{records = {
+		{id = cx_id(1), cwd = chat, project = chat, title = "an old chat", used = 1, harness = .Codex},
+		{id = cx_id(2), cwd = mine, project = mine, title = "mine", used = 1, harness = .Codex},
+		{id = cx_id(3), cwd = open, project = open, title = "open in a tab", used = 1, harness = .Codex},
+	}}, core.Caller{kind = .Internal})
+	// that chat open in its project
+	argf := fmt.tprintf("%s/argv", cx_dir("refile-out"))
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, argf))
+	ro := core.run_command(core.Claude_Resume{claude_session_id = cx_id(3)}, CX_UI)
+	testing.expect(t, ro.ok, ro.error)
+	got := cx_wait_file(argf)
+	testing.expectf(t, strings.contains(got, fmt.tprintf("-C\n%s\n", open)), "%q", got)
+	os.remove(argf)
+	cx_rescan()
+	core.claude_disk_wait()
+	chats := core.chats_project()
+	testing.expect(t, chats != nil)
+	if chats == nil do return
+	in_chats :: proc(id: string) -> bool {
+		for s in core.sessions_with_new(.Chats, state.chats[:]) do if s.id == id do return true
+		return false
+	}
+	// no tab: Chats' now
+	testing.expect(t, core.project_by_cwd(chat) == nil, "no project for the chat's folder")
+	testing.expect(t, in_chats(cx_id(1)), "the old chat is in Chats")
+	js := core.state_json()
+	testing.expect(t, strings.contains(js, fmt.tprintf(`"id":"%s","cwd":"%s","project":"%s"`, cx_id(1), chat, chats.cwd)), "the browser's Chats too")
+	if rec, _ := core.claude_record(cx_id(2)); rec != nil do testing.expect_value(t, rec.project, mine)
+	// an open tab keeps its project, and the entry stays there while it is
+	testing.expect(t, core.project_by_cwd(open) != nil, "a project with an open session stays")
+	if rec, _ := core.claude_record(cx_id(3)); rec != nil do testing.expect_value(t, rec.project, open)
+	testing.expect(t, !in_chats(cx_id(3)), "listed once: under its project")
+	// closed: the next Rescan drops the project and the entry is Chats'
+	if rs, _, _ := core.find_tab(ro.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
+	cx_rescan()
+	core.claude_disk_wait()
+	testing.expect(t, core.project_by_cwd(open) == nil, "dropped once closed")
+	testing.expect(t, in_chats(cx_id(3)), "then in Chats")
+	r := core.run_command(core.Claude_Resume{claude_session_id = cx_id(1)}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	got = cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n--no-daemon\n-C\n%s\n", cx_id(1), chat)), "%q", got)
+	if rs, _, _ := core.find_tab(r.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
+	os.remove(argf)
+	r3 := core.run_command(core.Claude_Resume{claude_session_id = cx_id(3)}, CX_UI)
+	testing.expect(t, r3.ok, r3.error)
+	got = cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n--no-daemon\n-C\n%s\n", cx_id(3), open)), "%q", got)
+	if rs, _, _ := core.find_tab(r3.created_id); rs != nil do core.run_command(core.Close_Session{session = rs.id}, core.Caller{kind = .Internal})
+}
+
+// ---- hot reload (claude_reload.odin, docs/CODEX.md "Hot reload") ----
+
+// A temp Codex home (CODEX_HOME) with config, instructions, hooks, prompts, skills and Codex's
+// state (sign-in, sessions): never the user's ~/.codex.
+@(private = "file")
+cx_reload_home :: proc(tag: string) -> string {
+	home := cx_dir(tag)
+	for d in ([]string{"prompts", "rules", "skills/s1", "sessions/2026/11/17", "hooks"}) do os.make_directory_all(fmt.tprintf("%s/%s", home, d))
+	for f in ([]string{"config.toml", "AGENTS.md", "hooks.json", "auth.json", "session_index.jsonl", "history.jsonl", "skills/s1/SKILL.md", "prompts/p.md"}) {
+		_ = os.write_entire_file(fmt.tprintf("%s/%s", home, f), transmute([]u8)string("x\n"))
+	}
+	os.set_env("CODEX_HOME", home)
+	core.claude_reload_watch_reset()
+	core.dead_tab_reset()
+	return home
+}
+
+@(private = "file")
+cx_reload_done :: proc() {
+	core.claude_reload_watch_reset()
+	core.dead_tab_reset()
+	os.unset_env("CODEX_HOME")
+}
+
+// Which Codex files a running Codex reads only at start (a Restart bar), which it applies itself
+// (skills: no bar), and that its sign-in and state are never looked at.
+@(test)
+codex_reload_classify :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rclass")
+	defer cx_reload_done()
+	proj := cx_dir("rclass-proj")
+	C :: core.Claude_File_Class
+	Case :: struct {
+		p:    string,
+		want: C,
+	}
+	cases := []Case {
+		{fmt.tprintf("%s/config.toml", home), .Restart},
+		{fmt.tprintf("%s/AGENTS.md", home), .Restart},
+		{fmt.tprintf("%s/AGENTS.override.md", home), .Restart},
+		{fmt.tprintf("%s/hooks.json", home), .Restart},
+		{fmt.tprintf("%s/prompts/p.md", home), .Restart},
+		{fmt.tprintf("%s/rules/default.rules", home), .Restart},
+		{fmt.tprintf("%s/AGENTS.md", proj), .Restart},
+		{fmt.tprintf("%s/AGENTS.override.md", proj), .Restart},
+		{fmt.tprintf("%s/skills/s1/SKILL.md", home), .Live},
+		{fmt.tprintf("%s/hooks/run.sh", home), .Ignored},
+		{fmt.tprintf("%s/auth.json", home), .Ignored},
+		{fmt.tprintf("%s/session_index.jsonl", home), .Ignored},
+		{fmt.tprintf("%s/history.jsonl", home), .Ignored},
+		{fmt.tprintf("%s/sessions/2026/11/17/rollout-x.jsonl", home), .Ignored},
+		{fmt.tprintf("%s/config.toml", proj), .Ignored},
+		{"AGENTS.md", .Ignored},
+	}
+	for c in cases do testing.expectf(t, core.codex_file_class(c.p) == c.want, "%s: %v, want %v", c.p, core.codex_file_class(c.p), c.want)
+	// Claude's classes never take Codex's files
+	testing.expect_value(t, core.claude_file_class(fmt.tprintf("%s/config.toml", home)), C.Ignored)
+}
+
+// A changed Codex file a running Codex reads only at start: the Codex bar (native and a browser's
+// strip), Restart resumes the conversation (`codex resume <id>`), after the user confirms; Claude's
+// bar and watcher never take a Codex tab, nor the reverse.
+@(test)
+codex_reload_bar_and_restart :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rflow")
+	defer cx_reload_done()
+	argd := cx_dir("rflow-argv")
+	argf := fmt.tprintf("%s/argv", argd)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, argf))
+	dir, _, tab := cx_codex_session(t, "rflow")
+	testing.expect(t, tab != 0)
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad531"
+	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid, source = "startup"}, CX_SCRIPT).ok)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 0)
+	// what is watched: the home's config, instructions, hooks, prompts and rules; the project's
+	// AGENTS.md; never Codex's sign-in, state or skills
+	src := core.claude_reload_sources_for_test(.Codex)
+	for f in ([]string{"config.toml", "AGENTS.md", "AGENTS.override.md", "hooks.json"}) do testing.expectf(t, fmt.tprintf("%s/%s", home, f) in src, "watched: %s", f)
+	testing.expect(t, fmt.tprintf("%s/prompts/", home) in src, "watched: prompts/")
+	testing.expectf(t, src[fmt.tprintf("%s/AGENTS.md", dir)] == dir, "the project's AGENTS.md, for its tabs")
+	for k, _ in src {
+		for never in ([]string{"auth.json", "sessions", "session_index", "history", "skills", "/hooks/", "/rules"}) do testing.expectf(t, !strings.contains(k, never), "never watched: %s", k)
+	}
+	testing.expect_value(t, len(core.claude_reload_sources_for_test()), 0) // Claude's watcher: no Claude tab
+	// a skill (Codex watches those itself): no bar; config.toml: the bar
+	_ = os.write_entire_file(fmt.tprintf("%s/skills/s1/SKILL.md", home), transmute([]u8)string("changed\n"))
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 0)
+	_ = os.write_entire_file(fmt.tprintf("%s/config.toml", home), transmute([]u8)string("model = \"o3\"\n"))
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 1)
+	_, tb, _ := core.claude_tab_of(tab)
+	testing.expect(t, tb.reload.stale, "the Codex tab is stale")
+	testing.expect(t, core.claude_bar_shows(false, .Codex))
+	testing.expect(t, !core.claude_bar_shows(false), "Claude's bar is Claude's")
+	msg, can := core.claude_reload_message(false, .Codex)
+	testing.expect_value(t, msg, "Codex settings changed — Restart 1 idle Codex tab")
+	testing.expect(t, can)
+	bars := core.web_bars_json()
+	testing.expectf(t, strings.contains(bars, `"harness":"codex","kind":"codex_reload"`) && strings.contains(bars, `{"type":"claude_restart_changed","harness":"codex"}`) && strings.contains(bars, `{"type":"claude_reload_later","harness":"codex"}`), "the browser's strip: %s", bars)
+	testing.expect_value(t, core.json_path(core.state_json(), "reload.codex.changed.0"), fmt.tprintf("%s/config.toml", home))
+	// the wire: harness codex, both ways
+	c, err := core.parse_command(`{"type":"claude_restart_changed","harness":"codex"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, c.(core.Claude_Restart_Changed).harness, core.Harness.Codex)
+	testing.expect(t, strings.contains(core.command_wire_json(core.Claude_Restart_Changed{harness = .Codex}), `"harness":"codex"`))
+	testing.expect(t, strings.contains(core.command_wire_json(core.Claude_Reload_Later{harness = .Codex}), `"harness":"codex"`))
+	// Claude's Restart never restarts a Codex tab
+	testing.expect_value(t, core.run_command(core.Claude_Restart_Changed{}, CX_UI).error, "no Claude tab needs a restart")
+	testing.expect_value(t, core.run_command(core.Claude_Restart_Changed{harness = .Codex, update = true}, CX_UI).error, "Codex tabs have no update bar")
+	// Restart: the user confirms, then `codex resume <id>` in the same tab
+	r := core.run_command(core.Claude_Restart_Changed{harness = .Codex}, CX_UI)
+	testing.expect_value(t, r.error, "needs_confirmation")
+	testing.expectf(t, strings.contains(r.confirm_summary, "Codex tab"), "%s", r.confirm_summary)
+	testing.expect(t, !strings.has_prefix(cx_wait_file(argf), "resume"), "the first run wrote its argv")
+	os.remove(argf)
+	r = core.run_command(core.Claude_Restart_Changed{harness = .Codex, confirm = r.confirm_token}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, core.json_path(r.data, "restarting.0"), fmt.tprint(tab))
+	again := false
+	deadline := time.tick_add(time.tick_now(), 20 * time.Second)
+	for time.tick_diff(time.tick_now(), deadline) > 0 {
+		core.pump_all()
+		core.pty_reap()
+		core.dead_tab_tick()
+		if _, x, _ := core.find_tab(tab); x != nil && x.status == .Running && !core.restart_waiting(tab) {
+			again = true
+			break
+		}
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(t, again, "the Codex tab runs again")
+	got := cx_wait_file(argf)
+	testing.expectf(t, strings.has_prefix(got, fmt.tprintf("resume\n%s\n", sid)), "%q", got)
+	core.claude_reload_tick()
+	_, tb, _ = core.claude_tab_of(tab)
+	testing.expect(t, !tb.reload.stale, "fresh")
+	// an editor save of the project's AGENTS.md shows the bar at once; Later hides it
+	core.run_command(core.Claude_Reload_Later{harness = .Codex}, CX_UI)
+	testing.expect(t, !core.claude_bar_shows(false, .Codex), "Later hides it")
+	core.claude_reload_note_save(fmt.tprintf("%s/AGENTS.md", dir))
+	testing.expect_value(t, core.claude_reload_pending_count(.Codex), 1)
+	testing.expect_value(t, core.claude_reload_pending_count(), 0)
+	core.claude_reload_flush(harness = .Codex)
+	testing.expect(t, tb.reload.stale, "the save's change")
+	testing.expect(t, core.claude_bar_shows(false, .Codex))
+}
+
+// Codex writes its own config.toml in normal use (a project's trust, /model, notices, hook review
+// state, the TUI's one-time checks) and appends to rules/ on "always allow": none of that raises
+// the bar; the user's own keys do, and what the filter cannot read (an inline table, a dotted key)
+// counts as a change.
+@(test)
+codex_reload_self_writes_quiet :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rself")
+	defer cx_reload_done()
+	cfg := fmt.tprintf("%s/config.toml", home)
+	w :: proc(p, text: string) {_ = os.write_entire_file(p, transmute([]u8)text)}
+	base := "approval_policy = \"on-request\"\n\n[mcp_servers.x]\ncommand = \"x\"\nargs = [\n  \"[projects]\",\n  \"b\",\n]\n"
+	w(cfg, base)
+	d0, ok := core.codex_config_digest(cfg)
+	testing.expect(t, ok)
+	same := []string {
+		strings.concatenate({"model = \"o4\"\nmodel_reasoning_effort = \"high\"\n", base}),
+		strings.concatenate({base, "\n[projects.\"/w/app\"]\ntrust_level = \"trusted\"\n"}),
+		strings.concatenate({base, "\n[notice]\nhide_full_access_warning = true\n[notice.model_migrations]\na = \"b\"\n"}),
+		strings.concatenate({base, "\n[hooks.state.\"/h/config.toml:stop:0:0\"]\ntrusted_hash = \"sha256:x\"\n"}),
+		strings.concatenate({base, "\n[tui]\nscreen_reader_detection_done = true\n[tui.model_availability_nux]\n\"m\" = 1\n"}),
+		strings.concatenate({"# a comment\n", base, "\n"}),
+	}
+	for s, i in same {
+		w(cfg, s)
+		d, k := core.codex_config_digest(cfg)
+		testing.expectf(t, k && d == d0, "self-written %d counted as a change", i)
+	}
+	other := []string {
+		strings.concatenate({"approval_policy = \"never\"\n", base[len("approval_policy = \"on-request\"\n"):]}),
+		strings.concatenate({base, "\n[profiles.p]\nsandbox_mode = \"read-only\"\n"}),
+		strings.concatenate({base, "\n[tui]\nnotifications = true\n"}),
+		strings.concatenate({base, "projects = { \"/w\" = { trust_level = \"trusted\" } }\n"}), // inline: unread, a change
+		strings.concatenate({"notice.hide_full_access_warning = true\n", base}), // dotted: a change
+		strings.concatenate({base[:len(base) - 2], "  \"c\",\n]\n"}),
+	}
+	for s, i in other {
+		w(cfg, s)
+		d, k := core.codex_config_digest(cfg)
+		testing.expectf(t, k && d != d0, "the user's change %d not seen", i)
+	}
+	// too large to look into: any change is one
+	big := strings.concatenate({base, "# ", strings.repeat("x", core.CODEX_CONFIG_READ_MAX), "\n"})
+	w(cfg, big)
+	db, kb := core.codex_config_digest(cfg)
+	w(cfg, strings.concatenate({big, "\n"}))
+	db2, kb2 := core.codex_config_digest(cfg)
+	testing.expect(t, kb && kb2 && db != db2, "over the cap: changed")
+	// the running tab: Codex's own writes and a rules/ append raise no bar
+	w(cfg, base)
+	_, _, tab := cx_codex_session(t, "rself")
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "01a1d0d6-5353-7ff3-9308-ff91070ad532", source = "startup"}, CX_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now(.Codex)
+	testing.expect(t, !(fmt.tprintf("%s/rules/", home) in core.claude_reload_sources_for_test(.Codex)), "rules/ is Codex's to append to: not polled")
+	time.sleep(20 * time.Millisecond)
+	w(cfg, same[1])
+	w(fmt.tprintf("%s/rules/default.rules", home), "prefix_rule(pattern=[\"ls\"], decision=\"allow\")\n")
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 0)
+	w(cfg, other[0])
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 1)
+}
+
+// Another machine's mirrored tabs (machine_mirror.odin) are its core's: this Mac's watchers and
+// bars never take them, Claude's or Codex's.
+@(test)
+claude_reload_skips_other_machines :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	for h in ([2]core.Harness{.Claude, .Codex}) {
+		state.open_sessions = {}
+		remote := core.Open_Session{id = core.new_id(), machine = 3, cwd = strings.clone("/remote/p")}
+		append(&remote.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{harness = h}, status = .Running, title = "r"})
+		remote.tabs[0].reload.stale = true
+		append(&state.open_sessions, remote)
+		local := core.Open_Session{id = core.new_id(), cwd = strings.clone("/local/p")}
+		append(&local.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{harness = h}, status = .Running, title = "m", machine = 4})
+		local.tabs[0].reload.stale = true
+		append(&state.open_sessions, local)
+		testing.expectf(t, len(core.running_harness(h)) == 0, "%v: another machine's tabs are not this Mac's", h)
+		n := core.claude_reload_counts(false, h)
+		testing.expectf(t, n.idle + n.busy + n.no_bridge + n.queued + n.reloading == 0, "%v: no bar for them", h)
+	}
+	state.open_sessions = {}
+}
+
+// Project instructions: only a running tab's own (its folder up to its repository's root, a file
+// there not made yet too); a save elsewhere is no Codex change.
+@(test)
+codex_reload_project_agents_scope :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	home := cx_reload_home("rscope")
+	defer cx_reload_done()
+	_ = home
+	repo := cx_dir("rscope-repo")
+	os.make_directory_all(fmt.tprintf("%s/.git", repo))
+	sub := fmt.tprintf("%s/pkg/app", repo)
+	os.make_directory_all(sub)
+	pid := core.run_command(core.Add_Project{cwd = sub}, CX_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Codex}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := core.find_session(r.created_id).tabs[0].id
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "01a1d0d6-5353-7ff3-9308-ff91070ad533", source = "startup"}, CX_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now(.Codex)
+	src := core.claude_reload_sources_for_test(.Codex)
+	for d in ([]string{sub, fmt.tprintf("%s/pkg", repo), repo}) do testing.expectf(t, fmt.tprintf("%s/AGENTS.md", d) in src, "watched though not there yet: %s", d)
+	testing.expect(t, !(fmt.tprintf("%s/AGENTS.md", filepath_dir(repo)) in src), "never above the repository")
+	// a parent's AGENTS.md made now: the bar
+	_ = os.write_entire_file(fmt.tprintf("%s/pkg/AGENTS.md", repo), transmute([]u8)string("be brief\n"))
+	core.claude_reload_poll_now(.Codex)
+	testing.expect_value(t, len(state.reload.codex.changed), 1)
+	core.run_command(core.Claude_Reload_Later{harness = .Codex}, CX_UI)
+	// saves: another project's AGENTS.md, one above the repository, one in a child folder: nothing
+	other := cx_dir("rscope-other")
+	for p in ([]string{fmt.tprintf("%s/AGENTS.md", other), fmt.tprintf("%s/AGENTS.md", filepath_dir(repo)), fmt.tprintf("%s/deeper/AGENTS.md", sub)}) {
+		core.claude_reload_note_save(p)
+		testing.expectf(t, core.claude_reload_pending_count(.Codex) == 0, "not this tab's: %s", p)
+	}
+	core.claude_reload_note_save(fmt.tprintf("%s/AGENTS.md", repo))
+	testing.expect_value(t, core.claude_reload_pending_count(.Codex), 1)
+}
+
+@(private = "file")
+filepath_dir :: proc(p: string) -> string {
+	i := strings.last_index_byte(p, '/')
+	return i <= 0 ? "/" : p[:i]
+}
+
+// A Codex tab with no conversation yet (its first prompt not sent: SessionStart is lazy) is not
+// told to "restart by hand": the bar says what is true.
+@(test)
+codex_reload_fresh_tab_wording :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	_ = cx_reload_home("rfresh")
+	defer cx_reload_done()
+	_, _, tab := cx_codex_session(t, "rfresh")
+	core.claude_reload_tick()
+	core.run_command(core.Claude_Reload_Watch{paths = {"/x/config.toml"}, scopes = {""}, harness = .Codex})
+	_, tb, _ := core.claude_tab_of(tab)
+	testing.expect(t, tb.reload.stale)
+	msg, can := core.claude_reload_message(false, .Codex)
+	testing.expect(t, !can)
+	testing.expectf(t, !strings.contains(msg, "never reported") && strings.contains(msg, "no conversation yet"), "%s", msg)
 }

@@ -4,14 +4,23 @@
 import { useApp, shownSession } from "./ctx.ts";
 import { keysLabel, menuAt } from "./ctx.ts";
 import { Icon, Logo } from "./icons.tsx";
-import { IconButton, newSessionItems } from "./Sidebar.tsx";
+import { IconButton, newSession } from "./Sidebar.tsx";
 import { newTabItems } from "./Panes.tsx";
 import { TermPane } from "./Term.tsx";
 import { unreadCount } from "./Bell.tsx";
 import type { Panel } from "../state.ts";
+import { atlasShown, atlasToggle, panelView, sessionPanels } from "./phone.ts";
 
 export function agentName(app: ReturnType<typeof useApp>): string {
   return String(app.store.settings.agent_name || "Atlas");
+}
+
+// Atlas's drawer shown or hidden (phone.ts atlasToggle): the desktop follows the core's home_open;
+// a phone opens and closes its own and never the Mac's drawer.
+export function toggleAtlas(app: ReturnType<typeof useApp>): void {
+  const t = atlasToggle(app.phone, !!app.overlay.atlas, !!app.store.homeOpen);
+  if (t.cmd) app.run(t.cmd);
+  if (app.phone) app.setOverlay({ atlas: t.atlas });
 }
 
 export function TopBar() {
@@ -33,14 +42,14 @@ export function TopBar() {
         label="New tab"
         run={(e) => {
           if (cs) menuAt(app, e, newTabItems(app, cs));
-          else if (store.selectedProject) menuAt(app, e, newSessionItems(app, store.selectedProject));
+          else if (store.selectedProject) newSession(app, store.selectedProject, e);
         }}
       />
       <IconButton
         icon="chevron-down"
         small
         label="New session"
-        run={(e) => store.selectedProject && menuAt(app, e, newSessionItems(app, store.selectedProject))}
+        run={(e) => store.selectedProject && newSession(app, store.selectedProject, e)}
       />
       <IconButton icon="deck" label="Deck" run={() => app.run({ type: "show_no_session" }).then(() => app.go({ screen: "deck" }))} />
       <span class="spacer" />
@@ -60,8 +69,8 @@ export function TopBar() {
       ) : null}
       <IconButton icon="bell" label="Notifications" badge={unread} run={() => app.setOverlay({ bell: !app.overlay.bell })} />
       <IconButton icon="sidebar-right" label={`Right panels (${keysLabel({ k: "b", alt: true })})`} run={() => app.run({ type: "set_layout", right_open: !store.layout.right_open })} />
-      {store.homeSession ? (
-        <button type="button" class={"agent-btn" + (store.homeOpen ? " on" : "")} onClick={() => app.run({ type: "set_home", open: !store.homeOpen })} title={`${name} (${keysLabel({ k: "j" })})`}>
+      {atlasShown(store.homeSession, store.web) ? (
+        <button type="button" class={"agent-btn" + (store.homeOpen ? " on" : "")} onClick={() => toggleAtlas(app)} title={`${name} (${keysLabel({ k: "j" })})`}>
           <span class="agent-avatar">{name[0]?.toUpperCase()}</span>
           {name}
           {agentUnread ? <span class="badge">{agentUnread}</span> : null}
@@ -75,16 +84,8 @@ export function RightPanels() {
   const app = useApp();
   const { store } = app;
   const cs = store.session(shownSession(app));
-  const panels: Panel[] = [];
-  const seen = new Set<string>();
-  // the session's pi tab first, then the tab on screen: what their bridges publish
-  if (cs)
-    for (const t of store.tabs(cs.id))
-      for (const p of store.panels(t.id))
-        if (!seen.has(p.id)) {
-          seen.add(p.id);
-          panels.push(p);
-        }
+  // what the session's tabs publish, once each (phone.ts; a phone shows the same in a sheet)
+  const panels: Panel[] = cs ? sessionPanels(store.tabs(cs.id), (id) => store.panels(id)) : [];
   const collapsed: string[] = store.layout.collapsed ?? [];
   return (
     <aside class="right">
@@ -96,9 +97,7 @@ export function RightPanels() {
       {panels.length === 0 ? <p class="empty small">The session's agent publishes its todos, subagents and shells here.</p> : null}
       {panels.map((p) => {
         const folded = collapsed.includes(p.id);
-        // a bridge's first head row is the panel's title ("Todos 3/4"), as the window draws it
-        const head = p.rows[0]?.head ? p.rows[0].text : p.title;
-        const rows = p.rows[0]?.head ? p.rows.slice(1) : p.rows;
+        const { head, rows } = panelView(p);
         return (
           <section class="panel">
             <button type="button" class="panel-head" onClick={() => app.run({ type: "set_panel_collapsed", panel: p.id, collapsed: !folded })}>
@@ -135,7 +134,7 @@ export function AgentDrawer() {
         <IconButton small icon="close" label={`Close ${name}`} run={() => app.run({ type: "set_home", open: false })} />
       </div>
       <div class="drawer-body">
-        {tab ? <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused keyboard={!app.phone} /> : <p class="empty">Starting {name}…</p>}
+        {tab ? <TermPane tabId={tab.id} attachable={tab.status !== "not_started"} focused keyboard={!app.phone} inDrawer /> : <p class="empty">Starting {name}…</p>}
       </div>
     </aside>
   );

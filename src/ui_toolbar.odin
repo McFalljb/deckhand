@@ -105,7 +105,7 @@ button_click :: proc(b: Button) {
 close_tab_click :: proc(tab_id: u64) {
 	s, _, i := find_tab(tab_id)
 	if s == nil do return
-	if i == 0 do ui_do(core.Close_Session{session = s.id, ask = true})
+	if i == 0 && core.session_main_tab(s) != 0 do ui_do(core.Close_Session{session = s.id, ask = true})
 	else {
 		closed_tab_record(tab_id) // the user's own close: ⇧⌘T reopens it (closed_tabs.odin)
 		ui_do(core.Close_Tab{tab_id = tab_id})
@@ -186,7 +186,8 @@ search_wide :: proc(cs: ^core.Open_Session, bar_w: f32) -> bool {
 		for tab in cs.tabs {
 			ic, label, extra := tab_label(cs, tab)
 			close := !squeezed || tab.id == cs.active_tab
-			fixed := tab_fixed_w(ic, tab_shows_mark(tab), false, extra, close)
+			badge, _ := tab_badge(tab)
+			fixed := tab_fixed_w(ic, tab_shows_mark(tab), false, extra, close, badge)
 			used += clamp(text_w(label) + fixed, px(TAB_MIN_W), max_tab + (close ? tab_close_w() : 0)) + px(SP_1)
 		}
 	}
@@ -668,8 +669,7 @@ settings_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL: // the list, when taller than the window
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 		app.redraw = true
 		return true
 	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_UP:
@@ -795,8 +795,7 @@ shortcuts_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL:
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 		app.redraw = true
 		return true
 	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_UP:

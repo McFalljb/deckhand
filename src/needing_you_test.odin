@@ -302,8 +302,8 @@ needing_you_remote_osc_and_claude_status :: proc(t: ^testing.T) {
 	osc := core.Tab{id = 11, kind = core.Shell_Tab{}, title = strings.clone("sh"), status = .Running}
 	osc.prog.state, osc.prog.kind = .Blocked, .Permission
 	add(&r, 10, osc)
-	add(&r, 20, core.Tab{id = 21, kind = core.Claude_Tab{turn = .Waiting}, title = strings.clone("claude"), status = .Running})
-	add(&r, 30, core.Tab{id = 31, kind = core.Claude_Tab{ended = .Error}, title = strings.clone("claude"), status = .Running})
+	add(&r, 20, core.Tab{id = 21, kind = core.Claude_Tab{turn = .Waiting, harness = .Claude}, title = strings.clone("claude"), status = .Running})
+	add(&r, 30, core.Tab{id = 31, kind = core.Claude_Tab{ended = .Error, harness = .Claude}, title = strings.clone("claude"), status = .Running})
 	core.mirror_merge(3, &r, &m)
 	defer {
 		core.mirror_unmerge(3)

@@ -34,7 +34,7 @@ w_reset :: proc() -> runtime.Allocator {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
 	core.persist = {}
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	core.platform = {quit = proc() {}}
 	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
@@ -56,7 +56,7 @@ w_claude :: proc(t: ^testing.T, tag: string) -> (sess, id: u64) {
 	r := core.run_command(core.New_Chat{project_id = pid}, W_UI)
 	testing.expect(t, r.ok, r.error)
 	sess = r.created_id
-	r = core.run_command(core.New_Claude_Tab{session = sess}, W_UI)
+	r = core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, W_UI)
 	testing.expect(t, r.ok, r.error)
 	return sess, r.created_id
 }

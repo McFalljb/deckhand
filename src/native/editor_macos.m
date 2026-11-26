@@ -44,13 +44,19 @@ void dh_fsw_set(const char **paths, int n, dh_fsw_cb cb) {
 	FSEventStreamStart(stream);
 }
 
-// Moves path to the Trash. 0 on success.
-int dh_trash(const char *path) {
+// Moves path to the Trash. 0 on success. where (where_len bytes, NUL-terminated) gets the path
+// the Trash put it at ("" when it did not say or it does not fit): restore_path brings it back.
+int dh_trash(const char *path, char *where, int where_len) {
 	@autoreleasepool {
+		if (where && where_len > 0) where[0] = 0;
 		NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
 		NSError *err = nil;
-		BOOL ok = [[NSFileManager defaultManager] trashItemAtURL:url resultingItemURL:nil error:&err];
-		return ok ? 0 : 1;
+		NSURL *put = nil;
+		BOOL ok = [[NSFileManager defaultManager] trashItemAtURL:url resultingItemURL:&put error:&err];
+		if (!ok) return 1;
+		const char *p = put.isFileURL ? put.fileSystemRepresentation : NULL;
+		if (where && p && (int)strlen(p) < where_len) memcpy(where, p, strlen(p) + 1);
+		return 0;
 	}
 }
 

@@ -6,7 +6,7 @@ import { render } from "preact";
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks";
 import { pairKey, unpair, whoami } from "../api.ts";
 import { Link, type LinkStatus, type Result, type WindowRequest } from "../link.ts";
-import { AppCtx, useApp, wishes, type App, type Overlay, shownSession } from "./ctx.ts";
+import { AppCtx, useApp, wishes, type App, type Overlay, type ToastAction, shownSession } from "./ctx.ts";
 import { Sidebar } from "./Sidebar.tsx";
 import { SessionPanes } from "./Panes.tsx";
 import { Deck } from "./Deck.tsx";
@@ -14,15 +14,17 @@ import { AgentDrawer, RightPanels, TopBar } from "./Bars.tsx";
 import { Palette, useShortcuts } from "./Palette.tsx";
 import { Bell } from "./Bell.tsx";
 import { ConfirmBar, CopySheet, LinkSheet, Menu, Sheet, Toasts, type ToastItem } from "./Overlays.tsx";
-import { PhoneHome, PhoneSession } from "./Phone.tsx";
+import { PanelsSheet, PhoneHome, PhoneSession, SelectSheet } from "./Phone.tsx";
 import { fitFor, focusedFit } from "./Term.tsx";
 import { pairScreen } from "../ui/pair.ts";
 import { SettingsPage } from "./Settings.tsx";
 import { JobSheet } from "./JobSheet.tsx";
 import { Peek } from "./Peek.tsx";
+import { forgetTypingMode } from "./phone.ts";
+import { storageGet, storageRemove } from "../ui/dom.ts";
 
 const PHONE = "(max-width: 760px)";
-const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null };
+const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null, atlas: false, panels: null, select: null };
 
 type Screen = { kind: "pair" } | { kind: "away"; title: string; text: string; button: string; act: () => void } | { kind: "main" };
 
@@ -39,11 +41,19 @@ function Root() {
   const [phone, setPhone] = useState(() => window.matchMedia(PHONE).matches);
   const [route, setRoute] = useState<App["route"]>(() => parseHash());
   const toastId = useRef(0);
+  // a browser left in the old saved text-box mode types straight in again, once (phone.ts)
+  useEffect(() => {
+    if (forgetTypingMode({ get: storageGet, remove: storageRemove }))
+      toast("Typing goes straight into the terminal again. The text box is in the session menu (⋯).");
+  }, []);
 
-  const toast = (text: string, err = false) => {
+  const toast = (text: string, err = false, action?: ToastAction) => {
     const id = ++toastId.current;
-    setToasts((t) => [...t.slice(-2), { id, text, err }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), err ? 6000 : 3000);
+    const drop = () => setToasts((t) => t.filter((x) => x.id !== id));
+    // an action (Undo) runs once and takes its toast away; it stays a while longer
+    const act = action && { label: action.label, run: () => (drop(), action.run()) };
+    setToasts((t) => [...t.slice(-2), { id, text, err, action: act }]);
+    window.setTimeout(drop, act ? 8000 : err ? 6000 : 3000);
   };
 
   const link = useMemo(
@@ -119,8 +129,13 @@ function Root() {
     const mq = window.matchMedia(PHONE);
     const onMq = () => setPhone(mq.matches);
     mq.addEventListener("change", onMq);
-    const vv = () => document.documentElement.style.setProperty("--vvh", `${window.visualViewport ? window.visualViewport.height : window.innerHeight}px`);
+    const vv = () => {
+      const v = window.visualViewport;
+      document.documentElement.style.setProperty("--vvh", `${v ? v.height : window.innerHeight}px`);
+      document.documentElement.style.setProperty("--vvtop", `${v ? Math.max(0, v.offsetTop) : 0}px`);
+    };
     window.visualViewport?.addEventListener("resize", vv);
+    window.visualViewport?.addEventListener("scroll", vv);
     window.addEventListener("resize", vv);
     vv();
     const onHash = () => setRoute(parseHash());
@@ -202,6 +217,8 @@ function Root() {
           <Sheet />
           <LinkSheet />
           <CopySheet />
+          <PanelsSheet />
+          <SelectSheet />
           {overlay.job ? <JobSheet /> : null}
           {overlay.peek ? <Peek /> : null}
         </>

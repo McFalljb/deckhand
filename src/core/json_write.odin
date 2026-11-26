@@ -5,8 +5,10 @@ package core
 // snapshot and reply envelopes. Odin's default marshalling is not used for
 // any of these (it does not tag union variants).
 
+import "base:runtime"
 import "core:fmt"
 import "core:path/filepath"
+import "core:reflect"
 import "core:strconv"
 import "core:strings"
 import "core:time"
@@ -151,229 +153,8 @@ FOLD_NAMES := [Sidebar_Fold]string {
 // ---- commands ----
 
 command_type :: proc(cmd: Command) -> string {
-	switch _ in cmd {
-	case Add_Project:         return "add_project"
-	case Select_Project:      return "select_project"
-	case Rename_Project:      return "rename_project"
-	case Open_Session_Cmd:    return "open_session"
-	case New_Chat:            return "new_chat"
-	case Focus_Session:       return "focus_session"
-	case Show_No_Session:     return "show_no_session"
-	case Next_Needing_You:    return "next_needing_you"
-	case Close_Session:       return "close_session"
-	case New_Shell_Tab:       return "new_shell_tab"
-	case Close_Tab:           return "close_tab"
-	case Focus_Tab:           return "focus_tab"
-	case Split_Pane:          return "split_pane"
-	case Close_Pane:          return "close_pane"
-	case Focus_Pane:          return "focus_pane"
-	case Move_Tab:            return "move_tab"
-	case Set_Split:           return "set_split"
-	case Equalize_Panes:      return "equalize_panes"
-	case Zoom_Pane:           return "zoom_pane"
-	case Copy_Selection:      return "copy_selection"
-	case Terminal_Link:       return "terminal_link"
-	case Send_Text:           return "send_text"
-	case Set_Focus:           return "set_focus"
-	case Focus_Take:          return "focus_take"
-	case Focus_Release:       return "focus_release"
-	case Set_Last_Harness:    return "set_last_harness"
-	case Set_Layout:          return "set_layout"
-	case Set_Panel:           return "set_panel"
-	case Cancel_Confirmation: return "cancel_confirmation"
-	case Rescan:              return "rescan"
-	case Refresh_Shell_Env:   return "refresh_shell_env"
-	case Quit:                return "quit"
-	case Get_State:           return "get_state"
-	case List_Commands:       return "list_commands"
-	case Set_Home:            return "set_home"
-	case Set_Home_Dir:        return "set_home_dir"
-	case Set_Folder:          return "set_folder"
-	case Setup_Sheet:         return "setup_sheet"
-	case Set_Chats_Readonly:  return "set_chats_readonly"
-	case Set_Claude_Default_Flags: return "set_claude_default_flags"
-	case Set_Pi_Extension:    return "set_pi_extension"
-	case Set_Pinned:          return "set_pinned"
-	case Set_Hidden:          return "set_hidden"
-	case Set_Sort:            return "set_sort"
-	case Set_Sidebar_Folded:  return "set_sidebar_folded"
-	case Set_Sidebar_View:    return "set_sidebar_view"
-	case Set_Row_Expanded:    return "set_row_expanded"
-	case Set_Filter:          return "set_filter"
-	case Reveal_Path:         return "reveal"
-	case Session_Info:        return "session_info"
-	case Copy_Path:           return "copy_path"
-	case Restore_Sidebar:     return "restore_sidebar"
-	case Set_Agent_Name:      return "set_agent_name"
-	case Set_Agent_Model:     return "set_agent_model"
-	case Agent_Model_Picker:  return "agent_model_picker"
-	case Set_Notify:          return "set_notify"
-	case Set_Tidy_Projects:   return "set_tidy_projects"
-	case Set_Keep_Sessions:   return "set_keep_sessions"
-	case Set_Separate_Core:   return "set_separate_core"
-	case Set_Remote_Machines: return "set_remote_machines"
-	case Set_Machines_Reachable: return "set_machines_reachable"
-	case Set_Web_Access:      return "set_web_access"
-	case Set_Web_Listen:      return "set_web_listen"
-	case Web_Pair:            return "web_pair"
-	case Web_Devices:         return "web_devices"
-	case Web_Watch:           return "web_watch"
-	case File_Read:           return "file_read"
-	case File_Save:           return "file_save"
-	case Web_Settings, Job_Draft: return web_extra_type(cmd)
-	case Web_Revoke:          return "web_revoke"
-	case Machine_Add:         return "machine_add"
-	case Machine_Remove:      return "machine_remove"
-	case Machine_Rename:      return "machine_rename"
-	case Machine_Connect:     return "machine_connect"
-	case Machine_Login:       return "machine_login"
-	case Machine_Install:     return "machine_install"
-	case Machine_Linger:      return "machine_linger"
-	case Pi_Handoff:          return "pi_handoff"
-	case Pi_Handoff_Part:     return "pi_handoff_part"
-	case Machine_Open_Page:   return "machine_open_page"
-	case Holder_Replace:      return "holder_replace"
-	case Holder_Restart:      return "holder_restart"
-	case Holder_Recover:      return "holder_recover"
-	case Core_Handover:       return "core_handover"
-	case Claude_Typed:        return "claude_typed"
-	case Claude_Status_Dismiss: return "claude_status_dismiss"
-	case App_Socket:          return "app_socket"
-	case Harness_Install:     return "harness_install"
-	case Fs_Changed:          return "fs_changed"
-	case Copy_Control_Token:  return "copy_control_token"
-	case Set_Confirm_Policy:  return "set_confirm_policy"
-	case Set_Close_Confirm:   return "set_close_confirm"
-	case Set_Theme:           return "set_theme"
-	case Set_Reduce_Motion:   return "set_reduce_motion"
-	case Set_Dim_Panes:       return "set_dim_panes"
-	case Set_Terminal_Text_Size: return "set_terminal_text_size"
-	case Set_Appearance:      return "set_appearance"
-	case Set_Text_Size:       return "set_text_size"
-	case System_Appearance:   return "system_appearance"
-	case Pi_Session_Update:   return "pi.session"
-	case Pi_Status_Update:    return "pi.status"
-	case Pi_Prompt:           return "pi_prompt"
-	case Pi_Reload:           return "pi_reload"
-	case Pi_Restart:          return "pi_restart"
-	case Pi_Wait_Idle:        return "pi_wait_idle"
-	case Panel_Set:           return "panel.set"
-	case Panel_Remove:        return "panel.remove"
-	case Set_Panel_Collapsed: return "set_panel_collapsed"
-	case Tab_Exited:          return "tab_exited"
-	case Program_Status:      return "program_status"
-	case Set_Unread:          return "set_unread"
-	case Mark_All_Read:       return "mark_all_read"
-	case Rescan_Done:         return "rescan_done"
-	case Refresh_Shell_Env_Done: return "refresh_shell_env_done"
-	case Bridge_Done:         return "bridge_done"
-	case Restore_Session:     return "restore_session"
-	case Open_File:           return "open_file"
-	case Editor_State:        return "editor_state"
-	case Save_File:           return "save_file"
-	case Goto_Line:           return "goto"
-	case Reload_File:         return "reload_file"
-	case Keep_Buffer:         return "keep_buffer"
-	case Diff_File:           return "diff_file"
-	case Set_Wrap:            return "set_wrap"
-	case List_Dir:            return "list_dir"
-	case Create_File:         return "create_file"
-	case Create_Dir:          return "create_dir"
-	case Rename_Path:         return "rename_path"
-	case Delete_Path:         return "delete_path"
-	case Git_Head_Done:       return "git_head_done"
-	case Git_Status_Done:     return "git_status_done"
-	case Reveal_In_Finder:    return "reveal_in_finder"
-	case Keep_Tab:            return "keep_tab"
-	case Set_Left_Tab:        return "set_left_tab"
-	case Files_Expand:        return "files_expand"
-	case Files_Collapse_All:  return "files_collapse_all"
-	case Files_Reveal:        return "files_reveal"
-	case Set_Files_Filter:    return "set_files_filter"
-	case File_List_Done:      return "file_list_done"
-	case List_Worktrees:      return "list_worktrees"
-	case Files_Set_Root:      return "files_set_root"
-	case Worktree_Cleanup:    return "worktree_cleanup"
-	case Worktree_Session:    return "worktree_session"
-	case Worktrees_Done:      return "worktrees_done"
-	case Worktree_Cleanup_Done: return "worktree_cleanup_done"
-	case Notifications_List:  return "notifications_list"
-	case Notifications_Mark_Read: return "notifications_mark_read"
-	case Notifications_Clear: return "notifications_clear"
-	case Notify_Post:         return "notify_post"
-	case Set_Bell:            return "set_notifications"
-	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
-		return update_command_name(cmd)
-	case Job_List:            return "job_list"
-	case Job_Runs:            return "job_runs"
-	case Job_Run_Now:         return "job_run_now"
-	case Job_Stop:            return "job_stop"
-	case Jobs_Pause:          return "jobs_pause"
-	case Jobs_Resume:         return "jobs_resume"
-	case Job_Create:          return "job_create"
-	case Job_Save:            return "job_save"
-	case Job_Sheet:           return "job_sheet"
-	case Job_Mark_Read:       return "job_mark_read"
-	case Job_Set_Enabled:     return "job_set_enabled"
-	case Job_Delete:          return "job_delete"
-	case Job_Open:            return "job_open"
-	case Set_Pi_Path:         return "set_pi_path"
-	case Set_Job_Limits:      return "set_job_limits"
-	case Jobs_Sync:           return "jobs_sync"
-	case Jobs_Tick:           return "jobs_tick"
-	case Job_Run_Done:        return "job_run_done"
-	case Jobs_Env:            return "jobs_env"
-	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Select, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
-		return changes_command_type(cmd)
-	case Markdown_Open:       return "markdown_open"
-	case Show_File:           return "show_file"
-	case Markdown_Set_View:   return "markdown_view"
-	case Markdown_Scroll:     return "markdown_scroll"
-	case Markdown_Follow:     return "markdown_link"
-	case New_App_Tab:         return "new_app_tab"
-	case App_Restart:         return "app_restart"
-	case App_Close:           return "app_close"
-	case App_Declared:        return "app_declared"
-	case App_Input:           return "app_input"
-	case App_Events:          return "app_events"
-	case App_Call:            return "app_call"
-	case App_Call_Done:       return "app_call_done"
-	case App_Screenshot:      return "app_screenshot"
-	case App_Inspect:         return "app_inspect"
-	case App_Update:          return "app_update"
-	case Pi_Reload_All:       return "pi_reload_all"
-	case Pi_Restart_Updated:  return "pi_restart_updated"
-	case Pi_Reload_Later:     return "pi_reload_later"
-	case Reload_Watch:        return "reload_watch"
-	case Reload_Kick:      return "reload_kick"
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
-		return claude_reload_type(cmd)
-	case Comment_Add:         return "comment_add"
-	case Comment_Edit:        return "comment_edit"
-	case Comment_Delete:      return "comment_delete"
-	case Comments_Clear:      return "comments_clear"
-	case Comments_Send_Now:   return "comments_send_now"
-	case Comments_Ask_Cancel: return "comments_ask_cancel"
-	case Pi_Attached:         return "pi.attached"
-	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
-		return claude_command_type(cmd)
-	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
-		return claude_account_type(cmd)
-	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
-		return claude_extra_type(cmd)
-	case Claude_Model_Report: return "claude.model"
-	case Claude_Wait_Idle:    return "claude_wait_idle"
-	case Claude_Wait_Tick:    return "claude_wait_tick"
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
-		return browser_command_type(cmd)
-	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
-		return browser_polish_command_type(cmd)
-	case Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop:
-		return browser_agent_command_type(cmd)
-	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
-		return browser_act_command_type(cmd)
-	}
-	return ""
+	info := command_info(cmd)
+	return info == nil ? "" : info.name
 }
 
 // A pi tab's blocker as events and the log show it: "shell sh1" and "timer wk2" (the bridge's
@@ -386,382 +167,284 @@ blocker_redacted :: proc(b: string) -> string {
 	return "<redacted>"
 }
 
+// Which of a command's encodings (command_codec.odin): the log's (and the events'), the same
+// redacted, the window's to its core.
+Cmd_Mode :: enum u8 {
+	Log,
+	Red,
+	Wire,
+}
+
 // redact: for events and logs. Pasted text becomes its length, tokens vanish.
 write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
+	cmd_write(b, cmd, redact ? .Red : .Log)
+}
+
+@(private = "file")
+cmd_write :: proc(b: ^strings.Builder, cmd: Command, mode: Cmd_Mode) {
 	w := obj_begin(b)
-	kv_str(&w, "type", command_type(cmd))
-	token :: proc(w: ^Jw, t: string, redact: bool) {
-		if t != "" do kv_str(w, "confirm", redact ? "<redacted>" : t)
+	info := command_info(cmd)
+	kv_str(&w, "type", info == nil ? "" : info.name)
+	if info != nil && !write_command_hook(&w, cmd, mode) {
+		c := cmd
+		// `last` fields after the rest; on the wire, what the log leaves out after those
+		for pass in 0 ..< 3 do for &f in info.fields {
+			p := mode == .Wire && f.log.tx == .Drop ? 2 : (f.last ? 1 : 0)
+			if p == pass do cmd_write_field(&w, info, &f, &c, mode)
+		}
 	}
-	switch c in cmd {
-	case Add_Project:
-		kv_str(&w, "cwd", c.cwd)
-		if c.machine != 0 do kv_u64(&w, "machine", c.machine)
-	case Select_Project:
-		kv_u64(&w, "project_id", c.project_id)
-	case Rename_Project:
-		kv_u64(&w, "project_id", c.project_id)
-		kv_str(&w, "name", c.name)
-	case Open_Session_Cmd:
-		kv_u64(&w, "project_id", c.project_id)
-		kv_str(&w, "pi_session_id", c.pi_session_id)
-	case New_Chat:
-		kv_u64(&w, "project_id", c.project_id)
-	case Focus_Session:
-		kv_u64(&w, "session", c.session)
-	case Show_No_Session:
-	case Next_Needing_You:
-		if c.back do kv_bool(&w, "back", true)
-	case Close_Session:
-		kv_u64(&w, "session", c.session)
-		token(&w, c.confirm, redact)
-		if c.comments != .Ask do kv_str(&w, "comments", COMMENTS_CHOICE_NAMES[c.comments])
-	case Set_Home:
-		kv_bool(&w, "open", c.open)
-	case Set_Home_Dir:
-		kv_str(&w, "path", c.path)
-		if c.create do kv_bool(&w, "create", true)
-	case Set_Folder:
-		kv_str(&w, "kind", FOLDER_NAMES[c.kind])
-		kv_str(&w, "path", c.path)
-	case Setup_Sheet:
-		kv_bool(&w, "open", c.open)
-	case Set_Chats_Readonly:
-		kv_bool(&w, "on", c.on)
-	case Set_Pi_Extension:
-		kv_str(&w, "name", c.name)
-		kv_bool(&w, "on", c.on)
-	case Set_Claude_Default_Flags:
-		kv_bool(&w, "skip_permissions", c.skip_permissions)
-		if c.codex do kv_str(&w, "harness", "codex")
-		token(&w, c.confirm, redact)
-	case Set_Pinned:
-		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
-		if c.project_id != 0 do kv_u64(&w, "project_id", c.project_id)
-		if c.pi_session_id != "" do kv_str(&w, "pi_session_id", c.pi_session_id)
-		kv_bool(&w, "pinned", c.pinned)
-		if i, ok := c.index.?; ok do kv_u64(&w, "index", u64(max(i, 0)))
-	case Set_Hidden:
-		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
-		if c.project_id != 0 do kv_u64(&w, "project_id", c.project_id)
-		if c.pi_session_id != "" do kv_str(&w, "pi_session_id", c.pi_session_id)
-		kv_bool(&w, "hidden", c.hidden)
-	case Set_Sort:
-		kv_str(&w, "section", SORT_SECTION_NAMES[c.section])
-		kv_str(&w, "by", SORT_BY_NAMES[c.by])
-	case Set_Sidebar_Folded:
-		kv_str(&w, "section", FOLD_NAMES[c.section])
-		kv_bool(&w, "folded", c.folded)
-	case Set_Sidebar_View:
-		kv_str(&w, "view", SIDEBAR_VIEW_NAMES[c.view])
-	case Set_Row_Expanded:
-		kv_str(&w, "path", c.path)
-		kv_bool(&w, "expanded", c.expanded)
-	case Set_Filter:
-		if v, ok := c.text.?; ok do kv_str(&w, "text", v)
-		if v, ok := c.running.?; ok do kv_bool(&w, "running", v)
-		if v, ok := c.waiting.?; ok do kv_bool(&w, "waiting", v)
-		if v, ok := c.pinned.?; ok do kv_bool(&w, "pinned", v)
-		if v, ok := c.show_hidden.?; ok do kv_bool(&w, "show_hidden", v)
-	case Reveal_Path:
-		kv_u64(&w, "project_id", c.project_id)
-		if c.pi_session_id != "" do kv_str(&w, "pi_session_id", c.pi_session_id)
-	case Session_Info:
-		kv_u64(&w, "project_id", c.project_id)
-		kv_str(&w, "pi_session_id", c.pi_session_id)
-		if c.to != "" do kv_str(&w, "to", c.to)
-	case Copy_Path:
-		kv_u64(&w, "project_id", c.project_id)
-		if c.pi_session_id != "" do kv_str(&w, "pi_session_id", c.pi_session_id)
-	case Restore_Sidebar:
-		key(&w, "pinned_projects")
-		write_strings(w.b, c.pinned_projects)
-		key(&w, "pinned_sessions")
-		write_strings(w.b, c.pinned_sessions)
-		key(&w, "hidden_projects")
-		write_strings(w.b, c.hidden_projects)
-		key(&w, "hidden_sessions")
-		write_strings(w.b, c.hidden_sessions)
-	case Set_Agent_Name:
-		kv_str(&w, "name", c.name)
-	case Set_Agent_Model:
-		kv_str(&w, "model", c.model)
-	case Set_Notify:
-		kv_bool(&w, "on", c.on)
-	case Set_Tidy_Projects:
-		kv_bool(&w, "on", c.on)
-	case Set_Keep_Sessions:
-		kv_bool(&w, "on", c.on)
-	case Set_Separate_Core:
-		kv_bool(&w, "on", c.on)
-	case Set_Remote_Machines:
-		kv_bool(&w, "on", c.on)
-	case Set_Machines_Reachable:
-		kv_bool(&w, "on", c.on)
-		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
-	case Set_Web_Access:
-		kv_bool(&w, "on", c.on)
-		token(&w, c.confirm, redact)
-	case Set_Web_Listen:
-		kv_str(&w, "address", c.address)
-	case Web_Revoke:
-		kv_str(&w, "id", c.id)
-	case Machine_Add:
-		kv_str(&w, "name", c.name)
-		kv_str(&w, "target", c.target)
-		if c.via != "" do kv_str(&w, "via", c.via)
-	case Machine_Remove:
-		kv_u64(&w, "no", c.no)
-		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
-	case Machine_Rename:
-		kv_u64(&w, "no", c.no)
-		kv_str(&w, "name", c.name)
-	case Machine_Connect:
-		kv_u64(&w, "no", c.no)
-	case Machine_Login:
-		kv_u64(&w, "no", c.no)
-	case Machine_Install:
-		kv_u64(&w, "no", c.no)
-		if c.cancel do kv_bool(&w, "cancel", true)
-	case Machine_Linger:
-		kv_u64(&w, "no", c.no)
-	case Pi_Handoff:
-		kv_u64(&w, "project_id", c.project_id)
-		kv_str(&w, "pi_session_id", c.pi_session_id)
-		kv_u64(&w, "to_project_id", c.to_project_id)
-		kv_str(&w, "run", c.run)
-		kv_str(&w, "folder", c.folder)
-	case Pi_Handoff_Part:
-		kv_u64(&w, "project_id", c.project_id)
-		kv_u64(&w, "offset", c.offset)
-		kv_str(&w, "data", redact ? fmt.tprintf("<redacted %d bytes>", len(c.data)) : c.data) // a conversation: never in an event or the log
-		if c.last do kv_bool(&w, "last", true)
-	case Machine_Open_Page:
-		kv_u64(&w, "no", c.no)
-		kv_u64(&w, "port", c.port)
-		if c.path != "" do kv_str(&w, "path", c.path)
-	case Holder_Replace:
-		kv_bool(&w, "stop", c.stop)
-	case Holder_Recover:
-		if c.stop do kv_bool(&w, "stop", true)
-	case Core_Handover:
-		kv_str(&w, "to", c.to)
-	case Claude_Typed:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Claude_Status_Dismiss:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case App_Socket: // never the line (an app's data) nor a token
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "op", APP_SOCKET_OP_NAMES[c.op])
-	case Harness_Install:
-		kv_str(&w, "item", c.item)
-		kv_bool(&w, "dismiss", c.dismiss)
-	case Fs_Changed:
-		kv_u64(&w, "paths", u64(len(c.paths))) // how many, not which
-	case Web_Pair, Web_Devices: // nothing
-	case File_Read:
-		kv_str(&w, "path", c.path)
-		if c.since != "" do kv_str(&w, "since", c.since)
-	case File_Save:
-		// events and the log (redact): the path and how much, never the text
-		kv_str(&w, "path", c.path)
-		if redact do kv_u64(&w, "text_bytes", u64(len(c.text)))
-		else do kv_str(&w, "text", c.text) // the wire to the core only (command_wire_json)
-		if c.base != "" do kv_str(&w, "base", c.base)
-		if c.force do kv_bool(&w, "force", true)
-	case Web_Settings: kv_bool(&w, "open", c.open)
-	case Job_Draft: web_extra_write(&w, c, redact) // web_jobs.odin
-	case Web_Watch:
-		key(&w, "projects")
+	obj_end(&w)
+}
+
+// One field as its tag says (command_codec.odin).
+@(private = "file")
+cmd_write_field :: proc(w: ^Jw, info: ^Cmd_Info, f: ^Cmd_Field, cmd: ^Command, mode: Cmd_Mode) {
+	if f.skip || (f.ui && mode != .Wire) do return // ui: only on the wire, whatever red= says
+	data := rawptr(uintptr(cmd) + f.offset)
+	t: Cmd_Transform
+	if mode != .Wire || !f.full {
+		t = f.log
+		if mode == .Red && f.red.tx != .None do t = f.red
+	}
+	if t.tx == .Drop do return
+	if f.omit && cmd_is_zero(data, f.ti) do return
+	ti := f.ti
+	if u, is := runtime.type_info_base(ti).variant.(runtime.Type_Info_Union); is && len(u.variants) == 1 && !u.no_nil { // Maybe(T): unset is left out
+		if reflect.get_union_variant_raw_tag(any{data, ti.id}) == 0 do return
+		ti = u.variants[0]
+	}
+	if f.nonneg && wire_int(data, ti.size) < 0 do return
+	if t.tx == .None && f.codec != "" && cmd_write_codec(w, info, f, data, cmd, mode) do return
+	switch t.tx {
+	case .None, .Drop:
+		key(w, f.key)
+		cmd_write_value(w.b, f, data, ti)
+	case .Bytes: kv_str(w, f.key, fmt.tprintf("<redacted %d bytes>", cmd_len(data, ti)))
+	case .Len:   kv_u64(w, t.arg != "" ? t.arg : f.key, u64(cmd_len(data, ti)))
+	case .Token: kv_str(w, f.key, "<redacted>")
+	case .Url:   kv_str(w, f.key, browser_url_redacted((^string)(data)^))
+	case .Path:  kv_str(w, f.key, "<path>")
+	case .Items: kv_str(w, f.key, fmt.tprintf("<redacted %d %s>", cmd_len(data, ti), t.arg))
+	case .Cut:   kv_str(w, f.key, cut_utf8((^string)(data)^, t.n))
+	case .F3:
+		key(w, f.key)
+		fmt.sbprintf(w.b, "%.3f", (^f32)(data)^)
+	case .Blockers:
+		list := (^[]string)(data)^
+		masked := make([]string, len(list), context.temp_allocator)
+		for x, i in list do masked[i] = blocker_redacted(x)
+		key(w, f.key)
+		write_strings(w.b, masked)
+	}
+}
+
+// A string's bytes, a list's items.
+@(private = "file")
+cmd_len :: proc(data: rawptr, ti: ^runtime.Type_Info) -> int {
+	#partial switch _ in runtime.type_info_base(ti).variant {
+	case runtime.Type_Info_String:        return len((^string)(data)^)
+	case runtime.Type_Info_Slice:         return (^runtime.Raw_Slice)(data).len
+	case runtime.Type_Info_Dynamic_Array: return (^runtime.Raw_Dynamic_Array)(data).len
+	}
+	return 0
+}
+
+@(private = "file")
+cmd_write_value :: proc(b: ^strings.Builder, f: ^Cmd_Field, data: rawptr, ti: ^runtime.Type_Info) {
+	#partial switch t in runtime.type_info_base(ti).variant {
+	case runtime.Type_Info_Integer:
+		if !t.signed do strings.write_u64(b, wire_uint(data, ti.size))
+		else if f.pos do strings.write_i64(b, max(wire_int(data, ti.size), 0))
+		else if f.signed do strings.write_i64(b, wire_int(data, ti.size))
+		else do strings.write_u64(b, u64(wire_int(data, ti.size)))
+	case runtime.Type_Info_Float:
+		buf: [32]u8
+		x := ti.size == 4 ? f64((^f32)(data)^) : (^f64)(data)^
+		strings.write_string(b, strings.trim_prefix(strconv.write_float(buf[:], x, 'g', -1, ti.size * 8), "+"))
+	case runtime.Type_Info_Boolean:
+		strings.write_string(b, wire_uint(data, ti.size) != 0 ? "true" : "false")
+	case runtime.Type_Info_String:
+		json_quote(b, (^string)(data)^)
+	case runtime.Type_Info_Enum:
+		x := wire_int(data, ti.size)
+		if f.names != nil {
+			i := x - f.names_min
+			json_quote(b, i >= 0 && i < i64(len(f.names)) ? f.names[i] : "")
+			return
+		}
+		wire_write(b, data, ti)
+	case runtime.Type_Info_Slice:
+		if t.elem.id == typeid_of(string) {
+			write_strings(b, (^[]string)(data)^)
+			return
+		}
+		wire_write(b, data, ti)
+	case:
+		wire_write(b, data, ti)
+	}
+}
+
+command_json :: proc(cmd: Command, redact := false) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	write_command(&b, cmd, redact)
+	return strings.to_string(b)
+}
+
+// A command as the window sends it to its core (window_link.odin; design §10.2, M3-F): what
+// parse_command_ui reads back into the same command. command_json is the log's and the events'
+// encoding, which writes counts for lists, leaves out tokens and limits and never writes the
+// UI-only fields; this one writes every field (the `full` and `ui` ones of command_codec.odin).
+// Temp allocator. Never logged or sent to an agent.
+command_wire_json :: proc(cmd: Command) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	cmd_write(&b, cmd, .Wire)
+	return strings.to_string(b)
+}
+
+// A field written by hand (its tag's codec=); false: as any other.
+@(private = "file")
+cmd_write_codec :: proc(w: ^Jw, info: ^Cmd_Info, f: ^Cmd_Field, data: rawptr, cmd: ^Command, mode: Cmd_Mode) -> bool {
+	sib :: proc(info: ^Cmd_Info, cmd: ^Command, name: string, $T: typeid) -> T {return (^T)(cmd_sibling(info, cmd, name))^}
+	switch f.codec {
+	case "inverse": kv_bool(w, f.key, !(^bool)(data)^) // no_focus as focus
+	case "harness_ct": // a Claude command's harness: "codex" or nothing (Claude's wire is unchanged)
+		if harness_is_codex((^Harness)(data)^) do kv_str(w, f.key, "codex")
+	case "images": write_prompt_images(w.b, (^[]Prompt_Image)(data)^)
+	case "rows":
+		key(w, f.key)
+		write_rows(w.b, (^[]Panel_Row)(data)^)
+	case "raw_list": // each a JSON object (get_raw_list)
+		key(w, f.key)
 		strings.write_byte(w.b, '[')
-		for id, i in c.projects {
+		for e, i in (^[]string)(data)^ {
 			if i > 0 do strings.write_byte(w.b, ',')
-			strings.write_u64(w.b, id)
+			strings.write_string(w.b, e)
 		}
 		strings.write_byte(w.b, ']')
-	case Copy_Control_Token: // nothing: the token is never written
-	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
-		notify_write(w.b, cmd) // after "type": the object is not empty
-	case Update_Install:
-		token(&w, c.confirm, redact)
-	case Update_Check, Update_Skip, Update_Later, Update_Download, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
-		update_write(w.b, cmd) // update.odin: never the release body
-	case Pi_Reload_All, Pi_Restart_Updated, Pi_Reload_Later, Reload_Watch, Reload_Kick:
-		reload_write(w.b, cmd) // reload.odin; confirmation tokens never
-	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
-		claude_reload_write(w.b, cmd) // claude_reload.odin; confirmation tokens never
-	case New_Shell_Tab:
-		kv_u64(&w, "session", c.session)
-		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
-		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
-	case Split_Pane:
-		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
-		kv_str(&w, "direction", PANE_DIR_NAMES[c.direction])
-		if c.tab_id != 0 do kv_u64(&w, "tab_id", c.tab_id)
-		if c.no_focus do kv_bool(&w, "focus", false)
-	case Close_Pane:
-		kv_u64(&w, "pane", c.pane)
-	case Focus_Pane:
-		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
-		if c.direction != "" do kv_str(&w, "direction", c.direction)
-	case Move_Tab:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_u64(&w, "pane", c.pane)
-		if c.index >= 0 do kv_u64(&w, "index", u64(c.index))
-	case Set_Split:
-		kv_u64(&w, "split", c.split)
-		fmt.sbprintf(w.b, `,"ratio":%.3f`, c.ratio)
-	case Equalize_Panes:
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-	case Zoom_Pane:
-		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
-		if z, ok := c.zoom.?; ok do kv_bool(&w, "zoom", z)
-	case Close_Tab:
-		kv_u64(&w, "tab_id", c.tab_id)
-		token(&w, c.confirm, redact)
-		if c.comments != .Ask do kv_str(&w, "comments", COMMENTS_CHOICE_NAMES[c.comments])
-	case Focus_Tab:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Copy_Selection:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Terminal_Link:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "url", redact ? browser_url_redacted(c.url) : c.url) // never user:pass@ in events
-		if c.external do kv_bool(&w, "external", true)
-	case Send_Text:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
-		if c.generated do kv_bool(&w, "generated", true)
-	case Set_Focus:
-		kv_str(&w, "widget", c.widget)
-	case Focus_Take:
-		kv_str(&w, "widget", c.widget)
-	case Focus_Release:
-		kv_str(&w, "widget", c.widget)
-	case Set_Last_Harness:
-		kv_str(&w, "harness", HARNESS_KEYS[c.harness])
-	case Set_Layout:
-		if v, ok := c.left_width.?; ok do kv_f32(&w, "left_width", v)
-		if v, ok := c.right_width.?; ok do kv_f32(&w, "right_width", v)
-		if v, ok := c.left_open.?; ok do kv_bool(&w, "left_open", v)
-		if v, ok := c.right_open.?; ok do kv_bool(&w, "right_open", v)
-		if v, ok := c.drawer_width.?; ok do kv_f32(&w, "drawer_width", v)
-		if v, ok := c.drawer_pinned.?; ok do kv_bool(&w, "drawer_pinned", v)
-	case Set_Panel:
-		kv_str(&w, "panel", c.panel)
-		kv_bool(&w, "open", c.open)
-	case Cancel_Confirmation:
-		kv_str(&w, "token", redact ? "<redacted>" : c.token)
-	case Quit:
-		token(&w, c.confirm, redact)
-		if c.stop_sessions do kv_bool(&w, "stop_sessions", true)
-	case Set_Confirm_Policy:
-		kv_str(&w, "caller", CALLER_NAMES[c.caller])
-		kv_str(&w, "class", CLASS_NAMES[c.class])
-		kv_str(&w, "mode", MODE_NAMES[c.mode])
-	case Set_Close_Confirm:
-		kv_str(&w, "tab_kind", TAB_KIND_NAMES[c.tab_kind])
-		kv_str(&w, "rule", CLOSE_NAMES[c.rule])
-	case Set_Theme:
-		kv_str(&w, "name", THEME_NAMES[c.name])
-	case Set_Reduce_Motion:
-		kv_bool(&w, "on", c.on)
-	case Set_Dim_Panes:
-		kv_bool(&w, "on", c.on)
-	case Set_Terminal_Text_Size:
-		kv_u64(&w, "pt", u64(c.pt))
-	case Set_Appearance:
-		kv_str(&w, "mode", APPEARANCE_NAMES[c.mode])
-	case Set_Text_Size:
-		kv_str(&w, "size", TEXT_SIZE_NAMES[c.size])
-	case System_Appearance:
-		kv_bool(&w, "light", c.light)
-	case Pi_Session_Update:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "pi_session_id", c.pi_session_id)
-		kv_str(&w, "session_file", c.session_file)
-		kv_str(&w, "cwd", c.cwd)
-	case Pi_Status_Update:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "agent", AGENT_NAMES[c.agent])
-		kv_bool(&w, "waiting", c.waiting)
-		kv_bool(&w, "question", c.question)
-		key(&w, "blockers")
-		// events and the log: what kind and which id only ("shell sh1"), never a command or a
-		// task, as panel rows are only counted; the state keeps the text (Tab.blockers)
-		if redact {
-			masked := make([]string, len(c.blockers), context.temp_allocator)
-			for x, i in c.blockers do masked[i] = blocker_redacted(x)
-			write_strings(w.b, masked)
-		} else do write_strings(w.b, c.blockers)
-	case Pi_Prompt:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
-		if len(c.images) > 0 {
-			if redact do kv_str(&w, "images", fmt.tprintf("<redacted %d images>", len(c.images)))
-			else do write_prompt_images(w.b, c.images)
+	case "raw": // app_call's params: a JSON object as the caller wrote it
+		x := (^string)(data)^
+		if mode == .Red do kv_u64(w, "params_bytes", u64(len(x)))
+		else if x != "" {
+			key(w, f.key)
+			strings.write_string(w.b, x)
 		}
-	case Pi_Reload:
-		kv_u64(&w, "tab_id", c.tab_id)
-		token(&w, c.confirm, redact)
-	case Pi_Restart:
-		kv_u64(&w, "tab_id", c.tab_id)
-		if c.pick_model do kv_bool(&w, "pick_model", true)
-	case Pi_Wait_Idle:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_u64(&w, "timeout_ms", c.timeout_ms)
-	case Panel_Set:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "panel", c.panel)
-		kv_str(&w, "title", c.title)
-		key(&w, "rows")
-		// events and the log: only how much (PROTOCOL.md §6)
-		if redact do json_quote(w.b, fmt.tprintf("<redacted %d rows>", len(c.rows)))
-		else do write_rows(w.b, c.rows)
-	case Panel_Remove:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "panel", c.panel)
-	case Set_Panel_Collapsed:
-		kv_str(&w, "panel", c.panel)
-		kv_bool(&w, "collapsed", c.collapsed)
-	case Bridge_Done:
-		kv_u64(&w, "request_id", c.request_id)
-		kv_bool(&w, "ok", c.ok)
-		if c.error != "" do kv_str(&w, "error", c.error)
-	case Tab_Exited:
-		kv_u64(&w, "tab_id", c.tab_id)
-		if how := exit_text(c.exit); how != "" do kv_str(&w, "exit", how) // a crash or a hangup (dead_tab.odin)
-	case Program_Status:
-		// what the program said, not its title or message (untrusted text; the snapshot has them)
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "state", PROG_STATE_NAMES[c.summary.state])
-		if c.summary.kind != .None do kv_str(&w, "kind", PROG_KIND_NAMES[c.summary.kind])
-		if c.summary.app != "" do kv_str(&w, "app", c.summary.app)
-		kv_u64(&w, "records", u64(c.summary.records))
-	case Set_Unread:
-		if c.tab_id != 0 do kv_u64(&w, "tab_id", c.tab_id)
-		if c.pi_session_id != "" do kv_str(&w, "pi_session_id", c.pi_session_id)
-		kv_bool(&w, "unread", c.unread)
-	case Mark_All_Read:
-	case Rescan_Done:
-		kv_u64(&w, "request_id", c.request_id)
-	case Refresh_Shell_Env_Done:
-		kv_u64(&w, "request_id", c.request_id) // never the values
-		kv_bool(&w, "ok", c.ok)
+	case "rect":
+		if !sib(info, cmd, "has_rect", bool) do return true
+		r := (^App_Rect)(data)^
+		key(w, f.key)
+		fmt.sbprintf(w.b, `{{"x":%v,"y":%v,"w":%v,"h":%v}}`, r.x, r.y, r.w, r.h)
+	case "act_target": // its fields beside the command's
+		tg := (^Act_Target)(data)^
+		if tg.selector != "" do kv_str(w, "selector", tg.selector)
+		if tg.has_xy {
+			key(w, "x")
+			fmt.sbprintf(w.b, "%v", tg.x)
+			key(w, "y")
+			fmt.sbprintf(w.b, "%v", tg.y)
+		}
+	case "mods": // the log: CDP's bits; the wire: their names
+		m := (^int)(data)^
+		if mode != .Wire {
+			key(w, f.key)
+			fmt.sbprintf(w.b, "%d", m)
+			return true
+		}
+		names := make([dynamic]string, context.temp_allocator)
+		for n, i in ACT_MOD_NAMES do if m & (1 << uint(i)) != 0 do append(&names, n)
+		key(w, f.key)
+		write_strings(w.b, names[:])
+	case "xy": // devtools' point: both or neither
+		x, y := sib(info, cmd, "x", i32), sib(info, cmd, "y", i32)
+		if f.name == "x" && x >= 0 && y >= 0 {
+			kv_u64(w, "x", u64(x))
+			kv_u64(w, "y", u64(y))
+		}
+	case "has": // browser_select's label and value: when given
+		if sib(info, cmd, strings.concatenate({"has_", f.name}, context.temp_allocator), bool) do kv_str(w, f.key, (^string)(data)^)
+	case "exit": // a crash or a hangup (dead_tab.odin)
+		if how := exit_text((^Exit_Info)(data)^); how != "" do kv_str(w, f.key, how)
+	case "job_finished":
+		j := (^Job_Finished)(data)^
+		kv_str(w, "job_id", j.job_id)
+		kv_str(w, "status", JOB_STATUS_NAMES[j.status])
+	case "exit_code": if sib(info, cmd, "status", App_Status) == .Exited do kv_u64(w, f.key, u64(max((^int)(data)^, 0)))
+	case "ok_if_empty": kv_bool(w, f.key, (^string)(data)^ == "")
+	case "wait_value": // a waited-for text may be what the user typed into the page: its length only
+		if mode == .Red && sib(info, cmd, "what", string) == "text" do kv_u64(w, "value_bytes", u64(len((^string)(data)^)))
+		else do kv_str(w, f.key, (^string)(data)^)
+	case "app_argv": // the log: how many words (the command line is one), never which
+		argv := (^[]string)(data)^
+		if mode == .Red do kv_u64(w, "argc", u64(len(argv) + (sib(info, cmd, "command", string) != "" ? 1 : 0)))
+		else {
+			key(w, f.key)
+			write_strings(w.b, argv)
+		}
+	case "delete_path": // path, unless only paths are given
+		if (^string)(data)^ != "" || len(sib(info, cmd, "paths", []string)) == 0 do kv_str(w, f.key, (^string)(data)^)
+	case "files": // how many files changed (the list is capped: more)
+		key(w, f.key)
+		strings.write_int(w.b, len((^[]string)(data)^) + sib(info, cmd, "more", int))
+	case "prog_summary": // what the program said, not its title or message (untrusted text; the snapshot has them)
+		p := (^Prog_Summary)(data)^
+		kv_str(w, "state", PROG_STATE_NAMES[p.state])
+		if p.kind != .None do kv_str(w, "kind", PROG_KIND_NAMES[p.kind])
+		if p.app != "" do kv_str(w, "app", p.app)
+		kv_u64(w, "records", u64(p.records))
+	case "bell_macos": bell_write(w, f.key, (^[Bell_Group]Maybe(Os_When))(data)^, OS_WHEN_NAMES)
+	case "bell_sound": bell_write(w, f.key, (^[Bell_Group]Maybe(Bell_Sound))(data)^, BELL_SOUND_NAMES)
+	case: return false
+	}
+	return true
+}
+
+// {"macos":{"waiting":"always"},"sound":{"waiting":"tink"}}: the groups set
+@(private = "file")
+bell_write :: proc(w: ^Jw, k: string, vals: [Bell_Group]Maybe($E), names: [E]string) {
+	n := 0
+	for v, g in vals do if x, set := v.?; set {
+		if n == 0 do fmt.sbprintf(w.b, `,"%s":{{`, k)
+		else do strings.write_byte(w.b, ',')
+		fmt.sbprintf(w.b, `"%s":"%s"`, BELL_GROUP_NAMES[g], names[x] != "" ? names[x] : "default")
+		n += 1
+	}
+	if n > 0 do strings.write_byte(w.b, '}')
+}
+
+// The commands whose JSON no tag can say: written here (true), after "type".
+@(private = "file")
+write_command_hook :: proc(w: ^Jw, cmd: Command, mode: Cmd_Mode) -> bool {
+	#partial switch c in cmd {
+	case New_Claude_Session: // the log's order is not the wire's
+		if mode == .Wire do return false
+		kv_u64(w, "project_id", c.project_id)
+		if harness_is_codex(c.harness) do kv_str(w, "harness", "codex")
+		if c.account != "" do kv_str(w, "account", c.account)
+		if c.cwd != "" do kv_str(w, "cwd", c.cwd)
+		if len(c.args) > 0 do kv_u64(w, "argc", u64(len(c.args)))
+	case Browser_Update: // what changed (what)
+		kv_u64(w, "tab_id", c.tab_id)
+		if .Url in c.what do kv_str(w, "url", mode == .Red ? browser_url_redacted(c.url) : c.url)
+		if .Title in c.what do kv_str(w, "title", c.title)
+		if .Nav in c.what {
+			kv_bool(w, "loading", c.loading)
+			kv_bool(w, "can_back", c.can_back)
+			kv_bool(w, "can_forward", c.can_forward)
+		}
+		if .Blocked in c.what do kv_str(w, "blocked_popup", mode == .Red ? browser_url_redacted(c.blocked) : c.blocked)
 	case Restore_Session:
-		kv_u64(&w, "project_id", c.project_id)
-		kv_str(&w, "pi_session_id", c.pi_session_id)
-		kv_str(&w, "session_dir", c.session_dir)
-		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
-		if c.agent == .Claude do kv_str(&w, "agent", "claude")
-		key(&w, "tabs")
+		kv_u64(w, "project_id", c.project_id)
+		kv_str(w, "pi_session_id", c.pi_session_id)
+		kv_str(w, "session_dir", c.session_dir)
+		if c.cwd != "" do kv_str(w, "cwd", c.cwd)
+		if c.agent == .Claude do kv_str(w, "agent", "claude")
+		key(w, "tabs")
 		strings.write_byte(w.b, '[')
 		for t, i in c.tabs {
 			if i > 0 do strings.write_byte(w.b, ',')
 			o := obj_begin(w.b)
 			kv_str(&o, "kind", TAB_KIND_NAMES[t.kind])
 			kv_str(&o, "title", t.title)
-			kv_str(&o, "cwd", t.cwd)
+			kv_str(&o, "cwd", mode == .Red && t.kind == .Browser ? browser_url_redacted(t.cwd) : t.cwd) // a browser tab's: its URL
 			if t.active do kv_bool(&o, "active", true)
 			if len(c.layout.nodes) > 0 {
 				if pn, ok := t.pane.?; ok { // its saved pane (left out: not known)
@@ -776,10 +459,10 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if len(c.layout.nodes) > 0 {
 			// the saved panes (persist.odin panes_parse): the tree in pre-order, the pi tab's pane (left out: not known)
 			if pn, ok := c.pi_pane.?; ok && c.agent != .Claude {
-				key(&w, "pi_pane")
+				key(w, "pi_pane")
 				strings.write_int(w.b, pn)
 			}
-			key(&w, "panes")
+			key(w, "panes")
 			lo := obj_begin(w.b)
 			kv_u64(&lo, "count", u64(c.layout.panes))
 			kv_u64(&lo, "focused", u64(c.layout.focused))
@@ -793,468 +476,29 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 			strings.write_byte(w.b, ']')
 			obj_end(&lo)
 		}
-		if c.home do kv_bool(&w, "home", true)
-	case Open_File:
-		kv_str(&w, "path", c.path)
-		if c.line > 0 do kv_u64(&w, "line", u64(c.line))
-		if c.col > 0 do kv_u64(&w, "col", u64(c.col))
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-		if c.preview do kv_bool(&w, "preview", true)
-	case Keep_Tab:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Set_Left_Tab:
-		kv_str(&w, "tab", LEFT_TAB_NAMES[c.tab])
-	case Files_Expand:
-		kv_str(&w, "path", c.path)
-		kv_bool(&w, "expanded", c.expanded)
-	case Files_Collapse_All:
-		kv_str(&w, "root", c.root)
-	case Files_Reveal:
-		kv_str(&w, "path", c.path)
-	case Set_Files_Filter:
-		kv_str(&w, "text", c.text)
-	case Editor_State:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Save_File:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Goto_Line:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_u64(&w, "line", u64(max(c.line, 0)))
-		if c.col > 0 do kv_u64(&w, "col", u64(c.col))
-	case Reload_File:
-		kv_u64(&w, "tab_id", c.tab_id)
-		token(&w, c.confirm, redact)
-	case Keep_Buffer:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Diff_File:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "against", EDITOR_VIEW_NAMES[c.against])
-	case Set_Wrap:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_bool(&w, "on", c.on)
-	case List_Dir:
-		kv_str(&w, "path", c.path)
-		if c.ignored do kv_bool(&w, "ignored", true)
-	case Create_File:
-		kv_str(&w, "path", c.path)
-		token(&w, c.confirm, redact)
-	case Create_Dir:
-		kv_str(&w, "path", c.path)
-		token(&w, c.confirm, redact)
-	case Rename_Path:
-		kv_str(&w, "from", c.from)
-		kv_str(&w, "to", c.to)
-		token(&w, c.confirm, redact)
-	case Delete_Path:
-		kv_str(&w, "path", c.path)
-		token(&w, c.confirm, redact)
-	case Reveal_In_Finder:
-		kv_str(&w, "path", c.path)
-	case Git_Head_Done: // internal; the file's text stays out of events and the log
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_bool(&w, "tracked", c.tracked)
-	case Git_Status_Done:
-		kv_str(&w, "root", c.root)
-		kv_bool(&w, "ok", c.ok)
-	case File_List_Done:
-		kv_str(&w, "root", c.root)
-	case List_Worktrees:
-		if c.path != "" do kv_str(&w, "path", c.path)
-	case Files_Set_Root:
-		if c.base != "" do kv_str(&w, "base", c.base)
-		kv_str(&w, "path", c.path)
-	case Worktree_Cleanup:
-		kv_str(&w, "path", c.path)
-		token(&w, c.confirm, redact)
-	case Worktree_Session:
-		kv_u64(&w, "project_id", c.project_id)
-		kv_str(&w, "path", c.path)
-	case Worktrees_Done:
-		kv_str(&w, "common", c.common)
-	case Worktree_Cleanup_Done:
-		kv_str(&w, "path", c.path)
-		if c.err != "" do kv_str(&w, "err", c.err)
-	case Job_List:
-		if c.unread do kv_bool(&w, "unread", true)
-	case Job_Runs:
-		kv_str(&w, "job", c.job)
-		if c.limit > 0 do kv_u64(&w, "limit", u64(c.limit))
-	case Job_Run_Now:     kv_str(&w, "job", c.job)
-	case Job_Stop:        if c.job != "" do kv_str(&w, "job", c.job)
-	case Jobs_Pause:      if c.job != "" do kv_str(&w, "job", c.job)
-	case Jobs_Resume:     if c.job != "" do kv_str(&w, "job", c.job)
-	case Job_Save: // the note is the user's text: its length only
-		if c.path != "" do kv_str(&w, "path", c.path)
-		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
-		if c.based_on != "" do kv_str(&w, "based_on", c.based_on)
-	case Job_Sheet:
-		kv_bool(&w, "open", c.open)
-		if c.job != "" do kv_str(&w, "job", c.job)
-		if c.for_project != "" do kv_str(&w, "for_project", c.for_project)
-	case Job_Create: // the prompt is the user's text: its length only
-		kv_str(&w, "name", c.name)
-		if c.schedule != "" do kv_str(&w, "schedule", c.schedule)
-		if c.folder != "" do kv_str(&w, "folder", c.folder)
-		if c.for_project != "" do kv_str(&w, "for_project", c.for_project)
-		if c.prompt != "" do kv_str(&w, "prompt", redact ? fmt.tprintf("<redacted %d bytes>", len(c.prompt)) : c.prompt)
-	case Job_Mark_Read:
-		if c.job != "" do kv_str(&w, "job", c.job)
-		if c.run != "" do kv_str(&w, "run", c.run)
-	case Job_Set_Enabled:
-		kv_str(&w, "job", c.job)
-		kv_bool(&w, "on", c.on)
-	case Job_Delete:
-		kv_str(&w, "job", c.job)
-		token(&w, c.confirm, redact)
-	case Job_Open:
-		kv_str(&w, "job", c.job)
-		kv_str(&w, "what", c.what)
-	case Set_Pi_Path:     kv_str(&w, "path", c.path)
-	case Set_Job_Limits:
-		f :: proc(w: ^Jw, k: string, v: Maybe(f64)) {if x, ok := v.?; ok {key(w, k); fmt.sbprintf(w.b, "%v", x)}}
-		n :: proc(w: ^Jw, k: string, v: Maybe(int)) {if x, ok := v.?; ok {key(w, k); fmt.sbprintf(w.b, "%d", x)}}
-		t :: proc(w: ^Jw, k: string, v: Maybe(i64)) {if x, ok := v.?; ok {key(w, k); fmt.sbprintf(w.b, "%d", x)}}
-		f(&w, "max_cost", c.max_cost)
-		f(&w, "day", c.day)
-		f(&w, "week", c.week)
-		f(&w, "month", c.month)
-		t(&w, "timeout", c.timeout)
-		t(&w, "stall", c.stall)
-		n(&w, "max_turns", c.max_turns)
-		n(&w, "concurrency", c.concurrency)
-		n(&w, "loop_calls", c.loop_calls)
-		n(&w, "fail_pause", c.fail_pause)
-	case Job_Run_Done: // its run is freed by then: never read it here
-	case Jobs_Env: // the PATH and notes folder stay out of the log
-	// the Changes tab (changes.odin): no diff text, no git output; the commit message only as its length in events
-	case Changes_Open:
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-		if c.path != "" do kv_str(&w, "path", c.path)
-	case Changes_List:
-		if c.tab_id != 0 do kv_u64(&w, "tab_id", c.tab_id)
-		if c.path != "" do kv_str(&w, "path", c.path)
-	case Changes_Stage:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "path", c.path)
-		if c.status != "" do kv_str(&w, "status", c.status)
-	case Changes_Unstage:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "path", c.path)
-		if c.status != "" do kv_str(&w, "status", c.status)
-	case Changes_Discard:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "path", c.path)
-		if c.status != "" do kv_str(&w, "status", c.status)
-		if c.second do kv_bool(&w, "second", true)
-		token(&w, c.confirm, redact)
-	case Changes_Select:
-		kv_u64(&w, "tab_id", c.tab_id)
-		if c.path != "" do kv_str(&w, "path", c.path)
-		if c.scope != "" do kv_str(&w, "scope", c.scope)
-		if c.status != "" do kv_str(&w, "status", c.status)
-		if c.more do kv_bool(&w, "more", true)
-		if c.refresh do kv_bool(&w, "refresh", true)
-	case Changes_Commit:
-		kv_u64(&w, "tab_id", c.tab_id)
-		if redact do kv_u64(&w, "message_bytes", u64(len(c.message)))
-		else do kv_str(&w, "message", c.message)
-	case Changes_Scan_Done:
-		kv_str(&w, "root", c.root)
-	case Changes_Diff_Done:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case Changes_Op_Done:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "what", c.what)
-		kv_bool(&w, "ok", c.err == "")
-	// the Markdown tab (markdown_view.odin)
-	case Markdown_Open:
-		kv_str(&w, "path", c.path)
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-		if c.anchor != "" do kv_str(&w, "anchor", c.anchor)
-	case Markdown_Set_View:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_bool(&w, "source", c.source)
-	case Show_File:
-		kv_str(&w, "path", c.path)
-		if c.line > 0 do kv_u64(&w, "line", u64(c.line))
-		if c.anchor != "" do kv_str(&w, "anchor", c.anchor)
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-	case Markdown_Scroll:
-		kv_u64(&w, "tab_id", c.tab_id)
-		if c.anchor != "" do kv_str(&w, "anchor", c.anchor)
-		if c.line > 0 do kv_u64(&w, "line", u64(c.line))
-	case Markdown_Follow:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "url", c.url)
-		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
-	// app tabs (app_tab.odin): never input, call or argument values in events
-	case New_App_Tab:
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-		if redact do kv_u64(&w, "argc", u64(len(c.argv) + (c.command != "" ? 1 : 0)))
-		else {
-			key(&w, "argv")
-			strings.write_byte(b, '[')
-			for a, i in c.argv {
-				if i > 0 do strings.write_byte(b, ',')
-				json_quote(b, a)
-			}
-			strings.write_byte(b, ']')
-			if c.command != "" do kv_str(&w, "command", c.command)
-		}
-		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
-		if c.title != "" do kv_str(&w, "title", c.title)
-		if c.name != "" do kv_str(&w, "name", c.name)
-	case App_Restart:
-		kv_u64(&w, "tab_id", c.tab_id)
-	case App_Close:
-		kv_u64(&w, "tab_id", c.tab_id)
-		token(&w, c.confirm, redact)
-		if c.comments != .Ask do kv_str(&w, "comments", COMMENTS_CHOICE_NAMES[c.comments])
-	case App_Declared:
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-	case App_Input:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_u64(&w, "events", u64(len(c.events)))
-	case App_Events:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "topic", c.topic)
-		if c.since != 0 do kv_u64(&w, "since", c.since)
-	case App_Call:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "method", c.method)
-		if redact do kv_u64(&w, "params_bytes", u64(len(c.params)))
-		else if c.params != "" {
-			key(&w, "params")
-			strings.write_string(b, c.params)
-		}
-	case App_Screenshot:
-		kv_u64(&w, "tab_id", c.tab_id)
-		if c.has_rect {
-			key(&w, "rect")
-			fmt.sbprintf(b, `{{"x":%v,"y":%v,"w":%v,"h":%v}}`, c.rect.x, c.rect.y, c.rect.w, c.rect.h)
-		}
-	case App_Inspect:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_bool(&w, "on", c.on)
-	case App_Call_Done:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_bool(&w, "ok", c.ok)
-	case App_Update:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "status", APP_STATUS_NAMES[c.status])
-		if c.status == .Exited do kv_u64(&w, "exit_code", u64(max(c.exit_code, 0)))
-	// pending comments (comments.odin): never the user's text in events and the log
-	case Comment_Add:
-		kv_str(&w, "source", COMMENT_SOURCE_NAMES[c.source])
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_str(&w, "what", c.what)
-		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
-		if c.crop != "" do kv_str(&w, "crop", c.crop)
-	case Comment_Edit:
-		kv_u64(&w, "comment_id", c.comment_id)
-		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
-	case Comment_Delete:
-		kv_u64(&w, "comment_id", c.comment_id)
-	case Comments_Clear:
-		kv_u64(&w, "session", c.session)
-	case Comments_Send_Now:
-		kv_u64(&w, "session", c.session)
-		if c.tab_id != 0 do kv_u64(&w, "tab_id", c.tab_id)
-	case Pi_Attached:
-		kv_u64(&w, "tab_id", c.tab_id)
-		kv_u64(&w, "attachment_id", c.attachment_id)
-	case Rescan, Refresh_Shell_Env, Get_State, List_Commands, Agent_Model_Picker, Jobs_Sync, Jobs_Tick, Comments_Ask_Cancel, Holder_Restart:
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
-		browser_command_write(&w, cmd, redact) // below
-	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
-		browser_polish_command_write(&w, cmd, redact) // browser_polish.odin
-	case Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop:
-		browser_agent_write(b, cmd, redact) // browser_agent.odin
-	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
-		browser_act_write(b, cmd, redact) // browser_act.odin
-	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
-		claude_command_write(b, cmd, redact) // claude.odin: never prompt text, titles or flags
-	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
-		claude_account_write(b, cmd) // claude_accounts.odin
-	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
-		claude_extra_write(b, cmd) // claude_panels.odin: never their text
-	case Claude_Model_Report:
-		fmt.sbprintf(b, `,"tab_id":%d,"model":`, c.tab_id)
-		json_quote(b, c.model)
-	case Claude_Wait_Idle:
-		claude_wait_write(b, c) // claude_wait.odin
-	case Claude_Wait_Tick:
+		if c.home do kv_bool(w, "home", true)
+	case:
+		return false
 	}
-	obj_end(&w)
+	return true
 }
 
-command_json :: proc(cmd: Command, redact := false) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	write_command(&b, cmd, redact)
-	return strings.to_string(b)
-}
-
-// A command as the window sends it to its core (window_link.odin; design §10.2, M3-F): what
-// parse_command_ui reads back into the same command. command_json is the log's and the events'
-// encoding, which writes counts for lists, leaves out tokens and limits and never writes the
-// UI-only fields; this one writes every field. Temp allocator. Never logged or sent to an agent.
-command_wire_json :: proc(cmd: Command) -> string {
-	b := strings.builder_make(context.temp_allocator)
-	write_command_wire(&b, cmd)
-	return strings.to_string(b)
-}
-
-// The commands whose log form drops something are written here in full; the rest as
-// write_command (unredacted) writes them.
-@(private = "file")
-write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
-	strs :: proc(w: ^Jw, k: string, list: []string) {
-		key(w, k)
-		strings.write_byte(w.b, '[')
-		for x, i in list {
-			if i > 0 do strings.write_byte(w.b, ',')
-			json_quote(w.b, x)
-		}
-		strings.write_byte(w.b, ']')
+// get_state's pending_confirmations: each one's question, who asked, its class and its command
+// (redacted: no token).
+write_pending_confirmations :: proc(b: ^strings.Builder, list: []Pending_Confirmation) {
+	strings.write_byte(b, '[')
+	for p, i in list {
+		if i > 0 do strings.write_byte(b, ',')
+		o := obj_begin(b)
+		kv_str(&o, "summary", p.summary)
+		kv_str(&o, "caller", caller_kind_name(p.caller.kind))
+		kv_str(&o, "class", CLASS_NAMES[p.class])
+		kv_u64(&o, "id", p.id)
+		key(&o, "command")
+		write_command(b, p.command, redact = true)
+		obj_end(&o)
 	}
-	// the log form plus fields it never writes: its closing brace comes off first
-	plus :: proc(b: ^strings.Builder, cmd: Command) -> Jw {
-		write_command(b, cmd)
-		strings.pop_byte(b)
-		return {b = b, first = false}
-	}
-	#partial switch c in cmd {
-	// UI-only fields (parse_command_ui reads them; a socket's parse never does)
-	case Close_Session:
-		w := plus(b, cmd)
-		if c.ask do kv_bool(&w, "ask", true)
-		obj_end(&w)
-		return
-	case Focus_Session:
-		w := plus(b, cmd)
-		if c.reopen do kv_bool(&w, "reopen", true)
-		obj_end(&w)
-		return
-	case Set_Home_Dir:
-		w := plus(b, cmd)
-		if c.setup do kv_bool(&w, "setup", true)
-		obj_end(&w)
-		return
-	// limits and timeouts the log leaves out
-	case App_Call:
-		w := plus(b, cmd)
-		if c.timeout_ms != 0 do kv_u64(&w, "timeout_ms", u64(max(c.timeout_ms, 0)))
-		obj_end(&w)
-		return
-	case App_Events:
-		w := plus(b, cmd)
-		if c.limit != 0 do kv_u64(&w, "limit", u64(max(c.limit, 0)))
-		obj_end(&w)
-		return
-	case Browser_Console:
-		w := plus(b, cmd)
-		if c.limit != 0 do kv_u64(&w, "limit", u64(max(c.limit, 0)))
-		obj_end(&w)
-		return
-	case Browser_Network:
-		w := plus(b, cmd)
-		if c.limit != 0 do kv_u64(&w, "limit", u64(max(c.limit, 0)))
-		obj_end(&w)
-		return
-	// the log rounds the ratio to 3 decimals: a pixel off in a pane's width
-	case Set_Split:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		kv_u64(&w, "split", c.split)
-		kv_f32(&w, "ratio", c.ratio)
-		obj_end(&w)
-		return
-	// fields the log writes as a count or redacts: the whole command here
-	case New_Claude_Tab:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		if c.session != 0 do kv_u64(&w, "session", c.session)
-		if c.project_id != 0 do kv_u64(&w, "project_id", c.project_id)
-		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
-		if c.resume != "" do kv_str(&w, "resume", c.resume)
-		if len(c.args) > 0 do strs(&w, "args", c.args)
-		if c.account != "" do kv_str(&w, "account", c.account)
-		if c.codex do kv_str(&w, "harness", "codex")
-		obj_end(&w)
-		return
-	case New_Claude_Session:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		kv_u64(&w, "project_id", c.project_id)
-		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
-		if len(c.args) > 0 do strs(&w, "args", c.args)
-		if c.account != "" do kv_str(&w, "account", c.account)
-		if c.codex do kv_str(&w, "harness", "codex")
-		obj_end(&w)
-		return
-	case Claude_Rename:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		kv_str(&w, "claude_session_id", c.claude_session_id)
-		kv_str(&w, "title", c.title)
-		obj_end(&w)
-		return
-	case Pi_Reload_All:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		if c.only_changed do kv_bool(&w, "only_changed", true)
-		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
-		obj_end(&w)
-		return
-	case Pi_Restart_Updated:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
-		obj_end(&w)
-		return
-	case Claude_Restart_Changed:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		if c.update do kv_bool(&w, "update", true)
-		if c.all do kv_bool(&w, "all", true)
-		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
-		obj_end(&w)
-		return
-	case App_Input:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		kv_u64(&w, "tab_id", c.tab_id)
-		key(&w, "events")
-		strings.write_byte(b, '[')
-		for e, i in c.events {
-			if i > 0 do strings.write_byte(b, ',')
-			strings.write_string(b, e) // each a JSON object (get_raw_list)
-		}
-		strings.write_byte(b, ']')
-		obj_end(&w)
-		return
-	case Browser_Click:
-		w := obj_begin(b)
-		kv_str(&w, "type", command_type(cmd))
-		kv_u64(&w, "tab_id", c.tab_id)
-		if c.target.selector != "" do kv_str(&w, "selector", c.target.selector)
-		if c.target.has_xy {
-			key(&w, "x")
-			fmt.sbprintf(b, "%v", c.target.x)
-			key(&w, "y")
-			fmt.sbprintf(b, "%v", c.target.y)
-		}
-		if c.button != .Left do kv_str(&w, "button", ACT_BUTTON_NAMES[c.button])
-		if c.double do kv_bool(&w, "double", true)
-		if c.modifiers != 0 {
-			names := make([dynamic]string, context.temp_allocator)
-			for n, i in ACT_MOD_NAMES do if c.modifiers & (1 << uint(i)) != 0 do append(&names, n)
-			strs(&w, "modifiers", names[:])
-		}
-		obj_end(&w)
-		return
-	}
-	write_command(b, cmd)
+	strings.write_byte(b, ']')
 }
 
 // ---- results and events ----
@@ -1271,6 +515,7 @@ write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {
 		if !redact && r.confirm_token != "" do kv_str(&c, "token", r.confirm_token)
 		kv_str(&c, "summary", r.confirm_summary)
 		kv_str(&c, "by", r.confirm_by_user ? "user" : "caller")
+		if r.confirm_id != 0 do kv_u64(&c, "id", r.confirm_id)
 		obj_end(&c)
 	}
 	if r.data != "" {
@@ -1305,6 +550,7 @@ event_json :: proc(ev: Event, full := false) -> string {
 		kv_bool(&w, "changed", e.changed)
 		key(&w, "command")
 		write_command(&b, e.command, redact = true)
+		if e.confirmation != 0 do kv_u64(&w, "confirmation", e.confirmation) // the user's confirmed run of that pending confirmation
 		key(&w, "result")
 		write_result(&b, e.result, redact = true)
 	case Finished_Event:
@@ -1535,7 +781,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		if os.machine != 0 do kv_str(&o, "machine", machine_name(os.machine)) // another machine's (machine_mirror.odin)
 		// a Claude-only session (claude.odin): its main tab is a Claude tab, and its id (here and as
 		// claude_session_id) is that tab's Claude session id
-		kv_str(&o, "agent", os.agent == .Claude ? "claude" : "pi")
+		kv_str(&o, "agent", os.agent == .Claude ? "claude" : os.agent == .Files ? "files" : "pi")
 		if os.agent == .Claude do kv_str(&o, "claude_session_id", os.pi_session_id)
 		kv_str(&o, "pi_session_id", os.pi_session_id)
 		kv_str(&o, "session_dir", os.session_dir)
@@ -1627,7 +873,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_bool(&to, "loading", bt.loading)
 				kv_bool(&to, "can_back", bt.can_back)
 				kv_bool(&to, "can_forward", bt.can_forward)
-				if bt.blocked_popup != "" do kv_str(&to, "blocked_popup", bt.blocked_popup)
+				if bt.blocked_popup != "" do kv_str(&to, "blocked_popup", browser_url_public(bt.blocked_popup)) // State keeps it as asked (Browser_Popup opens it)
 				// its page: open | waiting (no slot free) | unloaded (opens when shown) | closed (see the tab)
 				if page := window_browser_page(t.id); page != "" do kv_str(&to, "page", page)
 			}
@@ -1664,6 +910,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_str(&to, "agent", AGENT_NAMES[t.agent])
 				kv_bool(&to, "waiting", t.waiting)
 				kv_bool(&to, "question", t.question)
+				if pt := t.kind.(Pi_Tab); pt.model != "" do kv_str(&to, "model", pt.model)
+				if pt := t.kind.(Pi_Tab); pt.thinking != "" do kv_str(&to, "thinking", pt.thinking)
 				key(&to, "blockers")
 				write_strings(b, t.blockers[:])
 				key(&to, "reload") // hot reload (reload.odin)
@@ -1798,6 +1046,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	{
 		f := obj_begin(b)
 		kv_str(&f, "filter", s.files.filter)
+		kv_bool(&f, "hide_ignored", s.files.hide_ignored)
 		key(&f, "expanded")
 		strings.write_byte(b, '[')
 		for fr, i in s.files.expanded {
@@ -1822,18 +1071,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		obj_end(&f)
 	}
 	key(&w, "pending_confirmations")
-	strings.write_byte(b, '[')
-	for p, i in s.pending_confirmations {
-		if i > 0 do strings.write_byte(b, ',')
-		o := obj_begin(b)
-		kv_str(&o, "summary", p.summary)
-		kv_str(&o, "caller", caller_kind_name(p.caller.kind))
-		kv_str(&o, "class", CLASS_NAMES[p.class])
-		key(&o, "command")
-		write_command(b, p.command, redact = true)
-		obj_end(&o)
-	}
-	strings.write_byte(b, ']')
+	write_pending_confirmations(b, s.pending_confirmations[:])
 	// the close prompt (comments.odin): a tab, or a session (tab_id 0), closed with comments not sent
 	if s.comments_ask != {} {
 		key(&w, "comments_ask")
@@ -1965,41 +1203,6 @@ write_agent :: proc(b: ^strings.Builder, a: Agent_Info) {
 	kv_str(&w, "model", agent_model())
 	kv_u64(&w, "notified", u64(a.notified))
 	obj_end(&w)
-}
-
-// browser tabs' commands (browser_nav.odin). URLs go into events: they are
-// what the tab shows (State has them too).
-@(private = "file")
-// redact (events, logs): addresses without their user:pass@ (browser_url_public).
-browser_command_write :: proc(w: ^Jw, cmd: Command, redact := false) {
-	url :: proc(u: string, redact: bool) -> string {return redact ? browser_url_redacted(u) : u}
-	#partial switch c in cmd {
-	case Browser_Open:
-		if c.session != 0 do kv_u64(w, "session", c.session)
-		kv_str(w, "url", url(c.url, redact))
-	case Browser_Navigate:
-		kv_u64(w, "tab_id", c.tab_id)
-		kv_str(w, "url", url(c.url, redact))
-	case Browser_Back:    kv_u64(w, "tab_id", c.tab_id)
-	case Browser_Forward: kv_u64(w, "tab_id", c.tab_id)
-	case Browser_Reload:  kv_u64(w, "tab_id", c.tab_id)
-	case Browser_Stop:    kv_u64(w, "tab_id", c.tab_id)
-	case Browser_Update:
-		kv_u64(w, "tab_id", c.tab_id)
-		if .Url in c.what do kv_str(w, "url", url(c.url, redact))
-		if .Title in c.what do kv_str(w, "title", c.title)
-		if .Nav in c.what {
-			kv_bool(w, "loading", c.loading)
-			kv_bool(w, "can_back", c.can_back)
-			kv_bool(w, "can_forward", c.can_forward)
-		}
-		if .Blocked in c.what do kv_str(w, "blocked_popup", c.blocked)
-	case Browser_Popup_Open:
-		kv_u64(w, "opener", c.opener)
-		kv_str(w, "url", url(c.url, redact))
-		if c.background do kv_bool(w, "background", true)
-		if c.pane != 0 do kv_u64(w, "pane", c.pane)
-	}
 }
 
 // A tab's panels: [{panel, title, rows}].
@@ -2175,16 +1378,4 @@ write_machine_jobs :: proc(b: ^strings.Builder, rows: []Job_Row) {
 		obj_end(&w)
 	}
 	strings.write_byte(b, ']')
-}
-
-// job_draft's (web_jobs.odin): the form and the note are the user's text, their lengths only when
-// redacted.
-@(private = "file")
-web_extra_write :: proc(w: ^Jw, c: Job_Draft, redact: bool) {
-	x := c
-	for f, i in job_draft_strings(&x) {
-		if f^ == "" do continue
-		if redact && i > 1 do kv_str(w, JOB_DRAFT_FIELDS[i], fmt.tprintf("<redacted %d bytes>", len(f^)))
-		else do kv_str(w, JOB_DRAFT_FIELDS[i], f^)
-	}
 }

@@ -598,6 +598,45 @@ home_keeps_the_keyboard :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.run_command(core.Set_Home{open = true}, home).error, "only the user shows or hides the agent's drawer")
 }
 
+// 5b. start_home starts Atlas's pi without its drawer: a phone starts it, and the Mac's window
+// (its drawer, its keyboard) stays as it was (#196)
+@(test)
+start_home_leaves_the_drawer :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	h_reset(t)
+	defer h_stop()
+	phone := core.Caller{kind = .UI, web = true}
+	state.agent.unread = 2
+	r := core.run_command(core.Start_Home{}, phone)
+	testing.expect(t, r.ok, r.error)
+	ht := core.home_tab()
+	testing.expect(t, ht != nil && ht.status == .Running, "Atlas's pi runs")
+	testing.expect_value(t, r.created_id, ht.id)
+	testing.expect(t, !state.home_open, "the Mac's drawer stays shut")
+	testing.expect_value(t, state.focus_widget, "")
+	testing.expect_value(t, state.agent.unread, 2) // nobody saw it
+	// again: it runs already, nothing changes
+	r = core.run_command(core.Start_Home{}, phone)
+	testing.expect(t, r.ok && r.created_id == ht.id, r.error)
+	// exited: started again, still without the drawer
+	core.run_command(core.Tab_Exited{tab_id = ht.id})
+	testing.expect(t, core.home_tab().status == .Exited)
+	r = core.run_command(core.Start_Home{}, {kind = .Control})
+	testing.expect(t, r.ok, r.error)
+	testing.expect(t, core.home_tab().status == .Running && !state.home_open)
+	// the drawer open at the Mac stays open, the keyboard where it is
+	testing.expect(t, core.run_command(core.Set_Home{open = true}, H_UI).ok)
+	core.run_command(core.Set_Focus{widget = "rename_project"}, H_UI)
+	testing.expect(t, core.run_command(core.Start_Home{}, phone).ok)
+	testing.expect(t, state.home_open && state.focus_widget == "rename_project")
+	// a pi tab may not (Anyone); the wire name parses
+	testing.expect(t, !core.run_command(core.Start_Home{}, {kind = .Panel, tab_id = 7}).ok)
+	cmd, err := core.parse_command(`{"type":"start_home"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	_, is := cmd.(core.Start_Home)
+	testing.expect(t, is)
+}
+
 // 6. open_session never matches Home's session
 @(test)
 open_session_skips_home :: proc(t: ^testing.T) {

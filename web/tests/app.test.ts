@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { score } from "../src/app/match.ts";
-import { tabView } from "../src/status.ts";
 
 test("palette score: prefix, word start, anywhere, in order, none", () => {
   assert.equal(score("Split pane right", ""), 1);
@@ -10,16 +9,6 @@ test("palette score: prefix, word start, anywhere, in order, none", () => {
   assert.ok(score("Split pane right", "pane") > score("Split pane right", "spr"));
   assert.equal(score("Split pane right", "spr"), 10);
   assert.equal(score("Split pane right", "zz"), 0);
-});
-
-test("tab marks: waiting kinds, progress, finished", () => {
-  const base = { id: 1, machine: 0, kind: { pi_tab: {} }, title: "", status: "running", agent: "idle", waiting: false, question: false, unseen: false };
-  assert.equal(tabView({ ...base, waiting: true, prog: { state: "waiting", kind: "permission", msg: "Run rm?" } }).mark, "permission");
-  const w = tabView({ ...base, agent: "working", prog: { state: "working", kind: "", progress: 40 } });
-  assert.equal(w.mark, "progress");
-  assert.equal(w.progress, 0.4);
-  assert.equal(tabView({ ...base, unseen: true }).mark, "done");
-  assert.equal(tabView(base).mark, "idle");
 });
 
 import { Store } from "../src/state.ts";
@@ -186,4 +175,142 @@ test("file tabs: a read belongs to the path it was made for (#148 review)", () =
   assert.equal(reads.end(b!), true);
   assert.notEqual(reads.begin(false), null);
   assert.equal(reads.current(a!), false);
+});
+
+import { newSessionChoices } from "../src/app/harness.ts";
+
+test("new session: the core's choices per machine and kind, Chats too; none says why", () => {
+  const s = new Store();
+  const pi = { harness: "pi", label: "pi" }, cc = { harness: "claude", label: "Claude Code" }, cx = { harness: "codex", label: "Codex" };
+  s.applyFull({ version: 1, state: {
+    projects: { projects: [{ id: 7, group: "projects", machine: 0 }, { id: 8, group: "chats", machine: 0 }, { id: 9, group: "projects", machine: 2 }, { id: 10, group: "projects", machine: 3 }] },
+    web: { watch: [], new: [
+      { machine: 0, projects: [cc, pi, cx], chats: [cc, cx], note: "install one" },
+      { machine: 2, projects: [cx], chats: [], note: "nothing on m2" },
+      { machine: 3, projects: [], chats: [], note: "nothing on m3" },
+    ] },
+  } });
+  const view = (id: number) => newSessionChoices(s, id).map((c) => [c.label, JSON.stringify(c.cmd ?? null)]);
+  assert.deepEqual(view(7), [
+    ["Claude Code", '{"type":"new_claude_session","project_id":7}'],
+    ["pi", '{"type":"new_chat","project_id":7}'],
+    ["Codex", '{"type":"new_claude_session","project_id":7,"harness":"codex"}'],
+  ]);
+  assert.deepEqual(view(8).map((x) => x[0]), ["Claude Code", "Codex"], "Claude Code and Codex in Chats, no pi when it is not there");
+  assert.deepEqual(view(9).map((x) => x[0]), ["Codex"]);
+  // another machine with nothing: why, and a session anyway (its pi tab says how to install one)
+  assert.deepEqual(view(10), [["nothing on m3", "null"], ["New session", '{"type":"new_chat","project_id":10}']]);
+  assert.equal(newSessionChoices(s, 10)[0].note, true);
+  // this machine with nothing: only why
+  s.applyDelta({ version: 2, sections: { web: { watch: [], new: [{ machine: 0, projects: [], chats: [], note: "install one" }] } } });
+  assert.deepEqual(view(7), [["install one", "null"]]);
+});
+
+import { newSessionPlan, newTabChoices } from "../src/app/harness.ts";
+
+test("new session: one row per account, one choice starts at once, none says why; tab rows only where installed", () => {
+  const s = new Store();
+  const pi = { harness: "pi", label: "pi", account: "" };
+  s.applyFull({ version: 1, state: {
+    projects: { projects: [{ id: 7, group: "projects", machine: 0 }, { id: 8, group: "chats", machine: 0 }, { id: 9, group: "projects", machine: 2 }, { id: 10, group: "projects", machine: 3 }] },
+    web: { watch: [], new: [
+      { machine: 0, projects: [{ harness: "claude", label: "Claude Code · work", account: "/h/.claude-work" }, { harness: "claude", label: "Claude Code · home", account: "/h/.claude" }, pi], chats: [pi], note: "install one",
+        claude_tab: [{ account: "/h/.claude-work", name: "work" }, { account: "/h/.claude", name: "home" }], codex_tab: [] },
+      { machine: 2, projects: [], chats: [], claude_tab: [{ account: "", name: "" }], codex_tab: [{ account: "", name: "" }], note: "nothing on m2" },
+      { machine: 3, projects: [], chats: [], claude_tab: [], codex_tab: [], note: "nothing on m3" },
+    ] },
+  } });
+  assert.deepEqual(newSessionChoices(s, 7)[0].cmd, { type: "new_claude_session", project_id: 7, account: "/h/.claude-work" });
+  assert.equal("pick" in newSessionPlan(s, 7), true);
+  assert.deepEqual(newSessionPlan(s, 8), { run: { type: "new_chat", project_id: 8 } }, "one choice: at once");
+  assert.deepEqual(newSessionPlan(s, 9), { run: { type: "new_chat", project_id: 9 }, toast: "nothing on m2", err: false }, "another machine with none: a session anyway");
+  s.applyDelta({ version: 2, sections: { web: { watch: [], new: [{ machine: 0, projects: [], chats: [], note: "install one" }] } } });
+  assert.deepEqual(newSessionPlan(s, 7), { toast: "install one", err: true }, "this machine with none: why");
+  s.applyDelta({ version: 3, sections: { web: { watch: [], new: [
+    { machine: 0, projects: [], chats: [], note: "", claude_tab: [{ account: "/h/.claude-work", name: "work" }, { account: "/h/.claude", name: "home" }], codex_tab: [] },
+    { machine: 2, projects: [], chats: [], note: "", claude_tab: [{ account: "", name: "" }], codex_tab: [{ account: "", name: "" }] },
+  ] } } });
+  assert.deepEqual(newTabChoices(s, 0, { session: 5 }, false, "New Claude tab").map((c) => [c.label, JSON.stringify(c.cmd)]), [
+    ["New Claude tab · work", '{"type":"new_claude_tab","session":5,"account":"/h/.claude-work"}'],
+    ["New Claude tab · home", '{"type":"new_claude_tab","session":5,"account":"/h/.claude"}'],
+  ]);
+  assert.deepEqual(newTabChoices(s, 0, { session: 5 }, true, "New Codex tab"), [], "no Codex here");
+  assert.deepEqual(newTabChoices(s, 2, { project_id: 9 }, true, "New Codex tab").map((c) => c.cmd), [{ type: "new_claude_tab", project_id: 9, harness: "codex" }]);
+  assert.deepEqual(newTabChoices(s, 3, { project_id: 10 }, false, "x"), [], "an unknown machine: none");
+});
+
+import { barPrimary, barsFor } from "../src/app/bars.ts";
+
+test("status strip: a tab's own bars, then its harness's hot-reload bars; none for other tabs", () => {
+  const s = new Store();
+  const bar = (tab: number, harness: string, kind: string) => ({ tab, harness, kind, tone: "waiting", text: kind, actions: [] });
+  s.applyFull({ version: 1, state: { webbars: [bar(5, "claude", "held"), bar(6, "codex", "status"), bar(0, "pi", "reload"), bar(0, "claude", "claude_reload")] } });
+  const tab = (id: number, kind: object) => ({ id, machine: 0, kind, title: "", status: "running", agent: "idle", waiting: false, question: false }) as any;
+  assert.deepEqual(barsFor(s, tab(5, { claude_tab: {} })).map((b) => b.kind), ["held", "claude_reload"]);
+  assert.deepEqual(barsFor(s, tab(6, { claude_tab: { codex: true } })).map((b) => b.kind), ["status"], "a Codex tab: not Claude Code's reload bar");
+  assert.deepEqual(barsFor(s, tab(7, { pi_tab: {} })).map((b) => b.kind), ["reload"]);
+  assert.deepEqual(barsFor(s, tab(8, { shell_tab: {} })), []);
+  s.applyDelta({ version: 2, sections: { webbars: null } });
+  assert.deepEqual(barsFor(s, tab(5, { claude_tab: {} })), []);
+});
+
+test("new session: a project whose picker differs (its last used account) gets its own rows, first as the native picker's", () => {
+  const s = new Store();
+  const work = { harness: "claude", label: "Claude Code · work", account: "/h/.claude-work" };
+  const home = { harness: "claude", label: "Claude Code · home", account: "/h/.claude" };
+  s.applyFull({ version: 1, state: {
+    projects: { projects: [{ id: 7, group: "projects", machine: 0 }, { id: 8, group: "projects", machine: 0 }] },
+    web: { watch: [], new: [{ machine: 0, projects: [work, home], chats: [work, home], note: "", claude_tab: [], codex_tab: [], project_rows: [{ project: 7, rows: [home, work] }] }] },
+  } });
+  assert.deepEqual(newSessionChoices(s, 7).map((c) => c.label), ["Claude Code · home", "Claude Code · work"], "project 7: its last used first");
+  assert.deepEqual(newSessionChoices(s, 7)[0].cmd, { type: "new_claude_session", project_id: 7, account: "/h/.claude" });
+  assert.deepEqual(newSessionChoices(s, 8).map((c) => c.label), ["Claude Code · work", "Claude Code · home"], "another project: its kind's list");
+});
+
+test("status strip: Restart anyway is carried as the core wrote it, never the strip's primary button", () => {
+  const s = new Store();
+  const actions = [
+    { label: "Restart anyway", command: { type: "claude_restart_anyway", tab_id: 5 } },
+    { label: "Later", command: { type: "claude_reload_later" } },
+  ];
+  s.applyFull({ version: 1, state: { webbars: [{ tab: 0, harness: "claude", kind: "claude_reload", tone: "info", text: "Restarting Claude — 1 tab waits until idle · Claude: a subagent silent for 2h 05m", actions }] } });
+  const tab = (id: number, kind: object) => ({ id, machine: 0, kind, title: "", status: "running", agent: "idle", waiting: false, question: false }) as any;
+  const bars = barsFor(s, tab(5, { claude_tab: {} }));
+  assert.deepEqual(bars.map((b) => b.actions.map((a) => a.label)), [["Restart anyway", "Later"]]);
+  assert.deepEqual(bars[0].actions[0].command, { type: "claude_restart_anyway", tab_id: 5 });
+  assert.equal(barPrimary(bars[0]), 1, "the last command (Later) is the strip's primary, not Restart anyway");
+  assert.deepEqual(barsFor(s, tab(6, { claude_tab: { codex: true } })), [], "a Codex tab: not Claude Code's bar");
+});
+
+test("status strip: another machine's tab shows none of this machine's bars (#152 review)", () => {
+  const s = new Store();
+  s.applyFull({ version: 1, state: { webbars: [{ tab: 0, harness: "pi", kind: "reload", tone: "info", text: "pi settings changed", actions: [{ label: "Reload", command: { type: "pi_reload_all", only_changed: true } }] }] } });
+  const remote = { id: 9, machine: 2, kind: { pi_tab: {} }, title: "", status: "running", agent: "idle", waiting: false, question: false } as any;
+  assert.deepEqual(barsFor(s, remote), [], "a remote pi tab: its own core's bars, not this one's Reload");
+  assert.equal(barsFor(s, { ...remote, machine: 0 }).length, 1);
+});
+
+import { modeBadge } from "../src/app/harness.ts";
+
+test("tab badge: a Claude or Codex tab's permission mode, quiet unless it acts without asking (src/core/claude_mode.odin)", () => {
+  assert.equal(modeBadge(null), null);
+  assert.equal(modeBadge({ shell_tab: {} }), null);
+  assert.equal(modeBadge({ claude_tab: {} }), null); // an older core: no field
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "" } }), null);
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "default" } }), null);
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "plan" } }), { label: "plan", warn: false });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "acceptEdits" } }), { label: "accept edits", warn: false });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "bypassPermissions" } }), { label: "bypass", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { codex: true, permission_mode: "codex-full-access" } }), { label: "full access", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "newMode" } }), { label: "newMode", warn: true });
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "<b>x</b>" } }), null);
+  assert.equal(modeBadge({ claude_tab: { permission_mode: 3 } }), null);
+});
+
+test("tab badge: auto and an unknown mode get the warning colour; Codex's other ways of not asking too", () => {
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "auto" } }), { label: "auto", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "someNewMode" } }), { label: "someNewMode", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "codex-never-asks" } }), { label: "never asks", warn: true });
+  assert.deepEqual(modeBadge({ claude_tab: { permission_mode: "codex-approves" } }), { label: "approves for you", warn: true });
+  assert.equal(modeBadge({ claude_tab: { permission_mode: "codex-read-only" } }), null); // never a safer-sounding Codex badge
 });

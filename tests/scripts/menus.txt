@@ -203,7 +203,7 @@ assert_state sidebar.sort.chats recent
 # ==== project rows ====
 rclickid proj 0
 eventually
-assert_menurows Pin|New session|New Claude tab|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Pin|New session|New session with flags…|New Claude tab|New Claude tab with flags…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 revealed_clear
 clickmenu Reveal in Finder
 eventually
@@ -244,7 +244,7 @@ eventually
 assert_state sidebar.pinned_projects.# 2
 rclickid proj 0
 eventually
-assert_menurows Unpin|Move down|New session|New Claude tab|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Unpin|Move down|New session|New session with flags…|New Claude tab|New Claude tab with flags…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 clickmenu Move down
 eventually
 assert_rows projects ~/code/alpha,~/code/bravo
@@ -277,7 +277,7 @@ assert_rows projects ~/code/alpha,~/code/bravo
 rclickid proj 0
 clickmenu New session
 eventually
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 shot menus/harness-picker
 clickmenu pi
 waitfor ARGS: --session-id 15000
@@ -285,7 +285,7 @@ assert_state open_sessions.# 3
 # ==== the tab strip's "+" menu (right click on +) ====
 rclickid newshell
 eventually
-assert_menurows New shell tab|New Claude tab|New browser tab|New app tab…|New chat|New session in bravo|-|Split pane right|Split pane down
+assert_menurows New shell tab|New Claude tab|New Claude tab with flags…|New browser tab|New app tab…|New chat|New session in bravo|New session with flags…|-|Split pane right|Split pane down
 clickmenu New shell tab
 eventually
 assert_state open_sessions.2.tabs.# 2
@@ -309,7 +309,7 @@ rclickid newshell
 clickmenu New session in bravo
 eventually
 # pi was used last: first and selected, so Enter repeats it
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 key enter
 waitfor ARGS: --session-id 15000
 assert_state open_sessions.# 4
@@ -335,7 +335,7 @@ assert_files sub\na.txt\nnotes.md\n
 # rows: 0 sub/, 1 a.txt, 2 notes.md
 rclickid frow 0
 eventually
-assert_menurows New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+assert_menurows New file…|New folder…|-|Cut|Copy|Duplicate|-|Rename…|Move to Trash|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
 clickmenu Open terminal here
 eventually
 assert_state open_sessions.2.tabs.# 3
@@ -348,7 +348,7 @@ assert_clipboard sub
 assert_toast Path copied
 rclickid frow 1
 eventually
-assert_menurows Open|Open in preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+assert_menurows Open|Open in preview|Open to the side|-|New file…|New folder…|-|Cut|Copy|Duplicate|-|Rename…|Move to Trash|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
 clipboard_clear
 clickmenu Copy path
 wait 300
@@ -361,7 +361,7 @@ eventually
 assert_revealed /code/alpha/a.txt
 rclickid frow 2
 eventually
-assert_menurows Open|Open in preview|Open Markdown preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+assert_menurows Open|Open in preview|Open to the side|Open Markdown preview|-|New file…|New folder…|-|Cut|Copy|Duplicate|-|Rename…|Move to Trash|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
 clickmenu Open Markdown preview
 eventually
 assert_state open_sessions.2.tabs.# 4
@@ -373,7 +373,7 @@ eventually
 assert_state open_sessions.2.tabs.# 5
 assert_state open_sessions.2.tabs.4.kind editor
 assert_state open_sessions.2.tabs.4.title notes.md
-# New file, New folder, Rename, Move to Trash (asks first)
+# New file, New folder, Rename, Move to Trash (the user's own: no confirmation, the toast's Undo)
 rclickid frow 1
 clickmenu New file…
 eventually
@@ -402,13 +402,11 @@ assert_files renamed.txt\n
 assert_not_files made.txt
 # rows: 0 madedir/, 1 sub/, 2 a.txt, 3 notes.md, 4 renamed.txt
 rclickid frow 4
-clickmenu Move to Trash…
-eventually
-assert_state pending_confirmations.# 1
-clickid confirm_yes
+clickmenu Move to Trash
 wait 800
 assert_state pending_confirmations.# 0
 assert_not_files renamed.txt
+assert_toast Moved renamed.txt to the Trash
 assert_files notes.md
 # Open: an editor tab; then its own menu
 rclickid frow 2
@@ -547,7 +545,7 @@ rclickid wtrow 1
 clickmenu New session here
 eventually
 # the harness picker for the checkout: pi there is a worktree session
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 clickmenu pi
 waitfor ARGS: --session-dir 15000
 assert_state open_sessions.# 6
@@ -627,7 +625,7 @@ clickid lefttab 0
 wait 500
 rclickid proj 0
 eventually
-assert_menurows Pin|New session|New Claude tab|New job for this project…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Pin|New session|New session with flags…|New Claude tab|New Claude tab with flags…|New job for this project…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 clickmenu New job for this project…
 eventually
 assert_state focus.id job_sheet

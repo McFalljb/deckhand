@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code tabs in quiet test mode (docs/CLAUDE.md): never a real claude. A fake claude
+# Claude Code tabs in quiet test mode (docs/CLAUDE-TABS.md): never a real claude. A fake claude
 # (tests/scripts/fake-claude.py) runs the bundled plugin's hooks and `deckhand` CLI as Claude
 # Code would (build/claude-code and build/deckhand-cli, from ./build.sh). Run 1
 # (claude-1.txt): the "+" menu's New Claude tab, the SessionStart hook's session id, the CLI
@@ -27,7 +27,7 @@ PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--" "$PROJ/.deckhand"
 # the project's declared app: what the CLI's `app open fake` opens
 printf '{"apps":[{"name":"fake","argv":["%s/build/fake-app"]}]}\n' "$ROOT" > "$PROJ/.deckhand/apps.json"
-# Claude Code "installed" (Deckhand only looks that it is there, docs/CLAUDE.md §1): a stand-in in the
+# Claude Code "installed" (Deckhand only looks that it is there, docs/CLAUDE-TABS.md §1): a stand-in in the
 # native installer's place; DECKHAND_CLAUDE_CMD runs the fake instead, so it never runs
 claude_stub "$FAKE_HOME"
 if [ ! -x build/Deckhand.app/Contents/MacOS/Deckhand ]; then echo "claude scene: no CEF build (run ./build.sh)"; exit 1; fi

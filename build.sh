@@ -19,7 +19,8 @@
 # (-define:DECKHAND_TEST_HOOKS=false, src/core/test_hooks.odin): no test mode, no DECKHAND_* overrides,
 # no --print-token. Scenes need the hooks: build again without it before running them.
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
-# comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
+# comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh). The zstd decoder the
+# core links (src/zstd) is compiled from vendor/zstd/ into build/zstd/ (scripts/build-zstd.sh).
 set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
@@ -51,6 +52,9 @@ if [ ! -f vendor/sokol-odin/sokol/app/app.odin ]; then
 fi
 
 mkdir -p build
+
+# the zstd decoder (vendor/zstd/zstddeclib.c) the core links, for MACOS_MIN: build/zstd/libzstddec.a
+scripts/build-zstd.sh
 
 # sokol C libraries (only the modules we use), built once into the sokol-odin tree
 # where its Odin bindings expect them.
@@ -107,6 +111,15 @@ if [ ! -f build/dh_platform.a ] || [ src/native/platform_macos.m -nt build/dh_pl
   clang -c -O2 -Wall -fobjc-arc src/native/menubar_macos.m -o build/dh_menubar.o
   rm -f build/dh_platform.a
   ar rcs build/dh_platform.a build/dh_platform.o build/dh_menubar.o
+fi
+
+# a Files drag out of the window: AppKit's drag session (macOS; src/files_drag_out_darwin.odin); its
+# test hook a member of its own (only builds with test hooks call it, so only they link it)
+if [ ! -f build/dh_dragout.a ] || [ src/native/dragout_macos.m -nt build/dh_dragout.a ] || [ src/native/dragout_test_macos.m -nt build/dh_dragout.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/dragout_macos.m -o build/dh_dragout.o
+  clang -c -O2 -Wall -fobjc-arc src/native/dragout_test_macos.m -o build/dh_dragout_test.o
+  rm -f build/dh_dragout.a
+  ar rcs build/dh_dragout.a build/dh_dragout.o build/dh_dragout_test.o
 fi
 
 # editor and file-system model: FSEvents watcher, Trash, Finder (macOS)
@@ -210,7 +223,7 @@ check_link_minos() { # odin build args (package and defines)
   if [ $# = 0 ]; then echo "check-minos: found no link inputs"; exit 1; fi
   scripts/check-minos.sh $MACOS_MIN "$@"
 }
-# Claude Code tabs (src/core/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
+# Claude Code tabs (src/core/claude.odin, docs/CLAUDE-TABS.md): the deckhand CLI the plugin's bin/deckhand
 # (and its alias bin/pi-desk) runs (tools/deckhand-cli; from src/ only src/jsonguard, which imports only core), and the plugin itself next to the binary
 # (build/claude-code; bundle-app.sh copies both into the app)
 build_claude() {
@@ -330,6 +343,9 @@ case "$MODE" in
     python3 -B tests/scenes_test.py -q
     # every environment read names a known variable (test knobs go through hook_env)
     python3 -I scripts/check-env-reads.py
+    # a test stops only what it started: no unscoped pkill or killall in tests/ (and the check's test)
+    python3 -I scripts/check-scoped-kills.py
+    sh tests/check-scoped-kills-test.sh
     # the Deckhand CLI for Claude tabs (its tests share a fake environment: one thread)
     odin test tools/deckhand-cli -out:build/deckhand-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
     build_claude

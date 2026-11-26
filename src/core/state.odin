@@ -26,6 +26,10 @@ import "core:time"
 
 Pi_Tab :: struct {
 	readonly: bool, // the removed read-only chats': kept on the grow-only wire (schema/released-v1.json), always false
+	// pi's model as its bridge last reported it (pi.status): "provider/id" and the thinking level;
+	// "" = not reported (an older bridge, or none connected). Not saved.
+	model:    string,
+	thinking: string,
 }
 Shell_Tab :: struct {}
 Tab_Kind :: union {
@@ -36,7 +40,7 @@ Tab_Kind :: union {
 	Markdown_Tab, // a .md file drawn as a document (markdown_view.odin); its source is a read-only editor in `editors`
 	Browser_Tab, // a web page (browser.odin; CEF, docs/BROWSER.md)
 	App_Tab, // a program rendering into the tab (app_tab.odin; docs/ENGINE-BRIDGE.md)
-	Claude_Tab, // Claude Code in a terminal, with Deckhand's plugin (claude.odin; docs/CLAUDE.md)
+	Claude_Tab, // Claude Code in a terminal, with Deckhand's plugin (claude.odin; docs/CLAUDE-TABS.md)
 }
 
 Tab_Status :: enum {
@@ -168,9 +172,11 @@ PANEL_TITLE_MAX :: 128
 COLLAPSED_MAX :: 64
 
 // What runs in an open session's main tab (its first): pi, or Claude Code (a Claude-only session).
+// Files: no agent and no main tab, only the project's file tabs (files_session.odin).
 Session_Agent :: enum u8 {
 	Pi,
 	Claude,
+	Files,
 }
 
 Open_Session :: struct {
@@ -243,6 +249,7 @@ Files_State :: struct {
 	expanded:  [dynamic]Files_Root, // at most FILES_ROOTS_MAX, least recently used dropped
 	filter:    string, // fuzzy words matched against paths (not saved)
 	checkouts: [dynamic]Files_Checkout, // at most FILES_ROOTS_MAX, most recent first
+	hide_ignored: bool, // gitignored rows left out of the tree (default: shown, dimmed); saved
 }
 FILES_ROOTS_MAX :: 32
 FILES_EXPANDED_MAX :: 256
@@ -254,6 +261,7 @@ Pending_Confirmation :: struct {
 	command: Command,
 	class:   Command_Class,
 	caller:  Caller,
+	id:      u64, // stable, unlike its redacted command: needs_confirmation's id, get_state's, the confirmed run's event's "confirmation"
 }
 
 // Destructive commands, grouped so confirmation policies are per class.
@@ -341,11 +349,12 @@ Settings :: struct {
 	last_harness: Harness, // the harness the user last started a session with from "New session" (harness.odin): the picker's first row
 	claude_account_default: string, // the user's default account ("" = the environment's: CLAUDE_CONFIG_DIR, else ~/.claude)
 	pi_extensions: [dynamic]Pi_Extension_Choice, // the user's on/off for the pi integration's optional extensions (pi_integration.odin; user-only); one not listed has the manifest's default
-	// Codex accounts (claude_accounts.odin with codex; user-only): Codex homes (CODEX_HOME) the
+	// Codex accounts (claude_accounts.odin with harness .Codex; user-only): Codex homes (CODEX_HOME) the
 	// user added, renamed or removed, the last used and the user's default ("" = the environment's)
 	codex_accounts:        [dynamic]Claude_Account_Setting,
 	codex_account_last:    string,
 	codex_account_default: string,
+	harness_flags: [Harness]string, // the user's default flags per harness, one line as typed (harness_flags.odin; user-only, this Mac's)
 }
 
 // Left column sections, each sorted on its own.

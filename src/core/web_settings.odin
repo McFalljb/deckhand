@@ -81,7 +81,14 @@ web_settings_sections_for :: proc(out: ^[dynamic][2]string, serial: u64) {
 // web_view_tick: the flag goes with its link (a takeover, a detach). No rebuild here: the page is
 // built on open and when a section it reads changes, so no disk work runs on a timer.
 web_settings_tick :: proc() {
+	if web_set.link != 0 do claude_lists_poll() // the lists read on a worker since (settings_files.odin)
 	if web_set.link != 0 && (!window_link_web() || window_link_serial() != web_set.link) do web_settings_reset()
+}
+
+// Something the page lists changed outside the sections its key hashes (claude_lists.odin's
+// plugins and MCP servers, read on a worker): built again at the next flush.
+web_settings_stale :: proc() {
+	web_set.key = 0
 }
 
 web_settings_reset :: proc() {
@@ -347,6 +354,8 @@ web_setting_items :: proc(b: ^strings.Builder, s: ^Setting, rows: []Settings_Fil
 		}
 	case "web_devices":
 		for r in rows do if strings.has_prefix(r.path, WEB_DEVICE_ROW) do item(b, &n, r, nil, "")
+	case "claude_plugins", "claude_mcp", "codex_plugins": // read-only: names only (claude_lists.odin, codex_plugins.odin)
+		for r in rows do if strings.has_prefix(r.path, s.row) do item(b, &n, r, nil, "")
 	case "claude_accounts", "codex_accounts":
 		codex := s.id == "codex_accounts"
 		group := codex ? "codex-accounts" : "claude-accounts"

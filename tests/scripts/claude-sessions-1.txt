@@ -1,9 +1,9 @@
-# Claude-only sessions, run 1 (tests/scripts/claude-sessions.sh; docs/CLAUDE.md §1, §4): a fake
+# Claude-only sessions, run 1 (tests/scripts/claude-sessions.sh; docs/CLAUDE-TABS.md §1, §4): a fake
 # claude. + New session (the picker: Claude Code) under the selected project; its row beside the pi session, marked
 # Claude; the row's menu (Pin, Rename…); the filter; closed, its row resumes it; quit (run 2).
 wait 1500
 # the window in front: the tab on screen is seen (a turn's end leaves no unseen dot; the fake
-# claude reports no OSC 7501, so its dots come from the hooks: docs/CLAUDE.md §5a)
+# claude reports no OSC 7501, so its dots come from the hooks: docs/CLAUDE-TABS.md §5a)
 window_active on
 command {"type":"add_project","cwd":"$homedir/proj"}
 command {"type":"rescan"}
@@ -15,7 +15,7 @@ shot claude-sessions/before
 # Claude Code (key 2): a session whose only tab is Claude
 clickid new
 eventually
-assert_menurows pi|Claude Code
+assert_menurows pi|Claude Code|-|With flags…
 key 2
 eventually
 assert_state open_sessions.# 1
@@ -151,7 +151,7 @@ shot claude-sessions/resumed
 # another Claude session in the selected project
 menu_key 45 n cmd shift menu
 eventually
-assert_menurows Claude Code|pi
+assert_menurows Claude Code|pi|-|With flags…
 key enter
 eventually
 assert_state open_sessions.# 2

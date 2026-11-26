@@ -466,6 +466,7 @@ deck_meta_line :: proc(s: ^core.Open_Session, from: ^core.Tab, room: f32) {
 	th := theme()
 	small := FONT_UI_SMALL
 	harness := core.HARNESSES[core.open_session_harness(s)]
+	if s.agent == .Files do harness.name, harness.glyph = "Files", .Folder // no agent (core/files_session.odin)
 	mach := deck_machine(s)
 	dots, ndots := deck_others(s, from)
 	tabs := ndots > 0 ? fmt.tprintf("%d tabs", len(s.tabs)) : ""
@@ -604,8 +605,7 @@ deck_event :: proc(e: ^sapp.Event) -> bool {
 		return true
 	case .MOUSE_SCROLL:
 		if !inside(clay.ID("deck"), e.mouse_x, e.mouse_y) || deck_under_drawer(e) do return false
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 		app.redraw = true
 		return true
 	case .MOUSE_DOWN:

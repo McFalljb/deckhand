@@ -17,7 +17,7 @@ settings_user_here_only :: proc(t: ^testing.T) {
 		Set_Machines_Reachable{on = true},
 		Set_Remote_Machines{on = true},
 		Set_Pi_Extension{name = "guardrails", on = false},
-		Set_Claude_Default_Flags{skip_permissions = true},
+		Set_Claude_Default_Flags{skip_permissions = true, harness = .Claude},
 		Set_Chats_Readonly{on = true},
 	}
 	not :: "not allowed for this caller"
@@ -37,7 +37,7 @@ settings_user_here_only :: proc(t: ^testing.T) {
 	// the user at this Mac: the plain ones apply, the two that ask first ask here
 	testing.expect(t, run_command(Set_Remote_Machines{on = true}, {kind = .UI}).ok && state.settings.remote_machines)
 	testing.expect_value(t, run_command(Set_Chats_Readonly{on = true}, {kind = .UI}).error, CHATS_READONLY_REMOVED) // removed: always refused
-	for cmd in ([]Command{Set_Machines_Reachable{on = true}, Set_Claude_Default_Flags{skip_permissions = true}}) {
+	for cmd in ([]Command{Set_Machines_Reachable{on = true}, Set_Claude_Default_Flags{skip_permissions = true, harness = .Claude}}) {
 		r := run_command(cmd, {kind = .UI})
 		testing.expectf(t, r.error == "needs_confirmation" && r.confirm_token != "", "%s asks this Mac's user: %v", command_type(cmd), r.error)
 	}

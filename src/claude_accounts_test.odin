@@ -1,7 +1,7 @@
 package main
 
 // Claude Code accounts and Claude sessions found on disk (claude_accounts.odin, claude_disk.odin;
-// docs/CLAUDE.md §1b, §4c). Every test runs in a fake HOME with fake config folders and fake
+// docs/CLAUDE-TABS.md §1b, §4c). Every test runs in a fake HOME with fake config folders and fake
 // transcripts: never the user's ~/.claude*, never a real claude (a shell line stands in for it).
 
 import "base:runtime"
@@ -92,7 +92,7 @@ ca_reset :: proc(env: ^Ca_Env) -> runtime.Allocator {
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	env.home = ca_dir("home")
 	env.root = ca_dir("data")
 	d := ca_dir("out")
@@ -151,7 +151,7 @@ ca_close :: proc(t: ^testing.T, sess: u64) {
 @(private = "file")
 ca_labels :: proc() -> string {
 	b := strings.builder_make(context.temp_allocator)
-	for a, i in core.claude_accounts() {
+	for a, i in core.claude_accounts(.Claude) {
 		if i > 0 do strings.write_byte(&b, ',')
 		strings.write_string(&b, a.label)
 		if a.default do strings.write_byte(&b, '*')
@@ -191,14 +191,14 @@ claude_accounts_one :: proc(t: ^testing.T) {
 	context.allocator = ca_reset(&env)
 	defer ca_done()
 	testing.expect_value(t, ca_labels(), "Claude*") // the default, even before Claude Code made it
-	testing.expect(t, !core.claude_accounts_many())
+	testing.expect(t, !core.claude_accounts_many(.Claude))
 	ca_config(fmt.tprintf("%s/.claude", env.home), marked = false)
 	os.make_directory_all(fmt.tprintf("%s/.claude-cache", env.home)) // a folder by that name, no account file: not one
 	core.claude_accounts_refresh()
 	testing.expect_value(t, ca_labels(), "Claude*")
-	testing.expect_value(t, core.claude_accounts()[0].dir, fmt.tprintf("%s/.claude", env.home))
+	testing.expect_value(t, core.claude_accounts(.Claude)[0].dir, fmt.tprintf("%s/.claude", env.home))
 	// the default needs no environment: claude runs as it does in the user's shell
-	testing.expect_value(t, len(core.claude_account_env(core.claude_accounts()[0].dir)), 0)
+	testing.expect_value(t, len(core.claude_account_env(core.claude_accounts(.Claude)[0].dir, .Claude)), 0)
 }
 
 // Folders that hold Claude Code's account file are found (by stat): ~/.claude-*, ~/.config/claude*
@@ -214,23 +214,23 @@ claude_accounts_detected :: proc(t: ^testing.T) {
 	os.make_directory_all(fmt.tprintf("%s/.claude-junk", env.home))
 	core.claude_accounts_refresh()
 	testing.expect_value(t, ca_labels(), "Claude*,Work,Personal")
-	testing.expect(t, core.claude_accounts_many())
+	testing.expect(t, core.claude_accounts_many(.Claude))
 	work := fmt.tprintf("%s/.claude-work", env.home)
-	dir, err := core.claude_account_resolve("work")
+	dir, err := core.claude_account_resolve("work", .Claude)
 	testing.expect_value(t, err, "")
 	testing.expect_value(t, dir, work)
 	// another account sets CLAUDE_CONFIG_DIR for claude (and again after the login profile ran)
-	e := core.claude_account_env(work)
+	e := core.claude_account_env(work, .Claude)
 	testing.expect(t, len(e) > 0 && strings.contains(strings.join(e, "\n", context.temp_allocator), fmt.tprintf("CLAUDE_CONFIG_DIR=%s", work)))
 	// rename, remove; the default stays
-	testing.expect(t, core.run_command(core.Rename_Claude_Account{account = "Work", label = "Day job"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Rename_Claude_Account{account = "Work", label = "Day job", harness = .Claude}, CA_UI).ok)
 	testing.expect_value(t, ca_labels(), "Claude*,Day job,Personal")
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Personal"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Personal", harness = .Claude}, CA_UI).ok)
 	testing.expect_value(t, ca_labels(), "Claude*,Day job")
-	testing.expect(t, !core.run_command(core.Remove_Claude_Account{account = "Claude"}, CA_UI).ok, "the default stays")
+	testing.expect(t, !core.run_command(core.Remove_Claude_Account{account = "Claude", harness = .Claude}, CA_UI).ok, "the default stays")
 	// settings are the user's
-	testing.expect(t, !core.run_command(core.Rename_Claude_Account{account = "Day job", label = "x"}, CA_CONTROL).ok)
-	testing.expect(t, !core.run_command(core.Remove_Claude_Account{account = "Day job"}, CA_CONTROL).ok)
+	testing.expect(t, !core.run_command(core.Rename_Claude_Account{account = "Day job", label = "x", harness = .Claude}, CA_CONTROL).ok)
+	testing.expect(t, !core.run_command(core.Remove_Claude_Account{account = "Day job", harness = .Claude}, CA_CONTROL).ok)
 	// a removed folder stays guarded: its transcripts and account file are still Claude's
 	testing.expect(t, core.claude_credential(fmt.tprintf("%s/.config/claude-personal/projects/x/y.jsonl", env.home)))
 	testing.expect(t, core.claude_credential(fmt.tprintf("%s/.claude-work/projects/x/y.jsonl", env.home)))
@@ -259,10 +259,10 @@ claude_accounts_env_default :: proc(t: ^testing.T) {
 	os.set_env("CLAUDE_CONFIG_DIR", odd)
 	core.claude_accounts_refresh()
 	testing.expect_value(t, ca_labels(), "Claude*,~/.claude")
-	testing.expect_value(t, core.claude_accounts()[0].dir, odd)
-	testing.expect_value(t, len(core.claude_account_env(odd)), 0)
+	testing.expect_value(t, core.claude_accounts(.Claude)[0].dir, odd)
+	testing.expect_value(t, len(core.claude_account_env(odd, .Claude)), 0)
 	home := fmt.tprintf("%s/.claude", env.home)
-	e := strings.join(core.claude_account_env(home), "\n", context.temp_allocator)
+	e := strings.join(core.claude_account_env(home, .Claude), "\n", context.temp_allocator)
 	testing.expect(t, strings.contains(e, "DECKHAND_CLAUDE_ACCOUNT="), "~/.claude: unset after the profile")
 	testing.expect(t, !strings.contains(e, "CLAUDE_CONFIG_DIR="), e)
 	// a relative CLAUDE_CONFIG_DIR is not Claude's folder: ~/.claude is the default
@@ -279,21 +279,21 @@ claude_accounts_added :: proc(t: ^testing.T) {
 	defer ca_done()
 	acme := fmt.tprintf("%s/acme-claude", ca_dir("outside"))
 	ca_config(acme, marked = false)
-	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = acme}, CA_CONTROL).ok, "the user's")
-	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = "relative"}, CA_UI).ok)
-	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = env.home}, CA_UI).ok, "HOME itself is no config folder")
-	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = fmt.tprintf("%s/nope", acme)}, CA_UI).ok, "a folder that is there")
-	r := core.run_command(core.Add_Claude_Account{dir = acme}, CA_UI)
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = acme, harness = .Claude}, CA_CONTROL).ok, "the user's")
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = "relative", harness = .Claude}, CA_UI).ok)
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = env.home, harness = .Claude}, CA_UI).ok, "HOME itself is no config folder")
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = fmt.tprintf("%s/nope", acme), harness = .Claude}, CA_UI).ok, "a folder that is there")
+	r := core.run_command(core.Add_Claude_Account{dir = acme, harness = .Claude}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, ca_labels(), "Claude*,Acme-claude")
-	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = acme}, CA_UI).ok, "already an account")
+	testing.expect(t, !core.run_command(core.Add_Claude_Account{dir = acme, harness = .Claude}, CA_UI).ok, "already an account")
 	testing.expect(t, core.claude_credential(fmt.tprintf("%s/projects/p/s.jsonl", acme)), "an added folder is guarded")
 	testing.expect(t, core.claude_credential(fmt.tprintf("%s/.credentials.json", acme)))
-	_, err := core.claude_account_resolve("/etc")
+	_, err := core.claude_account_resolve("/etc", .Claude)
 	testing.expect(t, err != "", "not a configured account")
-	_, err = core.claude_account_resolve(fmt.tprintf("%s/.claude-work", env.home))
+	_, err = core.claude_account_resolve(fmt.tprintf("%s/.claude-work", env.home), .Claude)
 	testing.expect(t, err != "")
-	dir, err2 := core.claude_account_resolve(acme)
+	dir, err2 := core.claude_account_resolve(acme, .Claude)
 	testing.expect_value(t, err2, "")
 	testing.expect_value(t, dir, acme)
 }
@@ -313,7 +313,7 @@ claude_accounts_start_env :: proc(t: ^testing.T) {
 	core.claude_accounts_refresh()
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work"}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work", harness = .Claude}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	e := ca_wait_file(env.envf)
 	testing.expect(t, strings.contains(e, fmt.tprintf("CLAUDE_CONFIG_DIR=%s\n", work)), e)
@@ -327,18 +327,18 @@ claude_accounts_start_env :: proc(t: ^testing.T) {
 	testing.expect(t, rec != nil && rec.account == work)
 	// the last used is the next default (the project's)
 	os.remove(env.envf)
-	r2 := core.run_command(core.New_Claude_Session{project_id = pid}, CA_UI)
+	r2 := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, CA_UI)
 	testing.expect(t, r2.ok, r2.error)
 	testing.expect(t, strings.contains(ca_wait_file(env.envf), fmt.tprintf("CLAUDE_CONFIG_DIR=%s\n", work)))
 	// the default account: CLAUDE_CONFIG_DIR as the login shell leaves it (here: its profile's)
 	os.remove(env.envf)
-	r3 := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude"}, CA_UI)
+	r3 := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude", harness = .Claude}, CA_UI)
 	testing.expect(t, r3.ok, r3.error)
 	testing.expect(t, strings.contains(ca_wait_file(env.envf), "CLAUDE_CONFIG_DIR=/wrong\n"), "the default changes nothing")
 	// agents: a configured label, never a folder of their own
-	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = pid, account = "/tmp"}, CA_CONTROL).ok)
-	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = pid, account = "nope"}, CA_CONTROL).ok)
-	testing.expect(t, core.run_command(core.New_Claude_Tab{project_id = pid, account = "work"}, CA_CONTROL).ok)
+	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = pid, account = "/tmp", harness = .Claude}, CA_CONTROL).ok)
+	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = pid, account = "nope", harness = .Claude}, CA_CONTROL).ok)
+	testing.expect(t, core.run_command(core.New_Claude_Tab{project_id = pid, account = "work", harness = .Claude}, CA_CONTROL).ok)
 	// a resume from the row (closed first) runs under the record's account
 	ca_close(t, r.created_id)
 	os.remove(env.envf)
@@ -361,12 +361,12 @@ claude_accounts_gone :: proc(t: ^testing.T) {
 	core.claude_accounts_refresh()
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work"}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work", harness = .Claude}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	sid := "ca000000-0000-4000-8000-000000000002"
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = sid, source = "startup"}, CA_SCRIPT)
 	ca_close(t, r.created_id)
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", harness = .Claude}, CA_UI).ok)
 	rr := core.run_command(core.Open_Session_Cmd{project_id = pid, pi_session_id = sid}, CA_UI)
 	testing.expect(t, !rr.ok && strings.contains(rr.error, "account"), rr.error)
 }
@@ -442,7 +442,7 @@ claude_disk_rows_listed :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(snap, `"found":true`))
 	testing.expect(t, !strings.contains(snap, ".jsonl"), "no transcript path for agents")
 	// one Deckhand already has (its own history) is not listed twice
-	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude"}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude", harness = .Claude}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = b, source = "resume"}, CA_SCRIPT).ok)
 	core.run_command(core.Select_Project{project_id = pid}, CA_UI)
@@ -549,7 +549,7 @@ claude_disk_nothing :: proc(t: ^testing.T) {
 	env: Ca_Env
 	context.allocator = ca_reset(&env)
 	defer ca_done()
-	core.claude_found = .No
+	core.harness_found[.Claude] = .No
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
 	core.run_command(core.Select_Project{project_id = pid}, CA_UI)
@@ -646,6 +646,59 @@ claude_disk_projects :: proc(t: ^testing.T) {
 	testing.expect_value(t, ca_row_text(), "hello(c)[Work]")
 }
 
+// The home folder itself is never a project found on disk (a Claude session started in ~), from
+// Claude's discovery or Codex's (found_project); a project added there by hand stays as it was.
+@(test)
+claude_disk_projects_never_home :: proc(t: ^testing.T) {
+	env: Ca_Env
+	context.allocator = ca_reset(&env)
+	defer ca_done()
+	work := fmt.tprintf("%s/.claude-work", env.home)
+	ca_config(work)
+	core.claude_accounts_refresh()
+	other := ca_dir("not-home")
+	ca_write(fmt.tprintf("%s/%s.jsonl", ca_transcripts(work, env.home), "78787878-0000-4000-8000-0000000000a1"), strings.join({ca_user(env.home, "in home"), ""}, "\n", context.temp_allocator))
+	ca_write(fmt.tprintf("%s/%s.jsonl", ca_transcripts(work, other), "78787878-0000-4000-8000-0000000000a2"), strings.join({ca_user(other, "elsewhere"), ""}, "\n", context.temp_allocator))
+	core.rescan_now()
+	testing.expect(t, core.project_by_cwd(other) != nil, "a folder Claude ran in is a project")
+	testing.expect(t, core.project_by_cwd(env.home) == nil, "never the home folder")
+	// added by hand at ~: kept, and still the user's (not one found on disk)
+	r := core.run_command(core.Add_Project{cwd = env.home}, CA_UI)
+	testing.expect(t, r.ok, r.error)
+	core.rescan_now()
+	p := core.project_by_cwd(env.home)
+	testing.expect(t, p != nil && !p.claude, "the hand-added home project is untouched")
+}
+
+// The never-home check fails closed: when a found folder cannot be stat'ed now (an I/O error, not
+// "no such folder"), or the home folder's identity is unknown, it is not a found project on this
+// scan; the next scan tries again. A project added by hand stays.
+@(test)
+claude_disk_projects_home_check_fails_closed :: proc(t: ^testing.T) {
+	when core.TEST_HOOKS {
+		env: Ca_Env
+		context.allocator = ca_reset(&env)
+		defer ca_done()
+		defer core.claude_scan_stat_fail = {}
+		work := fmt.tprintf("%s/.claude-work", env.home)
+		ca_config(work)
+		core.claude_accounts_refresh()
+		other, mine := ca_dir("stat-other"), ca_dir("stat-mine")
+		for c, i in ([]string{other, mine}) do ca_write(fmt.tprintf("%s/7878787%d-0000-4000-8000-0000000000b1.jsonl", ca_transcripts(work, c), i), strings.join({ca_user(c, "x"), ""}, "\n", context.temp_allocator))
+		testing.expect(t, core.run_command(core.Add_Project{cwd = mine}, CA_UI).ok)
+		core.claude_scan_stat_fail = {candidate = true}
+		core.rescan_now()
+		testing.expect(t, core.project_by_cwd(other) == nil, "a folder that cannot be stat'ed now: not this scan")
+		testing.expect(t, core.project_by_cwd(mine) != nil, "one added by hand stays")
+		core.claude_scan_stat_fail = {home = true}
+		core.rescan_now()
+		testing.expect(t, core.project_by_cwd(other) == nil, "the home folder's identity unknown: none found")
+		core.claude_scan_stat_fail = {}
+		core.rescan_now()
+		testing.expect(t, core.project_by_cwd(other) != nil, "the next scan has it")
+	}
+}
+
 // A history entry whose transcript is gone (Claude Code's clean-up): greyed, by stat; its created
 // date is the transcript's while it is there.
 @(test)
@@ -659,7 +712,7 @@ claude_disk_gone_and_created :: proc(t: ^testing.T) {
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
 	sid := "9a9a9a9a-0000-4000-8000-00000000000c"
-	r := core.run_command(core.New_Claude_Session{project_id = pid}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, CA_UI)
 	tab := core.find_session(r.created_id).tabs[0].id
 	tp := fmt.tprintf("%s/%s.jsonl", ca_transcripts(cfg, proj), sid)
 	ca_write(tp, strings.join({ca_user(proj, "kept"), ""}, "\n", context.temp_allocator))
@@ -725,13 +778,13 @@ claude_accounts_picker :: proc(t: ^testing.T) {
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
 	items := make([dynamic]core.Menu_Item, context.temp_allocator)
-	core.claude_account_items(&items, "New Claude session", core.New_Claude_Session{project_id = pid})
+	core.claude_account_items(&items, "New Claude session", core.New_Claude_Session{project_id = pid, harness = .Claude})
 	testing.expect_value(t, len(items), 1)
 	work := fmt.tprintf("%s/.claude-work", env.home)
 	ca_config(work)
 	core.claude_accounts_refresh()
 	clear(&items)
-	core.claude_account_items(&items, "New Claude session", core.New_Claude_Session{project_id = pid})
+	core.claude_account_items(&items, "New Claude session", core.New_Claude_Session{project_id = pid, harness = .Claude})
 	testing.expect_value(t, len(items), 2)
 	if len(items) == 2 {
 		testing.expect_value(t, items[1].label, "New Claude session · Work")
@@ -739,21 +792,24 @@ claude_accounts_picker :: proc(t: ^testing.T) {
 		testing.expect_value(t, c.account, work)
 		testing.expect(t, items[0].check, "the default is checked first")
 	}
-	core.claude_installed_probe = proc() -> bool {return true}
-	defer core.claude_installed_probe = nil
-	core.pi_installed_probe = proc() -> bool {return false} // Claude Code alone: its accounts are the choices
-	defer core.pi_installed_probe = nil
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
+	defer core.harness_installed_probe[.Claude] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false} // Claude Code alone: its accounts are the choices
+	defer core.harness_installed_probe[.Pi] = nil
 	menu_open(core.Menu_New_Session{project_id = pid}, {0, 0})
 	rows := menu_items()
-	testing.expect_value(t, len(rows), 3) // the note, then each account
-	if len(rows) == 3 {
+	testing.expect_value(t, len(rows), 5) // the note, then each account, then With flags… (ui_flags.odin)
+	if len(rows) == 5 {
 		testing.expect(t, rows[0].note)
 		testing.expect_value(t, rows[2].label, "Claude Code · Work")
+		testing.expect(t, rows[3].sep)
+		ns, _ := rows[4].picker.?
+		testing.expect(t, rows[4].label == "With flags…" && ns.flags && ns.project_id == pid, "With flags…: the flags picker")
 	}
 	// after one under Work, Work is the pick: first
-	testing.expect(t, core.run_command(core.New_Claude_Session{project_id = pid, account = "Work"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.New_Claude_Session{project_id = pid, account = "Work", harness = .Claude}, CA_UI).ok)
 	rows = menu_items()
-	testing.expect(t, len(rows) == 3 && rows[1].label == "Claude Code · Work", "the last used first")
+	testing.expect(t, len(rows) == 5 && rows[1].label == "Claude Code · Work", "the last used first")
 	// a pi or Claude tab's own view of the state has no account folders
 	testing.expect(t, strings.contains(core.state_json(), `"claude_accounts":[`))
 	tab := core.find_session(state.current_session).tabs[0].id
@@ -777,19 +833,41 @@ claude_accounts_default_choice :: proc(t: ^testing.T) {
 	core.claude_accounts_refresh()
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
-	testing.expect_value(t, core.claude_account_pick(core.find_project(pid)), home)
-	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Work"}, CA_UI).ok)
-	testing.expect_value(t, core.claude_account_pick(core.find_project(pid)), work)
-	testing.expect_value(t, core.claude_account_pick(nil), work)
-	testing.expect(t, !core.run_command(core.Set_Claude_Account_Default{account = "Claude"}, CA_CONTROL).ok, "the user's")
-	testing.expect(t, !core.run_command(core.Set_Claude_Account_Default{account = "/tmp/nowhere"}, CA_UI).ok, "configured accounts only")
+	testing.expect_value(t, core.claude_account_pick(core.find_project(pid), .Claude), home)
+	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Work", harness = .Claude}, CA_UI).ok)
+	testing.expect_value(t, core.claude_account_pick(core.find_project(pid), .Claude), work)
+	testing.expect_value(t, core.claude_account_pick(nil, .Claude), work)
+	testing.expect(t, !core.run_command(core.Set_Claude_Account_Default{account = "Claude", harness = .Claude}, CA_CONTROL).ok, "the user's")
+	testing.expect(t, !core.run_command(core.Set_Claude_Account_Default{account = "/tmp/nowhere", harness = .Claude}, CA_UI).ok, "configured accounts only")
 	testing.expect(t, strings.contains(core.state_json(), `"chosen":true`), "the snapshot marks it")
 	// the project's last used wins; elsewhere the chosen default
-	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude"}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude", harness = .Claude}, CA_UI)
 	testing.expect(t, r.ok)
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = "61616161-0000-4000-8000-000000000001", source = "startup"}, CA_SCRIPT)
-	testing.expect_value(t, core.claude_account_pick(core.find_project(pid)), home)
-	testing.expect_value(t, core.claude_account_pick(nil), work)
+	testing.expect_value(t, core.claude_account_pick(core.find_project(pid), .Claude), home)
+	testing.expect_value(t, core.claude_account_pick(nil, .Claude), work)
+	// a browser's New session picker (web.new) offers the same first as the native one: in this
+	// project its last used, elsewhere the chosen default
+	{
+		core.harness_installed_probe[.Claude] = proc() -> bool {return true}
+		defer core.harness_installed_probe[.Claude] = nil
+		core.harness_installed_probe[.Pi] = proc() -> bool {return false}
+		defer core.harness_installed_probe[.Pi] = nil
+		native := core.new_session_choices(core.find_project(pid), "")
+		testing.expect(t, len(native) == 2 && native[0].label == "Claude Code · Claude", "the native picker: the project's pick first")
+		web := ""
+		secs := core.state_sections(state)
+		for x in core.web_view_cached(secs[:]) do if x[0] == "web" do web = x[1]
+		quoted :: proc(s: string) -> string {
+			b := strings.builder_make(context.temp_allocator)
+			core.json_quote(&b, s)
+			return strings.to_string(b)
+		}
+		row :: proc(label, dir: string) -> string {return fmt.tprintf(`{{"harness":"claude","label":%s,"account":%s}}`, quoted(label), quoted(dir))}
+		this := fmt.tprintf(`{{"project":%d,"rows":[%s,%s]}}`, pid, row("Claude Code · Claude", home), row("Claude Code · Work", work))
+		testing.expectf(t, strings.contains(web, this), "this project: its pick first: %s", web)
+		testing.expectf(t, strings.contains(web, fmt.tprintf(`"projects":[%s,%s]`, row("Claude Code · Work", work), row("Claude Code · Claude", home))), "elsewhere: the default first: %s", web)
+	}
 	// kept across a relaunch
 	text := core.workspace_json()
 	delete(state.settings.claude_account_default)
@@ -797,10 +875,10 @@ claude_accounts_default_choice :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.workspace_restore(text), "")
 	testing.expect_value(t, state.settings.claude_account_default, work)
 	// the environment's default again: nothing stored
-	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Claude"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Claude", harness = .Claude}, CA_UI).ok)
 	testing.expect_value(t, state.settings.claude_account_default, "")
-	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Work"}, CA_UI).ok)
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Work", harness = .Claude}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", harness = .Claude}, CA_UI).ok)
 	testing.expect_value(t, state.settings.claude_account_default, "")
 }
 
@@ -825,7 +903,7 @@ claude_accounts_settings_controls :: proc(t: ^testing.T) {
 	testing.expect(t, hok && !hr.make_default && !hr.remove, "the default: neither")
 	_, sok := row(core.CLAUDE_ACCOUNT_SCAN_ROW)
 	testing.expect(t, sok, "Scan again")
-	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Work"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Set_Claude_Account_Default{account = "Work", harness = .Claude}, CA_UI).ok)
 	wr, _ = row(strings.concatenate({core.CLAUDE_ACCOUNT_ROW, work}, context.temp_allocator))
 	hr, _ = row(strings.concatenate({core.CLAUDE_ACCOUNT_ROW, fmt.tprintf("%s/.claude", env.home)}, context.temp_allocator))
 	testing.expect(t, !wr.make_default && hr.make_default, "the chosen one is the default now")
@@ -896,7 +974,7 @@ claude_setup_accounts_many :: proc(t: ^testing.T) {
 	testing.expect_value(t, ca_labels(), "Claude*,Work,Personal")
 	setup_accounts_done()
 	core.inbox_drain()
-	testing.expect_value(t, ca_labels(), fmt.tprintf("Claude*,Job,Team Claude é,%s", core.claude_account_label_of(plain)))
+	testing.expect_value(t, ca_labels(), fmt.tprintf("Claude*,Job,Team Claude é,%s", core.claude_account_label_of(plain, .Claude)))
 	testing.expect_value(t, state.settings.claude_account_default, work)
 	// a removed account shows unticked; choosing it as the default ticks it; unticking the
 	// default moves it back to the environment's
@@ -987,15 +1065,15 @@ claude_review_add_container :: proc(t: ^testing.T) {
 	proj := fmt.tprintf("%s/code/app", ws)
 	os.make_directory_all(proj)
 	testing.expect(t, core.run_command(core.Add_Project{cwd = proj}, CA_UI).ok)
-	r := core.run_command(core.Add_Claude_Account{dir = ws}, CA_UI)
+	r := core.run_command(core.Add_Claude_Account{dir = ws, harness = .Claude}, CA_UI)
 	testing.expect(t, !r.ok && strings.contains(r.error, "project"), r.error)
-	r = core.run_command(core.Add_Claude_Account{dir = proj}, CA_UI)
+	r = core.run_command(core.Add_Claude_Account{dir = proj, harness = .Claude}, CA_UI)
 	testing.expect(t, !r.ok, "a project itself")
 	main_dir := ca_dir("main")
 	state.settings.home_dir = main_dir
-	r = core.run_command(core.Add_Claude_Account{dir = main_dir}, CA_UI)
+	r = core.run_command(core.Add_Claude_Account{dir = main_dir, harness = .Claude}, CA_UI)
 	testing.expect(t, !r.ok, "the main folder")
-	r = core.run_command(core.Add_Claude_Account{dir = filepath.dir(main_dir)}, CA_UI)
+	r = core.run_command(core.Add_Claude_Account{dir = filepath.dir(main_dir), harness = .Claude}, CA_UI)
 	testing.expect(t, !r.ok, "above the main folder")
 	state.settings.home_dir = ""
 	// the setup sheet's add: the same rule
@@ -1003,14 +1081,14 @@ claude_review_add_container :: proc(t: ^testing.T) {
 	testing.expect(t, !ok && strings.contains(msg, "project"), msg)
 	// removed: a folder without Claude Code's files is no longer Claude's
 	plain := ca_dir("plain")
-	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = plain}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = plain, harness = .Claude}, CA_UI).ok)
 	testing.expect(t, core.claude_credential(fmt.tprintf("%s/projects/x/y.jsonl", plain)))
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = plain}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = plain, harness = .Claude}, CA_UI).ok)
 	testing.expect(t, !core.claude_credential(fmt.tprintf("%s/projects/x/y.jsonl", plain)), "removed, no account file")
 	real := ca_dir("real")
 	ca_config(real)
-	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = real}, CA_UI).ok)
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = real}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = real, harness = .Claude}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = real, harness = .Claude}, CA_UI).ok)
 	testing.expect(t, core.claude_credential(fmt.tprintf("%s/projects/x/y.jsonl", real)), "removed, an account file: still guarded")
 }
 
@@ -1026,16 +1104,16 @@ claude_review_resume_account :: proc(t: ^testing.T) {
 	core.claude_accounts_refresh()
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude"}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude", harness = .Claude}, CA_UI)
 	sid := "5e5e5e5e-0000-4000-8000-000000000001"
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = sid, source = "startup"}, CA_SCRIPT)
 	ca_close(t, r.created_id)
-	r2 := core.run_command(core.New_Claude_Tab{project_id = pid, resume = sid, account = "Work"}, CA_CONTROL)
+	r2 := core.run_command(core.New_Claude_Tab{project_id = pid, resume = sid, account = "Work", harness = .Claude}, CA_CONTROL)
 	testing.expect(t, !r2.ok && strings.contains(r2.error, "account"), r2.error)
 	rec, _ := core.claude_record(sid)
 	testing.expect(t, rec != nil && rec.account == home, "still the home account")
 	// a report from another account's tab keeps the record's
-	r3 := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work"}, CA_UI)
+	r3 := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work", harness = .Claude}, CA_UI)
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r3.created_id).tabs[0].id, session_id = sid, source = "resume"}, CA_SCRIPT)
 	rec, _ = core.claude_record(sid)
 	testing.expect(t, rec != nil && rec.account == home, "history_touch keeps its account")
@@ -1059,7 +1137,7 @@ claude_review_startup_scan :: proc(t: ^testing.T) {
 	testing.expect(t, core.project_by_cwd(only) == nil, "not yet")
 	testing.expect(t, core.claude_startup_rescan_due(), "an account has projects/")
 	// the saved settings removed that account: the Rescan leaves its projects out
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", harness = .Claude}, CA_UI).ok)
 	core.run_command(core.Rescan{}, CA_UI)
 	for _ in 0 ..< 300 {
 		core.inbox_drain()
@@ -1134,6 +1212,97 @@ claude_review_cache_full :: proc(t: ^testing.T) {
 	}
 }
 
+// An assistant line as Claude Code writes them (cwd and isSidechain on every line), about n bytes.
+@(private = "file")
+ca_assistant :: proc(cwd: string, n: int) -> string {
+	return fmt.tprintf(`{{"parentUuid":"u1","isSidechain":false,"userType":"external","cwd":%q,"sessionId":"x","version":"2.1.317","type":"assistant","message":{{"role":"assistant","content":[{{"type":"text","text":%q}}]}},"uuid":"a1","timestamp":"2026-11-01T10:00:00.000Z"}}`, cwd, strings.repeat("w", n, context.temp_allocator))
+}
+
+// Titles of found transcripts read with few lines parsed (fixtures, as Claude Code writes them):
+// the tail's lines are parsed only when they carry a title (custom-title, ai-title, summary), the
+// head's only until its cwd, side-chain flag and first prompt are known (then only title lines);
+// the titles are the same: a /rename in the tail wins, else the first real prompt, else ai-title.
+@(test)
+claude_disk_titles_few_parses :: proc(t: ^testing.T) {
+	env: Ca_Env
+	context.allocator = ca_reset(&env)
+	defer ca_done()
+	cfg := fmt.tprintf("%s/.claude", env.home)
+	ca_config(cfg)
+	core.claude_accounts_refresh()
+	proj := ca_dir("fewparse")
+	dir := ca_transcripts(cfg, proj)
+	body := make([dynamic]string, context.temp_allocator)
+	for _ in 0 ..< 400 do append(&body, ca_assistant(proj, 600)) // ~280 KB: a head and a tail
+	meta := ca_user(proj, "<command-name>/clear</command-name>")
+	renamed := `{"type":"custom-title","customTitle":"My rename","sessionId":"x"}`
+	ai := `{"type":"ai-title","aiTitle":"Claude's own","sessionId":"x"}`
+	join :: proc(parts: ..[]string) -> string {
+		all := make([dynamic]string, context.temp_allocator)
+		for p in parts do append(&all, ..p)
+		append(&all, "")
+		return strings.join(all[:], "\n", context.temp_allocator)
+	}
+	ca_write(fmt.tprintf("%s/71717171-0000-4000-8000-000000000001.jsonl", dir), join({meta, ca_user(proj, "the first prompt")}, body[:], {ai, renamed}, body[:20]))
+	ca_write(fmt.tprintf("%s/71717171-0000-4000-8000-000000000002.jsonl", dir), join({ca_user(proj, "only a prompt")}, body[:], {ai}))
+	ca_write(fmt.tprintf("%s/71717171-0000-4000-8000-000000000003.jsonl", dir), join({meta, ai}, body[:30]))
+	before := core.claude_disk_lines_parsed
+	inline_before := core.claude_disk_inline_read
+	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
+	core.run_command(core.Select_Project{project_id = pid}, CA_UI)
+	core.claude_disk_wait()
+	core.claude_disk_wait()
+	parsed := core.claude_disk_lines_parsed - before
+	inline := core.claude_disk_inline_read - inline_before
+	got := make(map[string]string, context.temp_allocator)
+	for f in state.claude_disk do if f.listed do got[f.id] = f.title
+	testing.expect_value(t, got["71717171-0000-4000-8000-000000000001"], "My rename")
+	testing.expect_value(t, got["71717171-0000-4000-8000-000000000002"], "only a prompt")
+	testing.expect_value(t, got["71717171-0000-4000-8000-000000000003"], "Claude's own")
+	fmt.eprintfln("claude_disk_titles_few_parses: %d lines parsed for 3 transcripts; %d bytes read on the main thread", parsed, inline)
+	testing.expectf(t, inline <= 256 * 1024, "%d bytes read on the main thread", inline)
+	testing.expectf(t, parsed <= 20, "%d lines parsed", parsed)
+}
+
+// The worker's titles make the rows again once it has drained, or at a bounded interval while it
+// drains, never once per transcript (each time is a listing of the project and Chats).
+@(test)
+claude_disk_rescans_bounded :: proc(t: ^testing.T) {
+	env: Ca_Env
+	context.allocator = ca_reset(&env)
+	defer ca_done()
+	old_budget := core.claude_disk_inline_budget
+	core.claude_disk_inline_budget = 0 // every title from the worker
+	defer core.claude_disk_inline_budget = old_budget
+	cfg := fmt.tprintf("%s/.claude", env.home)
+	ca_config(cfg)
+	core.claude_accounts_refresh()
+	proj := ca_dir("rescans")
+	dir := ca_transcripts(cfg, proj)
+	body := make([dynamic]string, context.temp_allocator)
+	for _ in 0 ..< 300 do append(&body, ca_assistant(proj, 600))
+	text := strings.join({ca_user(proj, "hello"), strings.join(body[:], "\n", context.temp_allocator), ""}, "\n", context.temp_allocator)
+	for i in 0 ..< 120 do ca_write(fmt.tprintf("%s/%08x-0000-4000-8000-000000000009.jsonl", dir, i), text)
+	before := core.claude_disk_rescans
+	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
+	core.run_command(core.Select_Project{project_id = pid}, CA_UI)
+	start := time.tick_now()
+	// frames while the worker drains
+	for _ in 0 ..< 20_000 {
+		core.claude_disk_tick()
+		if !core.claude_disk_busy() do break
+		time.sleep(500 * time.Microsecond)
+	}
+	took := time.tick_since(start)
+	core.claude_disk_wait()
+	rescans := core.claude_disk_rescans - before
+	titled := 0
+	for f in state.claude_disk do if f.listed && f.title == "hello" do titled += 1
+	testing.expect_value(t, titled, 120)
+	fmt.eprintfln("claude_disk_rescans_bounded: %d rescans while draining 120 transcripts in %v", rescans, took)
+	testing.expectf(t, rescans <= 4 + int(took / (250 * time.Millisecond)), "%d rescans in %v", rescans, took) // the first and the last, one per 250 ms, and slack (Codex's pass)
+}
+
 // Saving a config file of an account no Claude tab runs under shows no restart bar.
 @(test)
 claude_review_note_save :: proc(t: ^testing.T) {
@@ -1147,7 +1316,7 @@ claude_review_note_save :: proc(t: ^testing.T) {
 	core.claude_accounts_refresh()
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude"}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Claude", harness = .Claude}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	n := core.claude_reload_pending_count()
 	core.claude_reload_note_save(fmt.tprintf("%s/commands/x.md", work))
@@ -1171,7 +1340,7 @@ claude_review_gone_subfolder :: proc(t: ^testing.T) {
 	sub := fmt.tprintf("%s/sub", proj)
 	os.make_directory_all(sub)
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, cwd = sub}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, cwd = sub, harness = .Claude}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	sid := "50b50b50-0000-4000-8000-000000000001"
 	tab := core.find_session(r.created_id).tabs[0].id
@@ -1297,7 +1466,7 @@ claude_review2_restore :: proc(t: ^testing.T) {
 	// like these are hidden from nesting, so the rule is checked, not the drawn row)
 	_ = mid
 	// the account removed, saved, relaunched: the Rescan drops its project
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work"}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", harness = .Claude}, CA_UI).ok)
 	text = core.workspace_json()
 	state.projects = {}
 	state.selected_project = 0
@@ -1320,12 +1489,12 @@ claude_review2_resume_removed :: proc(t: ^testing.T) {
 	core.claude_accounts_refresh()
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
-	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work"}, CA_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, account = "Work", harness = .Claude}, CA_UI)
 	sid := "c0c0c0c0-0000-4000-8000-000000000001"
 	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = sid, source = "startup"}, CA_SCRIPT)
 	ca_close(t, r.created_id)
-	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work"}, CA_UI).ok)
-	r2 := core.run_command(core.New_Claude_Tab{project_id = pid, resume = sid}, CA_UI)
+	testing.expect(t, core.run_command(core.Remove_Claude_Account{account = "Work", harness = .Claude}, CA_UI).ok)
+	r2 := core.run_command(core.New_Claude_Tab{project_id = pid, resume = sid, harness = .Claude}, CA_UI)
 	testing.expect(t, !r2.ok && strings.contains(r2.error, "account"), r2.error)
 }
 
@@ -1338,7 +1507,7 @@ claude_review2_inside_account :: proc(t: ^testing.T) {
 	ca_config(fmt.tprintf("%s/.claude", env.home), marked = false)
 	team := ca_dir("team")
 	ca_config(team)
-	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = team}, CA_UI).ok)
+	testing.expect(t, core.run_command(core.Add_Claude_Account{dir = team, harness = .Claude}, CA_UI).ok)
 	inside := fmt.tprintf("%s/code", team)
 	os.make_directory_all(inside)
 	r := core.run_command(core.Add_Project{cwd = inside}, CA_UI)
@@ -1400,7 +1569,7 @@ claude_review3_unstamped :: proc(t: ^testing.T) {
 	proj := ca_dir("proj")
 	pid := core.run_command(core.Add_Project{cwd = proj}, CA_UI).created_id
 	sid := "d0d0d0d0-0000-4000-8000-000000000001"
-	recs := []core.Claude_Record{{id = sid, cwd = proj, project = proj, title = "old one", used = 1_700_000_000}}
+	recs := []core.Claude_Record{{id = sid, cwd = proj, project = proj, title = "old one", used = 1_700_000_000, harness = .Claude}}
 	testing.expect(t, core.run_command(core.Claude_Restore_History{records = recs}, {kind = .Internal}).ok)
 	rec, _ := core.claude_record(sid)
 	testing.expect(t, rec != nil && rec.account == "", "not stamped at load")
@@ -1420,6 +1589,6 @@ claude_review3_unstamped :: proc(t: ^testing.T) {
 	testing.expect(t, r.ok, r.error)
 	if r.ok {
 		_, tab, _ := core.find_tab(r.created_id)
-		if tab != nil do testing.expect_value(t, core.claude_account_dir(tab.kind.(core.Claude_Tab).account), x)
+		if tab != nil do testing.expect_value(t, core.claude_account_dir(tab.kind.(core.Claude_Tab).account, .Claude), x)
 	}
 }

@@ -317,7 +317,7 @@ workspace_json :: proc() -> string {
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
 	unwritten := make(map[u64]bool, context.temp_allocator) // saved without a session file ("no_file")
 	for &s in state.open_sessions {
-		if s.home || s.machine != 0 do continue // another machine's is its own to save (machine_mirror.odin)
+		if s.home || s.machine != 0 || s.agent == .Files do continue // another machine's is its own to save (machine_mirror.odin); Files sessions: files_sessions below
 		// a Claude-only session once its Claude session id came (claude.session), a pi session once
 		// its file is there, or before that while it has a live tab beside pi (no pi there: its pi
 		// tab exited 127, the user works in a shell next to it)
@@ -338,6 +338,7 @@ workspace_json :: proc() -> string {
 		if p.group != .Projects || p.machine != 0 do continue // Chats is always there; another machine's is its own
 		keep := p.dir == "" || p.name != "" || p.by_hand || p.id == state.selected_project
 		for s in saved do if s.project_id == p.id do keep = true
+		if files_session_of(p.id) != nil do keep = true
 		if !keep do continue
 		if n > 0 do strings.write_byte(&w.b, ',')
 		n += 1
@@ -381,7 +382,7 @@ workspace_json :: proc() -> string {
 			if tab.id == s.active_tab do active = j
 			open_obj(&w)
 			// a Codex tab (codex.odin) is "codex": an older Deckhand drops it rather than start claude on its id
-			if ct, is_cl := tab.kind.(Claude_Tab); is_cl && ct.codex do ks(&w, "kind", "codex")
+			if ct, is_cl := tab.kind.(Claude_Tab); is_cl && harness_is_codex(ct.harness) do ks(&w, "kind", "codex")
 			else do ks(&w, "kind", TAB_KIND_NAMES[tab_kind_id(tab.kind)])
 			if held := tab_held(tab.id); held != 0 {
 				ki(&w, "held", int(held)) // its process runs on in the session holder
@@ -421,6 +422,7 @@ workspace_json :: proc() -> string {
 		// another machine's on screen: shown again once its link brings it back (persist_machine_merged)
 		ks(&w, "current_machine_session", s.pi_session_id)
 	}
+	write_files_sessions(&w)
 	// Home: only its pi session id (its dir and cwd are Deckhand's own)
 	if hs := home_session(); hs != nil {
 		strings.write_string(&w.b, ",\n")
@@ -459,8 +461,8 @@ workspace_json :: proc() -> string {
 	close_obj(&w)
 
 	// the Files tab: expanded folders per tree root, most recent first (the
-	// filter is not saved); the checkout each project's tree shows
-	if len(state.files.expanded) > 0 || len(state.files.checkouts) > 0 {
+	// filter is not saved); the checkout each project's tree shows; ignored files hidden
+	if len(state.files.expanded) > 0 || len(state.files.checkouts) > 0 || state.files.hide_ignored {
 		strings.write_string(&w.b, ",\n")
 		w.first = true
 		k(&w, "files")
@@ -491,6 +493,7 @@ workspace_json :: proc() -> string {
 			}
 			strings.write_byte(&w.b, ']')
 		}
+		if state.files.hide_ignored do kb(&w, "hide_ignored", true)
 		close_obj(&w)
 	}
 
@@ -513,7 +516,7 @@ workspace_json :: proc() -> string {
 			if r.transcript != "" do ks(&w, "transcript", r.transcript)
 			if r.model != "" do ks(&w, "model", r.model)
 			if r.account != "" do ks(&w, "account", r.account)
-			if r.codex do kb(&w, "codex", true) // a Codex conversation (codex.odin)
+			if harness_is_codex(r.harness) do kb(&w, "codex", true) // a Codex conversation (codex.odin)
 			if len(r.args) > 0 {
 				k(&w, "args")
 				write_strings(&w.b, r.args)
@@ -602,6 +605,7 @@ workspace_json :: proc() -> string {
 
 	if st.claude_skip_permissions do kb(&w, "claude_skip_permissions", true)
 	if st.codex_full_access do kb(&w, "codex_full_access", true)
+	for h in Harness do if st.harness_flags[h] != "" do ks(&w, strings.concatenate({HARNESS_KEYS[h], "_flags"}, context.temp_allocator), st.harness_flags[h]) // harness_flags.odin
 	if len(st.pi_extensions) > 0 {
 		k(&w, "pi_extensions")
 		open_obj(&w)
@@ -773,8 +777,9 @@ workspace_restore :: proc(text: string) -> string {
 		if ap, aok := enum_of(st, "appearance", APPEARANCE_NAMES); aok do run(Set_Appearance{mode = ap})
 		if ts, tok := enum_of(st, "text_size", TEXT_SIZE_NAMES); tok do run(Set_Text_Size{size = ts})
 		// chats_readonly (the removed Start chats read-only) in an older file: ignored
-		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp)})
-		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), codex = true})
+		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp), harness = .Claude})
+		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), harness = .Codex})
+		for h in Harness do if hf, hok := st[strings.concatenate({HARNESS_KEYS[h], "_flags"}, context.temp_allocator)].(json.String); hok do run(Set_Harness_Flags{harness = h, flags = hf}) // checked as the user's would be
 		if pe, pok := st["pi_extensions"].(json.Object); pok {
 			names := make([dynamic]string, context.temp_allocator)
 			for n in pe do append(&names, n)
@@ -929,7 +934,7 @@ workspace_restore :: proc(text: string) -> string {
 				args := make([dynamic]string, context.temp_allocator)
 				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
 				acct, _ := to["account"].(json.String) // an older file's "readonly" is ignored: a full agent from its next start
-				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], account = string(acct), codex = kind == "codex", active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], account = string(acct), harness = kind == "codex" ? .Codex : .Claude, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 				continue
 			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
@@ -944,6 +949,8 @@ workspace_restore :: proc(text: string) -> string {
 			if s := find_session(r.created_id); s != nil do persist.focus_tab = s.active_tab
 		}
 	}
+
+	read_files_sessions(root, has_current)
 
 	delete(persist.focus_machine)
 	persist.focus_machine = ""
@@ -984,6 +991,7 @@ workspace_restore :: proc(text: string) -> string {
 	// the Files tab's expanded folders (ones gone since are dropped); the
 	// least recent root first, so the order comes back as it was
 	if fo, is := root["files"].(json.Object); is {
+		if b, bok := fo["hide_ignored"].(json.Boolean); bok do run(Set_Files_Hide_Ignored{hide = bool(b)})
 		// first the checkouts the trees show (worktrees: their folders become tree roots); gone ones are dropped
 		checkouts, _ := fo["checkouts"].(json.Array)
 		#reverse for cv in checkouts {
@@ -1023,8 +1031,8 @@ workspace_restore :: proc(text: string) -> string {
 			codex, _ := o["codex"].(json.Boolean)
 			args := make([dynamic]string, context.temp_allocator)
 			if a, aok := o["args"].(json.Array); aok do for x in a do if xs, xok := x.(json.String); xok do append(&args, string(xs))
-			if id == "" || !strings.has_prefix(project, "/") || claude_args_check(args[:]) != "" do continue
-			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), account = string(acct), codex = bool(codex)})
+			if id == "" || !strings.has_prefix(project, "/") || (codex ? codex_args_check(args[:]) : claude_args_check(args[:])) != "" do continue // its harness's rule
+			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), account = string(acct), harness = codex ? .Codex : .Claude})
 		}
 	}
 	if len(recs) > 0 do run(Claude_Restore_History{records = recs[:]})
@@ -1212,4 +1220,88 @@ sb_group :: proc(c: Set_Bell, g: Bell_Group) -> Maybe(bool) {
 	case .Jobs:     return c.jobs
 	}
 	return nil
+}
+
+// The projects' Files sessions (files_session.odin), by project folder: their file tabs (a file
+// view's or Markdown tab's path) and which one was active; "current" when one was on screen. Its
+// own key, so an older Deckhand (which reads open_sessions only) leaves them out and keeps the rest.
+@(private = "file")
+write_files_sessions :: proc(w: ^W) {
+	n := 0
+	for &s in state.open_sessions {
+		if s.agent != .Files || s.machine != 0 do continue
+		p := find_project(s.project_id)
+		if p == nil do continue
+		paths := 0
+		for tab in s.tabs {
+			if et, is := tab.kind.(Editor_Tab); is && et.view == .File do paths += 1
+			if _, is := tab.kind.(Markdown_Tab); is do paths += 1
+		}
+		if paths == 0 do continue
+		if n == 0 {
+			strings.write_string(&w.b, ",\n")
+			w.first = true
+			k(w, "files_sessions")
+			strings.write_byte(&w.b, '[')
+		} else do strings.write_string(&w.b, ",\n")
+		n += 1
+		open_obj(w)
+		ks(w, "project", p.cwd)
+		k(w, "tabs")
+		strings.write_byte(&w.b, '[')
+		active, j := 0, 0
+		for tab in s.tabs {
+			path, kind := "", ""
+			if et, is := tab.kind.(Editor_Tab); is && et.view == .File do path, kind = et.path, "editor"
+			if mt, is := tab.kind.(Markdown_Tab); is do path, kind = mt.path, "markdown"
+			if path == "" do continue
+			if j > 0 do strings.write_byte(&w.b, ',')
+			if tab.id == s.active_tab do active = j
+			j += 1
+			open_obj(w)
+			ks(w, "kind", kind)
+			ks(w, "path", path)
+			close_obj(w)
+		}
+		strings.write_byte(&w.b, ']')
+		ki(w, "active_tab", active)
+		if s.id == state.current_session || (state.current_session == 0 && s.id == state.shown_before) do kb(w, "current", true)
+		close_obj(w)
+	}
+	if n > 0 do strings.write_byte(&w.b, ']')
+}
+
+// The saved Files sessions back: a project that is not listed (removed, or its folder renamed) or
+// gone is skipped, and so is each file the open rules refuse now (files_restore_ok); one with no
+// file left does not come back. Never anything else of the workspace.
+@(private = "file")
+read_files_sessions :: proc(root: json.Object, has_current: bool) {
+	list, _ := root["files_sessions"].(json.Array)
+	for v, i in list {
+		if i >= FILES_SESSIONS_MAX do break
+		o, ok := v.(json.Object)
+		if !ok do continue
+		pcwd, _ := o["project"].(json.String)
+		if !strings.has_prefix(pcwd, "/") do continue
+		p := project_by_cwd(string(pcwd))
+		if p == nil do continue
+		want, _ := o["active_tab"].(json.Integer)
+		saved, _ := o["tabs"].(json.Array)
+		tabs := make([dynamic]Restore_Tab, context.temp_allocator)
+		for tv, j in saved {
+			if j >= FILES_TABS_MAX do break
+			to, tok := tv.(json.Object)
+			if !tok do continue
+			kind, _ := to["kind"].(json.String)
+			path, _ := to["path"].(json.String)
+			if !strings.has_prefix(path, "/") do continue
+			switch kind {
+			case "editor":   append(&tabs, Restore_Tab{kind = .Editor, cwd = string(path), active = i64(j) == i64(want)})
+			case "markdown": append(&tabs, Restore_Tab{kind = .Markdown, cwd = string(path), active = i64(j) == i64(want)})
+			}
+		}
+		s := files_session_restore(p, tabs[:])
+		if s == nil do continue
+		if cur_, _ := o["current"].(json.Boolean); cur_ && !has_current do persist.focus_tab = s.active_tab
+	}
 }

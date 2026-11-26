@@ -310,7 +310,7 @@ pushed into a turn). Every call is logged without values or code text. Fields: [
   `app_call`, `app_screenshot`, `app_input`, `app_events`, and `app_open`, `app_restart`,
   `app_close` for its own session's declared apps. Their descriptions send agents to
   `tab.describe` first.
-- A **Claude tab**: the `deckhand app …` verbs ([CLAUDE.md](CLAUDE.md)).
+- A **Claude tab**: the `deckhand app …` verbs ([CLAUDE-TABS.md](CLAUDE-TABS.md)).
 - **Atlas**: the same commands over `control` (any app tab), and `new_app_tab` through `desk_run`.
 - Another pi extension can reach the commands through pi's event bus: emit `deckhand:command`
   `{requestId, command}` (browser and app commands only) and listen on

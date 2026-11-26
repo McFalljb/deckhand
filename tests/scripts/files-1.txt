@@ -15,6 +15,19 @@ assert_state layout.left_tab files
 assert_files huge\nnode_modules\nsrc\n.gitignore\ndebug.log\nmain.c\nnew.txt\nREADME.md\n
 wait 500
 shot files/tree
+# ---- the header's eye: ignored rows leave the tree, then come back dimmed
+hover filestool 3
+eventually
+assert_tip Hide ignored files
+clickid filestool 3
+eventually
+assert_state files.hide_ignored true
+assert_files huge\nsrc\n.gitignore\nmain.c\nnew.txt\nREADME.md\n
+shot files/ignored-hidden
+clickid filestool 3
+eventually
+assert_state files.hide_ignored false
+assert_files huge\nnode_modules\nsrc\n.gitignore\ndebug.log\nmain.c\nnew.txt\nREADME.md\n
 # ---- expand a folder with a click; open a file: a preview tab (italic), the next replaces it
 clickid frow 2
 eventually
@@ -50,6 +63,15 @@ assert_tip New file…
 clickid filestool 0
 eventually
 assert_state focus.id files_name
+# the name field is a row of the tree: src's first child, right under its row; an error goes under it
+assert_under fnew 0 frow 2
+type app.c
+key enter
+eventually
+assert_under fnew 1 fnew 0
+assert_drawn already exists
+assert_state focus.id files_name
+key a cmd
 type notes.md
 shot files/new-file
 key enter
@@ -61,6 +83,19 @@ assert_state focus.id files
 key f2
 eventually
 assert_state focus.id files_name
+# a focus change from outside the window (set_focus is anyone's) cancels: nothing is renamed
+type half
+# a shortcut typed into the field itself (⌃A) does not let an outside focus change commit
+key a ctrl
+wait 300
+command {"type":"set_focus","widget":"files"}
+wait 500
+assert_state focus.id files
+assert_files   notes.md\n
+assert_not_files half.md
+key f2
+eventually
+assert_state focus.id files_name
 assert_selection notes
 type todo
 shot files/rename
@@ -69,16 +104,24 @@ eventually
 assert_files   todo.md\n
 assert_not_files notes.md
 assert_state open_sessions.0.tabs.3.title todo.md
-# ---- delete: ⌘⌫ asks in the confirmation bar first
+# ---- delete: ⌘⌫ moves it to the Trash without asking (the toast's Undo); ⌘Z puts it back
 key backspace cmd
-wait 200
-assert_state pending_confirmations.# 1
-assert_files   todo.md\n
-shot files/delete-confirm
-clickid confirm_yes
 eventually
-assert_state pending_confirmations.# 0
 assert_not_files todo.md
+assert_state pending_confirmations.# 0
+assert_toast Moved todo.md to the Trash
+shot files/delete-undo
+key z cmd
+eventually
+assert_files   todo.md\n
+assert_toast put back
+key backspace cmd
+eventually
+assert_not_files todo.md
+# the tree keeps the keyboard (no confirmation bar took it): Esc gives it back
+key escape
+wait 200
+assert_state focus.id <missing>
 # ---- the row menu ("…" on hover, right click): open a terminal in src
 hover frow 3
 wait 300
@@ -94,6 +137,33 @@ key escape
 wait 800
 paste pwd\n
 waitfor proj/src 5000
+# ---- several rows: letters typed in the tree pick a row and never reach the terminal on screen;
+# ⇧↑ extends; the row menu acts on both; ⌘⌫ moves both, ⌘Z puts both back (the rows are used below)
+menu show_files
+wait 200
+assert_state focus.id files
+type util
+wait 200
+assert_not_screen util
+key up shift
+rclickid frow @src/util.c
+wait 200
+assert_menurows Move 2 items to Trash|-|Cut|Copy|Duplicate|-|Copy paths|Copy relative paths
+key escape
+key backspace cmd
+eventually
+assert_not_files util.c
+assert_state pending_confirmations.# 0
+assert_toast Moved 2 items to the Trash
+key z cmd
+eventually
+assert_files src/\n  app.c\n  util.c\n
+menu show_files
+wait 200
+key escape
+key escape
+wait 200
+assert_state focus.id <missing>
 # a file made outside Deckhand shows up (the watcher); src stays open. Under load the watcher can
 # be behind (#116): a generous deadline, no slower when it passes
 paste touch external.c\n
@@ -106,6 +176,12 @@ dragid frow 8 terminal
 eventually
 assert_screen /proj/main.c'
 key backspace
+# ---- drag to move: new.txt onto the folder row src moves it there (rename_path), the toast says so
+dragid frow @/new.txt frow @/src
+eventually
+assert_files   new.txt\n  util.c\n
+assert_not_files main.c\nnew.txt\n
+assert_toast Moved new.txt to src/
 # ---- the active editor file is revealed: collapse all, then switch to app.c's tab
 clickid filestool 2
 wait 200

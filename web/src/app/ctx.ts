@@ -25,6 +25,9 @@ export interface Overlay {
   copy: string | null; // text to copy by hand (no async clipboard here)
   job: { job: string; for_project: string; data?: any } | null; // the job sheet (JobSheet.tsx): a job to edit, or "" new; data: its job_draft open, read before it shows
   peek: { session: number; tab: number; x: number; y: number } | null; // a look at another session (Peek.tsx)
+  atlas: boolean; // a phone's own Atlas drawer (phone.ts drawerShown; the desktop follows the core's home_open)
+  select: string | null; // a phone's Select text sheet: the terminal's text (Phone.tsx SelectSheet)
+  panels: number | null; // a phone's sheet of a session's right-column panels (Phone.tsx PanelsSheet): that session's id
 }
 
 export interface App {
@@ -32,7 +35,7 @@ export interface App {
   store: Store;
   phone: boolean;
   run(command: object): Promise<Result>;
-  toast(text: string, err?: boolean): void;
+  toast(text: string, err?: boolean, action?: ToastAction): void;
   overlay: Overlay;
   setOverlay(o: Partial<Overlay>): void;
   // the session and tab the phone shows (the desktop follows the core's current session)
@@ -43,6 +46,12 @@ export interface App {
   unpair(): void;
   // Draws what a click asked for at once, before the core's state says it (wished).
   wish(key: string, value: unknown): void;
+}
+
+// A toast's button (Undo): text only.
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 export const AppCtx = createContext<App>(null as unknown as App);

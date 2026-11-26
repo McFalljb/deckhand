@@ -227,17 +227,17 @@ notify_job_finished :: proc(ev: Job_Finished) {
 // ---- commands ----
 
 Notifications_List :: struct { 	// query: the entries, newest first (titles and ids)
-	limit: int, // 0 = NOTICES_LIST_DEFAULT
+	limit: int `cmd:"omit,nonneg,max=NOTICES_MAX"`, // 0 = NOTICES_LIST_DEFAULT
 }
 // Marks entries read: one (id), a session's (session) or all (all).
 Notifications_Mark_Read :: struct {
-	id:      u64,
-	session: u64,
-	all:     bool,
+	id:      u64 `cmd:"omit"`,
+	session: u64 `cmd:"omit"`,
+	all:     bool `cmd:"omit"`,
 }
 Notifications_Clear :: struct {} // removes every entry
 Notify_Post :: struct { 	// internal: a job's result (notify_job_finished)
-	job: Job_Finished,
+	job: Job_Finished `cmd:"codec=job_finished"`,
 }
 // The bell's settings (this Mac's user only: never an agent, never another machine); unset
 // fields keep their value.
@@ -249,8 +249,8 @@ Set_Bell :: struct {
 	// every group's macOS at once (the setting before per-group ones, and saved files from
 	// then): false = never, true = the defaults (BELL_OS_DEFAULT); before macos
 	os:       Maybe(bool),
-	macos:    [Bell_Group]Maybe(Os_When), // per group (Default: its default)
-	sound:    [Bell_Group]Maybe(Bell_Sound), // per group (Default: its default)
+	macos:    [Bell_Group]Maybe(Os_When) `cmd:"last,codec=bell_macos"`, // per group (Default: its default)
+	sound:    [Bell_Group]Maybe(Bell_Sound) `cmd:"last,codec=bell_sound"`, // per group (Default: its default)
 	dock:     Maybe(bool), // the Dock icon's badge: the sessions waiting for you
 }
 
@@ -390,7 +390,7 @@ notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind, tab_shown
 		title         = notice_text(open_session_title(s)),
 		place         = notice_text(place),
 		claude        = claude,
-		codex         = claude && claude_tab_is_codex(tab^),
+		codex         = claude && tab_harness(tab^) == .Codex,
 	}
 	return notice_post(n)
 }
@@ -656,40 +656,4 @@ notices_json :: proc(limit: int, caller: Caller) -> string {
 	}
 	strings.write_string(&b, "]}")
 	return strings.to_string(b)
-}
-
-// The command's fields on the wire (events, the log), after its "type"
-// (write_command): `,"k":v` pairs.
-notify_write :: proc(b: ^strings.Builder, cmd: Command) {
-	kv :: proc(b: ^strings.Builder, k: string, v: bool) {fmt.sbprintf(b, `,"%s":%v`, k, v)}
-	#partial switch c in cmd {
-	case Notifications_List:
-		if c.limit > 0 do fmt.sbprintf(b, `,"limit":%d`, c.limit)
-	case Notifications_Mark_Read:
-		if c.id != 0 do fmt.sbprintf(b, `,"id":%d`, c.id)
-		if c.session != 0 do fmt.sbprintf(b, `,"session":%d`, c.session)
-		if c.all do kv(b, "all", true)
-	case Notify_Post:
-		strings.write_string(b, `,"job_id":`)
-		json_quote(b, c.job.job_id)
-		fmt.sbprintf(b, `,"status":"%s"`, JOB_STATUS_NAMES[c.job.status])
-	case Set_Bell:
-		vals := [Bell_Group]Maybe(bool){.Finished = c.finished, .Waiting = c.waiting, .Errors = c.errors, .Jobs = c.jobs}
-		for v, g in vals do if on, set := v.?; set do kv(b, BELL_GROUP_NAMES[g], on)
-		if on, set := c.os.?; set do kv(b, "os", on)
-		if on, set := c.dock.?; set do kv(b, "dock", on)
-		// {"macos":{"waiting":"always"},"sound":{"waiting":"tink"}}: the groups set
-		obj :: proc(b: ^strings.Builder, k: string, vals: [Bell_Group]Maybe($E), names: [E]string) {
-			n := 0
-			for v, g in vals do if x, set := v.?; set {
-				if n == 0 do fmt.sbprintf(b, `,"%s":{{`, k)
-				else do strings.write_byte(b, ',')
-				fmt.sbprintf(b, `"%s":"%s"`, BELL_GROUP_NAMES[g], names[x] != "" ? names[x] : "default")
-				n += 1
-			}
-			if n > 0 do strings.write_byte(b, '}')
-		}
-		obj(b, "macos", c.macos, OS_WHEN_NAMES)
-		obj(b, "sound", c.sound, BELL_SOUND_NAMES)
-	}
 }

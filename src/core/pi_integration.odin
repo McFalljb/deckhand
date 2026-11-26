@@ -27,18 +27,21 @@ package core
 //     PI_DESK_TOKEN or PI_DESK_CONTROL_TOKEN: pi-kit's desk extensions switch on only with
 //     those, so an installed pi-kit stays inert next to the bundled copy (socket_pi_env).
 //   - Minimum pi: PI_MIN_VERSION. A pi known (state.reload.pi_version, read from its package
-//     on disk, never run) to be older gets no -e; its tabs get a bar saying so (ui_claude.odin's
+//     on disk, never run; before a pi tab ran and it was probed, pi as new tabs find it by stat:
+//     pi_version_known) to be older gets no -e; its tabs get a bar saying so (ui_claude.odin's
 //     status bar), and so does the setup sheet. Unknown: loaded.
 
+import "base:runtime"
 import "core:encoding/json"
 import jg "../jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:time"
 
 PI_MIN_VERSION :: "1.4.0" // `-e` and the extension API the integration uses (docs/HARNESSES.md)
-PI_UPDATE_COMMAND :: "pi update"
+PI_UPDATE_COMMAND :: "pi " + PI_SELF_UPDATE_ARGS // the checklist's (harness_manifest.odin), for the pi on PATH
 
 // Tests: the integration's folder instead of the bundle's.
 pi_integration_override: string
@@ -120,7 +123,32 @@ pi_integration_from_env :: proc(test: bool) -> string {
 }
 
 // pi is known to be older than PI_MIN_VERSION (unknown or unparsable: false).
-pi_too_old :: proc() -> bool {return pi_version_below(state.reload.pi_version)}
+pi_too_old :: proc() -> bool {return pi_version_below(pi_version_known())}
+
+// pi's version: during a start, that of the binary the start runs (pi_start_bin); else the probed
+// one (reload.odin: once a pi tab runs), else, before that, pi as new tabs find it (harness_path:
+// the tabs' PATH, pi's managed install, nvm's and fnm's folders, then what the login shell named),
+// its package read by stat, never run; looked at again after PI_VERSION_GUESS_EVERY while frames
+// are drawn (the restart bar asks every frame). "" = unknown, and while DECKHAND_CMD replaces pi.
+pi_version_known :: proc() -> string {
+	if pi_start_bin != "" {
+		if v := harness_version_of(.Pi, pi_start_bin); v != "" do return v
+	}
+	if v := state.reload.pi_version; v != "" do return v
+	if hook_env(.Cmd) != "" do return "" // as probe_again: pi is replaced
+	@(static) guess: struct {
+		at:      time.Tick,
+		version: string,
+	}
+	if app_frames_called != 0 && guess.at != {} && time.tick_since(guess.at) < PI_VERSION_GUESS_EVERY do return guess.version
+	v := harness_version_of(.Pi, harness_path(.Pi))
+	if app_frames_called == 0 do return v // unit tests draw no frames: no cache
+	delete(guess.version, runtime.heap_allocator())
+	guess = {at = time.tick_now(), version = strings.clone(v, runtime.heap_allocator())}
+	return guess.version
+}
+
+PI_VERSION_GUESS_EVERY :: 10 * time.Second
 
 @(private = "file")
 pi_version_below :: proc(v: string) -> bool {
@@ -307,5 +335,9 @@ pi_status_dismiss :: proc(tab: ^Tab) {
 // The setup sheet's sentence about an old pi ("" = none).
 pi_setup_note :: proc() -> string {
 	if !pi_too_old() do return ""
-	return fmt.tprintf(" pi %s is older than %s, which Deckhand needs for its features in pi tabs: update it (%s).", state.reload.pi_version, PI_MIN_VERSION, PI_UPDATE_COMMAND)
+	return fmt.tprintf(" pi %s is older than %s, which Deckhand needs for its features in pi tabs: update it (%s).", pi_version_known(), PI_MIN_VERSION, PI_UPDATE_COMMAND)
 }
+
+// The pi binary a start runs, while start_pi decides its arguments ("" = none): its version
+// decides `-e` (pi_version_known), and the tab is told its folder (pi_tab_cmd).
+pi_start_bin: string

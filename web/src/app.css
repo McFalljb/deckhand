@@ -36,6 +36,7 @@ html, body {
 #app {
   position: fixed;
   inset: 0 0 auto 0;
+  top: var(--vvtop, 0px); /* iOS pans the page under the keyboard: the app follows what is visible */
   height: var(--vvh);
   display: flex;
   flex-direction: column;
@@ -436,6 +437,8 @@ a { color: inherit; }
 .tab:hover { background: var(--hover); color: var(--text-secondary); }
 .tab.on { background: var(--selected); color: var(--text); }
 .tab-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab-mode { flex: none; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.tab-mode.warn { color: var(--waiting); }
 .tab-close { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-muted); cursor: pointer; opacity: 0; }
 .tab:hover .tab-close, .tab.on .tab-close { opacity: 1; }
 .tab-close:hover { background: var(--hover); color: var(--text); }
@@ -444,6 +447,11 @@ a { color: inherit; }
 .term-host { position: absolute; inset: 0; background: var(--bg-app); }
 .term { position: absolute; inset: 8px 4px 4px 12px; }
 .term-fill { position: absolute; inset: 0; }
+/* the browser pans nothing on a terminal (a drag is its own scroll: termtouch.ts, which also cancels
+   the touch once it scrolls); a pinch still zooms the page */
+.term-fill .xterm { touch-action: pinch-zoom; }
+/* a phone's typing (termfield.ts): at the cursor, invisible, 16 px so iOS does not zoom into it */
+.term-field { position: absolute; left: 0; top: 0; z-index: 0; width: 2em; height: 18px; margin: 0; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden; white-space: pre; font-size: 16px; line-height: 1; color: transparent; background: transparent; caret-color: transparent; opacity: 0; pointer-events: none; }
 .term-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--text-secondary); background: var(--bg-app); text-align: center; }
 .exited-bar {
   position: absolute;
@@ -478,6 +486,12 @@ a { color: inherit; }
 .panel-head { display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; padding: 0 4px; border: 0; background: none; color: var(--text-secondary); font-weight: 600; cursor: pointer; text-align: left; }
 .panel-row { display: flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 4px 0 22px; color: var(--text); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 .panel-row.head { color: var(--text-secondary); font-weight: 600; padding-left: 4px; }
+/* Select text on a phone (Phone.tsx SelectSheet): the terminal's text, selectable by the phone's own selection */
+.select-sheet .select-text { margin: 0 0 8px; max-height: min(60vh, 540px); overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 8px; border-radius: var(--radius-sm); background: var(--bg-field); font-family: var(--font-mono); font-size: 12px; line-height: 1.35; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+/* the right column's panels as a phone's sheet (Phone.tsx PanelsSheet): long rows wrap, the list scrolls */
+.panels-sheet .panels-scroll { max-height: min(62vh, 560px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+.panels-sheet .panel-head { height: 36px; font-size: 15px; }
+.panels-sheet .panel-row { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; padding-top: 3px; padding-bottom: 3px; }
 .tone-dim, .tone-muted { color: var(--text-muted); }
 .tone-accent { color: var(--accent); }
 .tone-warning { color: var(--waiting); }
@@ -500,7 +514,10 @@ a { color: inherit; }
 }
 .drawer-head { padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); }
 .drawer-body { position: relative; flex: 1; min-height: 0; }
-.drawer.phone { position: fixed; inset: env(safe-area-inset-top) 0 0 0; width: 100%; z-index: 15; }
+/* a phone's Atlas not started: why, and its Start button */
+.atlas-start { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 32px 16px; text-align: center; }
+/* a phone's Atlas: over its screen, inside the page's height (--vvh: the keyboard's room left out) */
+.drawer.phone { position: absolute; inset: 0; width: 100%; z-index: 15; border-left: 0; box-shadow: none; background: var(--bg-app); }
 @keyframes slide-in { from { transform: translateX(24px); opacity: 0; } }
 
 
@@ -676,6 +693,9 @@ a { color: inherit; }
 .toasts { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; width: min(92vw, 420px); pointer-events: none; z-index: 40; }
 .toast { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-elevated); box-shadow: 0 4px 16px var(--shadow); animation: rise 160ms var(--ease); }
 .toast.err { border-color: var(--error); }
+.toast.has-act { display: flex; align-items: center; gap: 10px; }
+.toast.has-act .toast-text { flex: 1; min-width: 0; }
+.toast-act { pointer-events: auto; flex: none; }
 
 .confirm-bar {
   display: flex;
@@ -744,7 +764,7 @@ a { color: inherit; }
 .inputrow .icon-btn { width: 40px; height: 40px; }
 .inputrow .input { flex: 1; resize: none; max-height: 120px; min-height: 40px; font-size: 16px; }
 .inputrow .send { width: 40px; min-height: 40px; padding: 0; border-radius: 20px; }
-.raw-note { flex: 1; align-self: center; }
+.show-kb { flex: 1; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; font-size: 15px; touch-action: manipulation; }
 
 /* xterm.js's scrollbar: quiet until the pointer is over the terminal; none on a phone */
 .term .xterm-scrollable-element > .scrollbar.vertical { opacity: 0; transition: opacity 160ms; }
@@ -807,15 +827,94 @@ a { color: inherit; }
 .files { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .files-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px; color: var(--text-secondary); font-weight: 600; }
 .files-root { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.file-row { height: 26px; gap: 6px; }
-.file-row .title.st-M, .file-row .title.st-R { color: var(--diff-modified); }
-.file-row .title.st-A, .file-row .title.st-q { color: var(--diff-added); }
-.file-row .title.st-D { color: var(--diff-removed); }
+.files-head .icon-btn.small { width: 22px; height: 22px; }
+.file-row { height: 26px; gap: 6px; -webkit-touch-callout: none; }
+.files .w-item > .file-row { height: 100%; }
+.file-row.sel { background: var(--selected); color: var(--text); }
+.file-row .title.active { font-weight: 600; color: var(--text); }
+.file-row .title.dot { color: var(--text-muted); }
+/* gitignored (and what is under an ignored folder): dimmed (the header's eye hides them) */
+.file-row.ign .icon.kind, .file-row.ign .title.dot { opacity: 0.6; }
+/* ... but the open file's row and a selected row read at full contrast (a dotfile's too) */
+.file-row .title.dot.active, .file-row.sel .title.dot { color: var(--text); }
+.file-row.ign.sel .icon.kind, .file-row.ign.sel .title.dot, .file-row.ign .title.dot.active { opacity: 1; }
+.files-head .icon-btn[aria-pressed="true"] { color: var(--accent); }
+/* the checkout switcher (FilesFind.tsx): the root's name, its branch, a caret */
+.files-root { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.files-root-name { flex: 0 1 auto; min-width: 2em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files-branch { flex: 0 8 auto; display: inline-flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-muted); font-weight: 400; font-size: 12px; }
+.files-switch { border: 0; background: none; color: inherit; font: inherit; padding: 2px 4px; margin-left: -4px; border-radius: var(--radius-md); cursor: pointer; }
+.files-switch:hover, .files-switch:focus-visible { background: var(--hover, var(--selected)); }
+.files-switch { flex: 0 1 auto; } /* the caret stays in view; the branch shrinks first */
+.files-switch > :last-child { flex: none; }
+.phone-body .files-branch { display: none; } /* a phone's header is full: the sheet names the branch */
+.files-ro-note { margin: 0 8px 6px; padding: 4px 8px; border-radius: var(--radius-md); background: var(--bg-field); color: var(--text-secondary); font-size: 12px; }
+/* the filter and its matches in place of the tree */
+.files-filter { margin: 0 8px 6px; height: 28px; }
+.files-find { flex: 1; min-height: 0; overflow-y: auto; }
+.find-row { height: 26px; gap: 6px; cursor: pointer; }
+.find-row.sel { background: var(--selected); color: var(--text); }
+.find-name { font-weight: 600; color: var(--text); white-space: nowrap; flex: 0 0 auto; max-width: 70%; overflow: hidden; text-overflow: ellipsis; }
+.find-row.active .find-name { color: var(--accent); }
+.find-dir { color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-size: 12px; direction: rtl; text-align: left; }
+.find-msg { cursor: default; }
+.phone-body .find-row { height: 44px; font-size: 15px; }
+.phone-body .files-filter { height: 38px; }
+.phone-body .files-filter input { font-size: 16px; }
+/* git marks: the window's letters and colours (filetree.ts gitTone; src/ui_files.odin) */
+.file-row .g-add { color: var(--done); }
+.file-row .g-mod { color: var(--waiting); }
+.file-row .g-del { color: var(--error); }
+.file-row .ch-letter { text-align: center; }
+.file-more { display: none !important; }
+.file-row:hover .file-more, .file-row.sel .file-more { display: inline-grid !important; }
+@media (hover: none) { .file-more { display: inline-grid !important; } }
+.file-edit { cursor: default; }
+.field.file-name { flex: 1; min-width: 0; min-height: 0; height: calc(100% - 4px); padding: 0 6px; font-size: inherit; border-radius: var(--radius-sm); }
+.file-err { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+.phone-files .file-row { font-size: 15px; }
+.phone-files .file-more, .phone-files .files-head .icon-btn.small { width: 36px; height: 36px; }
+.phone-files .files-head { height: 44px; }
 .chev-gap { flex: 0 0 12px; }
+/* a phone's selection mode (Files.tsx PickBar): the count and its actions under the tree */
+.pick-gap { flex: 0 0 16px; }
+.files-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 52px; padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--border); background: var(--bg-elevated); }
+.files-pick-n { font-weight: 600; color: var(--text); white-space: nowrap; }
+.files-pick .btn.small { min-height: 36px; padding: 0 10px; font-size: 13px; }
+/* a cut row (Files tree clipboard): dimmed until pasted or Esc */
+.file-row.cut > .title, .file-row.cut > svg { opacity: 0.45; }
+/* toasts above a Files bar (selection, clipboard), never over its buttons */
+body:has(.files-clip) .toasts { bottom: calc(72px + env(safe-area-inset-bottom)); }
+body:has(.files-pick:not(.files-clip)) .toasts { bottom: calc(132px + env(safe-area-inset-bottom)); }
 .file-tab { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-app); }
 .code-edit { flex: 1; min-height: 0; display: flex; font-family: var(--font-mono); font-size: 12.5px; line-height: 18px; }
 .code-gutter { flex: none; overflow: hidden; padding: 8px 10px 8px 12px; color: var(--line-number); text-align: right; white-space: pre; user-select: none; border-right: 1px solid var(--border); }
 .code-text { flex: 1; min-width: 0; resize: none; border: 0; outline: none; margin: 0; padding: 8px 12px; background: transparent; color: var(--text); font: inherit; line-height: inherit; white-space: pre; overflow: auto; tab-size: 4; }
+/* syntax colours (Code.tsx): the textarea's text transparent over a layer painting it in colour */
+.code-main { flex: 1; min-width: 0; position: relative; display: flex; }
+.code-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.code-paint { margin: 0; padding: 8px 12px; font: inherit; line-height: inherit; white-space: pre; tab-size: 4; color: var(--syn-plain); will-change: transform; }
+.code-line { height: 18px; }
+/* a phone: 16 px text, or iOS zooms the page into the editor (phone.ts codeMetrics) */
+.code-edit.phone { font-size: 16px; line-height: 22px; }
+.code-edit.phone .code-line { height: 22px; }
+.code-text.painted { position: relative; color: transparent; -webkit-text-fill-color: transparent; caret-color: var(--text); }
+.code-text.painted::selection { background: var(--selection); }
+.sy-comment { color: var(--syn-comment); }
+.sy-keyword { color: var(--syn-keyword); }
+.sy-string { color: var(--syn-string); }
+.sy-escape { color: var(--syn-escape); }
+.sy-number { color: var(--syn-number); }
+.sy-constant { color: var(--syn-constant); }
+.sy-function { color: var(--syn-function); }
+.sy-type { color: var(--syn-type); }
+.sy-property { color: var(--syn-property); }
+.sy-attribute { color: var(--syn-attribute); }
+.sy-tag { color: var(--syn-tag); }
+.sy-operator { color: var(--syn-operator); }
+.sy-punctuation { color: var(--syn-punctuation); }
+.sy-heading { color: var(--syn-heading); }
+.sy-link { color: var(--syn-link); }
 .md-doc { flex: 1; min-height: 0; overflow: auto; }
 .md-body { max-width: 760px; margin: 0 auto; padding: 24px 28px 48px; color: var(--text); line-height: 1.6; font-size: 15px; overflow-wrap: anywhere; }
 .md-body h1, .md-body h2 { border-bottom: 1px solid var(--border); padding-bottom: 6px; }
@@ -833,6 +932,11 @@ a { color: inherit; }
 .md-body th, .md-body td { border: 1px solid var(--border); padding: 4px 10px; }
 .md-body hr { border: 0; border-top: 1px solid var(--border); }
 .md-img { color: var(--text-muted); }
+/* an image's tab (ImageView.tsx): centred, shrunk to fit, never enlarged, over a checkerboard */
+.img-view { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 16px; gap: 8px; }
+.img-box { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+.img-box img { max-width: 100%; max-height: 100%; object-fit: contain; --chk: color-mix(in srgb, var(--text-muted) 30%, var(--bg-app)); background: repeating-conic-gradient(var(--chk) 0 25%, var(--bg-app) 0 50%) 0 0 / 16px 16px; }
+.img-cap { flex: none; }
 .phone-term .file-tab { position: absolute; inset: 0; }
 .phone-term .md-body { padding: 16px; }
 .phone-term .phone-files { position: absolute; inset: 0; display: flex; flex-direction: column; width: auto; border: 0; }
@@ -974,3 +1078,26 @@ a { color: inherit; }
 .peek-term { position: absolute; left: 0; top: 0; pointer-events: none; }
 .peek-foot { padding: 0 2px; }
 .card, .open-row { -webkit-touch-callout: none; }
+
+/* A tab's status strip (TabBars.tsx): the native window's bars over a tab, as text */
+.tab-bars { flex: none; border-bottom: 1px solid var(--border); background: var(--bg-elevated); }
+.tab-bar { display: flex; align-items: center; gap: 8px; padding: 4px 12px; min-height: 30px; font-size: 12px; }
+.tab-bar + .tab-bar { border-top: 1px solid var(--border); }
+.tab-bar .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--waiting); }
+.tab-bar.error .dot { background: var(--error); }
+.tab-bar.info .dot { background: var(--accent); }
+.tab-bar-text { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
+.tab-bar .btn { flex: none; }
+/* moving (Files.tsx): the folder a drop goes into, the drag's image, the Move to… picker */
+.file-row.drop { background: var(--selection); color: var(--text); border-radius: 0; } /* the folder and its rows: one block */
+.files-tree.drop-root { box-shadow: inset 0 0 0 1px var(--accent); border-radius: var(--radius-md); }
+.files-drag { position: fixed; top: -200px; left: 0; padding: 3px 8px; border-radius: var(--radius-sm); background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text); font-size: 13px; white-space: nowrap; }
+.move-list { max-height: min(52vh, 440px); overflow-y: auto; margin: 0 -8px; padding: 0 8px; }
+.move-row { height: 30px; gap: 2px; cursor: default; }
+.move-row.sel { background: var(--selection); color: var(--text); }
+.move-chev { flex: 0 0 20px; height: 100%; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--text-muted); cursor: pointer; }
+.move-pick { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.move-pick:disabled { color: var(--text-muted); opacity: 0.6; cursor: default; }
+.move-pick:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: var(--radius-sm); }
+.sheet.bottom .move-row { height: 44px; font-size: 15px; }
+.sheet.bottom .move-chev { flex-basis: 36px; }

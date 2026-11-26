@@ -60,5 +60,5 @@ sessions, as you can, and through Atlas or a shell here reach the machines this 
 Allow only machines you trust as yourself ([docs/ATLAS.md](docs/ATLAS.md) §7.1). The same holds for
 a browser you pair with web access, which Deckhand serves over plain HTTP.
 
-The design notes in [docs/BROWSER.md](docs/BROWSER.md), [docs/CLAUDE.md](docs/CLAUDE.md),
+The design notes in [docs/BROWSER.md](docs/BROWSER.md), [docs/CLAUDE-TABS.md](docs/CLAUDE-TABS.md),
 [docs/CODEX.md](docs/CODEX.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md) (§5a, the hub) describe the intended boundaries.

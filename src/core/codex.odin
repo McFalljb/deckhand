@@ -1,7 +1,7 @@
 package core
 
 // Codex CLI tabs (docs/CODEX.md; phase 1 of issue #112). A Codex tab is a Claude tab record
-// (Claude_Tab, Claude_Record) with `codex` set: it shares the Claude tab's machinery as it is (the
+// (Claude_Tab, Claude_Record) with harness `.Codex`: it shares the Claude tab's machinery as it is (the
 // token and its process check, OSC 7501 status, the hooks' claude.session / claude.turn reports,
 // held prompts, the dead-tab bar, history rows, the bell and the attention counts). What differs
 // is here: the command line, the hooks Deckhand passes per run (and trusts for that run only),
@@ -17,7 +17,7 @@ package core
 //     Deckhand's MCP server, the folder or the daemon) go before Deckhand's, which come last. Never
 //     --dangerously-bypass-hook-trust (it would run every hook unreviewed, the repo's too).
 //     Deckhand writes nothing under ~/.codex or any Codex home; it sets CODEX_HOME only for a
-//     tab of an account the user added (claude_accounts.odin with codex; docs/CODEX.md §6a).
+//     tab of an account the user added (claude_accounts.odin with harness .Codex; docs/CODEX.md §6a).
 //   - The hooks: the bundled CLI by its absolute path (`'<cli>' hook codex-<event>`), each with a
 //     trusted_hash for this run in an inline `hooks.state` table (Codex 0.167.2's recipe:
 //     codex_hook_hash). Other hooks (the user's, a repo's) keep their own trust. When the recipe
@@ -42,6 +42,12 @@ import "core:time"
 import "core:unicode/utf8"
 
 CODEX_MIN_VERSION :: "0.163.0" // OSC 7501 program status (and --no-daemon, 0.157)
+// The oldest Codex a tab starts at all (--no-daemon): from it up to CODEX_MIN_VERSION, as a plain tab
+// (codex_plain_version): `codex --no-daemon -C <cwd>` and the user's flags, no hooks, no MCP server,
+// no token, nothing typed into it by Deckhand, and a bar saying so (as an old pi starts without the
+// integration).
+CODEX_PLAIN_MIN_VERSION :: "0.157.0"
+CODEX_PLAIN_REFUSAL :: "this Codex is older than " + CODEX_MIN_VERSION + ": its tab runs without Deckhand's hooks and status, so Deckhand types nothing into it (update Codex, then Restart)"
 CODEX_HASH_PINNED :: "0.167.2" // the Codex whose hook-trust recipe codex_hook_hash follows (codex_test.odin)
 CODEX_INSTALL_COMMAND :: "npm install -g @openai/codex@latest"
 CODEX_MISSING :: "Codex is not installed: install it with `" + CODEX_INSTALL_COMMAND + "`, then use Refresh shell environment or restart Deckhand"
@@ -65,11 +71,11 @@ CODEX_HOOKS := [?]Codex_Hook {
 }
 
 // codex, or why there is none: it is not on the login shell's PATH (npm's global bin).
-CODEX_TAB_CMD :: `command -v codex >/dev/null 2>&1 || { printf '%s\n' "Codex (codex) was not found on your login shell's PATH:" "  $PATH" "Install it with: npm install -g @openai/codex@latest (or add its folder to PATH in your shell's login profile, ~/.zprofile for zsh), then open a Codex tab again."; exit 127; }; exec codex "$@"`
+CODEX_TAB_CMD :: HARNESS_FOUND_CODEX_SH + `command -v codex >/dev/null 2>&1 || { printf '%s\n' "Codex (codex) was not found on your login shell's PATH:" "  $PATH" "Install it with: npm install -g @openai/codex@latest (or add its folder to PATH in your shell's login profile, ~/.zprofile for zsh), then open a Codex tab again."; exit 127; }; exec codex "$@"`
 
 // What a Codex tab runs: DECKHAND_CODEX_CMD (tests: a fake codex), else codex (CODEX_TAB_CMD); in
 // test mode never the real codex.
-codex_tab_cmd :: proc() -> string {
+codex_tab_cmd :: proc(bin := "") -> string {
 	if c := hook_env(.Codex_Cmd); c != "" do return c
 	when TEST_HOOKS {
 		if test_mode() {
@@ -77,7 +83,7 @@ codex_tab_cmd :: proc() -> string {
 			return TEST_NO_CODEX_CMD
 		}
 	}
-	return CODEX_TAB_CMD
+	return strings.concatenate({harness_found_sh(bin), CODEX_TAB_CMD}, context.temp_allocator)
 }
 
 when TEST_HOOKS {
@@ -101,7 +107,7 @@ codex_id_ok :: proc(id: string) -> bool {
 
 // The tab's kind of id: a Codex tab's must be a UUID, a Claude tab's claude_id_ok.
 claude_tab_id_ok :: proc(ct: ^Claude_Tab, id: string) -> bool {
-	return ct.codex ? codex_id_ok(id) : claude_id_ok(id)
+	return harness_is_codex(ct.harness) ? codex_id_ok(id) : claude_id_ok(id)
 }
 
 // ---- the command line ----
@@ -281,7 +287,14 @@ CODEX_FLAGS_OK := [?]Codex_Flag {
 	{"--no-alt-screen", 0, false},
 	{"--strict-config", 0, false},
 	{"--approve-for-me", 0, false},
+	{"--profile", 'p', true}, // a plain name (codex_profile_ok): $CODEX_HOME/<name>.config.toml over the base config, under every -c (Deckhand's too)
 	{"--dangerously-bypass-approvals-and-sandbox", 0, false},
+}
+
+// A Codex flag's long name ("-m" → "--model"); one it does not know, as it is (harness_flags.odin).
+codex_flag_long :: proc(name: string) -> string {
+	if len(name) == 2 && name[0] == '-' do for f in CODEX_FLAGS_OK do if f.short == name[1] do return f.long
+	return name
 }
 
 // Codex flags refused by name, and why (the others not in CODEX_FLAGS_OK: "not one Deckhand passes").
@@ -303,13 +316,23 @@ CODEX_FLAGS_REFUSED := [?]struct {
 	{"--image", 'i', "a Codex tab starts without a prompt"},
 	{"--enable", 0, CODEX_FEATURES_WHY},
 	{"--disable", 0, CODEX_FEATURES_WHY},
-	{"--profile", 'p', CODEX_PROFILES_WHY},
 	{"--help", 'h', "it prints and exits"},
 	{"--version", 'V', "it prints and exits"},
 }
 
+CODEX_NOT_A_FLAG :: "an argument that is not a flag: Codex would take it for a command or a prompt"
 CODEX_FEATURES_WHY :: "Codex features are set in your ~/.codex/config.toml, not per tab"
-CODEX_PROFILES_WHY :: "profiles are not supported per tab yet"
+CODEX_PROFILES_WHY :: "choose a profile with -p NAME (Codex no longer reads -c profile)"
+CODEX_PROFILE_NAME_WHY :: "--profile takes a plain profile name (letters, digits, _, - and ., not starting with - or .)"
+
+// A profile name Codex reads as $CODEX_HOME/<name>.config.toml and nothing else: letters, digits,
+// _, - and ., not starting with - or . (no path: Codex refuses -p ../x itself; an unknown name is
+// silently ignored).
+codex_profile_ok :: proc(name: string) -> bool {
+	if name == "" || len(name) > 128 || name[0] == '-' || name[0] == '.' do return false
+	for ch in transmute([]u8)name do if !(ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9' || ch == '_' || ch == '-' || ch == '.') do return false
+	return true
+}
 
 // Why a -c key=value cannot go ("" = it can): nothing under `hooks` (Deckhand's hooks and their
 // trust), `mcp_servers.deckhand` or the whole `mcp_servers` table (Deckhand's tools), `features`
@@ -341,7 +364,7 @@ codex_args_check :: proc(args: []string) -> string {
 	for a in args do if a == "" || len(a) > 1024 || strings.contains_any(a, "\x00\r\n") do return "an extra flag is empty, too long or has a line break"
 	for i := 0; i < len(args); i += 1 {
 		a := args[i]
-		if len(a) < 2 || a[0] != '-' || a == "--" do return fmt.tprintf("%q is not a flag: Codex would take it for a command or a prompt", a)
+		if len(a) < 2 || a[0] != '-' || a == "--" do return CODEX_NOT_A_FLAG
 		name, val: string
 		has_val := false
 		if a[1] == '-' {
@@ -355,8 +378,8 @@ codex_args_check :: proc(args: []string) -> string {
 		for f in CODEX_FLAGS_OK do if name == f.long || (f.short != 0 && len(name) == 2 && name[1] == f.short) do flag = f
 		f, ok := flag.?
 		if !ok {
-			for r in CODEX_FLAGS_REFUSED do if name == r.long || (r.short != 0 && len(name) == 2 && name[1] == r.short) do return fmt.tprintf("%s is refused: %s", name, r.why)
-			return fmt.tprintf("%s is not a Codex flag Deckhand passes on", name)
+			for r in CODEX_FLAGS_REFUSED do if name == r.long || (r.short != 0 && len(name) == 2 && name[1] == r.short) do return fmt.tprintf("%s is refused: %s", flag_shown(name), r.why)
+			return fmt.tprintf("%s is not a Codex flag Deckhand passes on", flag_shown(name))
 		}
 		if !f.value {
 			if has_val do return fmt.tprintf("%s takes no value", f.long)
@@ -368,49 +391,28 @@ codex_args_check :: proc(args: []string) -> string {
 			val = args[i]
 		}
 		if f.long == "--config" do if e := codex_config_refused(val); e != "" do return e
+		if f.long == "--profile" && !codex_profile_ok(val) do return CODEX_PROFILE_NAME_WHY
 	}
 	return ""
 }
 
 // Whether args (passed codex_args_check) choose how Codex asks or sandboxes: -s, -a,
 // --approve-for-me, full access itself, or a -c of approval_policy, sandbox_mode or
-// sandbox_workspace_write.
-@(private = "file")
+// sandbox_workspace_write (codex_access_choices, claude_mode.odin: the tab's badge reads the same).
 codex_args_choose_access :: proc(args: []string) -> bool {
-	for a, i in args {
-		if len(a) < 2 || a[0] != '-' do continue
-		kv := ""
-		if a[1] == '-' {
-			n, _, v := strings.partition(a, "=")
-			switch n {
-			case "--sandbox", "--ask-for-approval", "--approve-for-me", "--dangerously-bypass-approvals-and-sandbox": return true
-			case "--config": kv = v != "" ? v : (i + 1 < len(args) ? args[i + 1] : "")
-			}
-		} else {
-			switch a[1] {
-			case 's', 'a': return true
-			case 'c': kv = len(a) > 2 ? strings.trim_prefix(a[2:], "=") : (i + 1 < len(args) ? args[i + 1] : "")
-			}
-		}
-		if kv == "" do continue
-		key, _, _ := strings.partition(kv, "=")
-		first, _, _ := strings.partition(strings.trim_space(key), ".")
-		switch strings.trim(strings.trim_space(first), `"'`) {
-		case "approval_policy", "sandbox_mode", "sandbox_workspace_write": return true
-		}
-	}
-	return false
+	return len(codex_access_choices(args)) > 0
 }
 
 // What turning full access on asks the user (Set_Claude_Default_Flags with harness codex).
 CODEX_FULL_ACCESS_CONFIRM :: "Start the Codex tabs you start with --dangerously-bypass-approvals-and-sandbox? Codex will edit files and run commands without asking you first, outside its sandbox. Agents' tabs never get it."
 
-// args with the user's default Codex flags as the setting is NOW, after them (codex_start, for a
-// start the user makes; never saved into a tab's or a record's flags): full access
-// (--dangerously-bypass-approvals-and-sandbox), left out when the tab's flags already choose how
-// Codex asks or sandboxes (codex_args_choose_access; Codex refuses it beside -a or
-// --approve-for-me), or past CLAUDE_ARGS_MAX. Temp.
-codex_with_defaults :: proc(args: []string) -> []string {
+// args with the user's default Codex flags as the setting is NOW (codex_start, for a start the
+// user makes; never saved into a tab's or a record's flags): the Default flags line before them
+// (harness_with_defaults), then full access (--dangerously-bypass-approvals-and-sandbox), left
+// out when the flags already choose how Codex asks or sandboxes (codex_args_choose_access; Codex
+// refuses it beside -a or --approve-for-me), or past CLAUDE_ARGS_MAX. Temp.
+codex_with_defaults :: proc(args_in: []string) -> []string {
+	args := harness_with_defaults(.Codex, args_in)
 	if !state.settings.codex_full_access || len(args) + 1 > CLAUDE_ARGS_MAX || codex_args_choose_access(args) do return args
 	list := make([dynamic]string, 0, len(args) + 1, context.temp_allocator)
 	append(&list, ..args)
@@ -423,15 +425,37 @@ codex_with_defaults :: proc(args: []string) -> []string {
 // flags: the tab's own flags (an agent's restart starts without them); defaults: a start the user
 // makes, with the default flags as set now (codex_with_defaults). Its account: CODEX_HOME for a
 // home the user added (none for the default), set again after the login profile.
+// Why a Codex start can't go yet ("" = it can): no binary to read its version from (codex counts as
+// installed only because the login shell has not answered, or gave no clear answer), so the
+// minimum version could not be checked. The user tries again; a recheck asks the shell again.
+codex_start_path_why :: proc(bin: string) -> string {
+	if bin != "" do return ""
+	if harness_lookup_state(.Codex) == .Asking do return "Deckhand is still looking for Codex in your login shell: open the tab again in a moment."
+	return "Deckhand can't find the Codex your login shell starts, so it can't check its version: install it, or add its folder to PATH in your shell's login profile, then Restart."
+}
+
 codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> (ok: bool, why: string) {
-	bin := codex_binary()
+	// the codex this start runs, decided once: its version is checked and the tab is told its
+	// folder (codex_tab_cmd), so the tab never starts another copy than the one checked
+	bin := harness_path(.Codex) // by stat, else what the login shell named
+	if hook_env(.Codex_Cmd) == "" {
+		if why = codex_start_path_why(bin); why != "" {
+			term_note(t, why)
+			return false, why
+		}
+	}
+	codex_plain_forget(tab_id)
+	plain := ""
 	if v := codex_version_of(bin); claude_version_below(v, CODEX_MIN_VERSION) {
 		hint := codex_update_hint(bin)
-		term_note(t, codex_old_text(v, hint))
-		return false, fmt.tprintf("Codex %s is older than %s: update it %s", v, CODEX_MIN_VERSION, hint) // the refusal: short (a hub cuts it)
+		if claude_version_below(v, CODEX_PLAIN_MIN_VERSION) { 	// no --no-daemon: not at all
+			term_note(t, codex_old_text(v, hint))
+			return false, fmt.tprintf("Codex %s is older than %s: update it %s", v, CODEX_PLAIN_MIN_VERSION, hint) // the refusal: short (a hub cuts it)
+		}
+		plain = v // no OSC 7501: a plain tab
 	}
 	// its account (claude_accounts.odin): only a configured one starts
-	if ct.account != "" && !claude_account_known(ct.account, codex = true) {
+	if ct.account != "" && !claude_account_known(ct.account, harness = .Codex) {
 		why = fmt.tprintf("This Codex tab's account (%s) is no longer in Settings → Codex accounts: add it again, then Restart.", path_tilde(ct.account))
 		term_note(t, why)
 		return false, why
@@ -444,25 +468,87 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 		return false, why
 	}
 	if defaults do user = codex_with_defaults(user)
-	args, awhy := codex_args(cli, cwd, ct.session_id, user)
+	args: []string
+	awhy: string
+	if plain != "" do args, awhy = codex_plain_args(cwd, ct.session_id, user)
+	else do args, awhy = codex_args(cli, cwd, ct.session_id, user)
 	if awhy != "" {
 		why = fmt.tprintf("Codex can't start: %s.", awhy)
 		term_note(t, why)
 		return false, why
 	}
-	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator) // the account again after the login profile
+	cmd := strings.concatenate({CODEX_ACCOUNT_SH, codex_tab_cmd(bin)}, context.temp_allocator) // the account again after the login profile
 	argv := shell_script_argv(login_shell(), cmd, "codex")
 	append(&argv, ..args)
 	env := make([dynamic]string, context.temp_allocator)
-	append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli)))
-	append(&env, ..claude_account_env(ct.account, codex = true)) // its account: CODEX_HOME (none for the default)
-	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Codex}) { // tokens.json: never adopted as a Claude tab
+	// a plain tab gets no token: nothing of it may reach Deckhand (no hooks, no MCP server)
+	if plain == "" do append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli)))
+	else {
+		socket_forget_tab(tab_id) // a token of an earlier run of this tab dies too
+		append(&env, ..pi_extra_env({}))
+	}
+	append(&env, ..claude_account_env(ct.account, harness = .Codex)) // its account: CODEX_HOME (none for the default)
+	start := Held_Start{kind = .Codex} // tokens.json: never adopted as a Claude tab
+	if plain != "" do start.plain, _ = version_triple(plain) // and adopted plain again (holder_adopt)
+	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), start) {
 		socket_forget_tab(tab_id)
 		return false, ""
 	}
 	claude_run_started(tab_id, t, ct)
 	codex_login_check(ct.account)
+	if plain != "" do codex_plain_set(tab_id, plain)
 	return true, ""
+}
+
+// A plain Codex tab's command line (temp): the resume subcommand, the user's flags, then
+// `--no-daemon -C <cwd>`; no hooks, no MCP server (CODEX_PLAIN_MIN_VERSION).
+codex_plain_args :: proc(cwd, resume: string, user: []string = nil) -> (args: []string, why: string) {
+	if !filepath.is_abs(cwd) do return nil, "the tab's folder is not an absolute path"
+	if resume != "" && !codex_id_ok(resume) do return nil, "not a Codex session id"
+	if e := codex_args_check(user); e != "" do return nil, e
+	out := make([dynamic]string, context.temp_allocator)
+	if resume != "" do append(&out, "resume", resume)
+	append(&out, ..user)
+	append(&out, "--no-daemon", "-C", cwd)
+	return out[:], ""
+}
+
+// The running plain Codex tabs (codex_start): tab id -> its Codex's version (heap).
+@(private = "file")
+codex_plain: map[u64]string
+
+@(private = "file")
+codex_plain_set :: proc(tab_id: u64, v: string) {
+	codex_plain_forget(tab_id)
+	if codex_plain == nil do codex_plain = make(map[u64]string, runtime.heap_allocator())
+	codex_plain[tab_id] = strings.clone(v, runtime.heap_allocator())
+	window_state_changed()
+}
+
+// Forgets a tab's plain mark (a new start, its tab gone: claude_tab_gone).
+codex_plain_forget :: proc(tab_id: u64) {
+	if v, ok := codex_plain[tab_id]; ok {
+		delete(v, runtime.heap_allocator())
+		delete_key(&codex_plain, tab_id)
+	}
+}
+
+// A Codex tab adopted from the session holder (holder_adopt) that tokens.json says was started
+// plain (Held_Start.plain, its Codex's version): marked again, whatever its token trust and
+// whatever codex is on disk now.
+codex_plain_adopted :: proc(tab_id: u64, v: [3]u32) {
+	codex_plain_set(tab_id, fmt.tprintf("%d.%d.%d", v[0], v[1], v[2]))
+}
+
+// The version of a running plain Codex tab's Codex ("" = not one).
+codex_plain_version :: proc(tab_id: u64) -> string {
+	v, _ := codex_plain[tab_id]
+	return v
+}
+
+// The bar over a plain Codex tab (claude_status_message). hint: codex_update_hint's.
+codex_plain_text :: proc(v, hint: string) -> string {
+	return fmt.tprintf("Codex %s is older than %s: it runs here without Deckhand's hooks and status (no status mark, no row to resume, no held messages, comments or Deckhand's tools). Update it %s, then Restart the tab.", v, CODEX_MIN_VERSION, hint)
 }
 
 // ---- text Deckhand types into Codex's composer ----
@@ -494,54 +580,34 @@ codex_command_text :: proc(text: string) -> string {
 
 // The rule for this tab's harness (claude_prompt, claude_paste_message).
 claude_tab_command_text :: proc(ct: ^Claude_Tab, text: string) -> string {
-	return ct.codex ? codex_command_text(text) : claude_command_text(text)
+	return harness_is_codex(ct.harness) ? codex_command_text(text) : claude_command_text(text)
 }
 
 // ---- is Codex installed, which version, signed in? ----
 
-codex_found: Claude_Found
-
-// Tests: stands in for the lookup; nil = look.
-codex_installed_probe: proc() -> bool
-
-// The codex Deckhand would start, by stat: DECKHAND_CODEX_BIN (tests), else the PATH new tabs get
-// (never in test mode or a unit test: a codex the developer installed must not change what they
-// see). "" = not found this way.
-codex_binary :: proc() -> string {
-	if b := hook_env(.Codex_Bin); filepath.is_abs(b) do return b
-	when TEST_HOOKS {
-		if ODIN_TEST || test_mode() do return ""
-	}
-	for d in strings.split(detect_path(), ":", context.temp_allocator) do if exe_in(d, "codex") do return fmt.tprintf("%s/codex", strings.trim_right(d, "/"))
-	return ""
-}
-
-// Whether Codex is installed, as new tabs would find it (stat only, never run). Cached;
-// codex_recheck drops it (Refresh shell environment, a Codex tab that exited 127, the user's click).
+// Whether Codex is installed, as new tabs would find it (harness_installed, harness.odin).
 codex_installed :: proc() -> bool {
-	if codex_installed_probe != nil do return codex_installed_probe()
-	if codex_found == .Unknown do codex_found = codex_binary() != "" ? .Yes : .No
-	return codex_found == .Yes
+	_, found := harness_installed(.Codex)
+	return found
 }
 
+// Looked up again (Refresh shell environment, a Codex tab that exited 127), its sign-in too.
 codex_recheck :: proc() {
-	codex_found = .Unknown
+	harness_recheck(.Codex)
 	for &x in codex_login {
 		sync.atomic_add(&x.gen, 1)
 		sync.atomic_store(&x.state, .Unknown)
 	}
 }
 
-codex_installed_now :: proc() -> bool {
-	if codex_found == .No do codex_recheck()
-	return codex_installed()
-}
+codex_installed_now :: proc() -> bool {return harness_installed_now(.Codex)}
 
 // codex's version from where its binary links to: npm's package
 // (<…>/node_modules/@openai/codex/bin/codex.js -> its package.json), Homebrew's cask
 // (Caskroom/codex/<v>/); else, only then, from `codex --version` (codex_version_run). "" = unknown.
 codex_version_of :: proc(bin: string) -> string {
 	if bin == "" do return ""
+	bin := volta_target(.Codex, bin) // a Volta shim: the package it runs (harness_node.odin)
 	real := fs_real(bin)
 	if real == "" do real = bin
 	if i := strings.index(real, "/Caskroom/codex/"); i >= 0 {
@@ -561,6 +627,7 @@ codex_version_of :: proc(bin: string) -> string {
 		}
 	}
 	if v := codex_standalone_version(real); v != "" do return v
+	if filepath.base(real) == "volta-shim" do return "" // a Volta shim whose package is not on disk: never run (it would run codex)
 	return codex_version_run(real)
 }
 
@@ -651,11 +718,11 @@ codex_version_word :: proc(v: string) -> bool {
 }
 
 // The version of the codex new tabs start ("" = unknown or none).
-codex_version :: proc() -> string {return codex_version_of(codex_binary())}
+codex_version :: proc() -> string {return codex_version_of(harness_path(.Codex))}
 
 // What a Codex too old for Deckhand says in the tab. hint: codex_update_hint's.
 codex_old_text :: proc(v, hint: string) -> string {
-	return fmt.tprintf("Codex %s is older than %s, which Deckhand needs (its status reports): update it %s, then open the tab again.", v, CODEX_MIN_VERSION, hint)
+	return fmt.tprintf("Codex %s is older than %s, the oldest Deckhand can start (it needs --no-daemon; %s for its status reports): update it %s, then open the tab again.", v, CODEX_PLAIN_MIN_VERSION, CODEX_MIN_VERSION, hint)
 }
 
 // How to update the codex at bin, for its install (install_layout): "with `<command>`" for npm,
@@ -676,14 +743,14 @@ CODEX_MISSING_HINT :: "Codex is still not installed (or not on your login PATH):
 
 // claude_installed_now or codex_installed_now, for the tab's harness.
 claude_tab_installed_now :: proc(tab: ^Tab) -> bool {
-	if ct, is := tab.kind.(Claude_Tab); is && ct.codex do return codex_installed_now()
+	if ct, is := tab.kind.(Claude_Tab); is && harness_is_codex(ct.harness) do return codex_installed_now()
 	return claude_installed_now()
 }
 
 // Whether a tab is a Codex tab.
-claude_tab_is_codex :: proc(tab: Tab) -> bool {
+tab_harness :: proc(tab: Tab) -> Harness {
 	ct, is := tab.kind.(Claude_Tab)
-	return is && ct.codex
+	return is ? claude_kind_harness(ct.harness) : .Pi
 }
 
 // A command that would start codex when it is not installed (as claude_missing).
@@ -726,7 +793,7 @@ CODEX_LOGIN_TIMEOUT :: 15 * time.Second
 // none (more homes than slots: no bar for it). take: take a free slot. Main thread.
 @(private = "file")
 codex_login_slot :: proc(account: string, take := false) -> int {
-	d := claude_account_dir(account, codex = true)
+	d := claude_account_dir(account, harness = .Codex)
 	if account == "" || d == codex_home() do return 0
 	for x, i in codex_login do if i > 0 && x.home == d do return i
 	if !take do return -1
@@ -749,7 +816,7 @@ codex_login_set :: proc(s: Codex_Login, account := "") {
 
 // Asks once for account's home (a configured one; "" = the default, which sets no CODEX_HOME).
 codex_login_check :: proc(account := "") {
-	if account != "" && !claude_account_known(account, codex = true) do return
+	if account != "" && !claude_account_known(account, harness = .Codex) do return
 	i := codex_login_slot(account, take = true)
 	if i < 0 do return
 	if _, ok := sync.atomic_compare_exchange_strong(&codex_login[i].state, .Unknown, .Asking); !ok do return
@@ -757,10 +824,10 @@ codex_login_check :: proc(account := "") {
 	// its home after the login profile, as its tabs (CODEX_ACCOUNT_SH): the marker as a shell
 	// variable in the script (a configured folder, quoted), nothing for the default
 	set := ""
-	for e in claude_account_env(account, codex = true) do if strings.has_prefix(e, "DECKHAND_CODEX_ACCOUNT=") {
+	for e in claude_account_env(account, harness = .Codex) do if strings.has_prefix(e, "DECKHAND_CODEX_ACCOUNT=") {
 		set = strings.concatenate({"DECKHAND_CODEX_ACCOUNT=", sh_quote(e[len("DECKHAND_CODEX_ACCOUNT="):]), "; "}, context.temp_allocator)
 	}
-	script := strings.clone(strings.concatenate({"set -- login status; ", set, CODEX_ACCOUNT_SH, codex_tab_cmd()}, context.temp_allocator))
+	script := strings.clone(strings.concatenate({"set -- login status; ", set, CODEX_ACCOUNT_SH, codex_tab_cmd(harness_path(.Codex))}, context.temp_allocator))
 	Job :: struct {
 		slot:   int,
 		gen:    i32,
@@ -794,10 +861,17 @@ codex_home :: proc() -> string {
 }
 
 // The files in Codex's folder a user edits: everything else there is Codex's state (its sign-in
-// auth.json, sessions/ transcripts, history, logs, databases) and is never listed, read, watched
-// or opened by Deckhand.
+// auth.json, sessions/ transcripts, history, logs, databases), refused wherever Claude's
+// credentials are (settings_credential: open, show, upload, list, watch) and never written. One
+// exception, read only: the found-row scan lists sessions/, reads each rollout's first line and
+// session_index.jsonl's titles (codex_disk.odin, docs/CODEX.md §2b).
 CODEX_CONFIG_FILES := [?]string{"config.toml", "AGENTS.md", "AGENTS.override.md"}
 CODEX_CONFIG_FOLDERS := [?]string{"prompts", "skills", "rules"}
+// Codex's own hooks (its hooks.json, scripts in hooks/): the user's, shown, never written by
+// Deckhand, not even on the user's Save (the editor opens them read-only: codex_view_only).
+// plugins/ is not here: Codex fills it itself (installed plugins and their marketplaces).
+CODEX_VIEW_FILES := [?]string{"hooks.json"}
+CODEX_VIEW_FOLDERS := [?]string{"hooks"}
 
 // Whether p (clean, absolute) is Codex's sign-in or state rather than the user's config.
 // Codex's sign-in file as Codex finds it: $CODEX_HOME/auth.json (as tabs get it, absolute; HOME or
@@ -812,7 +886,7 @@ codex_auth_file :: proc() -> string {
 }
 
 codex_credential :: proc(p: string) -> bool {
-	if filepath.base(p) == "auth.json" && filepath.base(filepath.dir(p)) == ".codex" do return true
+	if strings.equal_fold(filepath.base(p), "auth.json") && strings.equal_fold(filepath.base(filepath.dir(p)), ".codex") do return true // any case
 	// the sign-in where Codex keeps it, CODEX_HOME's even when that is HOME or above (codex_home
 	// is not then); symlinks followed
 	if a := codex_auth_file(); a != "" {
@@ -822,13 +896,15 @@ codex_credential :: proc(p: string) -> bool {
 	// every Codex home (claude_account_dirs with codex): the default's, ~/.codex, each account's,
 	// a removed one's while it holds Codex's files; never HOME or above it. Codex's state if any
 	// home says so (one home may sit in another's config folder: ~/a/skills/b)
-	for home in claude_account_dirs(codex = true) {
+	for home in claude_account_dirs(harness = .Codex) {
 		for c in ([2]string{home, fs_real(home)}) {
 			if c == "" || !path_under(p, c) do continue
 			first, _, rest := strings.partition(p[len(c) + 1:], "/")
 			config := false
 			for f in CODEX_CONFIG_FOLDERS do if first == f do config = true
 			if rest == "" do for f in CODEX_CONFIG_FILES do if first == f do config = true
+			for f in CODEX_VIEW_FOLDERS do if first == f do config = true
+			if rest == "" do for f in CODEX_VIEW_FILES do if first == f do config = true
 			if !config do return true
 		}
 	}
@@ -839,7 +915,7 @@ codex_credential :: proc(p: string) -> bool {
 // credential_ids).
 codex_credential_files :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
-	for h in claude_account_dirs(codex = true) do append(&out, strings.concatenate({h, "/auth.json"}, context.temp_allocator))
+	for h in claude_account_dirs(harness = .Codex) do append(&out, strings.concatenate({h, "/auth.json"}, context.temp_allocator))
 	if a := codex_auth_file(); a != "" && !slice_has(out[:], a) do append(&out, a)
 	return out[:]
 }
@@ -855,8 +931,11 @@ slice_has :: proc(list: []string, x: string) -> bool {
 path_under :: proc(p, dir: string) -> bool {return dir != "" && len(p) > len(dir) && strings.has_prefix(p, dir) && p[len(dir)] == '/'}
 
 // codex_missing for a Codex start, else claude_missing.
-claude_harness_missing :: proc(codex: bool, caller: Caller) -> (r: Result, missing: bool) {
-	if codex do return codex_missing(caller)
+claude_harness_missing :: proc(harness: Harness, caller: Caller) -> (r: Result, missing: bool) {
+	switch harness {
+	case .Codex:       return codex_missing(caller)
+	case .Claude, .Pi: return claude_missing(caller) // .Pi: never a Claude tab's (claude_harness_check)
+	}
 	return claude_missing(caller)
 }
 
@@ -868,7 +947,8 @@ claude_harness_missing :: proc(codex: bool, caller: Caller) -> (r: Result, missi
 // their text, never sent. Held prompts have their own, stricter path (Claude_Deliver).
 codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
 	ct, is := &tab.kind.(Claude_Tab)
-	if !is || !ct.codex do return ""
+	if !is || !harness_is_codex(ct.harness) do return ""
+	if !replica_process && codex_plain_version(tab.id) != "" do return CODEX_PLAIN_REFUSAL // nothing typed into a plain tab
 	if why := codex_command_text(text); why != "" do return why
 	w := replica_process ? tab.live.claude_wait : claude_wait_of(tab, ct) // a window's replica: the core's (Tab_Live)
 	if tab.status != .Running do w = .Not_Running
@@ -881,8 +961,8 @@ codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
 // Whether id is a Claude Code conversation Deckhand can see: its history's, the disk index's, or a
 // transcript of p's (by stat, claude_disk_find; no scan). A Codex tab never claims one.
 claude_conversation_seen :: proc(p: ^Project, id: string) -> bool {
-	if r, _ := claude_record(id); r != nil && !r.codex do return true
-	if f := claude_disk_of(id); f != nil && !f.codex do return true
+	if r, _ := claude_record(id); r != nil && !harness_is_codex(r.harness) do return true
+	if f := claude_disk_of(id); f != nil && !harness_is_codex(f.harness) do return true
 	_, ok := claude_disk_find(p, id)
 	return ok
 }

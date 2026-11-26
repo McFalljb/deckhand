@@ -108,6 +108,7 @@ init :: proc "c" () {
 	client_call(core.System_Appearance{light = platform_system_light()}, .Internal) // before the attach: straight in
 	if !fallback {
 		platform_watch_appearance()
+		finder_drag_watch() // a Finder drag hovering the Files tree (files_drops_darwin.odin)
 		autotest_init()
 	}
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
@@ -150,6 +151,7 @@ init :: proc "c" () {
 	if !core.autotest_active || core.hook_env(.Data_Dir) != "" do core.titles_load(core.data_dir(context.temp_allocator))
 	core.claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
 	core.rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
+	core.rescan_at = time.tick_now() // a Rescan when the window comes to the front waits from here (commands.odin)
 	// control socket (socket.odin); `--print-token script|control` mints a
 	// token for local scripts and prints it once, as shell exports
 	// (development and test builds only: a release build mints a control token only from
@@ -213,6 +215,7 @@ init_separate :: proc(note := "") -> bool {
 	platform_terminate_hook(on_terminate)
 	menubar_install()
 	platform_watch_appearance()
+	finder_drag_watch() // a Finder drag hovering the Files tree (files_drops_darwin.odin)
 	autotest_init()
 	script_drain = client_drain // the script's commands go over core.sock
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
@@ -244,6 +247,10 @@ init_separate :: proc(note := "") -> bool {
 	}
 	if core.autotest_active do fmt.printfln("[autotest] core: attached to pid %d", client.core_pid)
 	if note != "" do toast_show(note)
+	if client.replaced_other_login {
+		client.replaced_other_login = false
+		toast_show(CORE_OTHER_LOGIN_TOAST)
+	}
 	// `deckhand DIR`: DIR's project, and a new chat there once the pane has a size
 	if app_args.dir != "" {
 		r, _ := client_call_wait(core.Add_Project{cwd = app_args.dir}, 5 * time.Second)
@@ -342,7 +349,7 @@ window_hooks_app :: proc() -> core.Window_Hooks {
 	return {
 		state_changed = proc() {app.redraw = true},
 		test_step = autotest_step,
-		test_event = autotest_on_event,
+		test_event = proc(ev: core.Event) {files_copy_on_event(ev); files_drops_on_event(ev); autotest_on_event(ev)}, // a Files copy's finished (ui_files_clip.odin), a Finder drop's (ui_files_drops.odin)
 		test_facts = client.host ? client_test_facts : nil, // the unit tests' host link (client.odin)
 	}
 }
@@ -362,6 +369,7 @@ on_system_appearance :: proc(light: bool) {
 // UI actions go through the inbox like every other caller; event() drains it
 // right after, so they apply in order before the next event.
 ui_do :: proc(cmd: core.Command) {
+	if sf, is := cmd.(core.Set_Focus); is && sf.widget != "files_name" do ui_focus_away += 1 // files_event_end
 	if window_only_quit(cmd) do return
 	if lost_core_save(cmd) do return
 	// a separate core: which widget has the keyboard is the core's (state.focus_widget), so the
@@ -503,6 +511,9 @@ frame :: proc "c" () {
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
+	if files_drag_tick() do app.redraw = true // a Files drag: a held folder opens, edge scroll (ui_files.odin)
+	if files_copy_tick() do app.redraw = true // a Files paste's copy finished: the next one (ui_files_clip.odin)
+	if files_drops_tick() do app.redraw = true // a Finder drop's next copy, a Finder drag's hover (ui_files_drops.odin)
 	holder_ask_tick() // a session holder from another build: asked once (below)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
 	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
@@ -550,7 +561,8 @@ frame :: proc "c" () {
 	browser_tick() // browser tabs follow the pane; new textures (browser.odin)
 	annot_tick() // their annotation overlays and markers (browser_annotate.odin)
 	browser_polish_tick() // their zoom, bars and fields (browser_polish.odin)
-	if app.pending_start && app.pane.z > 0 {
+	// the harness is chosen once pi's detection settled (launch_settled): kept pending till then
+	if app.pending_start && app.pane.z > 0 && launch_settled(app_args.claude) {
 		app.pending_start = false
 		cmd := launch_start(app_args.claude, app.launch_project)
 		if _, is := cmd.(core.New_Claude_Session); is do client_call(cmd) // the user's: in front, toast if Claude Code is missing
@@ -610,6 +622,7 @@ frame :: proc "c" () {
 	app_frames_committed() // slots this frame stopped showing go back once its GPU work is done
 	browser_frames_committed() // the same for browser tabs
 	app.redraw = font_frame_done() // the atlas grew or started over: draw again
+	images_frame_done() // closed or reloaded image tabs' textures (image_view.odin)
 	if t != nil do t.changed = false
 	for x in views_on_screen() do x.changed = false // every pane's terminal was drawn
 	if at != nil do at.changed = false
@@ -662,6 +675,9 @@ event :: proc(e: ^sapp.Event) {
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
 	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
+	if files_drag_out_event(e) do return // after a Files drag out of the window: its release goes nowhere (files_drag_out.odin)
+	files_event_begin(e) // did this event move the keyboard off a Files name field? (ui_files.odin)
+	defer files_event_end()
 	term_links_event(e) // ⌘ down or up, before anything takes the key (term_links.odin)
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
@@ -686,7 +702,11 @@ event :: proc(e: ^sapp.Event) {
 	}
 	// a peek (ui_peek.odin) is for looking: like the bell's popover it takes the keys and clicks
 	// (nothing reaches its terminal or what is under it); a ⌘ chord not its own closes it and goes on
+	if toast_event(e) do return // a toast's Undo (toast.odin)
 	if peek_event(e) do return
+	// a Files drag takes every key, paste and dropped file until it ends (Esc cancels): before the
+	// global shortcuts, so none acts mid-drag and nothing reaches a terminal (ui_files.odin)
+	if files_drag_event(e) do return
 	// ⌘K opens the palette from anywhere, and closes it
 	if e.type == .KEY_DOWN && e.key_code == .K && only_cmd {
 		ime_cancel()
@@ -1001,8 +1021,7 @@ event :: proc(e: ^sapp.Event) {
 		set_hover(nil, false)
 	case .MOUSE_SCROLL:
 		if over_sidebar(e.mouse_x) || over_right_column(e.mouse_x) {
-			clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-			clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+			chrome_scroll_event(e) // applied at the next layout (chrome_scroll.odin)
 			app.redraw = true
 		} else if mt != nil {
 			term_scroll(mt, e)
@@ -1156,17 +1175,19 @@ confirm_pending :: proc(token: string) {
 		case core.Pi_Reload: cmd = core.Pi_Reload{tab_id = c.tab_id, confirm = token}
 		case core.Pi_Reload_All: cmd = core.Pi_Reload_All{only_changed = c.only_changed, confirm = token}
 		case core.Pi_Restart_Updated: cmd = core.Pi_Restart_Updated{confirm = token}
-		case core.Claude_Restart_Changed: cmd = core.Claude_Restart_Changed{update = c.update, all = c.all, confirm = token}
+		case core.Claude_Restart_Changed: cmd = core.Claude_Restart_Changed{update = c.update, all = c.all, confirm = token, harness = c.harness}
+		case core.Claude_Restart_Anyway: cmd = core.Claude_Restart_Anyway{tab_id = c.tab_id, confirm = token}
 		case core.Reload_File: cmd = core.Reload_File{tab_id = c.tab_id, confirm = token}
-		case core.Delete_Path: cmd = core.Delete_Path{path = c.path, confirm = token}
+		case core.Delete_Path: cmd = core.Delete_Path{path = c.path, paths = c.paths, confirm = token}
 		case core.Create_File: cmd = core.Create_File{path = c.path, confirm = token}
 		case core.Create_Dir:  cmd = core.Create_Dir{path = c.path, confirm = token}
 		case core.Rename_Path: cmd = core.Rename_Path{from = c.from, to = c.to, confirm = token}
+		case core.Fs_Copy:     cmd = core.Fs_Copy{from = c.from, to = c.to, unique = c.unique, confirm = token}
 		case core.Worktree_Cleanup: cmd = core.Worktree_Cleanup{path = c.path, confirm = token}
 		case core.Job_Delete:  cmd = core.Job_Delete{job = c.job, confirm = token}
 		case core.Changes_Discard: cmd = core.Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}
 		case core.Markdown_Follow: cmd = core.Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
-		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, codex = c.codex, confirm = token}
+		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, harness = c.harness, confirm = token}
 		case core.Machine_Remove: cmd = core.Machine_Remove{no = c.no, confirm = token}
 		case core.Set_Machines_Reachable: cmd = core.Set_Machines_Reachable{on = c.on, confirm = token}
 		case core.Set_Web_Access: cmd = core.Set_Web_Access{on = c.on, confirm = token}
@@ -1245,7 +1266,8 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			} else if in_filter {
 				filter_enter()
 			} else if state.focus_widget == "rename_session" {
-				ui_do(core.Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				if r, _ := core.claude_record(rename_session); r != nil do ui_do(core.Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				else do ui_do_menu(core.Pi_Rename{pi_session_id = rename_session, name = tf_text(f)}, "Rename") // a pi session: its pi names it (pi_rename.odin); a refusal toasts
 				ui_do(core.Set_Focus{""})
 			} else {
 				ui_do(core.Rename_Project{state.selected_project, tf_text(f)})
@@ -1526,15 +1548,30 @@ launch_project :: proc(r: core.Result) -> u64 {
 	return r.ok ? r.created_id : 0
 }
 
-// What `deckhand DIR` starts in project pid once the pane has a size: a pi chat (a Claude session when
-// Claude Code is the only harness installed), or with --claude a
-// Claude session (the user's own launch: it comes to the front; without Claude Code a toast says
-// how to install it).
+// What `deckhand DIR` starts in project pid once the pane has a size: a pi chat (without pi, a
+// Claude session when Claude Code is installed, else a Codex session when Codex is), or with
+// --claude a Claude session (the user's own launch: it comes to the front; without Claude Code a
+// toast says how to install it).
 launch_start :: proc(claude: bool, pid: u64) -> core.Command {
 	if pid == 0 || core.find_project(pid) == nil do return nil // never the project that happened to be selected
-	if claude do return core.New_Claude_Session{project_id = pid}
-	if !core.pi_installed() && core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code alone (harness.odin)
-	return core.New_Chat{pid}
+	if claude do return core.New_Claude_Session{project_id = pid, harness = .Claude}
+	if !launch_settled(claude) do return nil // not yet: the frame asks again (launch_settled)
+	if !core.pi_installed() {
+		if core.claude_installed() do return core.New_Claude_Session{project_id = pid, harness = .Claude} // Claude Code without pi (harness.odin)
+		if core.codex_installed() do return core.New_Claude_Session{project_id = pid, harness = .Codex} // Codex alone
+	}
+	return core.New_Chat{project_id = pid}
+}
+
+// Whether `deckhand DIR` may choose its harness now: always with --claude; else once detection
+// settled. On a cold launch a harness counts as there while the login shell is asked
+// (harness_installed, harness.odin), and a user without pi would get a pi chat that exits 127 (or
+// without Claude Code, a Claude tab that does); the lookups always answer (harness_lookup_timeout)
+// and wake the window.
+launch_settled :: proc(claude: bool) -> bool {
+	if claude do return true
+	for h in core.Harness do _, _ = core.harness_installed(h) // starts a lookup where nothing found it by stat
+	return !core.harness_lookup_asking()
 }
 
 // Test mode's backing scale from DECKHAND_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty

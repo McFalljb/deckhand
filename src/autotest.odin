@@ -64,7 +64,8 @@ package main
 //                              added above it does not move the click
 //   assert_files TEXT          the Files tree's rows (indented names, "/" after open folders)
 //                              contain TEXT ("\n" = a line break); assert_not_files: do not
-//   dragid FROM INDEX TO       left drag from element FROM INDEX to element TO (centres)
+//   dragid FROM INDEX TO [INDEX]   left drag from element FROM INDEX to element TO (centres;
+//                              INDEX as clickid's, @PATH for a Files row)
 //   dragtab TAB WHERE [SLOT] [GAP] [esc|hold]   left drag of tab TAB (its index in the open
 //                              session's tabs) to WHERE: `strip SLOT GAP` (pane SLOT's strip, or
 //                              the title bar's with one pane, before its GAP-th tab), `centre SLOT`,
@@ -850,11 +851,14 @@ autotest_step :: proc() {
 			delete(autotest.clipboard)
 			autotest.clipboard = ""
 		case "dragid":
-			// a left drag from the centre of element FROM (index) to the centre of TO
+			// a left drag from the centre of element FROM INDEX to the centre of TO [INDEX] (each
+			// INDEX as clickid's: a number or a Files row's @PATH)
 			args := strings.fields(expand_vars(rest), context.temp_allocator)
-			from := clay.GetElementData(clay.ID(args[0], u32(num(args[1]))))
-			to := clay.GetElementData(clay.ID(args[2]))
-			if !from.found || !to.found {
+			fi, fok := script_index(args[:2])
+			ti, tok := script_index(args[2:])
+			from := clay.GetElementData(clay.ID(args[0], fi))
+			to := clay.GetElementData(clay.ID(args[2], ti))
+			if !fok || !tok || !from.found || !to.found {
 				if script_retry(idx) do return
 				script_fail("no element", rest)
 				continue
@@ -1716,7 +1720,7 @@ script_is_check :: proc(cmd: string) -> bool {
 	case "assert_file", "assert_not_file", "assert_tip", "assert_drawn", "assert_not_drawn", "assert_md", "assert_not_md",
 	     "assert_opened", "assert_menurows", "assert_revealed", "assert_toast", "assert_clipboard", "assert_notice",
 	     "assert_files", "assert_not_files", "assert_rows", "assert_link", "assert_drawn_selection", "assert_screen",
-	     "assert_not_screen", "assert_palette", "assert_selection", "assert_pane_selection", "assert_pane_cols", "hittest", "assert_in_window", "assert_window",
+	     "assert_not_screen", "assert_palette", "assert_selection", "assert_pane_selection", "assert_pane_cols", "hittest", "assert_in_window", "assert_under", "assert_window",
 	     "assert_menu", "assert_state", "assert_result", "assert_finished":
 		return true
 	}
@@ -1849,6 +1853,16 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		name := got == 1 ? "view" : (got == 0 ? "titlebar" : "nothing")
 		ok = name == args[2]
 		msg = ok ? fmt.tprint("assert ok: hit", args[0], args[1], "=", name) : fmt.tprintf("ASSERT FAILED hit %s %s: got %s, want %s", args[0], args[1], name, args[2])
+	case "assert_under":
+		// assert_under ID N ID2 N2: element ID N is laid out right under ID2 N2 (its top at the
+		// other's bottom, give or take a gap)
+		if len(args) < 4 do return false, "ASSERT FAILED under: usage assert_under ID N ID2 N2"
+		_ = ui_layout(sapp.widthf(), sapp.heightf())
+		a := clay.GetElementData(clay.ID(args[0], u32(num(args[1]))))
+		b := clay.GetElementData(clay.ID(args[2], u32(num(args[3]))))
+		gap := b.boundingBox.y + b.boundingBox.height
+		ok = a.found && b.found && a.boundingBox.y >= gap - 1 && a.boundingBox.y <= gap + 4 * app.dpi
+		msg = ok ? fmt.tprint("assert ok: under", rest) : fmt.tprintf("ASSERT FAILED under %s: %v (found %v) vs %v (found %v)", rest, a.boundingBox, a.found, b.boundingBox, b.found)
 	case "assert_in_window":
 		// assert_in_window ID: the element is laid out, wholly inside the window
 		_ = ui_layout(sapp.widthf(), sapp.heightf())

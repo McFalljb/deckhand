@@ -1,13 +1,14 @@
 package core
 
-// Claude rows and tabs at parity with pi's (docs/CLAUDE.md §4b): the history entry's transcript
+// Claude rows and tabs at parity with pi's (docs/CLAUDE-TABS.md §4b): the history entry's transcript
 // path and model (SessionStart), the model's switches (PostModelSwitch: claude.model), the row's
 // session info, Reveal and Copy path, the question and error dots (Stop, StopFailure), and the
 // user's rename pushed to Claude Code as its session title.
 //
-// Deckhand still never reads Claude Code's files: the transcript path is only a name the hook
-// reported, kept when it is a .jsonl under Claude's config dir's projects/ (real paths, so no `..`
-// and no symlink out of it), checked again before Reveal or Copy path use it.
+// Nothing here reads Claude Code's files (only claude_disk.odin reads transcripts, for the rows of
+// sessions found on disk): the transcript path is only a name the hook reported, kept when it is a
+// .jsonl under Claude's config dir's projects/ (real paths, so no `..` and no symlink out of it),
+// checked again before Reveal or Copy path use it.
 
 import "core:fmt"
 import "core:os"
@@ -23,7 +24,7 @@ Claude_Ended :: enum u8 {
 
 // From the tab's own plugin: its model changed (PostModelSwitch; also restoring it on resume).
 Claude_Model_Report :: struct {
-	tab_id: u64,
+	tab_id: u64 `cmd:"opt"`,
 	model:  string,
 }
 
@@ -41,7 +42,7 @@ claude_transcript_ok :: proc(path: string) -> string {
 	if !strings.has_suffix(path, ".jsonl") do return ""
 	// under any account's projects/ (claude_accounts.odin): each one is Claude's config folder
 	real := fs_real(path)
-	for cfg in claude_account_dirs() {
+	for cfg in claude_account_dirs(.Claude) {
 		root := fs_real(strings.concatenate({cfg, "/projects"}, context.temp_allocator))
 		if root == "" || real == root || !within(real, root) || !strings.has_suffix(real, ".jsonl") do continue
 		return real
@@ -87,6 +88,7 @@ claude_row_record :: proc(project_id: u64, id: string) -> ^Claude_Record {
 // to Claude Code as its sessionTitle).
 claude_rows_session :: proc(ct: ^Claude_Tab, c: Claude_Session_Report) -> string {
 	if c.source != "compact" do ct.ended = .None // a new conversation (a compaction keeps its turn)
+	claude_mode_report(c.tab_id, ct, c.permission_mode) // its permission mode, when SessionStart says it (claude_mode.odin)
 	rec, _ := claude_record(c.session_id)
 	if rec == nil do return ""
 	// the first path stays: a later report never repoints an entry's transcript (claude_transcript_ok)
@@ -149,9 +151,40 @@ claude_rows_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 
 // The tooltip line naming a Claude tab's model ("" = none).
 claude_tab_tip :: proc(tab: Tab) -> string {
+	if pt, is_pi := tab.kind.(Pi_Tab); is_pi { 	// its bridge's report (pi_tab_model_set)
+		if pt.model == "" do return ""
+		if pt.thinking != "" do return fmt.tprintf("pi · model %s · thinking %s", pt.model, pt.thinking)
+		return fmt.tprintf("pi · model %s", pt.model)
+	}
 	ct, is := tab.kind.(Claude_Tab)
-	if !is || ct.model == "" do return ""
-	return fmt.tprintf("%s · model %s", ct.codex ? "Codex" : "Claude Code", ct.model)
+	if !is do return ""
+	who := harness_is_codex(ct.harness) ? "Codex" : "Claude Code"
+	// its permission mode when not the default (claude_mode.odin)
+	mode := claude_mode_tip(ct)
+	if ct.model == "" do return mode != "" ? fmt.tprintf("%s · %s", who, mode) : ""
+	if mode != "" do return fmt.tprintf("%s · model %s · %s", who, ct.model, mode)
+	return fmt.tprintf("%s · model %s", who, ct.model)
+}
+
+// A pi tab's model from its bridge's pi.status: "provider/id" and the thinking level, each a short
+// word (claude_model_clean's characters; anything else: none). A status without them (an older
+// bridge, a lost connection) clears them.
+pi_tab_model_set :: proc(tab: ^Tab, c: Pi_Status_Update) {
+	pt, is := &tab.kind.(Pi_Tab)
+	if !is do return
+	id := claude_model_clean(c.model)
+	provider := claude_model_clean(c.provider)
+	model := id
+	if id != "" && provider != "" && !strings.has_prefix(id, strings.concatenate({provider, "/"}, context.temp_allocator)) do model = claude_model_clean(strings.concatenate({provider, "/", id}, context.temp_allocator))
+	thinking := id != "" ? claude_model_clean(c.thinking) : ""
+	if pt.model != model {
+		delete(pt.model)
+		pt.model = strings.clone(model)
+	}
+	if pt.thinking != thinking {
+		delete(pt.thinking)
+		pt.thinking = strings.clone(thinking)
+	}
 }
 
 // The snapshot's model of a Claude tab (claude_tab_json).
@@ -159,5 +192,9 @@ claude_rows_tab_json :: proc(b: ^strings.Builder, ct: Claude_Tab) {
 	if ct.model != "" {
 		strings.write_string(b, `,"model":`)
 		json_quote(b, ct.model)
+	}
+	if ct.permission_mode != "" { // claude_mode.odin
+		strings.write_string(b, `,"permission_mode":`)
+		json_quote(b, ct.permission_mode)
 	}
 }

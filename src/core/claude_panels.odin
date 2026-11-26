@@ -1,6 +1,6 @@
 package core
 
-// Claude tabs, part two (docs/CLAUDE.md §6a, §6b, §9): Claude's todos, subagents and background
+// Claude tabs, part two (docs/CLAUDE-TABS.md §6a, §6b, §9): Claude's todos, subagents and background
 // work as right-column panels, and claude_restart (a dead Claude tab's Restart, dead_tab.odin).
 //
 // The plugin's async hooks (integrations/claude-code/hooks/hooks.json, tools/deckhand-cli/
@@ -43,29 +43,29 @@ Claude_Todo_In :: struct {
 }
 // TodoWrite's whole list.
 Claude_Todos :: struct {
-	tab_id:   u64,
-	todos:    []Claude_Todo_In, // at most CLAUDE_TODOS_IN_MAX (json_read)
-	agent_id: string, // inside a subagent: that subagent's own list ("" = the main conversation's)
-	seq:      u64,
+	tab_id:   u64 `cmd:"opt"`,
+	todos:    []Claude_Todo_In `cmd:"log=len,codec=todos"`, // at most CLAUDE_TODOS_IN_MAX (json_read)
+	agent_id: string `cmd:"omit,log=cut:CLAUDE_KEY_MAX,last"`, // inside a subagent: that subagent's own list ("" = the main conversation's)
+	seq:      u64 `cmd:"opt"`,
 }
 // One task of the Task tools.
 Claude_Task :: struct {
-	tab_id:      u64,
-	event:       string, // created | updated | completed
-	task_id:     string,
-	subject:     string,
-	active_form: string,
-	status:      string, // updated: pending | in_progress | completed | deleted
-	seq:         u64,
+	tab_id:      u64 `cmd:"opt"`,
+	event:       string `cmd:"log=cut:16"`, // created | updated | completed
+	task_id:     string `cmd:"log=cut:CLAUDE_KEY_MAX"`,
+	subject:     string `cmd:"opt,log=-"`,
+	active_form: string `cmd:"opt,log=-"`,
+	status:      string `cmd:"omit,log=cut:16"`, // updated: pending | in_progress | completed | deleted
+	seq:         u64 `cmd:"opt,log=-"`,
 }
 Claude_Subagent :: struct {
-	tab_id:      u64,
-	event:       string, // launch | start | stop | tool
-	agent_id:    string, // start, stop, tool
-	agent_type:  string,
-	description: string, // launch
-	tool_name:   string, // tool: the tool it calls now
-	seq:         u64,
+	tab_id:      u64 `cmd:"opt"`,
+	event:       string `cmd:"log=cut:16"`, // launch | start | stop | tool
+	agent_id:    string `cmd:"omit,log=cut:CLAUDE_KEY_MAX"`, // start, stop, tool
+	agent_type:  string `cmd:"opt,log=-"`,
+	description: string `cmd:"opt,log=-"`, // launch
+	tool_name:   string `cmd:"opt,log=-"`, // tool: the tool it calls now
+	seq:         u64 `cmd:"opt,log=-"`,
 }
 // One task of a Stop's background_tasks.
 Claude_Bg_In :: struct {
@@ -78,20 +78,20 @@ Claude_Cron_In :: struct {
 }
 // Claude's background work: a launch (one task) or a Stop's snapshot (all of them).
 Claude_Background :: struct {
-	tab_id:      u64,
-	event:       string, // launch | snapshot
-	task_id:     string, // launch
-	kind:        string, // launch: shell
-	description: string, // launch
-	command:     string, // launch
-	tasks:       []Claude_Bg_In, // snapshot: at most CLAUDE_BG_IN_MAX (json_read)
-	crons:       []Claude_Cron_In, // snapshot: at most CLAUDE_CRONS_IN_MAX
-	seq:         u64,
+	tab_id:      u64 `cmd:"opt"`,
+	event:       string `cmd:"log=cut:16"`, // launch | snapshot
+	task_id:     string `cmd:"omit,log=cut:CLAUDE_KEY_MAX"`, // launch
+	kind:        string `cmd:"opt,log=-"`, // launch: shell
+	description: string `cmd:"opt,log=-"`, // launch
+	command:     string `cmd:"opt,log=-"`, // launch
+	tasks:       []Claude_Bg_In `cmd:"log=len,codec=bg_tasks"`, // snapshot: at most CLAUDE_BG_IN_MAX (json_read)
+	crons:       []Claude_Cron_In `cmd:"log=len,codec=bg_crons"`, // snapshot: at most CLAUDE_CRONS_IN_MAX
+	seq:         u64 `cmd:"opt"`,
 }
 // A dead Claude tab's Restart (dead_tab.odin, claude_tab_restart).
 Claude_Restart :: struct {
 	tab_id:     u64,
-	pick_model: bool, // Restart with model…: /model once the new Claude is ready (dead_tab.odin)
+	pick_model: bool `cmd:"omit"`, // Restart with model…: /model once the new Claude is ready (dead_tab.odin)
 }
 
 CLAUDE_TODOS_MAX :: 50 // kept per tab; a longer TodoWrite list shows "+N more"
@@ -256,12 +256,41 @@ work_of :: proc(tab_id: u64) -> ^Work {
 }
 
 // How many of a Claude tab's subagents run now (a restart waits for them: claude_reload.odin).
+// One silent for CLAUDE_AGENT_STALE still counts: silence never proves it ended (one long tool
+// call); claude_subagents_silent says so, and the user may restart such a tab anyway.
 claude_subagents_running :: proc(tab_id: u64) -> int {
 	w, has := claude_work[tab_id]
 	if !has do return 0
 	n := 0
 	for a in w.agents do if !a.done do n += 1
 	return n
+}
+
+// Tests: added to the clock claude_subagents_silent reads (a subagent hours old without waiting).
+when TEST_HOOKS {
+	claude_agents_clock_skew: time.Duration
+}
+
+// How long a Claude tab's running subagents have all been silent, when every one of them has
+// reported nothing for CLAUDE_AGENT_STALE (its SubagentStop lost, or one long tool call): the
+// shortest of their silences; else 0 (none runs, or one reported lately).
+claude_subagents_silent :: proc(tab_id: u64, now := time.Tick{}) -> time.Duration {
+	w, has := claude_work[tab_id]
+	if !has do return 0
+	now := now
+	if now == {} {
+		now = time.tick_now()
+		when TEST_HOOKS {
+			now = time.tick_add(now, claude_agents_clock_skew)
+		}
+	}
+	least := time.Duration(-1)
+	for a in w.agents do if !a.done {
+		d := time.tick_diff(a.last, now)
+		if d < CLAUDE_AGENT_STALE do return 0
+		if least < 0 || d < least do least = d
+	}
+	return max(least, 0)
 }
 
 // Whether a background task's status says it runs: only the ones known to (Claude Code's docs
@@ -747,7 +776,7 @@ claude_extra_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Re
 		}
 		if restart_waiting(tab.id) do return fail("this tab is restarting"), false
 		if s.missing do return fail("this session is gone"), false
-		// the saved flags are the user's to replay (CLAUDE.md §3)
+		// the saved flags are the user's to replay (CLAUDE-TABS.md §3)
 		r := claude_tab_restart(s, tab, caller.kind == .UI, c.pick_model && caller.kind == .UI) // Restart with model… is the user's
 		return r, r.ok // a refusal (still not installed, could not start) changes nothing
 	case Claude_Todos:
@@ -956,120 +985,4 @@ claude_extra_tab :: proc(cmd: Command) -> u64 {
 	case Claude_Restart:  return c.tab_id
 	}
 	return 0
-}
-
-claude_extra_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Claude_Todos:    return "claude.todos"
-	case Claude_Task:     return "claude.task"
-	case Claude_Subagent: return "claude.subagent"
-	case Claude_Background: return "claude.background"
-	case Claude_Restart:  return "claude_restart"
-	}
-	return ""
-}
-
-// For events and the command log: counts, events and ids, never Claude's text.
-claude_extra_write :: proc(b: ^strings.Builder, cmd: Command) {
-	#partial switch c in cmd {
-	case Claude_Restart:
-		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
-		if c.pick_model do strings.write_string(b, `,"pick_model":true`)
-	case Claude_Todos:
-		fmt.sbprintf(b, `,"tab_id":%d,"todos":%d,"seq":%d`, c.tab_id, len(c.todos), c.seq)
-		if c.agent_id != "" {
-			strings.write_string(b, `,"agent_id":`)
-			json_quote(b, cut_utf8(c.agent_id, CLAUDE_KEY_MAX))
-		}
-	case Claude_Background:
-		fmt.sbprintf(b, `,"tab_id":%d,"event":`, c.tab_id)
-		json_quote(b, cut_utf8(c.event, 16))
-		if c.task_id != "" {
-			strings.write_string(b, `,"task_id":`)
-			json_quote(b, cut_utf8(c.task_id, CLAUDE_KEY_MAX))
-		}
-		fmt.sbprintf(b, `,"tasks":%d,"crons":%d,"seq":%d`, len(c.tasks), len(c.crons), c.seq)
-	case Claude_Task:
-		fmt.sbprintf(b, `,"tab_id":%d,"event":`, c.tab_id)
-		json_quote(b, cut_utf8(c.event, 16))
-		strings.write_string(b, `,"task_id":`)
-		json_quote(b, cut_utf8(c.task_id, CLAUDE_KEY_MAX))
-		if c.status != "" {
-			strings.write_string(b, `,"status":`)
-			json_quote(b, cut_utf8(c.status, 16))
-		}
-	case Claude_Subagent:
-		fmt.sbprintf(b, `,"tab_id":%d,"event":`, c.tab_id)
-		json_quote(b, cut_utf8(c.event, 16))
-		if c.agent_id != "" {
-			strings.write_string(b, `,"agent_id":`)
-			json_quote(b, cut_utf8(c.agent_id, CLAUDE_KEY_MAX))
-		}
-	}
-}
-
-claude_extra_clone :: proc(cmd: Command, allocator := context.allocator) -> Command {
-	s :: proc(v: string, a := context.allocator) -> string {return strings.clone(v, a)}
-	#partial switch c in cmd {
-	case Claude_Todos:
-		out := make([]Claude_Todo_In, len(c.todos), allocator)
-		for t, i in c.todos do out[i] = {content = s(t.content, allocator), status = s(t.status, allocator), active_form = s(t.active_form, allocator)}
-		return Claude_Todos{tab_id = c.tab_id, todos = out, agent_id = s(c.agent_id, allocator), seq = c.seq}
-	case Claude_Task:
-		return Claude_Task{tab_id = c.tab_id, event = s(c.event, allocator), task_id = s(c.task_id, allocator), subject = s(c.subject, allocator), active_form = s(c.active_form, allocator), status = s(c.status, allocator), seq = c.seq}
-	case Claude_Subagent:
-		return Claude_Subagent{tab_id = c.tab_id, event = s(c.event, allocator), agent_id = s(c.agent_id, allocator), agent_type = s(c.agent_type, allocator), description = s(c.description, allocator), tool_name = s(c.tool_name, allocator), seq = c.seq}
-	case Claude_Background:
-		tasks := make([]Claude_Bg_In, len(c.tasks), allocator)
-		for x, i in c.tasks do tasks[i] = {id = s(x.id, allocator), kind = s(x.kind, allocator), status = s(x.status, allocator), description = s(x.description, allocator), command = s(x.command, allocator)}
-		crons := make([]Claude_Cron_In, len(c.crons), allocator)
-		for x, i in c.crons do crons[i] = {id = s(x.id, allocator), schedule = s(x.schedule, allocator), prompt = s(x.prompt, allocator), recurring = x.recurring}
-		return Claude_Background{tab_id = c.tab_id, event = s(c.event, allocator), task_id = s(c.task_id, allocator), kind = s(c.kind, allocator), description = s(c.description, allocator), command = s(c.command, allocator), tasks = tasks, crons = crons, seq = c.seq}
-	}
-	return cmd
-}
-
-claude_extra_free :: proc(cmd: Command, allocator := context.allocator) {
-	#partial switch c in cmd {
-	case Claude_Todos:
-		for t in c.todos {
-			delete(t.content, allocator)
-			delete(t.status, allocator)
-			delete(t.active_form, allocator)
-		}
-		delete(c.todos, allocator)
-		delete(c.agent_id, allocator)
-	case Claude_Task:
-		delete(c.event, allocator)
-		delete(c.task_id, allocator)
-		delete(c.subject, allocator)
-		delete(c.active_form, allocator)
-		delete(c.status, allocator)
-	case Claude_Subagent:
-		delete(c.event, allocator)
-		delete(c.agent_id, allocator)
-		delete(c.agent_type, allocator)
-		delete(c.description, allocator)
-		delete(c.tool_name, allocator)
-	case Claude_Background:
-		for x in c.tasks {
-			delete(x.id, allocator)
-			delete(x.kind, allocator)
-			delete(x.status, allocator)
-			delete(x.description, allocator)
-			delete(x.command, allocator)
-		}
-		delete(c.tasks, allocator)
-		for x in c.crons {
-			delete(x.id, allocator)
-			delete(x.schedule, allocator)
-			delete(x.prompt, allocator)
-		}
-		delete(c.crons, allocator)
-		delete(c.event, allocator)
-		delete(c.task_id, allocator)
-		delete(c.kind, allocator)
-		delete(c.description, allocator)
-		delete(c.command, allocator)
-	}
 }

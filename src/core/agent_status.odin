@@ -391,14 +391,14 @@ status_owner_gone :: proc(t: ^Term, tab: ^Tab) -> bool {
 // Internal: a tab's OSC 7501 records changed (status_pump).
 Program_Status :: struct {
 	tab_id:  u64,
-	summary: Prog_Summary, // strings borrowed
+	summary: Prog_Summary `cmd:"codec=prog_summary,borrow"`, // strings borrowed
 }
 
 // "Mark as unread" / "Mark as read": a tab (tab_id), or an open session
 // (pi_session_id: unread marks its active tab, read clears all its tabs).
 Set_Unread :: struct {
-	tab_id:        u64,
-	pi_session_id: string,
+	tab_id:        u64 `cmd:"omit"`,
+	pi_session_id: string `cmd:"omit"`,
 	unread:        bool,
 }
 
@@ -610,6 +610,21 @@ Status_Mark :: enum u8 {
 	Auth, // it wants a login: a lock
 	Done, // finished, not seen yet: a check
 	Error, // stopped with an error: "!"
+}
+
+// As a browser names them (web_view.odin webst:<session>; web/src/status.ts Mark).
+STATUS_MARK_NAMES := [Status_Mark]string {
+	.None       = "none",
+	.Idle       = "idle",
+	.Exited     = "exited",
+	.Working    = "working",
+	.Progress   = "progress",
+	.Waiting    = "waiting",
+	.Permission = "permission",
+	.Question   = "question",
+	.Auth       = "auth",
+	.Done       = "done",
+	.Error      = "error",
 }
 
 // The mark for a status (a tab's, or the tab a row's status came from).

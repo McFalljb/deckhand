@@ -537,11 +537,11 @@ wt_claude_session_in_a_worktree :: proc(t: ^testing.T) {
 	defer os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	wt_scan_now(f.main)
 	p := state.projects[0]
-	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = p.id, cwd = fmt.tprintf("%s/home", f.root)}, {kind = .UI}).ok, "not elsewhere")
-	r := core.run_command(core.New_Claude_Session{project_id = p.id, cwd = f.dirty}, {kind = .UI})
+	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = p.id, cwd = fmt.tprintf("%s/home", f.root), harness = .Claude}, {kind = .UI}).ok, "not elsewhere")
+	r := core.run_command(core.New_Claude_Session{project_id = p.id, cwd = f.dirty, harness = .Claude}, {kind = .UI})
 	if !testing.expect(t, r.ok, r.error) do return
 	s := core.find_session(r.created_id)
 	if !testing.expect(t, s != nil && s.agent == .Claude) do return

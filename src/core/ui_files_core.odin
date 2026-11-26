@@ -11,4 +11,11 @@ Files_Step :: enum u8 {
 	Rename,
 	Copy_Path,
 	Copy_Relative,
+	Open_Side, // Open to the side: open_file, then split_pane with that tab
+	// the window's file clipboard and the tree's own delete (ui_files_clip.odin)
+	Copy,
+	Cut,
+	Paste,
+	Duplicate,
+	Trash,
 }

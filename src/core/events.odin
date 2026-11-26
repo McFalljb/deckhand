@@ -16,6 +16,7 @@ Command_Event :: struct {
 	changed:    bool,
 	command:    Command,
 	result:     Result,
+	confirmation: u64, // the pending confirmation this run consumed (Pending_Confirmation.id; 0 = none)
 }
 
 Finished_Event :: struct {

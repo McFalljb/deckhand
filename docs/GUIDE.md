@@ -73,7 +73,8 @@ above the tabs with **Cancel** and **Confirm**.
 - macOS 14 or later on Apple silicon (arm64). Intel Macs are not supported.
 - At least one coding agent: pi 1.4.0 or later, Claude Code 2.1.295 or later, or Codex 0.163.0 or
   later. An older pi runs without Deckhand's integration ([pi in Deckhand](#pi-in-deckhand)); an
-  older Claude Code runs with status from Deckhand's hooks only; an older Codex does not start.
+  older Claude Code runs with status from Deckhand's hooks only; an older Codex (0.157.0 or later)
+  runs as a plain terminal tab, and one older than that does not start.
   Atlas and jobs need pi. The [first run](#the-first-run) can install them.
 - Optional: [other machines](#machines) you reach with `ssh`: Macs on Apple silicon, or Linux on
   x86_64. Deckhand installs its core there for you.
@@ -173,9 +174,10 @@ Deckhand finds more than one Claude Code account):
 4. **Your folders**: the layout as a small tree. **Done** makes the missing folders, empty, and
    closes the sheet. Nothing already there is moved or changed. The step also says whether
    Claude Code is installed (Deckhand looks for `claude`, never runs it): Claude tabs need it,
-   nothing else does; with one account it names its folder. With both pi and Claude Code it says
-   that **New session** asks which one to start; with Claude Code alone, that pi isn't installed
-   (Atlas and jobs need it); with neither, how to install one. When your pi is older than 1.4.0
+   nothing else does; with one account it names its folder. It says the same of Codex. With two or
+   more of pi, Claude Code and Codex it says that **New session** asks which one to start; with one
+   alone, that **New session** starts it (and, without pi, that Atlas and jobs need pi); with none,
+   how to install one. When your pi is older than 1.4.0
    it says so too (see [pi in Deckhand](#pi-in-deckhand)).
 
 **Skip for now** (or Esc on the first step) closes it for good: jobs stay off, and the Jobs tab
@@ -195,7 +197,7 @@ is installed into pi or written to `~/.pi`: pi outside Deckhand runs exactly as 
 
 It needs **pi 1.4.0 or newer**. When Deckhand sees (from pi's files on disk; it never runs pi to
 ask) that your pi is older, it starts pi without the integration and a bar over the tab says so,
-with **Copy update command** (`pi update`) and **Dismiss**; the setup sheet says so too, with
+with **Copy update command** (`pi update --self`) and **Dismiss**; the setup sheet says so too, with
 **Update** for the layouts it can update. Update pi,
 then restart the tab.
 
@@ -252,6 +254,11 @@ start fresh.
   a new one**. Either way, new tabs keep running again.
 - **Stop All Sessions, a logout or a restart of the Mac**: everything stops. The next start
   restores your sessions. Scheduled jobs wait until Deckhand runs again.
+- **A Deckhand Core or session holder left from an earlier login**: programs started there can't
+  look up accounts, reach the system's DNS or use the GPU compiler, so Deckhand replaces them when
+  you open it: a toast says "Replaced Deckhand's core from an earlier login", and another how many
+  sessions restart. As after Stop All, pi, Claude and Codex resume their conversations and shells
+  start fresh.
 
 **When Deckhand Core stops by itself.** With no window, no tab's program running, no job run, no
 scheduled job and nothing running on another machine it is linked to (whose alerts it shows) for
@@ -294,7 +301,9 @@ settings. The Developer ID will close that gap.
   kept there do not show in Deckhand.
 - A **chat** is a conversation (pi, Claude Code or Codex) outside any project. Chats run in one
   folder, the main folder's `chats/` (or `~/Chats` without a main folder, or the folder you
-  chose), so `cd <that folder> && pi --resume` finds them too. That folder has its own **chat
+  chose), so `cd <that folder> && pi --resume` finds them too. Codex Desktop's Chat-mode
+  conversations (each in its own folder under `~/Documents/Codex`) list in Chats too and resume in
+  their own folder. The chats folder has its own **chat
   instructions** (`AGENTS.md`, which pi and Codex read there besides your global one): the
   starter makes the agent a conversation partner and researcher, not a coding agent. It
   explains, looks things up, cites sources and draws diagrams in text. Edit them with the
@@ -504,7 +513,10 @@ Green is not a session's colour: it means a machine is online, or a job's last r
 pi tabs report through Deckhand's pi integration ([pi in Deckhand](#pi-in-deckhand)). Any other program in a terminal tab can report too, with
 the OSC 7501 program status protocol: Claude Code (2.1.295 or newer) does by itself. When both
 could speak for a pi tab, its bridge wins. Hover a mark's tab or row to see what it is in words,
-what it said, where it came from (pi bridge or OSC 7501) and for how long.
+what it said, where it came from (pi bridge or OSC 7501) and for how long. Hovering a pi tab also
+shows its model and thinking level ("pi · model anthropic/claude-sonnet-4-5 · thinking high"), as
+a Claude tab shows its model; after a switch in pi it follows (an older Deckhand pi integration
+reports none).
 
 Waiting work is never hidden: hidden rows, folded sections and filters always leave sessions
 that wait for you visible.
@@ -665,7 +677,8 @@ is waiting for you).
 ### Everyday tasks
 
 - **To add a project**, click **+** on the PROJECTS heading and pick a folder, drop a folder onto
-  the left column, or use the palette's "Add project…" (with nothing open, the centre has an
+  the left column (anywhere but the Files tab's list, where a drop copies files: see the Files
+  tab), or use the palette's "Add project…" (with nothing open, the centre has an
   **Add project…** button beside **New chat**). From a terminal, `build/deckhand DIR`
   adds DIR and starts a new session there.
 - **To open a session**, click it. If it is already open, Deckhand shows it instead of starting it
@@ -674,8 +687,11 @@ is waiting for you).
   row), use the **⌄** menu, or press ⇧⌘N (in the selected project). `build/deckhand --claude DIR`
   starts a Claude session in DIR.
 - **To start a new chat**, click the New chat button in the top bar or **+ New chat**, or press ⌘N.
-- **Which agent starts.** Deckhand looks for pi, Claude Code and Codex (it never runs them to find
-  out). With more than one installed, **New session** and **New chat** open a small picker: **pi**,
+- **Which agent starts.** Deckhand looks for pi, Claude Code and Codex the same way, as a new tab
+  would find them: on your PATH, in the folder its own installer uses, in nvm's and fnm's folders
+  (nvm loaded lazily too), then by asking your login shell (so one that another setup in
+  `~/.zprofile` puts on PATH is found too); a tab starts the copy Deckhand found. It never runs
+  them to find out. With more than one installed, **New session** and **New chat** open a small picker: **pi**,
   **Claude Code** and **Codex** (once per account when you have several), each with its icon,
   under the button or row you used. ↑↓ and Enter, a number key (1, 2…, the keypad's too) or a click picks; Esc closes it. The one you used last comes first and is selected, so
   Enter starts it again. With only one installed it starts at once, without a picker; with
@@ -715,7 +731,9 @@ is waiting for you).
 - **To pin** a project or session to the top of its section, click the pin on its row or use
   **…** → Pin. Pinned rows get Move up / Move down in the same menu.
 - **To rename a project**, use **…** → Rename…, or the palette's "Rename project". A pi session
-  is named in pi: type `/name My title` in the session. A Claude row: **…** → Rename….
+  is named in pi: type `/name My title` in the session, or, while it is open here and pi is idle,
+  **…** → Rename… on its row (type the name, Enter): Deckhand asks that pi to name it, as `/name`
+  does, so pi's own session list shows the name too. A Claude row: **…** → Rename….
 - **To hide** a project or session, use **…** → Hide. Nothing is deleted.
 - **To see hidden rows**, click the sort button on a section heading and tick **Show hidden**
   (or the palette's "Show hidden projects and sessions"). Hidden rows then show, and their menu
@@ -727,7 +745,9 @@ is waiting for you).
 - **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
-- **To pick up new sessions** started outside Deckhand, use the gear's "Rescan sessions".
+- **New sessions** started outside Deckhand (pi, Claude Code or Codex in a terminal, Codex
+  Desktop) show when you come back to the window, or a paired browser connects: Deckhand looks
+  again then, at most once every 3 minutes. To look now, use the gear's "Rescan sessions".
 
 ### Chats settings
 
@@ -892,12 +912,12 @@ session's pi.
 
 When you ask an agent to open or show a file "in a tab", it shows it in Deckhand: pi with its
 `desk_show` tool, Claude with `deckhand show`. A Markdown file opens in a
-[Markdown tab](#markdown-tabs), rendered; any other text file opens in an editor tab, at a line
-if the agent gives one. A pi or Claude tab shows files only in its own session, right after its
+[Markdown tab](#markdown-tabs), rendered; an image shows as a picture ([Editor tabs](#editor-tabs));
+any other text file opens in an editor tab, at a line if the agent gives one. A pi or Claude tab shows files only in its own session, right after its
 own tab; Atlas names the session. The tab opens behind the one you are looking at, and a file
 already open is not opened twice. It is display only: the agent cannot edit the tab, and nothing
-of it goes back to the agent. Agents are refused credentials and secret files (`.env`, keys,
-`~/.ssh`…), binary files, files over 20 MB, network and iCloud-only files, and more than 20 such
+of it goes back to the agent. Agents are refused coding agents' sign-ins and secret files (keys,
+`~/.ssh`…; a project's `.env` is shown like any file), other binary files, files over 20 MB (images: 64 MB), network and iCloud-only files, and more than 20 such
 tabs per session.
 
 ### Browser tabs
@@ -1075,7 +1095,8 @@ your first message (or the name you or Claude Code gave the conversation), read 
 and end of the file only; nothing else of the transcript is read or shown, and agents never get
 its path. Subagent and side-chain files are never rows. Click one to resume it in a Claude
 session under its account. Folders where only Claude Code ran (by the folder each transcript
-records) show up as projects. A row whose transcript is gone is greyed and reads **transcript
+records) show up as projects, never your home folder itself (a project you add there yourself
+stays). A row whose transcript is gone is greyed and reads **transcript
 gone**. **Rescan sessions** looks again.
 
 #### Claude accounts
@@ -1121,6 +1142,41 @@ you show it, and your Restart. It is never stored with a tab, so once you turn i
 those get it any more. Tabs and sessions that Atlas, a pi tab, a Claude tab or an app opens or
 restarts never get it.
 
+**Flags for a tab.** To start Claude Code, Codex or pi with command-line flags of your own (a
+model, a permission mode, `--mcp-config`, Codex's `-m`, `-s`, `-a`, `-p`, `--search`, pi's
+`--model` or `--thinking`), use **New Claude tab with flags…** or **New Codex tab with flags…**
+(the tab strip's **+**, a project's menu and the palette, while that agent is installed) or **New
+session with flags…** (the **+**, a project's menu, the palette, and **With flags…** at the end of
+the New session picker; with more than one agent installed it asks which: **pi with flags…**,
+**Claude Code with flags…**, **Codex with flags…**).
+A one-line field opens, filled with the flags you last used for that agent in this window; type
+them as on a command line (quotes work, `"be brief"` is one word; nothing is expanded: no `$VAR`,
+`~` or globs) and press Enter. Each agent's own rule applies: flags Deckhand sets itself, or that
+pick another session, print instead of opening the agent's screen, or would turn off Deckhand's
+hooks or tools are refused, and the field's row says why before anything starts (it names the
+flag, never its value). Claude Code's own `--settings` is allowed, as your `settings.json` is: a flag or
+setting that turns hooks off (`disableAllHooks`) leaves the tab without Deckhand's status, rows,
+comments and held messages, and the bar over the tab says so. Claude and Codex
+tabs keep their flags (a resume, a restore and your Restart use them again); a pi session uses them
+when it starts (pi itself remembers the session's model when it resumes). These flags are yours
+only: Atlas, scripts and apps cannot pass them. For another machine's project they go there as you
+typed them: that machine's Deckhand checks them and adds its own default flags, never this Mac's
+(its Deckhand must be 0.7.0 or later). A Claude or Codex tab whose permission mode is not the
+default says so after its title (**plan**, **accept edits**; **auto**, **bypass** in the warning colour…).
+A Codex tab shows only what its start flags allowed (**bypass**, **full access**, **never asks**):
+no badge there does not mean Codex asks first, since a mode set inside Codex or in its config is
+not seen. The badge is information, not a lock.
+
+**Default flags.** Settings › Coding agents has a **Default flags…** row in each agent's card (in
+the palette: **Default Claude Code flags…**, **Default Codex flags…**, **Default pi flags…**): one line each, checked by the same rule
+when you save it. They go before a tab's own flags each time you start that agent yourself (for
+Claude Code and Codex: a new tab, session or chat, your resume, a restored tab you show, your
+Restart; for pi: a new session), and a default the tab's own flags name too is left out, so
+`--model opus` on a tab beats a default `--model sonnet`. Like **Skip permissions in new tabs**
+they are never stored with a tab and never reach a tab Atlas, a script, a pi tab or an app starts.
+Only you, at this Mac, can change them: not an agent, a script, another machine or a paired
+browser.
+
 **Without Claude Code.** Deckhand works the same without it: **New session** and **New chat**
 start pi at once (no picker), and the Claude-only menu rows (**New Claude tab**) are not shown.
 The palette's and the menu bar's **New Claude tab** read "… — Claude Code not installed", and
@@ -1137,11 +1193,12 @@ PATH and in pi's managed install (`$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`)
 it; when neither has it, it asks your login shell (`command -v pi`, as a pi tab's shell would find
 it: nvm, fnm, mise or pnpm set up in `~/.zprofile`), and until that answers, pi counts as
 installed. Without pi, **New session** and **New chat** start the one you have at once (no
-picker when only one is installed), `deckhand DIR` starts Claude Code, Atlas's
+picker when only one is installed), `deckhand DIR` starts Claude Code (Codex when it is the
+only one installed), Atlas's
 button is not shown and ⌘J says that Atlas needs pi, and a job's run fails with "Jobs run pi,
 which was not found…" (Atlas and jobs run on pi for now). The Settings page, the palette and the gear
-show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With neither pi nor Claude Code,
-**New session** says how to install either. After installing, use **Refresh shell
+show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With no coding agent installed,
+**New session** says how to install one. After installing, use **Refresh shell
 environment** or restart Deckhand.
 
 **When Claude exits**, its tab stays with its last output and a bar: "Claude exited (code 1)" and
@@ -1179,7 +1236,8 @@ A Codex tab runs the [Codex CLI](https://github.com/openai/codex) (`codex`) in a
 the session's folder, with your login shell's environment and **your own Codex settings**
 (`~/.codex/config.toml`: model, sandbox, approvals, profiles). Deckhand adds only its hooks, for
 that run, so it knows the conversation's id and when Codex is working or waiting for you; nothing
-is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
+is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed for all of this; an
+older one from 0.157.0 runs as a plain terminal tab (below).
 
 - **Start one**: **New session** and pick **Codex** (listed once Codex is installed), **New Codex
   tab** in a project's or session's menu, or the palette's **New Codex tab** (in the session on
@@ -1190,8 +1248,15 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   message) appears then. **Resume** from the row continues it (`codex resume`); a session that was
   open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
   title only; Codex keeps its own. Codex conversations you ran outside Deckhand in the project's
-  folder are listed too (from `~/.codex/sessions/`, the last 60 days or so; read, never changed),
-  as "Untitled Codex session" with their date: a click resumes one.
+  folder are listed too (from `~/.codex/sessions/` and each Codex account's, however old, the
+  ones Codex Desktop compressed too; read, never changed), titled
+  with the name Codex gave the thread (its `session_index.jsonl`), else "Untitled Codex session"
+  with their date: a click resumes one. The first look reads each conversation's first line once,
+  in the background; Deckhand remembers what it read, so later launches read only new ones. Only
+  conversations you had with Codex (in a terminal or Codex Desktop) count, never `codex exec`
+  runs or Codex's own subagents. Folders where only Codex ran show up as projects, as Claude
+  Code's do (never your home folder itself); **Rescan sessions** looks again and drops one no
+  conversation records any more (unless you added or named it).
 - **Comments** go to a Codex tab as to a Claude tab: with your next message, or **Send now** (when
   Codex is idle and you have typed nothing), and **Send and close**; Changes' button reads **Ask
   Codex to review**.
@@ -1200,7 +1265,10 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   a `!` shell line, a `$skill` or an `@mention` into Codex: such a text is refused, with why.
 - **Bars over the tab**: *Codex is signed out* (sign in on Codex's own screen in the tab, or run
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
-  in a dialog). A Codex older than 0.163.0 does not start: the tab, and the refusal, say how to update
+  in a dialog). A Codex older than 0.163.0 (but 0.157.0 or later) starts as a plain tab: you use it
+  as in any terminal, without Deckhand's hooks and status (no status mark, no row to resume, no held
+  messages, comments or Deckhand's tools), and a bar says how to update; **Restart** the tab after
+  updating. A Codex older than 0.157.0 does not start: the tab, and the refusal, say how to update
   for how it was installed (`npm install -g @openai/codex@latest` for npm; Codex's own installer run
   again for its standalone install), as does Settings › **Coding agents**.
 - **Deckhand's tools**: Codex can show you files in tabs and use your session's browser and app
@@ -1213,10 +1281,22 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   you start Codex yourself (a new tab or session, your resume, a restored tab you show, your
   Restart), never to a tab Atlas, a script or an app starts, and not to a tab whose own flags pick
   a sandbox or approval mode.
-- **Extra flags** on a tab (yours only, as for Claude) are checked against Codex's own: flags that
-  would change Deckhand's hooks or tools, the tab's folder, Codex features or profiles (set those in
-  your `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …)
-  are refused, with why.
+- **Extra flags** on a tab (yours only, as for Claude: **New Codex tab with flags…**, **Default
+  Codex flags…**, see [Flags for a tab](#claude-code-tabs)) are checked against Codex's own: flags
+  that would change Deckhand's hooks or tools, the tab's folder or Codex features (set those in your
+  `~/.codex/config.toml`), or run a Codex command instead of the composer (`exec`, `login` …) are
+  refused, with why. A profile is allowed by its plain name (`-p work`: Codex reads
+  `<Codex home>/work.config.toml` over your config; Deckhand's own settings still come last); a
+  profile can turn hooks off or bring hooks of its own, which Codex asks you to review, as in
+  `config.toml`.
+- **"Update available"**: at start, Codex shows its own update prompt in the tab until you update it
+  or skip that version; answer it there.
+- **Settings changed**: edit a file a running Codex reads only when it starts (your Codex home's
+  `config.toml`, `AGENTS.md`, `hooks.json`, `prompts/`, `rules/` when saved in Deckhand, or the
+  project's `AGENTS.md`) and a bar says *Codex settings changed — Restart N idle Codex tabs*:
+  **Restart** resumes each conversation in its tab (busy ones once idle), after you confirm. What
+  Codex writes there itself (trusting a folder, `/model`, "always allow") does not count; skills
+  need no restart: Codex picks them up itself.
 - **On another machine**: **+ New session** under one of its projects (or **New Codex tab** in its
   menu) starts Codex there, with that machine's own Codex, settings and sign-in (its own **Full
   access in new Codex tabs**, never this Mac's); its Codex rows open there too. It needs Deckhand
@@ -1293,7 +1373,9 @@ as it does anywhere else.
 - **To scroll**, use the wheel or trackpad (pi handles its own scrolling).
 - **To make the text bigger or smaller**, press ⌘+ or ⌘− (⌘0: back to the look's size), or use
   the View menu. It sets the terminals' and the editor's text size and is remembered.
-- **To paste a file's path**, drag its row from the Files tab onto the terminal.
+- **To paste a file's path**, drag its row from the Files tab onto the terminal (a selection of
+  several: all their paths, separated by spaces). It goes to the pane you let go over, not the
+  focused one.
 - **Links**: hold **⌘** over a link to underline it and see where it goes (at the bottom of the
   terminal); **⌘-click** opens it in your default browser, and a mail link in your mail app.
   **⇧⌘-click** opens a web link in a new browser tab of the session, in front (in your default
@@ -1314,6 +1396,10 @@ as it does anywhere else.
 
 Deckhand has a small code editor with syntax highlighting.
 
+- **Highlighted languages**: C, C++, Objective-C, Odin, Go, Rust, Zig, Python, JavaScript,
+  TypeScript (and JSX/TSX), Lua, shell, Makefiles, Dockerfiles, HTML, CSS, JSON, YAML, TOML, INI
+  and Markdown, in editor tabs and in Markdown code blocks. Other files show as plain text.
+
 - **To open a file**, click it in the Files tab (a single click opens a *preview* tab that the
   next click replaces; double-click, Enter or editing keeps it), or press ⌘P and type part of its
   name. A double-click on a preview tab keeps it too.
@@ -1329,9 +1415,16 @@ Deckhand has a small code editor with syntax highlighting.
   **Compare** (a diff with the disk), **Keep mine** (your next save overwrites the file) and
   **Reload** (take the disk's version; one undo step). A file deleted on disk shows "Deleted on
   disk: ⌘S saves it again".
-- Deckhand does not open binary files, files over 20 MB, or **credential files**: pi's sign-ins
-  (`auth.json` and similar), other private files in pi's folder, and `.env` files. They show
-  "Credentials file: managed by pi (/login), not opened".
+- **Images**: a PNG, JPEG, GIF (its first frame) or BMP shows as a picture, read-only: centred,
+  shrunk to fit the pane (never enlarged past its own size), over a checkerboard where it is
+  transparent, with its type, size in pixels and file size under it. It follows the file on disk.
+  There is no zoom. Images over 64 MB or 100 megapixels, and images that cannot be decoded,
+  say they can't be shown. WebP shows in a browser only; an SVG opens as text (a browser also
+  previews it).
+- Deckhand does not open other binary files, files over 20 MB, or **credential files**: pi's sign-ins
+  (`auth.json` and similar), other private files in pi's folder, and Claude's and Codex's sign-ins
+  and state. They show "Credentials file: managed by pi (/login), not opened". A project's `.env`
+  opens and saves like any file.
 
 ## Markdown tabs
 
@@ -1356,25 +1449,128 @@ guide).
 
 ## The Files tab
 
-**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of the session on
-screen, else of the selected project. Press ⇧⌘E again to go back to Sessions.
+**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of what you picked
+last: the session you showed, or a project you selected in the Sessions tab (even while a session
+of another project stays on screen). The header names the project. Press ⇧⌘E again to go back to
+Sessions.
 
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
-  (deleted) and **!** (conflict). Gitignored files are left out; `.git` never shows.
-- **Mouse**: a click opens a folder or previews a file; drag a row onto a terminal to paste its
-  path.
-- **Keyboard** (while the tree has focus): ↑/↓ move, ←/→ close or open (or go to the parent or
-  child), Enter opens, Space previews, F2 renames, ⌘⌫ moves to the Trash (it asks first), Esc
-  gives the keyboard back.
-- **Header buttons**: New file, New folder, Collapse all, Refresh, Reveal in Finder.
-- **Row menu** (**…** or right-click): Open, Open in preview, New file…, New folder…, Rename…,
-  Move to Trash…, Reveal in Finder, Copy path, Copy relative path, Open terminal here, and for
-  `.md` files Open Markdown preview.
+  (deleted) and **!** (conflict). Gitignored files show dimmed; the header's eye (Hide ignored files /
+  Show ignored files) hides them and takes them out of the selection, and is kept across restarts.
+  `.git` never shows.
+- **Icons**: each row has a folder (open or closed) or a file icon by kind: code, docs, config,
+  images, shell scripts, package manifests and lock files, git files, `.env` files, archives and
+  binaries, and agent instructions (`AGENTS.md`, `CLAUDE.md`).
+- **Mouse**: a click opens a folder or previews a file; ⌘-click adds or removes a row, shift-click
+  selects a range (neither opens anything); a right-click selects the row (one already selected
+  keeps the selection), then opens its menu; drag a row out of the tree onto a pane (below).
+- **To drop files on a pane**, drag a row (or a selection it is in) out of the tree. Only the pane
+  under the pointer when you let go gets it, whichever pane is focused; it is outlined while you
+  drag, and the dragged name says what will happen:
+  - **Paste path**: a terminal gets the paths, each quoted for the shell, separated by spaces.
+  - **Insert into prompt**: a pi, Claude Code or Codex tab gets the paths typed into its prompt,
+    separated by spaces (quoted only when a name has a space or a quote; for Codex also one
+    starting with / ! $ or @). Nothing is sent: you press Enter. Codex refuses it while it is
+    working or asking something; a toast says why.
+  - **Open here**: an editor, Markdown, browser, Changes or app tab (or an empty pane) opens the
+    files as tabs in that pane; folders are not opened. A file already open in another pane moves
+    here, unless it is that pane's only tab. A file Deckhand will not open (a credential, for
+    example) is named in a toast.
+
+  A tab whose program has exited takes nothing. Letting go over no pane (the title bar, the
+  drawer) does nothing; **Esc** cancels. A name with a control character (a newline) is never
+  typed anywhere.
+- **To copy files in from Finder**, drop them on the Files tab's list: onto a folder to copy into
+  it, onto a file to copy next to it, below the last row to copy to the top of the project. The
+  target folder is highlighted while you hover. A name that is taken gets " copy" ("a copy.txt",
+  then "a copy 2.txt"); nothing is ever overwritten. Folders are copied whole, except `.git`
+  folders and sign-in files (credentials), which are left out; links are copied as links. Files
+  that look like secrets (keys such as `id_ed25519` or `*.pem`, `~/.ssh`, `~/.aws`, `.netrc`, …)
+  are never copied in this way: dropped alone they are refused, inside a folder they are left out,
+  and the toast names them. Move them yourself if you mean to. A toast
+  says what was copied where and what was left out ("Copied a.txt, pics to src/"). Only you, in
+  Deckhand's own window, can copy files from outside your projects this way; a browser, scripts
+  and agents cannot. Dropped on the left column outside the list (or on the Sessions tab), a
+  folder becomes a project as before.
+- **To move files**, drag a row (or a selection it is in) within the tree: onto a folder to move
+  it there, onto a file to move it next to that file, below the last row to move it to the top of
+  the project. The target folder is highlighted while you drag. Hold the pointer over a closed
+  folder to open it, or near the top or bottom of the list to scroll. **Esc** cancels the drag;
+  other keys and ⌘V do nothing until you let go.
+  Nothing asks first; a toast says where the items went ("Moved a.txt to src/"). Nothing moves
+  if the target is the item itself, a folder inside it, or the folder it is already in. Nothing
+  moves either if the target has an item with the same name; a toast says so. If a move is
+  refused part-way (a terminal working in that folder, for example), the toast names the item;
+  what already moved stays moved.
+  **Hold ⌥ when you let go** to copy instead (the dragged label
+  reads "+ Copy …"): a name the folder already has gets " copy" ("a copy.txt"), and dropping on
+  the items' own folder duplicates them.
+- **To copy, cut and paste**: ⌘C copies the selection, ⌘X cuts it (its rows dim until you paste or
+  press Esc), ⌘V pastes into the selected folder (or the selected file's folder, else the top of
+  the project). A copy whose name is taken there becomes "name copy" ("a copy.txt", then
+  "a copy 2.txt"); a cut never renames: if the name is taken, nothing moves and a toast says so.
+  A cut stays in its project: showing another project or checkout drops it. A copy can be pasted
+  into another project. Items hidden since (ignored files hidden) are not pasted.
+  ⌘D duplicates the selection next to itself. ⌘C also puts the paths on the clipboard as text,
+  quoted for a shell, so ⌘V in a terminal pastes them; text on the clipboard never pastes into the
+  tree. One copy runs at a time: a toast says "Copying 3 items…", then what was copied, what was
+  left out (a `.git` folder and sign-in files are never copied; the toast counts them and names each `.git`, a sign-in only as "a credential"),
+  or where it stopped; the copies are then selected. Pasting while a copy runs says "A copy is
+  still running".
+- **Undo** (⌘Z while the tree has the keyboard, or the **Undo** button on the toast): undoes the
+  tree's last operation done in this window: a new file or folder goes to the Trash (only while it
+  is unchanged: a file with the same size and modification time, an empty folder), a rename or
+  move goes back (not if something now has the old name), a copy goes to the Trash (only while
+  unchanged; a copied folder: nothing in it changed, and the confirmation bar asks first), a Move
+  to Trash comes back from the Trash (all of a batch; if part of it cannot, the toast says how many
+  came back and ⌘Z tries the rest again). The last 20 operations
+  are kept until the tree shows another project or checkout; there is no redo. Anything changed
+  since is not undone ("Not undone: a.txt changed since"). In an editor tab ⌘Z is the editor's.
+- **To copy files to another app** (macOS), drag rows out of the window: Finder copies them (never
+  moves them), a terminal gets their paths, other apps get the files. Credential files, and folders
+  holding one (or too large to check), stay behind.
+- **Keyboard** (while the tree has focus): ↑/↓ move (⇧ extends the selection), ←/→ close or open
+  (or go to the parent or child), Enter opens, Space previews, F2 renames, ⌘A selects every row
+  shown, ⌘⌫ moves the selection to the Trash, ⌘C ⌘X ⌘V ⌘D copy, cut, paste and duplicate, ⌘Z
+  undoes, Esc clears a selection of several (then a cut), else gives the keyboard back. Typing letters jumps to the next
+  row whose name starts with them (a pause of a second starts over); they never reach a terminal.
+- **Opening goes by the file's project**: in the session on screen when it is that project's,
+  else in the project's **Files** session, which comes on screen (listed as "Files" under Open):
+  file tabs only, no agent, one per project, back after a relaunch (one pane); it closes with its
+  last tab, and terminals, browser and agent tabs need a real session (New session). Any reason a
+  file does not open (sign-ins, too large, binary, gone) shows as a toast.
+- **Header buttons**: New file, New folder, Collapse all, Hide/Show ignored files, Refresh, Reveal
+  in Finder.
+- **New file / New folder**: the name field opens as the first row of the folder (the selected
+  folder, the selected file's, else the project's), opened and scrolled to; an error shows under
+  it. Enter (or a click elsewhere) creates and selects it; Esc, or no name, cancels.
+- **Move to Trash** (⌘⌫ or the menu): nothing asks first, as in Finder; the toast says what went
+  and has **Undo**. It asks first (the confirmation bar: how many folders and files, the first five
+  names) when Deckhand cannot promise to put it back: an item on another disk than your home
+  folder's (a USB disk, a network share), or more than 200 items. Agents, scripts, browsers and
+  other machines always ask, as before.
+- **Rename**: Enter or a click elsewhere renames, Esc cancels. Changing only the case
+  (`readme.md` → `README.md`) works. Only your own click or shortcut commits; a focus change
+  from an agent or script cancels.
+- **Row menu** (**…** or right-click): Open, Open in preview, Open to the side (in a new pane on
+  the right), New file…, New folder…, Cut, Copy, Paste (muted while nothing is cut or copied),
+  Duplicate, Rename…, Move to Trash, Reveal in Finder, Copy path, Copy relative path, Open
+  terminal here, and for `.md` files Open Markdown preview. On a selection of several: Move N
+  items to Trash, Cut, Copy, Duplicate, Copy paths and Copy relative paths (one per line).
+- **Refused**: renaming or trashing a folder a running terminal tab works in (the message names
+  the tab; close it first). It knows the folder a tab started in, not one a shell `cd`'d to later.
+  Only you, in the window, can rename a credential's file (a sign-in, in any case; a key) to a
+  name that is not a credential's, or move or trash anything into, out of or above an agent's
+  sign-in folder (pi's agent folder, Claude's and Codex's folders); agents and browsers cannot.
+- **Trash on a Linux core**: the XDG Trash (`~/.local/share/Trash`, where file managers restore
+  from); a file on another disk is refused, never deleted for good.
 - **Filter**: type in the field above the tree to match paths loosely.
 - **Folders inside folders**: a folder that is a project of its own (or a session's worktree)
   opens in the tree it sits in like any other folder, and so does a symlinked folder (in place,
-  wherever it points).
+  wherever it points). You, in the window, can rename, move, trash or duplicate such a folder
+  there (once moved or trashed, its project shows as missing); agents, scripts and browsers
+  cannot, and nobody can on a project folder that is not inside another.
 - **A folder that cannot be opened** shows a red line under it saying why, with **Retry**. "macOS
   needs permission" means macOS privacy protects it (Desktop, Documents, Downloads, iCloud Drive,
   removable and network volumes): allow Deckhand in **System Settings › Privacy & Security ›
@@ -1422,8 +1618,8 @@ What a session changed in its git checkout, and what to do about it.
   - Each row shows **+added −removed** lines (**bin** for a binary file).
 - **On the right**, the selected file's diff (added lines green, removed red). Scroll, select
   and copy (⌘C) as in an editor tab, ⌘F finds. Long diffs stop at 5,000 lines: **Show more**
-  adds 5,000. Binary files and credentials files (`.env`, keys, pi's sign-ins) are listed but
-  never shown.
+  adds 5,000. Binary files, credentials files (pi's sign-ins) and secret-looking names (`.env`,
+  keys) are listed but their diff is never shown.
 - **Moving between files**: **J** / **K** or **↓** / **↑**, or the **↑** **↓** buttons above the
   diff.
 - **Buttons above the diff**: **Open** opens the file in an editor tab at the hunk you clicked
@@ -1471,21 +1667,21 @@ buttons), with a search box on top.
   the settings that bound what other machines and agents may do here: **Allow other machines to
   connect**, **Machines over SSH** and your machines list, the pi extensions, and the default
   flags (Claude Code's **Skip permissions in new tabs**, Codex's **Full access in new Codex
-  tabs**); your notifications too. **Next start** and **Next launch** badges say when a change
+  tabs**, and each agent's **Default … flags…**); your notifications too. **Next start** and **Next launch** badges say when a change
   takes effect.
 - **Deckhand writes only its own settings.** pi's, Claude Code's and Codex's config are files:
   under a card, **Advanced: open the file** lists them. Click one to open it in an ordinary
   editor tab of the session you opened the page from (this Mac's sessions only; otherwise a toast
   asks you to open a session on this Mac first). A missing file shows **Create**: it is made only
   when you click, then opened. Rarely used files are under **All files… (N more)**. Clicking a
-  folder (`prompts/`, `skills/`, `extensions/`…) shows its files in the search.
+  folder (`prompts/`, `skills/`, `extensions/`, `themes/`…) shows its files in the search.
 - **Search** ("Search settings and files") matches settings by their names, words and hints, and
   files by name and path, including the files inside the listed folders and in the project's
   `.pi/` (git-ignored ones too). It never finds credentials. Esc clears it.
 
 **Right-click a file or folder row** for the same menu as before: **Open**, **Open in preview**,
 **Open Markdown preview** (Markdown files), **New file…** and **New folder…** (inside `prompts/`
-and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`,
+and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`, `themes/`,
 `extensions/` and a project's `.pi/`, never pi's own config files; Trash asks first), **Reveal in
 Finder** and **Copy path**. A file still to create has only **Copy path**. New file, New folder
 and Rename open a name field at the top of the page: Enter saves, Esc cancels. A new file opens
@@ -1525,7 +1721,7 @@ installed; Claude Code's files once it has been used.
 
 **pi.** Its files: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),
 `modes.json`, `keybindings.json`, `mcp.json`, your global instructions file (`AGENTS.md` or
-similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills` and `extensions`.
+similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills`, `extensions` and `themes`.
 Only these: never sessions, logs or sign-ins. Each pi extension's config file and folder, when it
 has one, are here too.
 
@@ -1555,13 +1751,28 @@ then shows pi-kit's shell. Your pi tab starts either way.
 
 **Claude Code.** Once Claude Code has a config folder (`~/.claude` or your `CLAUDE_CONFIG_DIR`):
 `settings.json`, `CLAUDE.md`, `keybindings.json`, and the folders `agents`, `skills`, `commands`,
-`output-styles`, `rules`. With Claude Code installed, also **Skip permissions in new tabs** (for
+`output-styles`, `rules`. With that folder there, also **Skip permissions in new tabs** (for
 `--dangerously-skip-permissions`) with a warning line (see [Claude Code tabs](#claude-code-tabs)),
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
 own files.
 
+**Plugins** and **MCP servers (user)** list what Claude Code has, by name only (with several
+accounts, each row names its account). Plugins come from `enabledPlugins` in `settings.json`,
+each marked enabled or disabled; turn one on or off with `/plugin` in Claude Code, and running
+Claude tabs then offer **Restart** (plugins load when Claude starts). The MCP servers are your
+user-scope ones (`claude mcp add --scope user`), each with its transport (stdio, http, sse);
+Deckhand reads only their names and transport from Claude Code's account file, never their
+commands, URLs, headers or environment, and that file itself is still never shown or opened.
+These lists change only in Claude Code (`/plugin`, `claude mcp`).
+
 **Codex.** Its version and how it was installed, as the checklist has it, **Full access in
 new Codex tabs** and your Codex accounts with **Add account…** (see [Codex tabs](#codex-tabs)).
+Once Codex is installed and has its folder (`~/.codex` or your `CODEX_HOME`): `config.toml`,
+`AGENTS.md`, `AGENTS.override.md`, and the folders `prompts`, `skills`, `rules`, each account's
+own, open and save like Claude Code's; `hooks.json` and `hooks/` show **read-only**. Its sign-in
+(`auth.json`), its sessions and history are never listed, opened or saved over; **Plugins** lists
+the plugins Codex installed by name and version only (their folders' names; nothing in them is
+opened).
 
 ### Machines
 
@@ -1721,7 +1932,7 @@ the project's `.claude/settings.json` (**Create** when missing), `.claude/settin
   [hot-reload bar](#hot-reload) shows at once and offers **Reload** for the running pi tabs that
   read it (after saving `ATLAS.md`, only Atlas). Claude Code applies its `settings.json` files and
   `keybindings.json` by itself; after saving a Claude file it reads only at start (`CLAUDE.md`,
-  `.mcp.json`…), the Claude bar shows at once.
+  `.mcp.json`, a `settings.json` whose `enabledPlugins` changed…), the Claude bar shows at once.
 
 ## Hot reload
 
@@ -1771,14 +1982,18 @@ files (permissions, hooks, env…), `keybindings.json`, skills and subagents. De
 alone. What a running Claude reads only when it starts: the `CLAUDE.md` and `CLAUDE.local.md`
 files (yours in `~/.claude`, the project's and the folders above it), rules, output styles and
 commands (`~/.claude/rules`, `output-styles`, `commands`, and the project's `.claude/` ones), the
-project's `.mcp.json`, a new `agents` or `skills` folder, and Deckhand's own Claude plugin.
+project's `.mcp.json`, a new `agents` or `skills` folder, the plugins turned on or off
+(`enabledPlugins` in a `settings.json`), and Deckhand's own Claude plugin.
 
 When one of those changes, a bar says "Claude Code settings changed — Restart 1 idle Claude tab".
 **Restart** starts each idle Claude tab again on the same conversation (`claude --resume`, with
 your extra flags); Deckhand asks first, because anything Claude runs in the background there
 (background shells, monitors) stops. A tab that is working, waiting for you, has something typed
-or a subagent running restarts once it is idle. **Details** lists the files and each Claude
-tab; **Later** hides the bar until the next change.
+or a subagent running restarts once it is idle. A subagent that has reported nothing for 2 hours
+may have lost its end report, or may still be in one long step, so its tab still waits: the bar
+then names the tab ("a subagent silent for 2h 05m") and offers **Restart anyway**, which restarts
+that tab now after you confirm; the other tabs restart without waiting for it. **Details** lists
+the files and each Claude tab; **Later** hides the bar until the next change.
 
 **After a Claude Code update.** Deckhand notes which Claude Code each Claude tab started with, by
 looking at where `claude` points (it never runs it). When Claude Code updates itself, a bar says
@@ -2201,6 +2416,28 @@ Away from `localhost` the page is not a secure context for the browser, so:
   selected and a **Copy** button that tries the browser's older copy command; if that fails,
   copy it by hand.
 
+### HTTPS with Tailscale Serve
+
+If your devices are on a Tailscale network, Tailscale Serve can put Deckhand's page behind HTTPS,
+with a certificate the browser trusts, at `https://<the Mac's name>.<your tailnet>.ts.net/`:
+
+1. In Settings › Machines, set **Listen address…** to `127.0.0.1:7433`, so only Serve (and this
+   Mac) reaches the plain HTTP page.
+2. In Terminal on the Mac: `tailscale serve --bg 7433`. It prints the address; the first time,
+   it may ask you to turn on HTTPS certificates for your tailnet in Tailscale's admin console.
+3. On the phone (signed in to the same tailnet), open that `https://` address and pair it as
+   above. It is a new address, so it is a new pairing.
+
+`tailscale serve status` shows what Serve shares, and `tailscale serve --https=443 off` stops
+sharing it. Use Serve, never `tailscale funnel`, which publishes the page to the whole internet.
+Another HTTPS reverse proxy works the same way if it passes WebSocket upgrades and keeps the
+browser's `Host` header: the page refuses a connection whose origin is not the address it was
+opened at, so a proxy that rewrites `Host` shows the page but never connects.
+
+Over HTTPS the page is a secure context: **Copy** puts text on the clipboard directly, without
+the box. Notifications still show only in the page and the bell: Deckhand doesn't send system or
+push notifications to a browser yet.
+
 ### One view at a time
 
 A core shows its sessions in one place at a time. A browser that opens takes the view from the
@@ -2216,10 +2453,26 @@ views this one.
 The browser has the window's layout: the left column (Sessions, Files, Jobs), the session's tabs
 and terminals, split panes, the Deck, the palette, the bell, the right column's panels, Atlas's
 drawer, Jobs and the job sheet, the Changes tab, the Files tab, and file tabs (Markdown rendered,
-editor tabs with line numbers and editing; ⌘S saves, Ctrl+S off a Mac). A file changed on disk follows
-when you have not edited it, and asks when you have. The Settings page shows every setting; the
+editor tabs with line numbers, syntax colours and editing; ⌘S saves, Ctrl+S off a Mac; images
+as pictures, WebP too, up to 8 MB; an SVG has **Preview**/**Source**). A file changed on disk follows
+when you have not edited it, and asks when you have. In the Files tab the arrows, Home and End move
+the selection, Enter opens, F2 renames, Delete or ⌘⌫ moves to the Trash (the confirmation bar asks);
+right-click or a row's **…** has Open, Open to the side, New file, New folder, Rename, Move to
+Trash and Copy (relative) path; new names are typed in the tree where they go; the open file's row is
+shown; git letters and colours are the window's; an icon shows each file's kind; gitignored files show dimmed, and the eye in the tree's header hides them (remembered per browser). ⌘-click, shift-click, shift-arrows and ⌘A (Ctrl off a Mac) select several rows (on a phone: **Select** in a row's sheet, then tap rows), Delete or the menu moves them all to the Trash with one confirmation (at most 500), **Copy paths** copies them one per line, and typing a name's first letters goes to it.
+Drag rows (or the selection) onto a folder, a file (its folder) or the empty space below (the top folder) to move them there, without asking; a closed folder opens when you hover over it, and a name already there is refused, never renamed. On a phone, or from the keyboard, **Move to…** in the row's menu or the selection bar picks the folder. With a row focused, ⌘C / ⌘X / ⌘V / ⌘D (Ctrl off a Mac; also **Copy**, **Cut**, **Paste here**, **Duplicate** in the menu, sheet and selection bar) copy, cut, paste into the selected folder (else the selected file's folder, else the top) and duplicate in place; a copy's clash becomes `name copy`, a cut's clash is refused, and Option-dragging copies; this clipboard is the page's own (a Copy also puts the quoted paths on the system clipboard). ⌘Z in the tree, or a toast's **Undo**, undoes the page's last 20 tree operations (new item, rename, move, copy, a confirmed delete put back from the Trash), refused when the item changed since; it is cleared when the folder or session changes or the page reloads.
+**Filter files** (the field under the tree's header; on a phone the magnifier shows it) lists the project's files that match every word you type, as a flat list (name, then its folder), best first; ↑ ↓ and Enter open one, and Esc clears the filter and goes back to the tree with the file you opened shown. Ignored files are never searched; past 100 matches it says to type more.
+**Another checkout in a browser**: the tree's name (with its branch) opens the project's checkouts (a menu; on a phone a sheet). (Only for a project that is its repository's top folder.) Choosing one switches this page's tree only, never the window's, and the browser remembers it per project. There the tree is read-only (no New, Rename, Move, Trash, Copy, Cut, Paste, Duplicate or Undo; *Read-only here: open a session in this checkout to change files*): files open and read, but saving or changing them is refused until a session runs in that checkout (or the window's switcher shows it).
+The Sessions column's filter and its Running, Waiting and Pinned chips are each browser's own:
+they narrow that browser's list and never the Mac's (until the core restarts).
+The Settings page shows every setting; the
 ones a browser can't change show their value and *Change this at the Mac*. Hovering a Deck card
-peeks at that session.
+peeks at that session. **New session** offers what the window's picker does there (the coding agents
+installed, once per account with the project's own first, the last used agent first; one starts
+at once). Over a Claude, Codex or pi tab, a strip shows the window's bars as text (held messages,
+hooks not running, an old version, Codex signed out, the hot-reload bars) with their buttons where
+a browser may use them (**Send now**, **Drop**, **Reload**, **Restart**, **Restart anyway**,
+**Later**, copying the update command); their **Dismiss** and **Details** are the window's.
 
 **Not in a browser:** browser tabs and app tabs (they show a note there; open them at the Mac),
 adding or removing machines, **Continue this conversation on <machine>**, the Settings page's
@@ -2244,9 +2497,29 @@ without Shift goes to the terminal (Ctrl+S in a file tab saves).
 
 Below 760 pixels wide the page is the phone's: the left column full width (or the Deck), then a
 session one tab at a time. Under a terminal: a key bar (Esc, Tab, Ctrl and Alt that stay down
-for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you) and a
-text field that takes dictation and autocorrect, sent with Enter. The keyboard button switches
-to raw keys, sent to the terminal as you type. A long press on a Deck card peeks at that session.
+for the next key, the arrows, ^C; 1, 2, 3, y, n and Enter while the agent waits for you). Tap
+the terminal, or **Show keyboard** under it, to type: each key goes straight in, as on a desktop (a
+menu, a sheet or another tab stops the typing until you tap again); the phone's keyboard may learn
+the words typed there, as in any text field. For dictation, autocorrect, a long message, or a
+long-press Paste, the session menu (⋯) has **Type in a text box**: a box under the terminal whose
+text goes in once with Enter, then the box closes. To copy part of a terminal, **Select text** in
+the same menu shows its scrollback and screen (the last 5,000 rows, a wrapped line joined) as text:
+touch and hold to select with the phone's own handles, then **Copy** (or **Copy all** with nothing
+selected); **Copy screen text** copies the rows on screen. Drag a terminal up or down to scroll it as the
+mouse wheel would: its scrollback, or inside a full-screen program (less, an agent) what the wheel
+sends there. A tab whose program exited shows **Restart** (an agent's) and **Close** (any but
+pi's), as at the Mac. When the session's agents publish panels (pi's, or a Claude tab's Todos,
+Subagents and Background), the panels button in the session's bar shows how many and opens them
+in a sheet, kept up to date; folding one there doesn't fold it at the Mac. A long press on a Deck card peeks at that session; on a row of the Files view
+(the folder button) it opens that row's menu as a sheet, where **Insert path** types that file's
+path into the tab as a drop on it does at the Mac (never Enter; a name with a control character
+is refused). **Atlas** (its button on the home screen, or the palette) opens full screen under its
+own bar, typed into like a session. It is the phone's own: opening or closing it never opens or
+closes Atlas's drawer at the Mac. When Atlas isn't running (or has never run, with pi
+installed), **Start Atlas** starts it, without opening it at the Mac or taking the Mac's keyboard. The filter box and its chips (Running,
+Waiting, Pinned) are the phone's own: they never change the Mac's left column, nor another
+browser's. The palette leaves out what would only change the Mac's window: split panes, the
+columns, dim panes, Show changes, Show hidden and the left column's sorts.
 
 ### From a terminal (Linux)
 
@@ -2459,8 +2732,8 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 
 ### Privacy
 
-- Deckhand never shows, opens or logs credential files (pi's sign-ins, private files in pi's
-  folder, `.env`), not on the Settings page, in the Files tab's editor, or to Atlas.
+- Deckhand never shows, opens or logs credential files (coding agents' sign-ins and state,
+  private files in pi's folder), not on the Settings page, in the Files tab's editor, or to Atlas.
 - Connection tokens for the control socket are never logged or saved.
 - Deckhand's only network call of its own is the [update check](#updates) (and the download
   you start with **Update**), to GitHub. Only pi (and its extensions) talk to model providers.
@@ -2705,11 +2978,18 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Shortcut | Action |
 |---|---|
 | ↑ ↓ ← → | Move, close or open folders |
+| ⇧↑ ⇧↓ | Extend the selection |
+| ⌘A | Select every row shown |
+| Letters | Jump to the next row whose name starts with them |
 | Enter | Open |
 | Space | Open in preview |
 | F2 | Files: rename |
-| ⌘⌫ | Files: move to Trash (asks first) |
-| Esc | Give the keyboard back |
+| ⌘⌫ | Files: move the selection to Trash (no confirmation on your home folder's disk; Undo) |
+| ⌘C ⌘X ⌘V | Files: copy, cut, paste into the selected folder |
+| ⌘D | Files: duplicate the selection |
+| ⌘Z | Files: undo the tree's last operation (new, rename, move, copy, Move to Trash) |
+| ⌥ while dragging | Files: copy instead of move |
+| Esc | Clear a selection of several, then a cut, else give the keyboard back (while dragging: cancel the move) |
 
 **Atlas's drawer**: ⌃L opens pi's model selector (the Model button).
 
@@ -2729,6 +3009,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New browser tab |  | a web page in the session on screen (its address field takes the keyboard) |
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen, with Deckhand's plugin |
 | New Codex tab |  | Codex in the session on screen, with Deckhand's hooks and tools ([Codex tabs](#codex-tabs)) |
+| New Claude tab with flags…, New Codex tab with flags… |  | the same, with flags you type on one line first ([Flags for a tab](#claude-code-tabs)) |
+| New session with flags… |  | a new session in the selected project, picking the agent, with flags you type first |
+| Default Claude Code flags…, Default Codex flags…, Default pi flags… |  | the flags that go before a tab's own in every start of that agent you make (Settings › Coding agents; only you, at this Mac) |
 | Skip permissions in new tabs |  | on or off: your new Claude tabs start with `--dangerously-skip-permissions` (asks first when turned on) |
 | Full access in new Codex tabs |  | on or off: your new Codex tabs start with `--dangerously-bypass-approvals-and-sandbox` (asks first when turned on) |
 | Add Claude account… |  | add a Claude Code config folder as an account (a folder picker) |
@@ -2811,7 +3094,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Text size: Small, Text size: Medium, Text size: Default, Text size: Large |  | the chrome's text size |
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
-| Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts) |
+| Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts, Codex's rollouts) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |

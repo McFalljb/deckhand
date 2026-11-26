@@ -83,6 +83,11 @@ md_code_language :: proc(info: string) -> ^Language {
 	case "md":                              name = "markdown"
 	case "yml":                             name = "yaml"
 	case "h":                               name = "c"
+	case "c++", "cxx", "hpp":               name = "cpp"
+	case "objective-c", "objectivec", "objective-c++", "objc++": name = "objc"
+	case "htm", "xhtml":                    name = "html"
+	case "makefile", "mk", "mak":           name = "make"
+	case "docker", "containerfile":         name = "dockerfile"
 	}
 	if l := language_by_name(name); l != nil do return l
 	return language_for_path(strings.concatenate({"x.", name}, context.temp_allocator))

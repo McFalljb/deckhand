@@ -75,7 +75,7 @@ for (const L of LOOKS) {
 }
 const { dark, light } = looks.graphite;
 
-const KEYS = ["bg_app", "bg_sidebar", "bg_panel", "bg_elevated", "bg_field", "hover", "selected", "text", "text_secondary", "text_muted", "text_on_accent", "border", "accent", "selection", "scrim", "shadow", "running", "waiting", "done", "error", "line_number", "diff_added", "diff_modified", "diff_removed", "syn_comment", "syn_keyword", "syn_string", "syn_number", "syn_function", "syn_type", "syn_heading", "syn_link"];
+const KEYS = ["bg_app", "bg_sidebar", "bg_panel", "bg_elevated", "bg_field", "hover", "selected", "text", "text_secondary", "text_muted", "text_on_accent", "border", "accent", "selection", "scrim", "shadow", "running", "waiting", "done", "error", "line_number", "diff_added", "diff_modified", "diff_removed", "syn_plain", "syn_comment", "syn_keyword", "syn_string", "syn_escape", "syn_number", "syn_constant", "syn_function", "syn_type", "syn_property", "syn_attribute", "syn_tag", "syn_operator", "syn_punctuation", "syn_heading", "syn_link"];
 const vars = (t) => KEYS.map((k) => `  --${k.replace(/_/g, "-")}: ${t[k]};`).join("\n");
 
 // the other looks: the page sets data-look and data-light on <html> (app/App.tsx)

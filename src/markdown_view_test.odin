@@ -91,6 +91,83 @@ markdown_links_by_caller :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.error, "no such file") // followed (not asked): b.md does not exist
 }
 
+// A web link with user:pass@ that another program asks to follow: the question (the bar's, the
+// event's and the log's summary, the snapshot's pending confirmation) shows the address
+// without them, and so the real host of https://good.example@evil.example.
+@(test)
+markdown_link_question_redacted :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, tab := md_setup(t, "a.md", "[a](https://user:pass@host.example/p?q=1) [b](https://good.example@evil.example/x)\n")
+	ctl := core.Caller{kind = .Control}
+	cmd := core.Markdown_Follow{tab_id = tab, url = "https://user:pass@host.example/p?q=1"}
+	r := core.run_command(cmd, ctl)
+	testing.expect_value(t, r.error, "needs_confirmation")
+	testing.expectf(t, strings.has_suffix(r.confirm_summary, ": open https://host.example/p?q=1?"), "%q", r.confirm_summary)
+	ev := core.event_json(core.Command_Event{caller = ctl, command = cmd, result = r})
+	testing.expectf(t, !strings.contains(ev, "user:pass"), "event holds user:pass: %s", ev)
+	snap := core.state_json()
+	testing.expectf(t, !strings.contains(snap, "user:pass"), "snapshot holds user:pass")
+	r = core.run_command(core.Markdown_Follow{tab_id = tab, url = "https://good.example@evil.example/x"}, ctl)
+	testing.expectf(t, strings.has_suffix(r.confirm_summary, ": open https://evil.example/x?"), "%q", r.confirm_summary)
+	testing.expect_value(t, len(opened), 0)
+}
+
+@(private = "file")
+md_events: [dynamic]string
+
+// What Atlas's desk_run sees of a web or mail link it asks to follow (the pi bridge's
+// confirmation wait, integrations/pi/lib/commands.ts parkedFor and confirmedBy): the command it
+// sends, Deckhand's needs_confirmation reply, get_state's pending_confirmations and the event of
+// the user's confirmed run, as the core writes them, for links that the redacted encoding
+// changes (user:pass@, a query and a fragment, a mail address). Written to
+// build/pi-confirmations.json; integrations/pi/test/fixtures/confirmations.json must be the same
+// (the pi tests drive the bridge with it).
+@(test)
+markdown_link_confirmations_for_pi :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	URLS :: [?]string{"https://user:pass@host.example/p?code=abc123&state=xyz#frag", "https://docs.example/a?q=1#sec", "mailto:alice@example.com?subject=hi"}
+	doc := strings.builder_make(context.temp_allocator)
+	for u in URLS do fmt.sbprintf(&doc, "[x](%s)\n\n", u)
+	_, tab := md_setup(t, "a.md", strings.to_string(doc))
+	saved := core.window.test_event
+	defer core.window.test_event = saved
+	core.window.test_event = proc(ev: core.Event) {
+		if e, ok := ev.(core.Command_Event); ok && e.caller.kind == .UI do append(&md_events, strings.clone(core.event_json(ev), runtime.heap_allocator()))
+	}
+	out := strings.builder_make(context.temp_allocator)
+	strings.write_string(&out, "{\"cases\":[")
+	for u, i in URLS {
+		clear(&md_events)
+		cmd := core.Markdown_Follow{tab_id = tab, url = u}
+		r := core.run_command(cmd, {kind = .Control})
+		testing.expect_value(t, r.error, "needs_confirmation")
+		pend := strings.builder_make(context.temp_allocator)
+		core.write_pending_confirmations(&pend, state.pending_confirmations[:])
+		reply := strings.builder_make(context.temp_allocator)
+		core.write_result(&reply, r)
+		token := state.pending_confirmations[len(state.pending_confirmations) - 1].token
+		ok := core.run_command(core.Markdown_Follow{tab_id = tab, url = u, confirm = token}, {kind = .UI})
+		testing.expect(t, ok.ok, ok.error)
+		testing.expect_value(t, len(md_events), 1)
+		// the confirmation's id, in all three: the reply, the snapshot's entry, the confirmed run's event
+		id := fmt.tprintf("%d", r.confirm_id)
+		testing.expect(t, r.confirm_id != 0, "the reply has an id")
+		testing.expectf(t, strings.contains(strings.to_string(reply), fmt.tprintf(`"id":%s`, id)), "reply: %s", strings.to_string(reply))
+		testing.expectf(t, strings.contains(strings.to_string(pend), fmt.tprintf(`"id":%s`, id)), "pending: %s", strings.to_string(pend))
+		testing.expectf(t, len(md_events) > 0 && strings.contains(md_events[0], fmt.tprintf(`"confirmation":%s`, id)), "event: %v", md_events)
+		if i > 0 do strings.write_byte(&out, ',')
+		fmt.sbprintf(&out, "\n{{\"sent\":%s,\n\"reply\":%s,\n\"state\":{{\"pending_confirmations\":%s}},\n\"event\":%s}}", core.command_json(cmd), strings.to_string(reply), strings.to_string(pend), len(md_events) > 0 ? md_events[0] : "null")
+	}
+	strings.write_string(&out, "]}\n")
+	for e in md_events do delete(e)
+	clear(&md_events)
+	got := strings.to_string(out)
+	root := strings.trim_suffix(strings.trim_right(#directory, "/"), "/src")
+	_ = os.write_entire_file(fmt.tprintf("%s/build/pi-confirmations.json", root), transmute([]u8)got)
+	want, err := os.read_entire_file(fmt.tprintf("%s/integrations/pi/test/fixtures/confirmations.json", root), context.temp_allocator)
+	testing.expectf(t, err == nil && string(want) == got, "integrations/pi/test/fixtures/confirmations.json differs from what the core writes (build/pi-confirmations.json)")
+}
+
 @(private = "file")
 md_tab_of :: proc(id: u64) -> core.Markdown_Tab {
 	_, tab, _ := core.find_tab(id)
@@ -226,4 +303,56 @@ markdown_source_stays_read_only :: proc(t: ^testing.T) {
 	e := editor_of(tab)
 	editor_reopen(e)
 	testing.expect(t, e.readonly, "read-only after editor_reopen")
+}
+
+// The preview's safety rules, over tests/markdown/corpus/safety.md: raw HTML is never shown as
+// markup (an HTML block shows its text, inline tags are dropped), an image is never fetched nor
+// followed (it is not a link), and following a link opens only http, https and mailto outside
+// Deckhand: javascript:, data:, file:, vbscript: and other schemes are refused however they are
+// spelled (case, entities, escapes, angle brackets, references, autolinks).
+@(test)
+markdown_safety_rules :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, tab := md_setup(t, "safety.md", #load("../tests/markdown/corpus/safety.md", string))
+	v := md_view_of(tab)
+	testing.expect(t, v != nil && v.laid, "laid out")
+	shown := md_shown_text()
+	for tag in ([]string{"<a ", "<img", "<iframe", "<script", "<style", "<div", "onerror", "onclick", "<title", "<textarea"}) {
+		testing.expectf(t, !strings.contains(strings.to_lower(shown, context.temp_allocator), tag), "the preview shows %q:\n%s", tag, shown)
+	}
+	testing.expect(t, strings.contains(shown, "markdown inside an html block"), "an HTML block's text is shown")
+	// images are not links: not in the link list, and not followable
+	for u in v.lay.links {
+		testing.expectf(t, !strings.has_prefix(u, "https://tracker.") && u != "data:image/png;base64,iVBORw0KGgo=", "an image's source is a link: %q", u)
+	}
+	r := core.run_command(core.Markdown_Follow{tab_id = tab, url = "https://tracker.example.com/pixel.gif"}, {kind = .UI})
+	testing.expect_value(t, r.error, "not a link of this document")
+	r = core.run_command(core.Markdown_Follow{tab_id = tab, url = "javascript:alert(2)"}, {kind = .UI})
+	testing.expect_value(t, r.error, "not a link of this document")
+	// every link of the document, clicked by the user: only web and mail links leave Deckhand
+	links := make([dynamic]string, context.temp_allocator)
+	for u in v.lay.links do append(&links, strings.clone(u, context.temp_allocator))
+	testing.expect(t, len(links) >= 25, fmt.tprintf("%d links", len(links)))
+	refused := 0
+	for u in links {
+		before := len(opened)
+		r = core.run_command(core.Markdown_Follow{tab_id = tab, url = u}, {kind = .UI})
+		core.inbox_drain()
+		scheme := ""
+		for c, i in u {
+			if c == ':' {
+				if i > 1 do scheme = strings.to_lower(u[:i], context.temp_allocator)
+				break
+			}
+			if !(c < 128 && is_ascii_alnum(u8(c)) || c == '+' || c == '-' || c == '.') do break
+		}
+		web := scheme == "http" || scheme == "https" || scheme == "mailto"
+		if len(opened) > before do testing.expectf(t, web, "opened %q", u)
+		if scheme != "" && !web {
+			testing.expectf(t, !r.ok && len(opened) == before, "followed %q (%v)", u, r)
+			refused += 1
+		}
+	}
+	testing.expect(t, refused >= 15, fmt.tprintf("%d dangerous links refused", refused))
+	testing.expect(t, len(opened) >= 4, fmt.tprintf("%d web links opened", len(opened)))
 }

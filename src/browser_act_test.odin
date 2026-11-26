@@ -398,15 +398,13 @@ browser_act_log_and_strip :: proc(t: ^testing.T) {
 	defer act_done()
 	pi := core.Caller{kind = .Panel, tab_id = pa}
 	typed := core.Browser_Type{tab_id = ta, selector = "#name", text = "s3cret words"}
-	b := strings.builder_make(context.temp_allocator)
-	core.browser_act_write(&b, typed, true)
-	testing.expect(t, !strings.contains(strings.to_string(b), "s3cret") && strings.contains(strings.to_string(b), `"text_bytes":12`), strings.to_string(b))
+	logged := core.command_json(typed, redact = true)
+	testing.expect(t, !strings.contains(logged, "s3cret") && strings.contains(logged, `"text_bytes":12`), logged)
 	up := core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"/Users/someone/private/tax.pdf"}}
-	strings.builder_reset(&b)
-	core.browser_act_write(&b, up, true)
-	testing.expect(t, !strings.contains(strings.to_string(b), "private") && strings.contains(strings.to_string(b), `"files":1`), strings.to_string(b))
+	logged = core.command_json(up, redact = true)
+	testing.expect(t, !strings.contains(logged, "private") && strings.contains(logged, `"files":1`), logged)
 	core.run_command(typed, pi)
-	strings.builder_reset(&b)
+	b := strings.builder_make(context.temp_allocator)
 	test_facts_json(&b, ta, agent = true)
 	testing.expectf(t, strings.contains(strings.to_string(b), `"doing":"typing into"`), "%s", strings.to_string(b))
 	testing.expect(t, strings.contains(strings.to_string(b), `"acting":true`), strings.to_string(b))

@@ -69,6 +69,7 @@ Client :: struct {
 	// a separate core (client_core.odin): the link is core.sock, `state` is core.state itself
 	sock:      ^cw.Sock_Transport,
 	core_pid:  i32,
+	replaced_other_login: bool, // client_core_dial stopped a core from another login (#202): toasted once attached
 	abandoned: map[string]bool, // results that came past CLIENT_WAIT: dropped when they come
 	focus_wait: string, // a separate core: the last Set_Focus's id, waited for before the next event (client_before_event; heap)
 	lost:      bool, // the core's connection ended
@@ -79,6 +80,7 @@ Client :: struct {
 	viewed_from: string, // another machine's Deckhand took the core (window.request viewed_from; heap): no reconnect until Take back
 	viewed_browser: bool, // ...a paired browser did (web access): viewed_from is its name
 	asking:         bool, // the Take Back question is up (client_core_tick): its modal loop's timer turns do nothing
+	state_gen:      u64, // state messages applied (the Settings page's rows: sp_rows_now)
 }
 
 client: Client
@@ -507,6 +509,7 @@ client_on_frames :: proc() {
 				else do core.window_link_resync()
 			} else {
 				client_got_state()
+				client.state_gen += 1
 				// a separate core: the Files and Settings trees' open folders and filter came in
 				// State, not through this process's commands (files.odin's cache key)
 				if client.sock != nil do core.files_state_gen += 1
@@ -523,7 +526,7 @@ client_on_frames :: proc() {
 				core.result_free(old)
 				client.results[m.id] = r
 			} else do client.results[strings.clone(m.id, heap)] = r
-			if m.result.pending && m.request_id != 0 && client.sock != nil && !(m.id in client.pending) {
+			if m.result.pending && m.request_id != 0 && m.id != "" && !(m.id in client.pending) { // in process too (ui_files_drops.odin)
 				if client.pending == nil do client.pending = make(map[string]u64, heap)
 				client.pending[strings.clone(m.id, heap)] = m.request_id
 			}

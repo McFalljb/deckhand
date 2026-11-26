@@ -1,0 +1,9 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/p/old"}],
+"open_sessions":[{"pi_session_id":"s-old","cwd":"$ROOT/p/old","session_dir":"","project":"$ROOT/p/old","tabs":[{"kind":"pi"},{"kind":"claude","claude_session_id":"c-ro","cwd":"$ROOT/p/old","readonly":true}],"active_tab":1}],
+"current_session":0,
+"layout":{"left_width":280,"right_width":300,"left_open":false,"right_open":true,"panels":[],"collapsed":[]},
+"claude_sessions":[{"id":"c-ro","cwd":"$ROOT/p/old","project":"$ROOT/p/old","used":3,"readonly":true}],
+"claude_readonly_ids":["c-ro"],
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"chats_readonly":true,"notes_dir":"$ROOT/home/Notes","bell":{"waiting":false,"errors":false,"os":false}}}

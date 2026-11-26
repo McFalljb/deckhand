@@ -1,11 +1,12 @@
 package core
 
-// The coding agents ("harnesses") Deckhand can start in a session: pi and Claude Code (sidebar.odin:
-// Harness). Either may be missing: a Claude-only user has no pi, a pi user may have no Claude Code.
+// The coding agents ("harnesses") Deckhand can start in a session: pi, Claude Code and Codex
+// (sidebar.odin: Harness). Any may be missing: a Claude-only or Codex-only user has no pi, a pi
+// user may have neither of the others.
 //
-//   - Whether each is installed is looked for, never run: claude_installed (claude.odin) and
-//     pi_installed here, by stat on the PATH new tabs get (child_base_env) and in each one's own
-//     install folders. DECKHAND_CMD stands in for pi (tests, benchmarks): pi counts as installed.
+//   - Whether each is installed is looked for, never run, the same way for all three:
+//     harness_installed below (the PATH new tabs get, the harness's own install folders, nvm's and
+//     fnm's, then the login shell's `command -v`). DECKHAND_CMD stands in for pi (tests, benchmarks).
 //   - The user's one "New session" (⌘N in Chats, ⇧⌘N, "+ New session", Chats' "+ New chat", a
 //     project's "+" and menu, a checkout's "New session here", the palette and the menu bar) goes
 //     through new_session_ui: no harness installed, a toast with how to install one; one, it
@@ -17,6 +18,7 @@ package core
 //   - Atlas and jobs run pi only (for now): without pi, Atlas is not offered (ATLAS_NEEDS_PI) and
 //     a job's run fails with JOBS_NEED_PI.
 
+import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -33,13 +35,13 @@ HARNESS_KEYS := [Harness]string {
 	.Codex  = "codex",
 }
 
-PI_INSTALL :: "npm install -g @earendil-works/pi-coding-agent"
-// What the user sees when no harness is installed: how to install either.
-NO_HARNESS :: "No coding agent is installed: install pi (`" + PI_INSTALL + "`, Node 22.19 or later) or Claude Code (`curl -fsSL https://claude.ai/install.sh | bash`, or `brew install --cask claude-code`), then use the gear's Refresh shell environment or restart Deckhand"
+// The install commands are the coding agents checklist's (harness_manifest.odin, codex.odin).
+// What the user sees when no harness is installed: how to install one.
+NO_HARNESS :: "No coding agent is installed: install pi (`" + PI_INSTALL_COMMAND + "`), Claude Code (`" + CLAUDE_INSTALL_COMMAND + "`, or `brew install --cask claude-code`) or Codex (`" + CODEX_INSTALL_COMMAND + "`), then use the gear's Refresh shell environment or restart Deckhand"
 // Atlas runs on pi (agent.odin).
-ATLAS_NEEDS_PI :: "Atlas needs pi, which is not installed: install it with `" + PI_INSTALL + "`, then use the gear's Refresh shell environment or restart Deckhand"
+ATLAS_NEEDS_PI :: "Atlas needs pi, which is not installed: install it with `" + PI_INSTALL_COMMAND + "`, then use the gear's Refresh shell environment or restart Deckhand"
 // Jobs run pi (jobs.odin).
-JOBS_NEED_PI :: "Jobs run pi, which was not found on the jobs' PATH or in pi's managed install: install it with `" + PI_INSTALL + "`, or set pi_path"
+JOBS_NEED_PI :: "Jobs run pi, which was not found on the jobs' PATH or in pi's managed install: install it with `" + PI_INSTALL_COMMAND + "`, or set pi_path"
 
 // An executable regular file `name` in the absolute folder dir (stat and access only).
 exe_in :: proc(dir, name: string) -> bool {
@@ -50,116 +52,284 @@ exe_in :: proc(dir, name: string) -> bool {
 	if posix.stat(cp, &st) != .OK || !posix.S_ISREG(st.st_mode) do return false
 	return posix.access(cp, {.X_OK}) == .OK
 }
+// ---- is a harness installed? (looked for, never run) ----
+//
+// One lookup for pi, Claude Code and Codex (harness_installed), in the order a tab's own command
+// finds its harness: the PATH new tabs get (detect_path), then the folders the harness's own
+// installer uses (harness_folders: PI_TAB_CMD and CLAUDE_TAB_CMD fall back to the same ones), then
+// the login shell's `command -v <name>` on a worker (a .zprofile that adds nvm, fnm, asdf, mise or
+// pnpm). Stat, access(X_OK) and `command -v` only: a harness is never run to find it. A stat that
+// finds nothing is never the last word: until the login shell answered, the harness counts as there.
 
-// Whether a `pi` that can run is on `path` (absolute entries only) or in pi's managed install
-// (<agent_dir>/bin, <home>/.pi/agent/bin: where PI_TAB_CMD also looks). Never run.
-pi_detect :: proc(path, home, agent_dir: string) -> bool {
-	for dir in strings.split(path, ":", context.temp_allocator) do if exe_in(dir, "pi") do return true
-	if filepath.is_abs(agent_dir) && exe_in(strings.concatenate({strings.trim_right(agent_dir, "/"), "/bin"}, context.temp_allocator), "pi") do return true
-	if filepath.is_abs(home) && exe_in(strings.concatenate({strings.trim_right(home, "/"), "/.pi/agent/bin"}, context.temp_allocator), "pi") do return true
-	return false
+// Whether a harness is there, cached (Unknown = look at the next use).
+Claude_Found :: enum u8 {
+	Unknown,
+	Yes,
+	No,
+}
+harness_found: [Harness]Claude_Found
+// Where it was found ("" = not known: a stand-in, or a login shell that gave no clear answer). Heap.
+@(private = "file")
+harness_where: [Harness]string
+
+// Tests: stands in for the lookup of a harness; nil = look.
+harness_installed_probe: [Harness]proc() -> bool
+
+// The folders a harness's own installer puts it in, looked in after PATH (absolute ones only;
+// temp): pi's managed install ($PI_CODING_AGENT_DIR/bin, ~/.pi/agent/bin), Claude Code's native
+// installer (~/.local/bin) and its older local install (~/.claude/local). Codex has none: npm,
+// Homebrew and its own installer put it on the login shell's PATH (the login shell finds it).
+harness_folders :: proc(h: Harness, home, agent_dir: string) -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	home := strings.trim_right(home, "/")
+	switch h {
+	case .Pi:
+		if filepath.is_abs(agent_dir) do append(&out, strings.concatenate({strings.trim_right(agent_dir, "/"), "/bin"}, context.temp_allocator))
+		if filepath.is_abs(home) do append(&out, strings.concatenate({home, "/.pi/agent/bin"}, context.temp_allocator))
+	case .Claude:
+		if filepath.is_abs(home) do append(&out, strings.concatenate({home, "/.local/bin"}, context.temp_allocator), strings.concatenate({home, "/.claude/local"}, context.temp_allocator))
+	case .Codex:
+	}
+	return out[:]
 }
 
-// The PATH pi_installed and claude_installed look in: the one new tabs get. Test mode looks in the
-// install folders only (under the scene's fake HOME), never PATH, unless DECKHAND_REAL_PI=1: a
-// scene finds the same harnesses on every Mac, never the developer's own pi or claude.
+// The harness binary on `path` (absolute entries only), else in its folders, else in a Node version
+// manager's (managers: node_manager_dirs, harness_node.odin). "" = none of them. Temp.
+harness_find :: proc(h: Harness, path, home, agent_dir: string, managers: []string = nil) -> string {
+	name := HARNESS_BIN_NAMES[h]
+	for dir in strings.split(path, ":", context.temp_allocator) do if exe_in(dir, name) do return strings.concatenate({strings.trim_right(dir, "/"), "/", name}, context.temp_allocator)
+	for dir in harness_folders(h, home, agent_dir) do if exe_in(dir, name) do return strings.concatenate({dir, "/", name}, context.temp_allocator)
+	for dir in managers do if exe_in(dir, name) do return strings.concatenate({dir, "/", name}, context.temp_allocator)
+	return ""
+}
+
+// The PATH the lookup searches: the one new tabs get. Test mode looks in the install folders only
+// (under the scene's fake HOME), never PATH, unless DECKHAND_REAL_PI=1: a scene finds the same
+// harnesses on every Mac, never the developer's own pi or claude.
 detect_path :: proc() -> string {
 	if test_mode() && hook_env(.Real_Pi) != "1" do return ""
 	path, _ := env_lookup(child_base_env(), "PATH")
 	return path
 }
 
-// Whether pi is there, cached as claude_found is (Unknown = look at the next use).
-pi_found: Claude_Found
+// The harness binary Deckhand would start, by stat (harness_find on detect_path); the tests' named
+// binaries first (DECKHAND_CLAUDE_BIN, DECKHAND_CODEX_BIN). Unit tests and test mode never find a
+// codex by search (a codex the developer installed must not change what they see). "" = not
+// found this way. Temp.
+harness_binary :: proc(h: Harness) -> string {
+	switch h {
+	case .Pi:
+	case .Claude:
+		if b := hook_env(.Claude_Bin); filepath.is_abs(b) do return b
+	case .Codex:
+		if b := hook_env(.Codex_Bin); filepath.is_abs(b) do return b
+		when TEST_HOOKS {
+			if ODIN_TEST || test_mode() do return ""
+		}
+	}
+	home := os.get_env("HOME", context.temp_allocator)
+	// nvm's and fnm's folders (harness_node.odin): $NVM_DIR and $FNM_DIR as new tabs get them; test
+	// mode and unit tests only their defaults under the (fake) HOME, never the developer's
+	nvm_dir, fnm_dir: string
+	if !(ODIN_TEST || test_mode()) {
+		env := child_base_env()
+		nvm_dir, _ = env_lookup(env, "NVM_DIR")
+		fnm_dir, _ = env_lookup(env, "FNM_DIR")
+	}
+	return harness_find(h, detect_path(), home, pi_agent_dir(), node_manager_dirs(home, nvm_dir, fnm_dir))
+}
 
-// Tests: stands in for the lookup; nil = look.
-pi_installed_probe: proc() -> bool
-
-// The login shell's own answer: `$SHELL -l -c 'command -v pi'` (or /bin/sh for fish and co.), on a
-// worker, as a pi tab's shell finds pi (a .zprofile adds nvm, fnm, asdf, mise, pnpm). pi itself is
-// never run. A stat that finds nothing is never the last word: until the shell answered, pi counts
-// as there.
-Pi_Lookup :: enum i32 {
+// The login shell's answer about a harness: `$SHELL -l -c 'command -v <name>'` (or /bin/sh for
+// fish and co.), asked on a worker once per recheck, as the tab's shell would find it.
+Harness_Lookup :: enum i32 {
 	None, // not asked (or asked again since)
 	Asking,
 	Found,
 	Missing,
+	Unknown, // no clear answer (a timeout, a failure, a signal, no path): asked again later
 }
 @(private = "file")
-pi_lookup: struct {
-	state: Pi_Lookup, // atomic
-	gen:   i32, // atomic: a recheck while asking drops the old answer
+Lookup :: struct {
+	state:    Harness_Lookup, // atomic
+	gen:      i32, // atomic, changed under lock: a recheck while asking drops the old answer
+	lock:     sync.Mutex,
+	path:     string, // heap, under lock: what the shell named ("" = no clear answer)
+	retry_at: time.Tick, // main thread: when an Unknown answer is asked again ({} = not set)
+	backoff:  time.Duration, // main thread: the wait before that, doubled each time
 }
+
+// After an unclear answer the login shell is asked again, first after this, doubling to the most.
+HARNESS_LOOKUP_RETRY :: 15 * time.Second
+HARNESS_LOOKUP_RETRY_MAX :: 5 * time.Minute
+@(private = "file")
+lookups: [Harness]Lookup
 
 // How long the login shell may take to answer (tests shorten it).
-pi_lookup_timeout := 10 * time.Second
+harness_lookup_timeout := 10 * time.Second
 
-pi_lookup_state :: proc() -> Pi_Lookup {return Pi_Lookup(sync.atomic_load(&pi_lookup.state))}
+when TEST_HOOKS {
+	// Unit tests: the login shell is asked only by a test that turns this on (never otherwise: the
+	// developer's own shell must not change what a test sees, nor a "there meanwhile" answer).
+	harness_lookup_in_unit_tests: bool
+}
+
+harness_lookup_state :: proc(h: Harness) -> Harness_Lookup {return Harness_Lookup(sync.atomic_load(&lookups[h].state))}
+
+// Whether the login shell is being asked about any harness.
+harness_lookup_asking :: proc() -> bool {
+	for h in Harness do if harness_lookup_state(h) == .Asking do return true
+	return false
+}
+
+// What the login shell named, once it answered ("" = not asked, no answer yet, or none). Temp.
+harness_shell_path :: proc(h: Harness) -> string {
+	if harness_lookup_state(h) != .Found do return ""
+	l := &lookups[h]
+	sync.lock(&l.lock)
+	defer sync.unlock(&l.lock)
+	return strings.clone(l.path, context.temp_allocator)
+}
 
 // Asks the login shell on a worker (once per recheck). Test mode: only with DECKHAND_REAL_PI=1, as
-// detect_path (never the developer's own pi).
+// detect_path (never the developer's own harnesses).
 @(private = "file")
-pi_lookup_start :: proc() {
-	if test_mode() && hook_env(.Real_Pi) != "1" {
-		sync.atomic_store(&pi_lookup.state, .Missing)
+harness_lookup_start :: proc(h: Harness) {
+	skip := test_mode() && hook_env(.Real_Pi) != "1"
+	when TEST_HOOKS {
+		if ODIN_TEST && !harness_lookup_in_unit_tests do skip = true
+	}
+	if skip {
+		sync.atomic_store(&lookups[h].state, .Missing)
 		return
 	}
-	if _, ok := sync.atomic_compare_exchange_strong(&pi_lookup.state, .None, .Asking); !ok do return
-	gen := sync.atomic_load(&pi_lookup.gen)
-	thread.create_and_start_with_poly_data(gen, proc(gen: i32) {
+	if _, ok := sync.atomic_compare_exchange_strong(&lookups[h].state, .None, .Asking); !ok do return
+	gen := sync.atomic_load(&lookups[h].gen)
+	thread.create_and_start_with_poly_data2(h, gen, proc(h: Harness, gen: i32) {
 		defer free_all(context.temp_allocator)
-		out, code, ran := run_bounded_exit("", shell_script_argv(login_shell(), "command -v pi", "sh")[:], pi_lookup_timeout)
-		// only a clean answer says no: exit 0 without a runnable pi, or command -v's 1. A timeout, a
-		// shell that cannot start, or any other failure (127, a broken rc file, a signal) proves
-		// nothing: pi counts as there (a recheck asks again; a pi tab that exits 127 rechecks)
-		found := true
+		name := HARNESS_BIN_NAMES[h]
+		out, code, ran := run_bounded_exit("", shell_script_argv(login_shell(), strings.concatenate({"command -v ", name}, context.temp_allocator), "sh")[:], harness_lookup_timeout)
+		// only a clean answer says no: command -v's exit 1, or exit 0 naming a path that is not a
+		// runnable binary. Exit 0 names the last line that is an absolute path (rc and logout noise
+		// around it). A timeout, a shell that cannot start, a signal, any other exit (127, a broken
+		// rc file), or exit 0 naming no path proves nothing: Unknown (the harness counts as there,
+		// and the shell is asked again later)
+		answer, bin := Harness_Lookup.Unknown, ""
 		if ran && code == 0 {
 			lines := strings.split_lines(strings.trim_space(out), context.temp_allocator)
-			bin := len(lines) > 0 ? strings.trim_space(lines[len(lines) - 1]) : ""
-			found = filepath.is_abs(bin) && exe_in(filepath.dir(bin), filepath.base(bin))
+			#reverse for line in lines {
+				l := strings.trim_space(line)
+				if filepath.is_abs(l) {
+					bin = l
+					break
+				}
+			}
+			if bin != "" {
+				answer = exe_in(filepath.dir(bin), filepath.base(bin)) ? .Found : .Missing
+				if answer == .Missing do bin = ""
+			}
 		} else if ran && code == 1 {
-			found = false
+			answer = .Missing
 		}
-		if sync.atomic_load(&pi_lookup.gen) == gen do sync.atomic_compare_exchange_strong(&pi_lookup.state, .Asking, found ? .Found : .Missing)
+		l := &lookups[h]
+		sync.lock(&l.lock)
+		if sync.atomic_load(&l.gen) == gen {
+			delete(l.path, runtime.heap_allocator())
+			l.path = strings.clone(bin, runtime.heap_allocator())
+			sync.atomic_compare_exchange_strong(&l.state, .Asking, answer)
+		}
+		sync.unlock(&l.lock)
 		if platform.wake != nil do platform.wake()
 	}, self_cleanup = true)
 }
 
-// Whether pi is installed, as new tabs would find it (see the top): a stat of the PATH tabs get and
-// pi's managed install, else the login shell's answer (asked once; meanwhile, yes). Cached;
-// pi_recheck drops both (Refresh shell environment, a pi tab that exited 127); pi_installed_now
-// stats again (the user's New session).
-pi_installed :: proc() -> bool {
-	if pi_installed_probe != nil do return pi_installed_probe()
-	if hook_env(.Cmd) != "" do return true
-	if pi_found == .Unknown && pi_detect(detect_path(), os.get_env("HOME", context.temp_allocator), pi_agent_dir()) do pi_found = .Yes
-	if pi_found != .Unknown do return pi_found == .Yes
-	switch pi_lookup_state() {
-	case .Found:
-		pi_found = .Yes
-	case .Missing:
-		pi_found = .No
-	case .None:
-		pi_lookup_start()
-		if pi_lookup_state() == .Missing do pi_found = .No
-	case .Asking:
+@(private = "file")
+harness_cache_set :: proc(h: Harness, found: Claude_Found, path: string) {
+	harness_found[h] = found
+	path := harness_real_dir(path) // a per-shell folder (fnm's) resolved to the install, which stays
+	if harness_where[h] == path do return
+	delete(harness_where[h], runtime.heap_allocator())
+	harness_where[h] = strings.clone(path, runtime.heap_allocator())
+}
+
+// Whether harness h is installed, as new tabs would find it (see above), and where ("" = not
+// known). DECKHAND_CMD stands in for pi (tests, benchmarks): pi counts as installed. Cached;
+// harness_recheck drops it and the login shell's answer (Refresh shell environment, a tab that
+// exited 127); harness_installed_now stats again (a user's action).
+harness_installed :: proc(h: Harness) -> (path: string, found: bool) {
+	if p := harness_installed_probe[h]; p != nil {
+		if !p() do return "", false
+		return harness_binary(h), true
 	}
-	return pi_found != .No // asking: there
+	if h == .Pi && hook_env(.Cmd) != "" do return "", true
+	if harness_found[h] == .Unknown {
+		if b := harness_binary(h); b != "" do harness_cache_set(h, .Yes, b)
+	}
+	if harness_found[h] == .Unknown {
+		switch harness_lookup_state(h) {
+		case .Found:
+			harness_cache_set(h, .Yes, harness_shell_path(h))
+		case .Missing:
+			harness_cache_set(h, .No, "")
+		case .None:
+			harness_lookup_start(h)
+			if harness_lookup_state(h) == .Missing do harness_cache_set(h, .No, "")
+		case .Unknown:
+			// never cached: asked again once the backoff passed (meanwhile, there)
+			l := &lookups[h]
+			if l.retry_at == {} {
+				l.backoff = l.backoff == 0 ? HARNESS_LOOKUP_RETRY : min(2 * l.backoff, HARNESS_LOOKUP_RETRY_MAX)
+				l.retry_at = time.tick_add(time.tick_now(), l.backoff)
+			} else if time.tick_diff(time.tick_now(), l.retry_at) <= 0 {
+				l.retry_at = {}
+				harness_lookup_reset(h)
+				harness_lookup_start(h)
+			}
+			return "", true
+		case .Asking:
+		}
+	}
+	return harness_where[h], harness_found[h] != .No // asking: there
+}
+
+// The login shell's answer dropped (under its lock: a worker still asking never writes over the
+// next lookup's answer).
+@(private = "file")
+harness_lookup_reset :: proc(h: Harness) {
+	l := &lookups[h]
+	sync.lock(&l.lock)
+	sync.atomic_add(&l.gen, 1)
+	sync.atomic_store(&l.state, .None)
+	sync.unlock(&l.lock)
 }
 
 // Everything looked up again, the login shell too.
-pi_recheck :: proc() {
-	pi_found = .Unknown
-	sync.atomic_add(&pi_lookup.gen, 1)
-	sync.atomic_store(&pi_lookup.state, .None)
+harness_recheck :: proc(h: Harness) {
+	harness_found[h] = .Unknown
+	harness_lookup_reset(h)
+	lookups[h].retry_at, lookups[h].backoff = {}, 0
 }
 
-// pi_installed after a fresh stat (the user may have installed it since); the login shell's
-// answer is kept (stat only: cheap enough for every New session).
-pi_installed_now :: proc() -> bool {
-	if pi_found == .No do pi_found = .Unknown
-	return pi_installed()
+// harness_installed after a fresh stat (the user may have installed it since); the login shell's
+// answer is kept (stat only: cheap enough for every New session, Restart or click).
+harness_installed_now :: proc(h: Harness) -> bool {
+	if harness_found[h] == .No do harness_found[h] = .Unknown
+	_, found := harness_installed(h)
+	return found
 }
+
+// The binary to read a harness's version from: by stat, else what the login shell named ("" =
+// none). Temp.
+harness_path :: proc(h: Harness) -> string {
+	if b := harness_binary(h); b != "" do return b
+	return harness_shell_path(h)
+}
+
+pi_installed :: proc() -> bool {
+	_, found := harness_installed(.Pi)
+	return found
+}
+pi_installed_now :: proc() -> bool {return harness_installed_now(.Pi)}
+pi_recheck :: proc() {harness_recheck(.Pi)}
 
 // ---- the one "New session" ----
 
@@ -175,13 +345,14 @@ Menu_New_Session :: struct {
 	cwd:        string,
 	run:        string,
 	folder:     string,
+	flags:      bool, // "New session with flags…": each harness's row asks for its flags (ui_flags.odin)
 }
 
 // Which harness a picker row's command starts.
 harness_of :: proc(cmd: Command) -> (h: Harness, ok: bool) {
 	#partial switch c in cmd {
 	case New_Chat, Worktree_Session: return .Pi, true
-	case New_Claude_Session:         return c.codex ? .Codex : .Claude, true
+	case New_Claude_Session:         return c.harness, true
 	}
 	return {}, false
 }
@@ -206,9 +377,9 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 		pi, claude, codex := machine_harnesses(no)
 		for h in order {
 			if h == .Pi && pi do append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = New_Chat{project_id = p.id}})
-			if h == .Claude && claude && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = New_Claude_Session{project_id = p.id}})
+			if h == .Claude && claude && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = New_Claude_Session{project_id = p.id, harness = .Claude}})
 			// Codex: only where its core says it starts one (machine_codex; an older core would start Claude Code)
-			if h == .Codex && codex && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, codex = true}})
+			if h == .Codex && codex && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, harness = .Codex}})
 		}
 		for &it, i in out do it.keys = fmt.tprint(i + 1)
 		return out[:]
@@ -221,8 +392,7 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 			if cwd != "" do cmd = Worktree_Session{project_id = p.id, path = cwd}
 			append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = cmd})
 		case .Claude, .Codex:
-			codex := h == .Codex
-			if codex {
+			if h == .Codex {
 				// a project or a checkout of it, or Chats
 				if !codex_installed() do continue
 				if p.group == .Chats {
@@ -232,13 +402,13 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 				// in a project or Chats (claude.odin: New_Claude_Session); a checkout: a project's only
 				if !claude_installed() || (p.group != .Projects && !(p.group == .Chats && cwd == "")) do continue
 			}
-			base := New_Claude_Session{project_id = p.id, cwd = cwd, codex = codex}
-			accts := claude_accounts(codex)
+			base := New_Claude_Session{project_id = p.id, cwd = cwd, harness = h}
+			accts := claude_accounts(h)
 			if len(accts) < 2 {
 				append(&out, Menu_Item{label = HARNESSES[h].name, icon = harness_icon(h), cmd = base})
 				continue
 			}
-			pick := claude_account_pick(p, codex)
+			pick := claude_account_pick(p, h)
 			for pass in 0 ..< 2 { 	// the pick first, then the others in their order
 				for a in accts {
 					if (a.dir == pick) != (pass == 0) do continue
@@ -278,6 +448,17 @@ codex_offered :: proc(id: u64) -> bool {
 	return codex_installed()
 }
 
+// Whether New Claude tab is offered for id (a project's or an open session's): this Mac's, while
+// claude is installed here; another machine's, while its checklist says it has Claude Code
+// (machine_harnesses), never by this Mac's install.
+claude_offered :: proc(id: u64) -> bool {
+	if no := id_machine(id); no != 0 {
+		_, claude, _ := machine_harnesses(no)
+		return claude
+	}
+	return claude_installed()
+}
+
 // Whether machine no's core starts Codex tabs for this Mac (its hello's features: codex_tabs).
 machine_codex :: proc(no: u64) -> bool {
 	for m in state.machines do if m.no == no do return m.codex
@@ -296,4 +477,24 @@ machine_no_harness_note :: proc(no: u64) -> string {
 		}
 	}
 	return "No coding agent is installed on that machine yet: its pi tab says how to install one, and ⌘T opens a terminal there"
+}
+
+// ---- where a tab starts its harness from ----
+
+// Each tab's command (PI_TAB_CMD, CLAUDE_TAB_CMD, CODEX_TAB_CMD) finds its harness on the login
+// shell's PATH and in its own folders. Each start decides its binary once (harness_path: the one
+// whose version it checks), and harness_found_sh tells the script that binary's folder
+// (`_dh_found=<dir>; `); this step puts the folder first on PATH, so the tab starts that binary
+// (with the node next to it: nvm, fnm), never another copy a login profile puts first. A line
+// says so when the login shell's PATH did not have it at all.
+HARNESS_FOUND_PI_SH :: `case "${_dh_found:-}" in /*) if [ -f "$_dh_found/pi" ] && [ -x "$_dh_found/pi" ]; then command -v pi >/dev/null 2>&1 || printf '%s\n' "Deckhand: starting pi from $_dh_found/pi, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; `
+HARNESS_FOUND_CLAUDE_SH :: `case "${_dh_found:-}" in /*) if [ -f "$_dh_found/claude" ] && [ -x "$_dh_found/claude" ]; then command -v claude >/dev/null 2>&1 || printf '%s\n' "Deckhand: starting Claude Code from $_dh_found/claude, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; `
+HARNESS_FOUND_CODEX_SH :: `case "${_dh_found:-}" in /*) if [ -f "$_dh_found/codex" ] && [ -x "$_dh_found/codex" ]; then command -v codex >/dev/null 2>&1 || printf '%s\n' "Deckhand: starting Codex from $_dh_found/codex, where Deckhand found it (it is not on your login shell's PATH)."; PATH="$_dh_found:$PATH"; export PATH; fi;; esac; `
+
+// `_dh_found=<bin's folder, links resolved>; ` for the front of a tab's command. bin is the path the
+// start decided once (harness_path), the one its version was read from ("" = none decided:
+// nothing). Temp.
+harness_found_sh :: proc(bin: string) -> string {
+	if !filepath.is_abs(bin) do return ""
+	return strings.concatenate({"_dh_found=", sh_quote(filepath.dir(harness_real_dir(bin))), "; "}, context.temp_allocator)
 }

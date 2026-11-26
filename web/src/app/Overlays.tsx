@@ -3,7 +3,7 @@
 // project, rename). The palette and the bell are their own files.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { useApp, type MenuItem } from "./ctx.ts";
+import { useApp, type MenuItem, type ToastAction } from "./ctx.ts";
 import { Icon } from "./icons.tsx";
 
 export function Menu() {
@@ -163,14 +163,16 @@ export interface ToastItem {
   id: number;
   text: string;
   err: boolean;
+  action?: ToastAction;
 }
 
 export function Toasts({ items }: { items: ToastItem[] }) {
   return (
     <div class="toasts" role="status" aria-live="polite">
       {items.map((t) => (
-        <div class={"toast" + (t.err ? " err" : "")} key={t.id}>
-          {t.text}
+        <div class={"toast" + (t.err ? " err" : "") + (t.action ? " has-act" : "")} key={t.id}>
+          {t.action ? <span class="toast-text">{t.text}</span> : t.text}
+          {t.action ? <button type="button" class="btn small toast-act" onClick={t.action.run}>{t.action.label}</button> : null}
         </div>
       ))}
     </div>
@@ -202,7 +204,13 @@ export function ConfirmBar() {
             app.toast("This needs a newer page to confirm: cancel it, or confirm it at the Mac", true);
             return;
           }
-          app.run({ ...c.command, confirm: token });
+          const cmd = c.command as { type?: string };
+          // its answer (errors as the core words them: app.run's toast); a file command done: the
+          // Files tree looks again
+          app.run({ ...c.command, confirm: token }).then((r) => {
+            // detail: the token and answer (the Files tree's own delete gets its Undo: fileundo.ts)
+            if (cmd.type === "delete_path" || cmd.type === "rename_path") window.dispatchEvent(new CustomEvent("deckhand:fs-changed", { detail: { token, result: r } }));
+          });
         }}
       >
         Confirm

@@ -33,19 +33,19 @@ import "core:thread"
 import "core:time"
 
 List_Worktrees :: struct {
-	path: string, // a folder of the repository ("" = the Files tab's project)
+	path: string `cmd:"omit"`, // a folder of the repository ("" = the Files tab's project)
 }
 // The Files tree of base (a project or session folder) shows path, another
 // checkout of the same repository ("" or base itself = base again).
 Files_Set_Root :: struct {
-	base: string, // "" = the Files tab's project
-	path: string,
+	base: string `cmd:"omit"`, // "" = the Files tab's project
+	path: string `cmd:"opt"`,
 }
 // Removes a merged, clean worktree and deletes its merged branch (the
 // user's only; confirms, class delete).
 Worktree_Cleanup :: struct {
 	path:    string,
-	confirm: string,
+	confirm: string `cmd:"omit,red=token"`,
 }
 // A new pi session of a project, running in one of its repository's checkouts.
 Worktree_Session :: struct {
@@ -55,8 +55,8 @@ Worktree_Session :: struct {
 // Internal: a worker read a repository's worktrees and branches.
 Worktrees_Done :: struct {
 	common: string,
-	gen:    u64,
-	out:    string,
+	gen:    u64 `cmd:"-"`,
+	out:    string `cmd:"-"`,
 }
 
 WT_GAP :: 2 * time.Second // between scans of one repository
@@ -727,7 +727,7 @@ worktrees_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Re
 			return {ok = true}, false
 		}
 		if !os.is_dir(p) do return fail("no such folder"), false
-		if err := wt_checkout_err(base, p, listed = caller.kind != .Internal); err != "" do return fail(err), false
+		if err := wt_sibling_err(base, p, listed = caller.kind != .Internal); err != "" do return fail(err), false // the read rule's (fs_read.odin), for every caller
 		return {ok = true}, files_checkout_set(base, p)
 	case Worktree_Session:
 		// commands.odin starts it (open_new_session); the checks are here
@@ -783,13 +783,13 @@ wt_errors: map[string]string
 // Internal: a clean up's worker finished (its checks, or the removal).
 Worktree_Cleanup_Done :: struct {
 	path:       string,
-	main:       string,
-	request_id: u64,
-	remove:     bool, // the removal ran (else only the checks)
-	removed:    bool, // the worktree is gone (the branch may not be)
-	branch:     string,
-	ignored:    string, // the checks: "N ignored paths (a/, b/ …)" ("" = none)
-	err:        string,
+	main:       string `cmd:"-"`,
+	request_id: u64 `cmd:"-"`,
+	remove:     bool `cmd:"-"`, // the removal ran (else only the checks)
+	removed:    bool `cmd:"-"`, // the worktree is gone (the branch may not be)
+	branch:     string `cmd:"-"`,
+	ignored:    string `cmd:"-"`, // the checks: "N ignored paths (a/, b/ …)" ("" = none)
+	err:        string `cmd:"omit"`,
 }
 
 // Whether a clean up of path is being checked or run on a worker.

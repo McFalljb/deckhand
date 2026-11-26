@@ -44,7 +44,7 @@ SESSION_HEADER_MAX :: 64 * 1024 // the header line is read up to this
 Session_Info :: struct {
 	project_id:    u64,
 	pi_session_id: string,
-	to:            string, // "" | "clipboard" | "agent"
+	to:            string `cmd:"omit"`, // "" | "clipboard" | "agent"
 }
 
 // What the info says (temp allocator).
@@ -166,7 +166,7 @@ session_info_build :: proc(project_id: u64, pi_session_id: string) -> (f: Sessio
 @(private = "file")
 claude_facts :: proc(project_id: u64, rec: ^Claude_Record) -> (f: Session_Facts, text: string, err: string) {
 	f.id = strings.clone(rec.id, context.temp_allocator)
-	f.agent = rec.codex ? "Codex" : "Claude Code"
+	f.agent = harness_is_codex(rec.harness) ? "Codex" : "Claude Code"
 	f.file, _ = claude_transcript_file(rec)
 	if p := find_project(project_id); p != nil do f.project = project_display(p^)
 	f.cwd = strings.clone(rec.cwd, context.temp_allocator)

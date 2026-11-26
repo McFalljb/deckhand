@@ -119,7 +119,7 @@ sidebar_make_room :: proc(list: ^[dynamic]string, is_project: bool) -> bool {
 Harness :: enum u8 {
 	Pi,
 	Claude,
-	Codex, // a Codex CLI tab is a Claude tab record with codex set (codex.odin)
+	Codex, // a Codex CLI tab is a Claude tab record with harness .Codex (codex.odin)
 }
 
 // A harness's name, its logo (an Icon that draws a logos.odin mark; .None while it has none)
@@ -143,20 +143,26 @@ harness_icon :: proc(h: Harness) -> Icon {return harness_mark_icon(HARNESSES[h])
 // drawn in the muted colour: a logo keeps its own colours and is never faded.
 harness_row_icon :: proc(h: Harness, dimmed: bool) -> Icon {return dimmed ? HARNESSES[h].glyph : harness_icon(h)}
 
+// An open session's row icon after its place: its harness's, none for a Files session (no agent).
+open_session_row_icon :: proc(s: ^Open_Session, dimmed: bool) -> Icon {
+	if s.agent == .Files do return .None
+	return harness_row_icon(open_session_harness(s), dimmed)
+}
+
 session_harness :: proc(s: Session) -> Harness {return s.codex ? .Codex : s.claude ? .Claude : .Pi}
 
 // An open session's harness: a Claude-only session's main tab (its first) says Claude Code or
-// Codex (a Codex session is a Claude session whose main tab has codex set: codex.odin), else pi.
+// Codex (a Codex session is a Claude session whose main tab's harness is .Codex: codex.odin), else pi.
 open_session_harness :: proc(s: ^Open_Session) -> Harness {
 	if s.agent != .Claude do return .Pi
-	if len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(Claude_Tab); is && ct.codex do return .Codex
+	if len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(Claude_Tab); is do return claude_kind_harness(ct.harness)
 	return .Claude
 }
 
 // A Claude row's account label while there are several accounts ("" = no tag).
 session_account_tag :: proc(s: Session) -> string {
 	if !s.claude do return ""
-	return claude_account_tag(s.account, s.codex)
+	return claude_account_tag(s.account, s.codex ? .Codex : .Claude)
 }
 
 // Whether a session needs the user's answer (tab_need's NEED_WAITING: blocked, or its agent asked a
@@ -483,7 +489,7 @@ sessions_with_new :: proc(section: Sort_Section, list: []Session, project: u64 =
 	append(&out, ..list)
 	if pid == 0 do return out[:]
 	for &o in state.open_sessions {
-		if o.home || o.project_id != pid || o.agent == .Claude || session_listed(list, o.pi_session_id) do continue // Claude-only: below
+		if o.home || o.project_id != pid || o.agent != .Pi || session_listed(list, o.pi_session_id) do continue // Claude-only: below; a Files session is no conversation
 		title := open_session_title(&o)
 		if o.title == "" do title = "" // not named yet: the section's "Untitled …"
 		// no file yet: when it was last made current (stable from frame to frame, so the order is)
@@ -503,7 +509,7 @@ sessions_with_new :: proc(section: Sort_Section, list: []Session, project: u64 =
 claude_rows :: proc(p: Project, out: ^[dynamic]Session) {
 	row :: proc(r: Claude_Record) -> Session {
 		t := time.unix(r.used, 0)
-		s := Session{id = r.id, title = r.title, untitled = r.codex ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, account = r.account, codex = r.codex}
+		s := Session{id = r.id, title = r.title, untitled = harness_is_codex(r.harness) ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, account = r.account, codex = harness_is_codex(r.harness)}
 		if f := claude_disk_of(r.id); f != nil {
 			if f.created != {} do s.when_ = utc_minute(f.created)
 			s.gone = f.gone
@@ -516,7 +522,7 @@ claude_rows :: proc(p: Project, out: ^[dynamic]Session) {
 		if o.home || o.agent != .Claude || o.project_id != p.id || o.pi_session_id == "" || session_listed(out[:], o.pi_session_id) do continue
 		if r, _ := claude_record(o.pi_session_id); r == nil {
 			t := time.unix(o.shown_at / 1e9, 0)
-			codex := len(o.tabs) > 0 && claude_tab_is_codex(o.tabs[0])
+			codex := len(o.tabs) > 0 && tab_harness(o.tabs[0]) == .Codex
 			append(out, Session{id = o.pi_session_id, untitled = codex ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, codex = codex})
 		}
 	}
@@ -728,6 +734,7 @@ open_session_refresh :: proc(s: ^Open_Session) {
 
 // "5m" since the session file last changed; "new" before pi wrote it.
 open_session_age :: proc(s: ^Open_Session) -> string {
+	if s.agent == .Files do return ""
 	if s.agent == .Claude { 	// its history entry's last use (claude.odin)
 		if r, _ := claude_record(s.pi_session_id); r != nil do return ago(time.unix(r.used, 0))
 		return "new"
@@ -804,11 +811,15 @@ open_session_is_chat :: proc(s: ^Open_Session) -> bool {
 }
 
 // A project's short name for rows, tabs and the palette: its own name, else
-// its folder's name; the ~ path when another project has the same folder name.
+// its folder's name; the ~ path when another shown project has the same folder
+// name (a hidden row, such as one whose folder is gone, is no clash).
 project_display :: proc(p: Project) -> string {
 	if p.name != "" do return p.name
 	base := filepath.base(p.cwd)
-	for q in state.projects do if q.group == .Projects && q.id != p.id && q.name == "" && filepath.base(q.cwd) == base do return p.label
+	for q in state.projects {
+		if q.group != .Projects || q.id == p.id || q.name != "" || filepath.base(q.cwd) != base do continue
+		if project_hide_reason(q) == .None do return p.label
+	}
 	return base
 }
 
@@ -828,10 +839,11 @@ session_place :: proc(s: ^Open_Session) -> (ic: Icon, name: string) {
 open_session_title :: proc(s: ^Open_Session, refresh := true) -> string {
 	// another machine's: the title it sent (its session file and Claude history are not on this Mac)
 	if s.machine != 0 && s.title != "" do return strings.clone(s.title, context.temp_allocator)
+	if s.agent == .Files do return "Files" // a project's open files, no agent (files_session.odin)
 	// a Claude-only session: its history entry's title (claude.odin; the first prompt, or the user's)
 	if s.agent == .Claude {
 		if r, _ := claude_record(s.pi_session_id); r != nil && r.title != "" do return strings.clone(r.title, context.temp_allocator)
-		if len(s.tabs) > 0 && claude_tab_is_codex(s.tabs[0]) do return "Untitled Codex session"
+		if len(s.tabs) > 0 && tab_harness(s.tabs[0]) == .Codex do return "Untitled Codex session"
 		return "Untitled Claude session"
 	}
 	untitled := open_session_is_chat(s) ? "Untitled chat" : "Untitled session"

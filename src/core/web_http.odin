@@ -549,7 +549,7 @@ web_read_more :: proc(fd: Sock_Fd, buf: ^[dynamic]u8, deadline: time.Tick, max: 
 	return true
 }
 
-WEB_CSP :: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+WEB_CSP :: "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 
 // The response, Connection: close. cookie: Set-Cookie with this token; clear_cookie: an expired one.
 web_send :: proc(fd: Sock_Fd, status: int, ctype: string, body: string, cookie := "", clear_cookie := false, host := "", api := true) {

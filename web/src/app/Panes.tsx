@@ -18,7 +18,9 @@ export function fileTabPath(t: Tab): string {
   if (k.editor_tab && (k.editor_tab.view ?? "file") === "file") return String(k.editor_tab.path ?? "");
   return "";
 }
-import { codexAvailable } from "./Sidebar.tsx";
+import { modeBadge, newTabChoices } from "./harness.ts";
+import { TabBars } from "./TabBars.tsx";
+import { exitBar } from "./phone.ts";
 
 const KIND_WORDS: Record<string, string> = {
   editor_tab: "an editor",
@@ -123,6 +125,7 @@ function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: 
   return (
     <section class={"pane" + (props.focused && !props.only ? " focused" : "")} onMouseDown={focusPane}>
       <TabStrip s={s} paneId={paneId} tabs={tabs} active={tab?.id ?? 0} only={props.only} />
+      {tab ? <TabBars tab={tab} /> : null}
       <div class="pane-body">
         {!tab ? (
           <div class="pane-note">No tabs here.</div>
@@ -148,21 +151,21 @@ function PaneView(props: { s: OpenSession; paneId: number; tabs: Tab[]; active: 
   );
 }
 
-function ExitedBar({ tab }: { tab: Tab }) {
+// An exited terminal's bar (phone.ts exitBar): Restart for an agent, Close but for pi's tab.
+export function ExitedBar({ tab }: { tab: Tab }) {
   const app = useApp();
-  const code = tab.exit?.known ? (tab.exit.signal ? `signal ${tab.exit.signal}` : `code ${tab.exit.code}`) : "";
-  const k = tabKind(tab);
-  const restart = k === "pi_tab" ? "pi_restart" : k === "claude_tab" ? "claude_restart" : "";
+  const b = exitBar(tab);
+  if (!b) return null;
   return (
     <div class="exited-bar">
-      <span>Exited{code ? ` (${code})` : ""}</span>
+      <span>{b.text}</span>
       <span class="spacer" />
-      {restart ? (
-        <button type="button" class="btn small" onClick={() => app.run({ type: restart, tab_id: tab.id })}>
+      {b.restart ? (
+        <button type="button" class="btn small" onClick={() => app.run({ type: b.restart, tab_id: tab.id })}>
           Restart
         </button>
       ) : null}
-      {k !== "pi_tab" ? (
+      {b.close ? (
         <button type="button" class="btn small" onClick={() => app.run({ type: "close_tab", tab_id: tab.id })}>
           Close
         </button>
@@ -177,16 +180,17 @@ function TabStrip({ s, paneId, tabs, active, only }: { s: OpenSession; paneId: n
     <div class="tabstrip" role="tablist">
       <div class="tabs-scroll">
         {tabs.map((t) => {
-          const v = stripView(t);
+          const v = stripView(app.store, t);
           const h = tabHarness(t);
           const on = t.id === active;
+          const mode = modeBadge(t.kind);
           return (
             <div
               class={"tab" + (on ? " on" : "")}
               role="tab"
               aria-selected={on ? "true" : "false"}
               tabIndex={0}
-              title={tabTitle(t)}
+              title={mode ? `${tabTitle(t)} · ${mode.label} mode` : tabTitle(t)}
               onClick={() => {
                 app.wish(`tab:${s.id}:${paneId}`, t.id);
                 app.run({ type: "focus_tab", tab_id: t.id });
@@ -202,6 +206,7 @@ function TabStrip({ s, paneId, tabs, active, only }: { s: OpenSession; paneId: n
               {v.dot !== "none" ? <StatusMark mark={v.mark} progress={v.progress} /> : null}
               {h && h !== "shell" ? <HarnessIcon harness={h} size={13} /> : !h ? <Icon name={KIND_ICON[tabKind(t)] ?? "file"} size={13} /> : null}
               <span class="tab-title">{tabTitle(t)}</span>
+              {mode ? <span class={"tab-mode" + (mode.warn ? " warn" : "")}>{mode.label}</span> : null}
               {tabKind(t) !== "pi_tab" || tabs.length > 1 ? (
                 <button
                   type="button"
@@ -230,9 +235,9 @@ export function newTabItems(app: App, s: OpenSession, paneId?: number): MenuItem
   const pane = paneId ? { pane: paneId } : {};
   const items: MenuItem[] = [
     { label: "Shell", keys: keysLabel({ k: "t", alt: true }), run: () => app.run({ type: "new_shell_tab", session: s.id, ...pane }) },
-    { label: "Claude Code", run: () => app.run({ type: "new_claude_tab", session: s.id }) },
   ];
-  if (codexAvailable(app.store, s.machine)) items.push({ label: "Codex", run: () => app.run({ type: "new_claude_tab", session: s.id, harness: "codex" }) });
+  // Claude Code and Codex while they are there, once per account while there are several (harness.ts)
+  for (const c of [...newTabChoices(app.store, s.machine, { session: s.id }, false, "Claude Code"), ...newTabChoices(app.store, s.machine, { session: s.id }, true, "Codex")]) items.push({ label: c.label, run: () => app.run(c.cmd) });
   if (!s.machine) items.push({ label: "Changes", run: () => app.run({ type: "changes_open", session: s.id }) });
   return items;
 }

@@ -1,0 +1,6 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/deckhand-ws-a-1795697386205589000"}],"selected_project":"$ROOT/deckhand-ws-a-1795697386205589000",
+"open_sessions":[{"pi_session_id":"30caee06-b3ab-4709-ae17-e49e570a26b3","no_file":true,"cwd":"$ROOT/deckhand-ws-a-1795697386205589000","session_dir":"","project":"$ROOT/deckhand-ws-a-1795697386205589000","tabs":[{"kind":"pi"},{"kind":"shell","title":"shell 1","cwd":"$ROOT/deckhand-ws-a-1795697386205589000"}],"active_tab":1}],"current_session":0,
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"remote_machines":false}}

@@ -196,6 +196,11 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 	th := theme()
 	ec := editor_colors()
 	draw_rect(x, y, w, h, th.bg_app)
+	if e.image_tab do image_ensure(e) // an image's tab: read and decoded at its first draw (image_view.odin)
+	if e.img != nil {
+		image_draw(e, x, y, w, h)
+		return
+	}
 	if e.refused != "" {
 		msg := e.refused
 		tw := text_width(msg, .UI)
@@ -392,7 +397,7 @@ draw_status_line :: proc(e: ^Editor, x, y, w, h: f32) {
 		case e.view == .Diff_Head: left = "Diff with HEAD (read-only)"
 		case e.view == .Diff_Disk: left = "Diff with the file on disk (read-only)"
 		case e.view == .Changes:   left = changes_status_text(e.tab_id)
-		case e.view == .File && e.readonly && e.refused == "": left = "Read-only copy"
+		case e.view == .File && e.readonly && e.refused == "": left = e.codex_view_only ? "Read-only: Codex's hooks (edit them in Codex or your own editor)" : "Read-only copy"
 		case e.missing:            left = "Deleted on disk: ⌘S saves it again"
 		case editor_dirty(e):      left = "Unsaved changes"
 		}

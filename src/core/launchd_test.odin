@@ -233,13 +233,26 @@ lt_loaded :: proc(label: string) -> bool {
 	return st == .Ok
 }
 
-// The job as §6 has it: Interactive, RunAtLoad, no KeepAlive, the group abandoned, escaped.
+// The job ran (RunAtLoad) and has ended: launchd's own record says so ("runs = N", N > 0, and
+// "state = not running"). A job not run yet, or still running, is neither: the sweep leaves a
+// running job alone, so a test that seeds one waits for this, never for a fixed time (#160: a
+// fixed 100 ms failed the 0.7.0 release run at load ~20; at load 25-58 the job still had a pid).
+@(private = "file")
+lt_ran_and_ended :: proc(label: string) -> bool {
+	out, st := run_group({"/bin/launchctl", "print", fmt.tprintf("gui/%d/%s", posix.getuid(), label)}, 10 * time.Second)
+	if st != .Ok || !strings.contains(out, "\tstate = not running\n") do return false
+	i := strings.index(out, "\truns = ")
+	return i >= 0 && !strings.has_prefix(out[i + len("\truns = "):], "0\n")
+}
+
+// The job as §6 has it: Interactive, RunAtLoad, no KeepAlive, the group abandoned, this login's
+// GUI session only, escaped; the holder or the core is the job's own process (no __detach: #202).
 @(test)
 launchd_plist_keys :: proc(t: ^testing.T) {
 	p := launchd_plist("dev.deckhand.test.1.2", "/A & B/<deckhand-core>", "/r", "/d", "/r/job-abcdef")
 	wants := []string{
 		"<key>Label</key><string>dev.deckhand.test.1.2</string>",
-		"<array><string>/A &amp; B/&lt;deckhand-core&gt;</string><string>__detach</string><string>--run</string><string>/r</string><string>--data</string><string>/d</string><string>--ready</string><string>ready</string></array>",
+		"<array><string>/A &amp; B/&lt;deckhand-core&gt;</string><string>hold</string><string>--run</string><string>/r</string><string>--data</string><string>/d</string><string>--ready</string><string>ready</string></array>",
 		"<key>WorkingDirectory</key><string>/r/job-abcdef</string>",
 		"<key>StandardInPath</key><string>/dev/null</string>",
 		"<key>StandardErrorPath</key><string>/r/holder.log</string>",
@@ -247,15 +260,21 @@ launchd_plist_keys :: proc(t: ^testing.T) {
 		"<key>RunAtLoad</key><true/>",
 		"<key>KeepAlive</key><false/>",
 		"<key>AbandonProcessGroup</key><true/>",
+		"<key>LimitLoadToSessionType</key><string>Aqua</string>",
 	}
 	for want in wants do testing.expectf(t, strings.contains(p, want), "missing %s", want)
+	testing.expect(t, !strings.contains(p, "__detach"), "no __detach: its forked child would belong to no job (#202)")
+	sp := launchd_plist("dev.deckhand.test.1.3", "/c/deckhand-core-serve", "/r", "/d", "/r/job-abcdef", mode = "serve")
+	testing.expect(t, strings.contains(sp, "<array><string>/c/deckhand-core-serve</string><string>serve</string><string>--run</string>"), "serve is the job's own process")
+	testing.expect(t, strings.contains(sp, "<key>StandardErrorPath</key><string>/r/core.log</string>"))
 	testing.expect_value(t, launchd_parse_pid("123\n"), i32(123))
 	for bad in ([]string{"", "\n", "123", "-4\n", "x\n", "99999999999\n"}) do testing.expect_value(t, launchd_parse_pid(bad), i32(0))
 }
 
-// One real launch through launchd (S2's path): the detached holder runs with parent launchd
-// after its job was booted out, the temp dir is gone, and a stale job and temp dir of a dead
-// launcher are swept. Skipped without a GUI session (CI, ssh).
+// One real launch through launchd: the holder is its job's own process (parent launchd, the job
+// still loaded, #202), the temp dir is gone, and a stale job and temp dir of a dead launcher are
+// swept. Booting the job out, as launchd does to the login's jobs at logout, stops the holder.
+// Skipped without a GUI session (CI, ssh).
 //
 // First the real holder started directly (test mode's way): it leaves its cwd (the app's) for "/",
 // so it never keeps a directory or a volume busy.
@@ -322,7 +341,15 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	_ = os.write_entire_file(fmt.tprintf("%s/job.plist", old_dir), transmute([]byte)string("x"))
 	tv := [2]posix.timeval{{tv_sec = posix.time_t(time.now()._nsec / 1e9 - 3600)}, {tv_sec = posix.time_t(time.now()._nsec / 1e9 - 3600)}}
 	posix.utimes(strings.clone_to_cstring(old_dir, context.temp_allocator), &tv)
-	time.sleep(100 * time.Millisecond) // /usr/bin/true has run and ended
+	// /usr/bin/true has run and ended in both (the sweep boots out only a job that is not running)
+	for l in ([]string{old_label, new_label}) {
+		ended := false
+		for _ in 0 ..< 200 {
+			if ended = lt_ran_and_ended(l); ended do break
+			time.sleep(50 * time.Millisecond)
+		}
+		if !testing.expectf(t, ended, "the seeded job %s did not run and end in 10 s", l) do return
+	}
 
 	t0 := time.tick_now()
 	pid, label, ok, why := launchd_launch(bin, run, data, {"LT_MARK=yes", "PATH=/usr/bin:/bin"}, TEST_LABEL_PREFIX)
@@ -335,9 +362,11 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	fmt.printfln("launchd_launch_real: launched pid %d in %v", pid, elapsed)
 	testing.expect_value(t, pid_parent(pid), i32(1))
 	testing.expect_value(t, launchd_realpath(holder_pid_exe(pid)), launchd_realpath(bin))
-	testing.expect(t, !lt_loaded(label), "its job was booted out")
+	testing.expect(t, lt_loaded(label), "its job stays loaded: the holder is its process")
 	time.sleep(50 * time.Millisecond)
-	testing.expect(t, posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK, "and it survived the bootout")
+	testing.expect(t, posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK, "and it runs")
+	lo, lst := run_group({"/usr/sbin/lsof", "-a", "-p", fmt.tprintf("%d", pid), "-d", "cwd", "-Fn"}, 10 * time.Second)
+	testing.expectf(t, lst == .Ok && strings.contains(lo, "\nn/\n"), "the holder left the job's temp dir for /: %q", lo)
 	// the sweep at its start
 	testing.expect(t, !lt_loaded(old_label), "an old stale job is booted out")
 	testing.expect(t, lt_loaded(new_label), "a young one is left")
@@ -346,6 +375,15 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	// its own temp dir is gone
 	entries, _ := os.read_all_directory_by_path(run, context.temp_allocator)
 	for e in entries do testing.expectf(t, !strings.has_prefix(e.name, LAUNCHD_JOB_DIR) || e.name == "job-busy02", "left: %s", e.name)
+
+	// the login's end, as launchd does it to the gui/<uid> jobs: SIGTERM to the job's process
+	launchd_bootout(domain, label)
+	stopped := false
+	for _ in 0 ..< 200 {
+		if stopped = posix.kill(posix.pid_t(pid), posix.Signal(0)) != .OK; stopped do break
+		time.sleep(25 * time.Millisecond)
+	}
+	testing.expect(t, stopped, "booting its job out stops the holder (as a logout does)")
 
 	// the same holder signed with another identifier: the launcher refuses it before the
 	// environment (P8: its code, by the token from accept), and the launch fails
@@ -395,4 +433,58 @@ holder_install_tmp_unique :: proc(t: ^testing.T) {
 	b := holder_install_tmp("/d")
 	testing.expect(t, a != b, a)
 	testing.expect(t, strings.has_prefix(a, "/d/.deckhand-core.") && strings.has_suffix(a, ".tmp"), a)
+}
+
+// #202: a launch from a process whose login has ended fails with launchd's "141: Reentrancy
+// avoided". No direct start follows (it would land in the dead login too), for the holder and the
+// core alike, and login_gone is set (a core then exits). A stand-in launchctl; launchd untouched.
+@(test)
+launchd_login_gone_no_fallback :: proc(t: ^testing.T) {
+	d := lt_dir("lgone")
+	defer os.remove_all(d)
+	run := fmt.tprintf("%s/run", d)
+	testing.expect_value(t, runtime_dir_prepare(run, RUNTIME_HOLDER_NEED), "")
+	fake := fmt.tprintf("%s/launchctl", d)
+	script := "#!/bin/sh\nif [ \"$1\" = bootstrap ]; then echo 'Bootstrap failed: 141: Reentrancy avoided' >&2; exit 141; fi\nif [ \"$1\" = bootout ]; then echo 'Boot-out failed: 141: Reentrancy avoided' >&2; exit 141; fi\nexit 0\n"
+	_ = os.write_entire_file(fake, transmute([]byte)script)
+	posix.chmod(strings.clone_to_cstring(fake, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+	// a real binary: a direct start of it would succeed, so a fallback would show
+	bin := fmt.tprintf("%s/deckhand-core", d)
+	if !lt_cc(t, LT_MAIN, bin, "") do return
+	saved := launchd_launchctl
+	launchd_launchctl = fake
+	defer {
+		launchd_launchctl = saved
+		login_gone = false
+		login_gui_kind_for_test = 0
+	}
+	login_gone = false
+	login_gui_kind_for_test = 1 // a GUI login (its end is what 141 means)
+	pid, ok, why := holder_launch(bin, run, fmt.tprintf("%s/data", d), {"PATH=/usr/bin:/bin"})
+	testing.expectf(t, !ok && pid == 0, "the holder's launch fails: %v %d", ok, pid)
+	testing.expectf(t, strings.contains(why, "login that has ended"), "why: %s", why)
+	testing.expect(t, login_gone, "login_gone is set")
+	login_gone = false
+	pid, ok, why = core_launch(bin, run, fmt.tprintf("%s/data", d))
+	testing.expectf(t, !ok && pid == 0, "the core's launch fails: %v %d", ok, pid)
+	testing.expectf(t, strings.contains(why, "login that has ended"), "why: %s", why)
+	testing.expect(t, login_gone, "login_gone is set")
+
+	// #204 review, item 6b: a caller in an ssh login (`deckhand-core-serve connect` from another
+	// Mac, a tmux from ssh) keeps the direct start: its 141 says nothing about the GUI login
+	login_gone = false
+	login_gui_kind_for_test = 2
+	pid, ok, why = holder_launch(bin, run, fmt.tprintf("%s/data", d), {"PATH=/usr/bin:/bin"})
+	testing.expectf(t, ok && pid > 0, "an ssh caller's holder starts directly: %v %d %s", ok, pid, why)
+	testing.expect(t, !login_gone, "and login_gone stays clear")
+}
+
+@(test)
+launchd_login_gone_parse :: proc(t: ^testing.T) {
+	// core.log of #202, verbatim
+	testing.expect(t, launchd_login_gone("launchctl bootstrap: Failed Bootstrap failed: 141: Reentrancy avoided"))
+	testing.expect(t, launchd_login_gone("Bootstrap failed: 141: Reentrancy avoided"))
+	testing.expect(t, !launchd_login_gone("launchctl bootstrap: Failed Bootstrap failed: 5: Input/output error"))
+	testing.expect(t, !launchd_login_gone("the detached holder never connected to the ready socket"))
+	testing.expect(t, !launchd_login_gone(""))
 }

@@ -20,7 +20,7 @@ const CREDIT_BATCH = 32 * 1024;
 const CREDIT_DELAY = 25; // ms: small credits go together
 const FIT_DELAY = 150; // ms: a keyboard sliding in resizes once, not every frame
 
-export type StreamEvent = { kind: "attached" } | { kind: "error"; text: string } | { kind: "closed" };
+export type StreamEvent = { kind: "attached" } | { kind: "live" } | { kind: "error"; text: string } | { kind: "closed" };
 
 export class TermStream {
   tabId = 0;
@@ -32,6 +32,8 @@ export class TermStream {
   private fitTimer = 0;
   private sentFit: Fit | null = null;
   private fitRetries = 0;
+  private serial = 0; // the link's socket the channel is on (link.ts)
+  private live = false; // bytes came on this channel
   private onEvent: (e: StreamEvent) => void = () => {};
   private off: (() => void)[];
 
@@ -60,7 +62,7 @@ export class TermStream {
   }
 
   attach(tabId: number): void {
-    if (this.tabId === tabId && (this.channel || this.attachId)) return;
+    if (this.tabId === tabId && (this.attached || this.attachId)) return;
     this.detach();
     this.tabId = tabId;
     this.view.reset();
@@ -76,26 +78,28 @@ export class TermStream {
   }
 
   detach(): void {
-    if (this.channel) this.link.sendJson({ type: "term.detach", channel: this.channel });
-    if (this.channel) this.focus(false);
+    if (this.attached) this.link.sendJson({ type: "term.detach", channel: this.channel });
+    if (this.attached) this.focus(false);
     this.dropChannel();
     this.tabId = 0;
     this.sentFit = null;
   }
 
+  // on the link's socket now: a channel from before a reconnect (a Take back while the pane was
+  // not shown, its terminal kept) is gone, and its number may be another stream's now
   get attached(): boolean {
-    return this.channel !== 0;
+    return this.channel !== 0 && this.serial === this.link.serial;
   }
 
   input(b: Uint8Array): void {
     if (this.look) return;
-    if (!this.channel || b.length === 0) return;
+    if (!this.attached || b.length === 0) return;
     this.link.sendFrame(this.channel, Kind.Data, b);
   }
 
   focus(gained: boolean): void {
     if (this.look) return;
-    if (this.channel) this.link.sendFrame(this.channel, Kind.Focus, new Uint8Array([gained ? 1 : 0]));
+    if (this.attached) this.link.sendFrame(this.channel, Kind.Focus, new Uint8Array([gained ? 1 : 0]));
   }
 
   // The element's size changed: ask the core for the grid it fits (the core alone resizes).
@@ -124,7 +128,7 @@ export class TermStream {
   }
 
   private sendFit(): void {
-    if (!this.tabId || !this.channel) return;
+    if (!this.tabId || !this.attached) return;
     const f = this.view.fit();
     if (!f) {
       // not measurable yet (the renderer has no cell size before its first paint): again shortly
@@ -147,6 +151,8 @@ export class TermStream {
     }
     this.channel = Number(m.channel) || 0;
     if (!this.channel) return;
+    this.live = false;
+    this.serial = this.link.serial;
     this.link.onChannel(this.channel, (f) => this.onFrame(f));
     this.focus(true);
     this.refit(true);
@@ -154,6 +160,11 @@ export class TermStream {
   }
 
   private onFrame(f: Frame): void {
+    // the first bytes of this channel (a snapshot or output): the stream works (Term.tsx's reopen)
+    if (!this.live && (f.kind === Kind.Snapshot || f.kind === Kind.Data)) {
+      this.live = true;
+      this.onEvent({ kind: "live" });
+    }
     switch (f.kind) {
       case Kind.Snapshot: {
         const s = decodeSnapshot(f.payload);
@@ -195,7 +206,7 @@ export class TermStream {
   }
 
   private addCredit(n: number): void {
-    if (!this.channel) return;
+    if (!this.attached) return;
     this.credit += n;
     if (this.credit >= CREDIT_BATCH) {
       this.flushCredit();
@@ -207,12 +218,12 @@ export class TermStream {
   private flushCredit(): void {
     window.clearTimeout(this.creditTimer);
     this.creditTimer = 0;
-    if (this.channel && this.credit > 0) this.link.sendFrame(this.channel, Kind.Credit, u32le(this.credit));
+    if (this.attached && this.credit > 0) this.link.sendFrame(this.channel, Kind.Credit, u32le(this.credit));
     this.credit = 0;
   }
 
   private dropChannel(): void {
-    if (this.channel) this.link.onChannel(this.channel, null);
+    if (this.channel && this.serial === this.link.serial) this.link.onChannel(this.channel, null);
     window.clearTimeout(this.creditTimer);
     this.creditTimer = 0;
     this.credit = 0;

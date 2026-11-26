@@ -7,11 +7,16 @@ import type { OpenSession } from "../state.ts";
 import { sessionView } from "../status.ts";
 import { keysLabel, keysMatch, useApp, type App, type Keys } from "./ctx.ts";
 import { score } from "./match.ts";
+import { ownFilter } from "./treefilter.ts";
 import { HarnessIcon, Icon, StatusMark } from "./icons.tsx";
-import { codexAvailable, focusSession, newChat, newSessionItems, openHarness } from "./Sidebar.tsx";
+import { treeTakes } from "./fileops.ts";
+import { focusSession, newChat, newSession, openHarness } from "./Sidebar.tsx";
+import { newTabChoices } from "./harness.ts";
 import { newTabItems } from "./Panes.tsx";
 import { setTermFont, termFontSize } from "./Term.tsx";
 import { openJobSheet } from "./JobSheet.tsx";
+import { toggleAtlas } from "./Bars.tsx";
+import { paletteShows, atlasShown } from "./phone.ts";
 
 export interface Action {
   id: string;
@@ -64,11 +69,13 @@ export const ACTIONS: Action[] = [
     id: "new_session",
     label: "New session",
     when: (app) => !!app.store.selectedProject,
-    run: (app) => app.setOverlay({ sheet: { title: "New session", items: newSessionItems(app, app.store.selectedProject) } }),
+    run: (app) => newSession(app, app.store.selectedProject),
   },
-  { id: "new_shell_tab", label: "New shell tab", keys: { k: "t", alt: true }, when: (app) => !!cur(app), run: (app) => app.run({ type: "new_shell_tab", session: cur(app)!.id, pane: panes(app)?.focused_pane || undefined }) },
-  { id: "new_claude_tab", label: "New Claude tab", when: (app) => !!cur(app), run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id }) },
-  { id: "new_codex_tab", label: "New Codex tab", when: (app) => !!cur(app) && codexAvailable(app.store, cur(app)!.machine), run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id, harness: "codex" }) },
+  // a phone names no pane (the Mac's focused pane is not the phone's to pick)
+  { id: "new_shell_tab", label: "New shell tab", keys: { k: "t", alt: true }, when: (app) => !!cur(app), run: (app) => app.run({ type: "new_shell_tab", session: cur(app)!.id, pane: (!app.phone && panes(app)?.focused_pane) || undefined }) },
+  // while that harness is there (harness.ts); the account is the core's pick, as the native palette's
+  { id: "new_claude_tab", label: "New Claude tab", when: (app) => !!cur(app) && newTabChoices(app.store, cur(app)!.machine, { session: cur(app)!.id }, false, "").length > 0, run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id }) },
+  { id: "new_codex_tab", label: "New Codex tab", when: (app) => !!cur(app) && newTabChoices(app.store, cur(app)!.machine, { session: cur(app)!.id }, true, "").length > 0, run: (app) => app.run({ type: "new_claude_tab", session: cur(app)!.id, harness: "codex" }) },
   { id: "show_changes", label: "Show changes", when: (app) => !!cur(app) && !cur(app)!.machine && !cur(app)!.home, run: (app) => app.run({ type: "changes_open", session: cur(app)!.id }) },
   { id: "close_tab", label: "Close tab", when: (app) => !!curTab(app), run: (app) => app.run({ type: "close_tab", tab_id: curTab(app)!.id }) },
   { id: "close_session", label: "Close session", when: (app) => !!cur(app), run: (app) => app.run({ type: "close_session", session: cur(app)!.id }) },
@@ -76,8 +83,8 @@ export const ACTIONS: Action[] = [
     id: "toggle_agent",
     label: (app) => `Toggle ${app.store.settings.agent_name || "Atlas"}`,
     keys: { k: "j" },
-    when: (app) => !!app.store.homeSession,
-    run: (app) => app.run({ type: "set_home", open: !app.store.homeOpen }),
+    when: (app) => atlasShown(app.store.homeSession, app.store.web),
+    run: (app) => toggleAtlas(app),
   },
   { id: "notifications", label: "Notifications", run: (app) => app.setOverlay({ bell: true, palette: false }) },
   { id: "notifications_read", label: "Notifications: mark all read", run: (app) => app.run({ type: "notifications_mark_read", all: true }) },
@@ -86,7 +93,7 @@ export const ACTIONS: Action[] = [
   { id: "toggle_right", label: "Toggle right panels", keys: { k: "b", alt: true }, when: (app) => !app.phone, run: (app) => app.run({ type: "set_layout", right_open: !app.store.layout.right_open }) },
   { id: "settings", label: "Settings…", keys: { k: "," }, run: (app) => app.go({ screen: app.route.screen === "settings" ? "home" : "settings" }) },
   { id: "job_new", label: "New job", run: (app) => { app.setOverlay({ palette: false }); openJobSheet(app, ""); } },
-  { id: "show_jobs", label: "Show jobs", run: (app) => app.run({ type: "set_left_tab", tab: "jobs" }) },
+  { id: "show_jobs", label: "Show jobs", run: (app) => (app.phone ? app.go({ screen: "jobs" }) : app.run({ type: "set_left_tab", tab: "jobs" })) },
   { id: "jobs_pause_all", label: "Pause all jobs", run: (app) => app.run({ type: "jobs_pause" }) },
   { id: "jobs_resume_all", label: "Resume all jobs", run: (app) => app.run({ type: "jobs_resume" }) },
   { id: "jobs_stop_all", label: "Stop all running jobs", run: (app) => app.run({ type: "job_stop" }) },
@@ -111,9 +118,9 @@ export const ACTIONS: Action[] = [
   },
   { id: "filter", label: "Filter projects and sessions", keys: { k: "f", shift: true }, run: (app) => focusFilter(app) },
   { id: "clear_filter", label: "Clear filter", run: (app) => app.run({ type: "set_filter", text: "", running: false, waiting: false, pinned: false }) },
-  { id: "quick_running", label: "Filter: running", detail: (app) => onOff(!!app.store.sidebar.only_running), run: (app) => app.run({ type: "set_filter", running: !app.store.sidebar.only_running }) },
-  { id: "quick_waiting", label: "Filter: waiting for you", detail: (app) => onOff(!!app.store.sidebar.only_waiting), run: (app) => app.run({ type: "set_filter", waiting: !app.store.sidebar.only_waiting }) },
-  { id: "quick_pinned", label: "Filter: pinned", detail: (app) => onOff(!!app.store.sidebar.only_pinned), run: (app) => app.run({ type: "set_filter", pinned: !app.store.sidebar.only_pinned }) },
+  { id: "quick_running", label: "Filter: running", detail: (app) => onOff(ownFilter(app.store.web).running), run: (app) => app.run({ type: "set_filter", running: !ownFilter(app.store.web).running }) },
+  { id: "quick_waiting", label: "Filter: waiting for you", detail: (app) => onOff(ownFilter(app.store.web).waiting), run: (app) => app.run({ type: "set_filter", waiting: !ownFilter(app.store.web).waiting }) },
+  { id: "quick_pinned", label: "Filter: pinned", detail: (app) => onOff(ownFilter(app.store.web).pinned), run: (app) => app.run({ type: "set_filter", pinned: !ownFilter(app.store.web).pinned }) },
   { id: "show_hidden", label: "Show hidden projects and sessions", detail: (app) => onOff(!!app.store.sidebar.show_hidden), run: (app) => app.run({ type: "set_filter", show_hidden: !app.store.sidebar.show_hidden }) },
   { id: "sort_projects", label: "Sort projects (next order)", detail: (app) => app.store.sidebar.sort?.projects ?? "", run: (app) => nextSort(app, "projects") },
   { id: "sort_sessions", label: "Sort sessions (next order)", detail: (app) => app.store.sidebar.sort?.sessions ?? "", run: (app) => nextSort(app, "sessions") },
@@ -157,7 +164,8 @@ export const ACTIONS: Action[] = [
     run: (app) => app.run({ type: "set_unread", tab_id: curTab(app)!.id, unread: true }),
   },
   { id: "mark_all_read", label: "Mark all sessions as read", run: (app) => app.run({ type: "mark_all_read" }) },
-  { id: "show_deck", label: "Show the Deck", run: (app) => app.run({ type: "show_no_session" }).then(() => app.go({ screen: "deck" })) },
+  // a phone's Deck is its own screen: the Mac's session stays on screen there
+  { id: "show_deck", label: "Show the Deck", run: (app) => (app.phone ? app.go({ screen: "deck" }) : app.run({ type: "show_no_session" }).then(() => app.go({ screen: "deck" }))) },
   { id: "unpair", label: "Unpair this browser", run: (app) => app.unpair() },
 ];
 
@@ -166,7 +174,7 @@ export function actionLabel(a: Action, app: App): string {
 }
 
 export function focusFilter(app: App) {
-  if (app.store.layout.left_tab !== "sessions") app.run({ type: "set_left_tab", tab: "sessions" });
+  if (app.store.layout.left_tab !== "sessions" && !app.phone) app.run({ type: "set_left_tab", tab: "sessions" });
   if (!app.store.layout.left_open && !app.phone) app.run({ type: "set_layout", left_open: true });
   app.go({ screen: "home" });
   window.setTimeout(() => (document.getElementById("sidebar-filter") as HTMLInputElement | null)?.focus(), 60);
@@ -186,8 +194,9 @@ export function useShortcuts(app: App) {
         return;
       }
       if (a.overlay.palette || a.overlay.sheet) return;
+      if (treeTakes(e)) return; // ⌘D on a Files row duplicates it (fileops.ts), not Split pane right
       for (const x of ACTIONS) {
-        if (x.keys && keysMatch(x.keys, e) && (!x.when || x.when(a))) {
+        if (x.keys && keysMatch(x.keys, e) && paletteShows(x.id, a.phone) && (!x.when || x.when(a))) {
           e.preventDefault();
           e.stopPropagation();
           x.run(a);
@@ -265,14 +274,14 @@ export function Palette() {
             run: () => {
               app.run({ type: "select_project", project_id: p.id });
               app.go({ screen: "home" });
-              if (!store.layout.left_open) app.run({ type: "set_layout", left_open: true });
+              if (!store.layout.left_open && !app.phone) app.run({ type: "set_layout", left_open: true });
             },
           },
         });
       }
     }
     for (const a of ACTIONS) {
-      if (a.when && !a.when(app)) continue;
+      if (!paletteShows(a.id, app.phone) || (a.when && !a.when(app))) continue;
       const label = actionLabel(a, app);
       const sc = score(label, query);
       if (sc <= 0) continue;

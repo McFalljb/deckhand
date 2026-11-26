@@ -212,7 +212,7 @@ SITES := [?]Site {
 		core.home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
 		_ = os.write_entire_file(fmt.tprintf("%s/%s", core.update_data_dir(), core.CLAUDE_HINTS_FILE), transmute([]u8)s)
 		core.claude_status_reset()
-		tab := core.Tab{id = 1 << 40, kind = core.Claude_Tab{}}
+		tab := core.Tab{id = 1 << 40, kind = core.Claude_Tab{harness = .Claude}}
 		tab.reload.version = "2.1.250" // older than CLAUDE_MIN_VERSION: the hint reads the file
 		return core.claude_status_message(&tab) != ""
 	}},
@@ -613,11 +613,16 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse", "", ""},
 		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse_string", "", ""}, // a page's binding payload
 		{"src/core/claude_disk.odin", "found_read", "jg.parse", "", ""}, // Claude transcripts (seen 16 deep)
-		{"src/core/claude_disk.odin", "found_cwd", "jg.parse", "", ""},
-		{"src/core/claude_disk.odin", "codex_first_line", "jg.parse", "", ""}, // a Codex rollout's first line (64 KB cap, json_depth_ok first)
+		{"src/core/claude_disk.odin", "transcript_cwd", "jg.parse", "", ""},
+		{"src/core/codex_disk.odin", "codex_first_line", "jg.parse", "", ""}, // a Codex rollout's first line (64 KB cap, json_depth_ok first)
+		{"src/core/codex_disk.odin", "codex_index_refresh", "jg.parse", "", ""}, // a Codex home's session_index.jsonl (16 KB a line, json_depth_ok first)
 		{"src/core/claude_status.odin", "hints_load", "jg.parse", "", ""},
+		{"src/core/claude_reload.odin", "restart_keys_digest", "jg.parse", "", ""},
+		{"src/core/claude_lists.odin", "read_plugins", "jg.parse", "", ""}, // a Claude settings.json's enabledPlugins (at most 4 MB, on a worker) // a Claude settings file's enabledPlugins (at most 4 MB; only once its stamp changed)
 		{"src/core/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
 		{"src/core/ctl.odin", "json_path", "jg.parse_string", "", ""},
+		{"src/core/files_ops.odin", "files_copy_result", "jg.parse_string", "", ""}, // fs_copy's finished data (the core's)
+		{"src/core/files_ops.odin", "files_trash_result", "jg.parse_string", "", ""}, // delete_path's data (the core's)
 		{"src/core/machines.odin", "machines_read", "jg.parse_string", "", ""},
 		{"src/core/machine_install.odin", "core_tarball_release_size", "jg.parse_string", "", ""}, // the network (bounded: UPDATE_JSON_MAX)
 		{"src/core/machines.odin", "hub_msg_type", "jg.parse_string", "", ""},

@@ -1,6 +1,6 @@
 package main
 
-// Claude rows and tabs at parity with pi's (claude_rows.odin; docs/CLAUDE.md §4b): the transcript
+// Claude rows and tabs at parity with pi's (claude_rows.odin; docs/CLAUDE-TABS.md §4b): the transcript
 // path and model in the history, the row's session info, Reveal and Copy path, the model's
 // switches, the question and error dots, the rename pushed to Claude Code, the exit's bell entry,
 // Send and close in a Claude-only session, Ask Claude to review, PI_KIT_NOTES_DIR and
@@ -44,7 +44,7 @@ r_reset :: proc() -> runtime.Allocator {
 	}
 	core.persist = {}
 	core.dead_tab_reset()
-	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.harness_installed_probe[.Claude] = stand_in_installed // the stand-in claude counts as installed
 	r_clip, r_revealed = "", ""
 	core.platform = {quit = proc() {}}
 	win_os = {set_clipboard = proc(s: string) {r_clip = strings.clone(s, runtime.heap_allocator())}, reveal = proc(p: string) {r_revealed = strings.clone(p, runtime.heap_allocator())}}
@@ -53,7 +53,7 @@ r_reset :: proc() -> runtime.Allocator {
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	core.claude_found = .Yes
+	core.harness_found[.Claude] = .Yes
 	// never the user's real Claude folder: a fake one (tests that need files make their own)
 	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/deckhand-cr-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
 	return runtime.heap_allocator()
@@ -89,7 +89,7 @@ r_config :: proc(tag, sid: string) -> (cfg, transcript: string) {
 
 @(private = "file")
 r_claude_session :: proc(t: ^testing.T, pid: u64) -> (sess, tab: u64) {
-	r := core.run_command(core.New_Claude_Session{project_id = pid}, R_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R_UI)
 	testing.expect(t, r.ok, r.error)
 	sess = r.created_id
 	if s := core.find_session(sess); s != nil && len(s.tabs) > 0 do tab = s.tabs[0].id
@@ -369,7 +369,7 @@ claude_rows_exit_bell :: proc(t: ^testing.T) {
 	sess := core.run_command(core.New_Chat{project_id = pid}, R_UI).created_id
 	for code in ([]int{0, 127, 3}) {
 		os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exit %d", code))
-		id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+		id := core.run_command(core.New_Claude_Tab{session = sess, harness = .Claude}, R_UI).created_id
 		state.current_session = 0 // not on screen
 		before := len(state.notices.items)
 		testing.expect(t, r_wait_exit(id), "exited")
@@ -601,4 +601,171 @@ claude_rows_polish :: proc(t: ^testing.T) {
 	append(&odd.tabs, core.Tab{id = 5, kind = core.Shell_Tab{}})
 	cmd, _ := changes_review_command(&odd, "x")
 	testing.expect(t, cmd == nil, "not a Claude tab")
+}
+
+// Audit: `deckhand DIR` with Codex the only harness installed starts a Codex session there, as
+// with Claude Code alone, never a pi chat that cannot start.
+@(test)
+launch_start_codex_alone :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	pid := core.run_command(core.Add_Project{cwd = r_dir("launchcodex")}, R_UI).created_id
+	defer core.harness_installed_probe[.Pi] = nil
+	defer core.harness_installed_probe[.Claude] = nil
+	defer core.harness_installed_probe[.Codex] = nil
+	core.harness_installed_probe[.Pi] = proc() -> bool {return false}
+	core.harness_installed_probe[.Claude] = proc() -> bool {return false}
+	core.harness_installed_probe[.Codex] = proc() -> bool {return true}
+	c, is := launch_start(false, pid).(core.New_Claude_Session)
+	testing.expect(t, is && c.harness == .Codex && c.project_id == pid, "a Codex session in DIR's project")
+	// Claude Code and Codex: Claude Code, as before
+	core.harness_installed_probe[.Claude] = proc() -> bool {return true}
+	c, is = launch_start(false, pid).(core.New_Claude_Session)
+	testing.expect(t, is && c.harness != .Codex, "a Claude session")
+	// pi there: a pi chat
+	core.harness_installed_probe[.Pi] = proc() -> bool {return true}
+	_, is_chat := launch_start(false, pid).(core.New_Chat)
+	testing.expect(t, is_chat, "a pi chat")
+}
+
+// The permission-mode badge (claude_mode.odin): from the tab's start flags (its own and the user's
+// defaults as they went), then what Claude Code's hooks report (Shift+Tab's switch, "default"
+// clears it); never guessed for Codex beyond its flags. On the tab's tooltip and in the snapshot.
+@(test)
+claude_rows_permission_mode :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	// the flags' modes
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, nil), "")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode", "plan"}), "plan")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode=acceptEdits"}), "acceptEdits")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode", "default"}), "")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--model", "x", "--dangerously-skip-permissions"}), "bypassPermissions")
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--allow-dangerously-skip-permissions"}), "") // only allows it
+	testing.expect_value(t, core.claude_mode_of_args(.Claude, {"--permission-mode", "x;y"}), "") // not a word
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--dangerously-bypass-approvals-and-sandbox"}), core.CODEX_MODE_BYPASS)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-s", "danger-full-access"}), core.CODEX_MODE_FULL_ACCESS)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-sread-only"}), "") // never a safer-sounding Codex badge
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--sandbox=workspace-write"}), "")
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--search"}), "")
+	// the labels: quiet ones, the warning's
+	for c in ([]struct {
+			mode, label: string,
+			warn:        bool,
+		}{{"", "", false}, {"default", "", false}, {"plan", "plan", false}, {"acceptEdits", "accept edits", false}, {"bypassPermissions", "bypass", true}, {core.CODEX_MODE_FULL_ACCESS, "full access", true}, {core.CODEX_MODE_BYPASS, "bypass", true}, {"newMode", "newMode", true}}) {
+		label, warn := core.claude_mode_label(c.mode)
+		testing.expect_value(t, label, c.label)
+		testing.expect_value(t, warn, c.warn)
+	}
+	dir := r_dir("mode")
+	pid := core.run_command(core.Add_Project{cwd = dir}, R_UI).created_id
+	// the start's flags: the tab's own
+	r := core.run_command(core.New_Claude_Session{project_id = pid, args = {"--permission-mode", "plan"}, harness = .Claude}, R_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := core.find_session(r.created_id).tabs[0].id
+	_, ttab, ct := core.claude_tab_of(tab)
+	testing.expect_value(t, ct.permission_mode, "plan")
+	tip := core.claude_tab_tip(ttab^)
+	testing.expectf(t, strings.contains(tip, "plan mode"), "%s", tip)
+	testing.expect(t, strings.contains(core.state_json(), `"permission_mode":"plan"`), "snapshot")
+	// the hooks say otherwise: they win; a report without it keeps it; "default" clears it
+	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "a9a9a9a9-0000-4000-8000-000000000001", source = "startup", permission_mode = "acceptEdits"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "acceptEdits")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "acceptEdits")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle", permission_mode = "bypassPermissions"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle", permission_mode = "a b"}, R_SCRIPT).ok) // a bad word is ignored, the report stands
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	testing.expect(t, core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", permission_mode = "default"}, R_SCRIPT).ok)
+	testing.expect_value(t, ct.permission_mode, "")
+	testing.expect_value(t, core.claude_tab_tip(ttab^), "")
+	// the wire: the plugin's JSON carries it
+	cmd, err := core.parse_command(`{"type":"claude.turn","tab_id":1,"state":"idle","permission_mode":"plan"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	if tr, is := cmd.(core.Claude_Turn_Report); testing.expect(t, is) do testing.expect_value(t, tr.permission_mode, "plan")
+	// the user's default (skip permissions) at a start the user makes: bypass; an agent's start: none
+	state.settings.claude_skip_permissions = true
+	defer state.settings.claude_skip_permissions = false
+	r = core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R_UI)
+	testing.expect(t, r.ok, r.error)
+	_, _, ct2 := core.claude_tab_of(core.find_session(r.created_id).tabs[0].id)
+	testing.expect_value(t, ct2.permission_mode, "bypassPermissions")
+	r = core.run_command(core.New_Claude_Tab{session = r.created_id, harness = .Claude}, R_CONTROL)
+	testing.expect(t, r.ok, r.error)
+	_, _, ct3 := core.claude_tab_of(r.created_id)
+	if testing.expect(t, ct3 != nil) do testing.expect_value(t, ct3.permission_mode, "")
+	// a Codex tab's hook report is not looked at (Codex reports none)
+	codex := core.Claude_Tab{harness = .Codex}
+	testing.expect(t, !core.claude_mode_report(0, &codex, "bypassPermissions"))
+	testing.expect_value(t, codex.permission_mode, "")
+}
+
+// Review round 1 (#171): every spelling codex_args_check accepts gives the same badge; Codex's
+// other ways of dropping approvals or the sandbox (-c sandbox_mode, -c approval_policy, -a never,
+// --approve-for-me) badge too, from the same parsing as the access decision; never a badge that
+// sounds safer than Codex may be (no "read-only"). auto and an unknown word get the warning colour.
+@(test)
+claude_rows_permission_mode_codex_spellings :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	full := []([]string) {
+		{"-s=danger-full-access"}, {"-sdanger-full-access"}, {"-s", "danger-full-access"}, {"--sandbox=danger-full-access"}, {"--sandbox", "danger-full-access"},
+		{"-c", `sandbox_mode="danger-full-access"`}, {"-csandbox_mode=danger-full-access"}, {"-c=sandbox_mode='danger-full-access'"}, {"--config=sandbox_mode = \"danger-full-access\""}, {"--config", "sandbox_mode=danger-full-access"},
+	}
+	for a in full {
+		testing.expectf(t, core.codex_args_check(a) == "", "%v accepted: %s", a, core.codex_args_check(a))
+		testing.expectf(t, core.claude_mode_of_args(.Codex, a) == core.CODEX_MODE_FULL_ACCESS, "%v: %q", a, core.claude_mode_of_args(.Codex, a))
+		testing.expectf(t, core.codex_args_choose_access(a), "%v: the access decision agrees", a)
+	}
+	never := []([]string){{"-a", "never"}, {"-a=never"}, {"-anever"}, {"--ask-for-approval=never"}, {"-c", "approval_policy=never"}, {"-c", `approval_policy = "never"`}}
+	for a in never {
+		testing.expectf(t, core.codex_args_check(a) == "", "%v accepted", a)
+		testing.expectf(t, core.claude_mode_of_args(.Codex, a) == core.CODEX_MODE_NEVER_ASKS, "%v: %q", a, core.claude_mode_of_args(.Codex, a))
+		testing.expectf(t, core.codex_args_choose_access(a), "%v: the access decision agrees", a)
+	}
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--approve-for-me"}), core.CODEX_MODE_APPROVES)
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"--dangerously-bypass-approvals-and-sandbox", "-s", "read-only"}), core.CODEX_MODE_BYPASS)
+	// the strongest wins, whatever the order
+	testing.expect_value(t, core.claude_mode_of_args(.Codex, {"-a", "never", "-s", "danger-full-access"}), core.CODEX_MODE_FULL_ACCESS)
+	// never safer than it may be: read-only, workspace-write, on-request say nothing
+	for a in ([]([]string){{"-s", "read-only"}, {"-s=workspace-write"}, {"-a", "on-request"}, {"-c", "sandbox_mode=read-only"}, {"-m", "o3"}}) do testing.expectf(t, core.claude_mode_of_args(.Codex, a) == "", "%v: %q", a, core.claude_mode_of_args(.Codex, a))
+	for m in ([]string{core.CODEX_MODE_BYPASS, core.CODEX_MODE_FULL_ACCESS, core.CODEX_MODE_NEVER_ASKS, core.CODEX_MODE_APPROVES, "auto", "someNewMode", "bypassPermissions"}) {
+		label, warn := core.claude_mode_label(m)
+		testing.expectf(t, label != "" && warn, "%s: %q warn %v", m, label, warn)
+	}
+	for m in ([]string{"plan", "acceptEdits", "dontAsk"}) {
+		_, warn := core.claude_mode_label(m)
+		testing.expectf(t, !warn, "%s: quiet", m)
+	}
+}
+
+// Review round 1 (#171): a tab started with skip-permissions keeps its bypass badge whatever a
+// hook report says until its process starts again (any process in the tab has its token: the
+// badge is information, not a boundary); a tab started without it follows the hooks.
+@(test)
+claude_rows_permission_mode_floor :: proc(t: ^testing.T) {
+	context.allocator = r_reset()
+	defer r_done()
+	dir := r_dir("modefloor")
+	pid := core.run_command(core.Add_Project{cwd = dir}, R_UI).created_id
+	r := core.run_command(core.New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}, harness = .Claude}, R_UI)
+	testing.expect(t, r.ok, r.error)
+	tab := core.find_session(r.created_id).tabs[0].id
+	_, _, ct := core.claude_tab_of(tab)
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	for m in ([]string{"default", "plan", "acceptEdits"}) {
+		core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle", permission_mode = m}, R_SCRIPT)
+		testing.expectf(t, ct.permission_mode == "bypassPermissions", "%s lowered it to %q", m, ct.permission_mode)
+	}
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = "abababab-0000-4000-8000-000000000001", source = "clear", permission_mode = "default"}, R_SCRIPT)
+	testing.expect_value(t, ct.permission_mode, "bypassPermissions")
+	// a tab started without it follows its hooks, up and down
+	r = core.run_command(core.New_Claude_Session{project_id = pid, harness = .Claude}, R_UI)
+	tab2 := core.find_session(r.created_id).tabs[0].id
+	_, _, ct2 := core.claude_tab_of(tab2)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab2, state = "idle", permission_mode = "bypassPermissions"}, R_SCRIPT)
+	testing.expect_value(t, ct2.permission_mode, "bypassPermissions")
+	core.run_command(core.Claude_Turn_Report{tab_id = tab2, state = "idle", permission_mode = "default"}, R_SCRIPT)
+	testing.expect_value(t, ct2.permission_mode, "")
 }

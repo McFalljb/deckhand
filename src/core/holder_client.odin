@@ -292,6 +292,8 @@ holder_client_start :: proc() -> bool {
 			case .Stale:
 				log_ln("Deckhand: session holder: removing a dead holder's socket", path)
 				sock_unlink(path)
+			case .Other_Login:
+				_ = holder_replace_other_login(refused_code_pid, other_login_start, path) // not stopped: its socket stays, a new holder starts beside it
 			}
 		}
 		if !quiet do break
@@ -343,10 +345,12 @@ holder_client_start :: proc() -> bool {
 	}
 	defer delete(exe)
 	before := holder_socks(run)
-	if _, lok, lwhy := holder_launch(exe, run, home_root, nil); !lok {
+	hpid, lok, lwhy := holder_launch(exe, run, home_root, nil)
+	if !lok {
 		log_ln("Deckhand: session holder: cannot start it:", lwhy)
 		return false
 	}
+	login_note(hpid) // test builds: it runs in this core's login (login_session.odin)
 	deadline := time.tick_now()
 	for time.tick_since(deadline) < HOLDER_WAIT {
 		outer: for path in holder_socks(run) {
@@ -388,12 +392,15 @@ Connect_Result :: enum {
 	Stale, // nobody listens (a holder killed with -9: the holder unlinks only its own socket at exit)
 	Quiet, // took the connection but closed it, or never answered, without a byte (shutting down?)
 	Refused_Code, // a holder of this user whose code is not ours (another build): nothing was sent to it
+	Other_Login, // ours, but from another login (#202): nothing was sent to it; holder_client_start replaces it
 }
 
 @(private = "file")
 handshake_got: int // bytes the handshake read so far (Quiet: none)
 @(private = "file")
 refused_code_pid: i32 // holder_connect's Refused_Code: the peer's pid
+@(private = "file")
+other_login_start: i64 // holder_connect's Other_Login: the peer's start time, read while connected (0: gone)
 
 // The holder at path alone, while it still runs (holder_recover): retried on a refusal as
 // holder_client_start does (a full listen backlog), but its socket is never taken for a dead
@@ -438,6 +445,15 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		sock_close(fd)
 		refused_code_pid = peer.pid
 		return .Refused_Code
+	}
+	// a holder from an ended GUI login, this core in the current one (#202, login_session.odin):
+	// nothing is sent to it; it is replaced. Any other session (an ssh login's): attached as before
+	if login_should_replace(tok, peer.pid) {
+		log_ln("Deckhand: session holder: pid", peer.pid, "runs in a GUI login that has ended")
+		other_login_start = holder_pid_start(peer.pid) // while the socket still ties the pid to it
+		sock_close(fd)
+		refused_code_pid = peer.pid
+		return .Other_Login
 	}
 	set_timeouts(fd)
 	hc.fd, hc.peer = fd, peer

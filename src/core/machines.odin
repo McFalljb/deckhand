@@ -74,7 +74,7 @@ machines_reachable_default_on :: false
 
 Set_Machines_Reachable :: struct {
 	on:      bool,
-	confirm: string, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
+	confirm: string `cmd:"omit,red=token"`, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
 }
 
 // What turning Allow other machines to connect on asks first (the guide's warning, plainly).
@@ -83,12 +83,14 @@ MACHINES_REACH_QUESTION :: "Allow other machines to connect to this Mac? A machi
 // dropped), name (what Deckhand calls it; "": the target's host part, machine_default_name);
 // via: a development or test build's command in place of `ssh … connect`. User-only.
 Machine_Add :: struct {
-	name, target, via: string,
+	name: string `cmd:"opt"`,
+	target: string `cmd:"opt"`,
+	via: string `cmd:"omit"`,
 }
 // Removes a machine (the user confirms first: nothing on it is touched). User-only.
 Machine_Remove :: struct {
 	no:      u64,
-	confirm: string,
+	confirm: string `cmd:"omit,red=token"`,
 }
 // Renames a machine: only what Deckhand calls it; its ssh target stays. User-only.
 Machine_Rename :: struct {
@@ -1625,9 +1627,9 @@ machine_connect_apply :: proc(c: Machine_Connect) -> Result {
 // screen, else the last shown (Home holds only its pi tab; another machine's is not this Mac's).
 machine_local_session :: proc() -> ^Open_Session {
 	s := cur()
-	if s != nil && !s.home && s.machine == 0 do return s
+	if s != nil && !s.home && s.machine == 0 && s.agent != .Files do return s // a Files session holds no terminal or browser tab
 	s = nil
-	for &o in state.open_sessions do if !o.home && o.machine == 0 && !o.missing && (s == nil || o.shown_at > s.shown_at) do s = &o
+	for &o in state.open_sessions do if !o.home && o.machine == 0 && !o.missing && o.agent != .Files && (s == nil || o.shown_at > s.shown_at) do s = &o
 	return s
 }
 

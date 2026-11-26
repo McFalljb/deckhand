@@ -4,13 +4,13 @@ package core
 // the rest of that file.
 
 Browser_Open :: struct {
-	session: u64, // 0: the caller's own (see above)
-	url:     string, // "" (the user only): a blank tab with the keyboard in its URL field
+	session: u64 `cmd:"omit"`, // 0: the caller's own (see above)
+	url:     string `cmd:"opt,red=url"`, // "" (the user only): a blank tab with the keyboard in its URL field
 }
 
 Browser_Navigate :: struct {
 	tab_id: u64,
-	url:    string, // as typed: normalised (browser_url_normalize)
+	url:    string `cmd:"red=url"`, // as typed: normalised (browser_url_normalize)
 }
 
 Browser_Back :: struct {tab_id: u64}
@@ -33,11 +33,12 @@ Browser_Field :: enum {
 Browser_Update :: struct {
 	tab_id:      u64,
 	what:        bit_set[Browser_Field],
-	url, title:  string,
+	url:         string `cmd:"red=url"`, // (write_command_hook carries out its tags)
+	title:       string, // as State's tab title: not redacted (PROTOCOL.md §6)
 	loading:     bool,
 	can_back:    bool,
 	can_forward: bool,
-	blocked:     string, // the refused popup's URL
+	blocked:     string `cmd:"red=url"`, // the refused popup's URL
 }
 
 // A page's popup (target=_blank, window.open, ⌘-click) with a user gesture, as the window reports
@@ -45,9 +46,9 @@ Browser_Update :: struct {
 // another. created_id: the tab, whose page CEF opens in the slot it reserved.
 Browser_Popup_Open :: struct {
 	opener:     u64, // the page's tab
-	url:        string, // as the page asked (State gets it without user:pass@)
-	background: bool, // behind the view (⌘-click, or an agent acting on the opener)
-	pane:       u64, // the pane it goes into (an agent's: its own tab's); 0 = the focused one
+	url:        string `cmd:"red=url"`, // as the page asked (State gets it without user:pass@)
+	background: bool `cmd:"omit"`, // behind the view (⌘-click, or an agent acting on the opener)
+	pane:       u64 `cmd:"omit"`, // the pane it goes into (an agent's: its own tab's); 0 = the focused one
 }
 
 BROWSER_BLANK :: "about:blank"

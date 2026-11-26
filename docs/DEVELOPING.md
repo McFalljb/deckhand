@@ -57,7 +57,12 @@ On its first run `build.sh` also compiles the sokol C libraries, Clay (from the 
 `vendor/clay/clay.h` into `build/clay-odin/`, next to a copy of the submodule's Odin bindings), the
 CoreText text backend and stb_truetype. `src/` imports `build/clay-odin`, so `odin test src` and
 the editor's Odin tooling need one `./build.sh` first. (The submodule's prebuilt macOS `clay.a`
-targets macOS 15, so it is not used.)
+targets macOS 15, so it is not used.) The core's one C library, zstd's decoder (it reads Codex's
+compressed rollouts), is compiled by `scripts/build-zstd.sh` from `vendor/zstd/zstddeclib.c` (zstd's
+own single-file decoder, generated from a release: `vendor/zstd/VERSION`) into
+`build/zstd/libzstddec.a`, which `src/zstd` links: `build.sh` and `tests/unit.py` run it, and so
+must anything that runs `odin build` or `odin test` on `src/core`, `src/coremain` or `src` by hand
+(`odin check` does not need it).
 
 The minimum macOS is 14.0 (`MACOS_MIN` in `build.sh`). `scripts/check-minos.sh` checks it twice:
 on every native library Odin links, and after bundling on every Mach-O in `Deckhand.app`, CEF
@@ -178,7 +183,8 @@ installs over SSH (Settings › Machines; removing it:
 (Odin `dev-2026-09`, clang):
 
 ```sh
-mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
+mkdir -p build && scripts/build-zstd.sh   # the zstd decoder the core links (vendor/zstd, cc)
+odin build src/coremain -out:build/deckhand-core-serve -o:speed
 odin build src/holder -out:build/deckhand-core -o:speed   # the session holder, beside it
 build/deckhand-core-serve serve --run ~/.local/state/deckhand/run --data ~/.local/share/deckhand
 python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a temp dir: hello, get_state, a shell tab
@@ -247,8 +253,8 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   (a tab's cwd, a process's parent and children; `src/core/proc_linux.odin`); `SO_PEERCRED` in place
   of `LOCAL_PEERTOKEN`, and trust is the same user only, as there is no code signing
   (`src/trust/peer_linux.odin`, [design §8.3](plans/background-core.md#83-trust-in-both-directions));
-  no Obj-C shim, so no banners of its own, no App Nap and no Trash
-  (`src/coremain/platform_linux.odin`); no updater and no quarantine; a core runs as a systemd
+  no Obj-C shim, so no banners of its own and no App Nap, and the XDG Trash
+  (`src/core/trash_xdg.odin`, `src/coremain/platform_linux.odin`); no updater and no quarantine; a core runs as a systemd
   user unit, else directly in its own session (`src/core/launch_linux.odin`).
 - **Dirs:** data in `~/.local/share/deckhand`, sockets in `~/.local/state/deckhand/run` (0700;
   never `$XDG_RUNTIME_DIR`, which logout removes). A data dir given with `DECKHAND_DATA_DIR` keeps
@@ -555,14 +561,31 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
 ```
 
 - **The window** is a client. It dials `core.sock` in the runtime dir; when nothing answers it
-  launches a core through launchd (`deckhand-core-serve __detach`, so the core never descends from
-  the window) and waits up to 15 s. The core streams `state.full`, then `state.delta`s; the window
+  launches a core through launchd (a `gui/<uid>` job whose own process is the core, so it never
+  descends from the window and the login's end stops it) and waits up to 15 s. The core streams `state.full`, then `state.delta`s; the window
   decodes them straight into `core.state`, its replica, so the core's read-only helpers work
   unchanged (`core.replica_process`; runtime a window needs but State lacks goes in
   `State.live` and `Tab.live`, `src/core/core_live.odin`). Its commands go to the core and wait
   at most 250 ms for a result. If the connection ends, the window dials again and relaunches a
   core if needed (at most 3 times a minute); only a core that said `window.request quit` first
   ends the window. See `src/client_core.odin` and [PROTOCOL.md](PROTOCOL.md) §5a.
+- **A core or holder from an ended login** (#202, `src/core/login_session.odin`). A process keeps
+  the macOS audit session (the login) it started in, and one that outlives a logout keeps running
+  in the dead login: its Mach bootstrap lookups fail (`141: Reentrancy avoided`), so what it
+  starts has no account lookups, no system DNS and no Metal compiler. Before its hello the window
+  compares the core's session (the audit token it reads on `core.sock`, `val[6]`) with its own
+  (`getaudit_addr`). It replaces the core only when it runs in the current GUI login itself (graphic
+  access, not remote, and the `gui/<uid>` domain's session) and the core's session is another
+  GUI-kind one (its flags by `auditon(A_GETSINFO_ADDR)`): a user has one GUI login at a time, so
+  that one has ended. An ssh login's core, or one whose session can't be read, is attached to as
+  before. Replacing: SIGTERM (its save), SIGKILL after 20 s, by pid and start time; at most once per
+  dial, so a core that won't stop is an error, not a loop. The core applies the same rule to a
+  holder at connect: it stops it (its sessions end; its socket goes only once it is gone) and
+  starts a new one, and the tabs restore as after Stop All. Both say so in a toast. A launch that
+  fails with launchd's 141 from a GUI-kind session never falls back to a direct start (that would
+  land in the dead login too), and a core whose launch failed so exits; an ssh caller keeps the
+  fallback. Test builds: `DECKHAND_TEST_ASID=N[:ended|:remote]` stands in for the session (scene
+  `other-login`).
 - **The core** runs headless in a `poll(2)` loop (`src/coremain/serve.odin`). It takes
   `core.lock` (one core per data dir) and `instance.lock` (shared), adopts the holder, restores and
   serves. It runs with or without a window, and exits after 10 idle minutes: no window, no live tab
@@ -578,7 +601,12 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
   process over the in-memory transport (`src/core/window_link.odin`), with the same messages.
 - **Quitting** goes through one table, `quit_route` in `src/main.odin`: ⌘Q, the Dock's Quit and
   closing the window close only the window; *Quit Deckhand and Stop All Sessions…* stops the core
-  and the holder; logout ends everything. User-facing behaviour:
+  and the holder; logout ends everything: the core and the holder are each a launchd job's own
+  process in `gui/<uid>` (`LimitLoadToSessionType` Aqua), so launchd sends them SIGTERM when the
+  login ends (the core saves; the holder's sessions end). Before #202 the job ran `__detach`,
+  whose forked child belonged to no job and outlived the logout; one still running from then is
+  replaced by the next login (above). `__detach` stays for an older core's handover launch.
+  User-facing behaviour:
   [How Deckhand runs](GUIDE.md#how-deckhand-runs).
 - **On Linux** there is no window and no Core.app: `core/<version>-<sha12>/` holds
   `deckhand-core-serve` and `deckhand-core`, the core runs as the systemd user unit
@@ -649,7 +677,7 @@ core/inbox.odin     command inbox: any thread submits, the main thread drains
 core/events.odin    events, the command log, own-event filter
 core/socket.odin    control socket: hello and tokens, subscriptions, pi-tab bridge routing
 core/ctl.odin       `deckhand --ctl`: a tiny socket client for scripts and tests
-core/json_*.odin    hand-written JSON (PROTOCOL.md)
+core/json_*.odin    JSON (PROTOCOL.md); a command's follows its struct's `cmd` tags (command_codec.odin)
 core/term.odin      one terminal, the core's side: PTY (or the holder's), libghostty-vt, size
 core/term_stream.odin, term_view_stream.odin  a terminal's bytes streamed to the window's copy
 term_view.odin      the window's side of a terminal: drawing, selection, input encoding
@@ -658,7 +686,7 @@ core/pty*.odin      the PTY: forkpty (macOS, Linux); ConPTY later
 core/persist.odin   workspace.json (PERSISTENCE.md)
 core/login_env.odin the login shell's environment (Launch environment, below)
 core/sessions.odin, titles.odin  pi's sessions and their titles
-core/claude*.odin   Claude Code tabs (CLAUDE.md); ../tools/deckhand-cli/ the CLI its plugin runs
+core/claude*.odin   Claude Code tabs (CLAUDE-TABS.md); ../tools/deckhand-cli/ the CLI its plugin runs
 core/codex.odin     Codex tabs: command line, per-run hooks and MCP server, version rule (CODEX.md)
 core/harness*.odin, ui_harness.odin  which coding agents are installed; the checklist's install and update
 core/pi_integration.odin  the bundled pi integration (HARNESSES.md)
@@ -685,6 +713,7 @@ coremain/connect.odin  `deckhand-core-serve connect`: the far end of a machine's
 core/systemd_unit.odin, launch_linux.odin, proc_linux.odin  the Linux core: its systemd unit, launching, /proc
 core/lock_holder.odin  who holds a lock file when a second core is refused
 core/files.odin, fs_model.odin, ui_files.odin  the Files tab (and the Settings page's file row menu)
+files_drag_out*.odin  rows dragged out of the window (AppKit: native/dragout_macos.m)
 core/changes.odin, ui_changes.odin  the Changes tab
 core/settings_files.odin  Settings' files and rows: agents' settings files by an allowlist
 core/settings_registry.odin  every setting: its section, card, label, action and command
@@ -736,7 +765,7 @@ and command code never calls sokol; what it needs from the window goes as `windo
 
 The core listens on `core.sock` in a per-user `0700` runtime dir and gives each pi tab
 `DECKHAND_SOCKET` and its own `DECKHAND_TOKEN` (caller `panel`); Claude and Codex tabs get
-tokens of their own, accepted only from the tab's processes ([CLAUDE.md](CLAUDE.md),
+tokens of their own, accepted only from the tab's processes ([CLAUDE-TABS.md](CLAUDE-TABS.md),
 [CODEX.md](CODEX.md)). The bridge of Deckhand's pi
 integration ([HARNESSES.md](HARNESSES.md)) reports `pi.session` and `pi.status`, publishes panels
 with `panel.set` and receives `pi.prompt`, `pi.reload` and `pi.wait_idle`. Atlas drives the app
@@ -907,10 +936,11 @@ Deckhand's own sh scripts run as `$SHELL -l -c SCRIPT` for a POSIX login shell, 
 `/bin/sh -c SCRIPT` in the imported environment for a known non-POSIX one (fish, nushell, xonsh,
 elvish, ysh, tcsh/csh, pwsh: `shell_is_posix`). Shell tabs still open `$SHELL -l`.
 
-**Whether pi is installed** (`pi_installed`): a stat of the new tabs' PATH and pi's managed
-install, else the login shell's `command -v pi` (on a worker, at most 10 s, pi never run). Until
-the shell answers, pi counts as there; only a clean "no" says it is missing, so a pi that only
-`.zprofile` adds is not reported missing after a timeout. `PI_CODING_AGENT_DIR` is read as pi
+**Whether a harness is installed** (`harness_installed`, the same for pi, Claude Code and Codex): a
+stat of the new tabs' PATH and the harness's own install folders, else the login shell's
+`command -v <name>` (on a worker, at most 10 s, the harness never run). Until the shell answers,
+it counts as there; only a clean "no" says it is missing, so one that only `.zprofile` adds is not
+reported missing after a timeout. `PI_CODING_AGENT_DIR` is read as pi
 reads it; a custom `sessionDir` is not followed.
 
 Unit tests: `src/core/login_env_test.odin` (fake shells, never yours).

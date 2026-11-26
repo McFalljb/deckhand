@@ -1,0 +1,83 @@
+<p><em>em</em> <em>em</em> <strong>strong</strong> <strong>strong</strong> <em><strong>both</strong></em> <em>nested <strong>strong</strong> em</em>
+snake_case_word and intra<em>word</em>emphasis and <strong>proper</strong> <strong><em>mixed</em></strong>
+<del>single strike</del> <del>double strike</del> ~~~triple~~~ <del><em>em in strike</em></del></p>
+<p><code>code</code> <code>double ` tick</code> <code>spaced</code> <code>multi line code</code> ```unclosed</p>
+<p>*escaped* _not em_ `not code` # [not link] \ backslash \a not escape</p>
+<p>&amp; &lt; &gt; &quot; ©  x # A � � &amp;madeup; &amp;amp 𝔄 &amp;#1234567890;</p>
+<p>Raw <span class="x">inline html</span> and <br> and <BR/> and <br/>break
+and <a href="javascript:alert(1)">html link</a> and <!-- comment --> and
+<img src="x" onerror="alert(1)"> and <?php echo ?> and <![CDATA[x]]></p>
+<p><a href="https://example.com/a" title="Title">inline</a> <a href="http://example.com">no title</a>
+<a href="a%20b.md">angle</a> <a href="foo(bar)baz.md">parens</a> <a href="docs/other.md#section">rel</a>
+<a href="#heading">anchor</a> <a href="">empty</a> <a href="%22t%22">title only</a> <a href="/s" title="single title">single</a>
+<a href="https://example.com/n">nested <em>em</em> <code>code</code></a> <a href="/b">link [with] brackets</a>
+<a href="https://example.com/?a=1&amp;b=2">with entity</a> <a href="https://example.com/_x">escaped</a>
+<a href="https://%E4%BE%8B%E3%81%88.jp/%E3%83%91%E3%82%B9">unicode</a> <a href="my%20file.md">space%20encoded</a>
+<img src="soup.png" alt="image alt em" title="Image title" /> <img src="empty-alt.png" alt="" />
+<a href="https://example.com/img"><img src="i.png" alt="image in link" /></a>
+<img src="x.png" alt="img nested alt" /></p>
+<p>[unknown ref] <a href="https://example.com/shortcut">Shortcut</a> <a href="/collapsed">collapsed</a> <a href="https://example.com/shortcut">Full</a></p>
+<p>Autolinks: <a href="https://example.com/auto">https://example.com/auto</a> <a href="mailto:me@example.invalid">mailto:me@example.invalid</a>
+<a href="mailto:me@example.invalid">me@example.invalid</a> <a href="ftp://files.example.com">ftp://files.example.com</a> <a href="irc://chat.example">irc://chat.example</a>
+<a href="made-up-scheme:thing">made-up-scheme:thing</a> <not a link> &lt;http://example.com/a b&gt;</p>
+<p>Bare: <a href="https://example.com/bare">https://example.com/bare</a>, <a href="http://www.example.org/path">www.example.org/path</a>. <a href="http://example.com/x?y=1&amp;z=2">http://example.com/x?y=1&amp;z=2</a>
+(<a href="http://www.example.com/in-parens">www.example.com/in-parens</a>) trailing punctuation <a href="http://www.example.com/x">www.example.com/x</a>. and
+email <a href="mailto:someone@example.invalid">someone@example.invalid</a> and <a href="mailto:a.b-c_d@sub.example.invalid">a.b-c_d@sub.example.invalid</a>. <a href="ftp://ftp.example.com/f">ftp://ftp.example.com/f</a>
+<a href="https://example.com/foo_(bar)">https://example.com/foo_(bar)</a> <a href="https://example.com/q?a=b#frag">https://example.com/q?a=b#frag</a>
+not.a.link and http:// and www. alone and xmpp:<a href="mailto:me@example.invalid">me@example.invalid</a></p>
+<p>Hard break at end with two spaces<br />
+next line. Backslash at very end\</p>
+---- blocks
+Document line=1
+  Paragraph line=1
+  Paragraph line=5
+  Paragraph line=8
+  Paragraph line=10
+  Paragraph line=12
+  Paragraph line=16
+  Paragraph line=26
+  Paragraph line=31
+  Paragraph line=35
+  Paragraph line=41
+---- links
+Link url="https://example.com/a" title="Title" autolink=false text="inline"
+Link url="http://example.com" title="" autolink=false text="no title"
+Link url="a b.md" title="" autolink=false text="angle"
+Link url="foo(bar)baz.md" title="" autolink=false text="parens"
+Link url="docs/other.md#section" title="" autolink=false text="rel"
+Link url="#heading" title="" autolink=false text="anchor"
+Link url="" title="" autolink=false text="empty"
+Link url="\"t\"" title="" autolink=false text="title only"
+Link url="/s" title="single title" autolink=false text="single"
+Link url="https://example.com/n" title="" autolink=false text="nested em code"
+Link url="/b" title="" autolink=false text="link [with] brackets"
+Link url="https://example.com/?a=1&b=2" title="" autolink=false text="with entity"
+Link url="https://example.com/_x" title="" autolink=false text="escaped"
+Link url="https://\u4f8b\u3048.jp/\u30d1\u30b9" title="" autolink=false text="unicode"
+Link url="my%20file.md" title="" autolink=false text="space%20encoded"
+Image url="soup.png" title="Image title" autolink=false text="image alt em"
+Image url="empty-alt.png" title="" autolink=false text=""
+Link url="https://example.com/img" title="" autolink=false text="image in link"
+Image url="i.png" title="" autolink=false text="image in link"
+Image url="x.png" title="" autolink=false text="img nested alt"
+Link url="link.md" title="" autolink=false text="nested"
+Link url="https://example.com/shortcut" title="" autolink=false text="Shortcut"
+Link url="/collapsed" title="" autolink=false text="collapsed"
+Link url="https://example.com/shortcut" title="" autolink=false text="Full"
+Link url="https://example.com/auto" title="" autolink=true text="https://example.com/auto"
+Link url="mailto:me@example.invalid" title="" autolink=true text="mailto:me@example.invalid"
+Link url="mailto:me@example.invalid" title="" autolink=true text="me@example.invalid"
+Link url="ftp://files.example.com" title="" autolink=true text="ftp://files.example.com"
+Link url="irc://chat.example" title="" autolink=true text="irc://chat.example"
+Link url="made-up-scheme:thing" title="" autolink=true text="made-up-scheme:thing"
+Link url="https://example.com/bare" title="" autolink=true text="https://example.com/bare"
+Link url="http://www.example.org/path" title="" autolink=true text="www.example.org/path"
+Link url="http://example.com/x?y=1&z=2" title="" autolink=true text="http://example.com/x?y=1&z=2"
+Link url="http://www.example.com/in-parens" title="" autolink=true text="www.example.com/in-parens"
+Link url="http://www.example.com/x" title="" autolink=true text="www.example.com/x"
+Link url="mailto:someone@example.invalid" title="" autolink=true text="someone@example.invalid"
+Link url="mailto:a.b-c_d@sub.example.invalid" title="" autolink=true text="a.b-c_d@sub.example.invalid"
+Link url="ftp://ftp.example.com/f" title="" autolink=true text="ftp://ftp.example.com/f"
+Link url="https://example.com/foo_(bar)" title="" autolink=true text="https://example.com/foo_(bar)"
+Link url="https://example.com/q?a=b#frag" title="" autolink=true text="https://example.com/q?a=b#frag"
+Link url="mailto:me@example.invalid" title="" autolink=true text="me@example.invalid"

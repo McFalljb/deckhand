@@ -80,6 +80,9 @@ serve_main :: proc(args: []string) -> int {
 	// a handover's successor: the holder's secret, for its one HELLO (core.successor_given)
 	if ready != "" {
 		if !serve_ready_handshake(ready) do return 1
+		// a launchd job's working dir is the launcher's temp dir (launchd_darwin.odin), removed
+		// once the launch is over: never kept as this core's
+		posix.chdir("/")
 	} else if secret_stdin {
 		buf: [65]u8
 		n := 0
@@ -102,6 +105,7 @@ serve_main :: proc(args: []string) -> int {
 	if !serve_platform_prepare(run) do return 1
 	core.home_root = strings.clone(data)
 	core.window_floor_load() // the window floor of earlier runs (window_sock.odin)
+	core.login_note(i32(posix.getpid())) // test builds: this core's login, for a window's check (login_session.odin)
 	if why := core.instance_guard(core.home_root, !core.autotest_active || core.hook_env(.Runtime_Dir) != ""); why != "" {
 		core.log_ln("deckhand-core serve:", why)
 		core.core_refused_write(run, why) // its window says why (client_core_dial)
@@ -123,6 +127,7 @@ serve_main :: proc(args: []string) -> int {
 	if files do core.titles_load(core.data_dir(context.temp_allocator))
 	core.claude_accounts_refresh()
 	core.rescan_now(claude = false)
+	core.rescan_at = time.tick_now() // a Rescan when the window comes to the front waits from here (commands.odin)
 	// the window's token first: a window that sees core.sock answer finds the token too
 	if !core.window_token_publish(run) {
 		core.log_ln("deckhand-core serve: cannot write", run, "/", core.WINDOW_TOKEN_FILE)
@@ -199,7 +204,13 @@ serve_platform :: proc() -> bool {
 			if core.window_attached() && !core.window_link_hub() && !core.window_link_web() do core.window_notify(title, body, front = true)
 			else if !core.autotest_active do dh_core_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator)) // the core is never in front
 		},
-		trash = proc(path: string) -> bool {return dh_core_trash(strings.clone_to_cstring(path, context.temp_allocator)) == 1},
+		trash = proc(path: string) -> bool {
+			buf: [4096]u8
+			if dh_core_trash(strings.clone_to_cstring(path, context.temp_allocator), raw_data(buf[:]), c.int(len(buf))) != 1 do return false
+			// where the Trash put it, for restore_path (Linux: trash_xdg set it already)
+			if buf[0] != 0 do core.fs_trash_where = strings.clone(string(cstring(raw_data(buf[:]))), context.temp_allocator)
+			return true
+		},
 		activity = proc(on: bool) {dh_core_activity(on ? 1 : 0)},
 		core_timer = proc(every: time.Duration, fire: proc()) {
 			loop.every, loop.fire = every, fire
@@ -252,6 +263,12 @@ serve_loop :: proc() {
 		loop_again = core.output_backlog() && terms_bytes_in() != before
 		if core.core_idle_due(&loop.idle_since, core.core_idle_facts(), time.tick_now()) {
 			core.log_fln("deckhand-core serve: no window, no tab's process, no job run and nothing running on a linked machine for %v: exiting", core.CORE_IDLE_EXIT)
+			loop.quit = true
+		}
+		// a holder (or a core) could not be started because this core's login has ended (#202,
+		// core.launchd_login_gone): it stops as for the idle exit, rather than run on in a dead login
+		if sync.atomic_load(&core.login_gone) {
+			core.log_ln("deckhand-core serve: this login has ended (launchd refuses its launches): exiting")
 			loop.quit = true
 		}
 		free_all(context.temp_allocator)

@@ -239,9 +239,13 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	// a Codex tab there: only to a core whose hello says it starts one (an older core would start
 	// Claude Code for it, or refuse it); refused here, before anything is sent
 	case New_Claude_Session:
-		if c.codex && !machine_codex(no) do return codex_remote_old(no), true
+		if harness_is_codex(c.harness) && !machine_codex(no) do return codex_remote_old(no), true
+		if len(c.args) > 0 && !machine_takes_flags(no) do return flags_remote_old(no), true
 	case New_Claude_Tab:
-		if c.codex && !machine_codex(no) do return codex_remote_old(no), true
+		if harness_is_codex(c.harness) && !machine_codex(no) do return codex_remote_old(no), true
+		if len(c.args) > 0 && !machine_takes_flags(no) do return flags_remote_old(no), true
+	case New_Chat:
+		if len(c.args) > 0 && !machine_takes_flags(no) do return flags_remote_old(no), true
 	case Pi_Handoff_Part:
 		// only pi_handoff's own sending (machine_handoff_send) puts one on a link, never a caller's
 		return fail("pi_handoff_part is sent only by pi_handoff"), true
@@ -302,6 +306,28 @@ hub_folder :: proc(cwd: string) -> (at: string, why: string) {
 	if !os.exists(p) do return "", fmt.tprintf("no such folder: %s", text_clean(p, ROUTE_TEXT_MAX))
 	if !os.is_dir(p) do return "", fmt.tprintf("not a folder: %s", text_clean(p, ROUTE_TEXT_MAX))
 	return p, ""
+}
+
+// Flags the user typed at this window for a start on another machine (docs/GUIDE.md, Flags for a
+// tab): they go as the start's `args`, as typed, and nothing else: never this Mac's default flags
+// (the core there adds its own), never checked here. That core takes them as its user's (on_behalf
+// ui) and checks them by its own rule (harness_args_check), as a start made at its own window.
+// A core before FLAGS_MIN_VERSION would take a pi session's without a word (new_chat had no
+// `args`): refused here when its version says so. A development build (no version) is let through.
+FLAGS_MIN_VERSION :: Semver{major = 0, minor = 7, patch = 0}
+
+// Whether machine no's core takes a start's flags (its hello's version, FLAGS_MIN_VERSION).
+machine_takes_flags :: proc(no: u64) -> bool {
+	for m in state.machines do if m.no == no {
+		v, ok := semver_parse(m.version)
+		return !ok || !semver_less(v, FLAGS_MIN_VERSION)
+	}
+	return false
+}
+
+@(private = "file")
+flags_remote_old :: proc(no: u64) -> Result {
+	return fail(fmt.tprintf("on %s: its Deckhand is too old to take flags from here: update Deckhand there (Update in its row's menu in the sidebar), or start it without flags", machine_name(no)))
 }
 
 // A Codex start for machine no, whose core does not say it starts Codex tabs.

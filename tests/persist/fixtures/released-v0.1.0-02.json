@@ -1,0 +1,6 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/pi-desk-ws-a-1795698343387243000"}],"selected_project":"$ROOT/pi-desk-ws-a-1795698343387243000",
+"open_sessions":[{"pi_session_id":"aaaa-1","cwd":"$ROOT/pi-desk-ws-a-1795698343387243000","session_dir":"","project":"$ROOT/pi-desk-ws-a-1795698343387243000","tabs":[{"kind":"pi"},{"kind":"shell","title":"shell 1","cwd":"$ROOT/pi-desk-ws-a-1795698343387243000"}],"active_tab":1}],"current_session":0,
+"layout":{"left_width":300,"right_width":320,"left_open":true,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{"script":{"tab_close":"trusted"}},"confirm_close":{}}}

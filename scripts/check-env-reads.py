@@ -23,6 +23,7 @@ KNOWN = {
     "PI_CODING_AGENT_DIR", "CLAUDE_CONFIG_DIR", "PI_KIT_NOTES_DIR",
     "CLAUDE_CODE_PROJECT_DIR_NAME",  # Claude Code's own (the user's env): how it names project folders
     "CODEX_HOME",  # Codex's own (the user's env, as tabs get it): its folder, which the credential guard refuses (codex.odin)
+    "NVM_DIR", "FNM_DIR",  # nvm's and fnm's folders as tabs get them: harness binaries looked for there by stat (harness.odin)
     "CFFIXED_USER_HOME",  # browser.odin: only a test-mode check that the scene set it
     "DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CLAUDE_TOKEN", "DECKHAND_SHOTS_DIR",  # the CLIs' transport
     "DECKHAND_GUI_LAUNCH", "DECKHAND_CEF_SHARED_TEXTURE",  # the user's workarounds

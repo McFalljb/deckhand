@@ -94,7 +94,7 @@ agent's own TUI, and everything around it is native UI.
   - **pi:** Deckhand's bundled integration (`integrations/pi`, loaded with `pi -e`) connects to
     the socket; extensions publish panels and receive actions.
   - **Claude Code:** a bundled plugin (`integrations/claude-code`, loaded with `--plugin-dir`)
-    with the `deckhand` CLI and hooks ([CLAUDE.md](CLAUDE.md)).
+    with the `deckhand` CLI and hooks ([CLAUDE-TABS.md](CLAUDE-TABS.md)).
   - **Codex:** hooks and a stdio MCP server (`deckhand-cli mcp`) passed on the command line for
     each run; nothing written under `~/.codex` ([CODEX.md](CODEX.md)).
   - **Control:** commands, state and events over the same socket, for Atlas and scripts
@@ -162,7 +162,7 @@ and act on pages ([BROWSER.md](BROWSER.md)).
 
 Claude tabs and Claude-only sessions, Claude chats, several accounts,
 sessions found on disk, comments, status, Atlas driving Claude tabs, the settings and update bars,
-rows at parity with pi's ([CLAUDE.md](CLAUDE.md)).
+rows at parity with pi's ([CLAUDE-TABS.md](CLAUDE-TABS.md)).
 
 - ⬜ Deckhand without pi: Atlas and jobs on Claude.
 
@@ -288,7 +288,7 @@ Decisions that still shape the code. Superseded ones are gone; their history is 
 
 ## 9. Related
 
-- [GUIDE.md](GUIDE.md) (the user guide), [HARNESSES.md](HARNESSES.md), [CLAUDE.md](CLAUDE.md),
+- [GUIDE.md](GUIDE.md) (the user guide), [HARNESSES.md](HARNESSES.md), [CLAUDE-TABS.md](CLAUDE-TABS.md),
   [CODEX.md](CODEX.md).
 - [DEVELOPING.md](DEVELOPING.md) (build, architecture, releases), [TESTING.md](TESTING.md).
 - [PROTOCOL.md](PROTOCOL.md), [TAB-PROTOCOL.md](TAB-PROTOCOL.md), [PERSISTENCE.md](PERSISTENCE.md).

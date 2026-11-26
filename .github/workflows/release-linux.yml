@@ -15,6 +15,8 @@ on:
       - "src/**"
       - .github/workflows/release-linux.yml
       - scripts/pack-linux.sh
+      - scripts/build-zstd.sh
+      - vendor/zstd/**
       - scripts/check-release-build.sh
       - tests/linux-release-check.sh
   # (GitHub runs it by hand only once this file is on main)

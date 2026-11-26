@@ -283,7 +283,7 @@ and dev builds keep the hooks; they never carry the release DR's identifier.
 - **A bad or missing MAC fails closed:** handover state is discarded (a crash-style restore), and
   every token in the file is treated as unknown. Bridges and Claude tabs then show "Reconnect
   needed: restart this tab", which is offered, not automatic. A read-only Claude tab with no
-  trusted ack state is stopped (docs/CLAUDE.md §1a).
+  trusted ack state is stopped (docs/CLAUDE-TABS.md §1a).
 - If the holder is gone, its key is gone too. Its sessions are gone as well, so nothing is lost
   by the files becoming unverifiable.
 
@@ -464,13 +464,17 @@ The holder disclaims TCC responsibility at start (herdr's `macos_responsibility.
 1. The launcher makes a 0700 temp dir with `job.plist` (0600) and a `ready` socket. The label is
    unique per launch: `dev.deckhand.<core|hold>.<pid>.<ns>`.
 2. It runs `launchctl bootstrap gui/<uid>` and removes the plist. The plist sets
-   `RunAtLoad=true`, `KeepAlive=false`, `AbandonProcessGroup=true` and
-   **`ProcessType=Interactive`**.
-3. The job runs `deckhand-core __detach <ready>`. It forks; the parent exits; the child calls
-   `setsid`, execs, and waits until its ppid is 1.
-4. The child connects to `ready`. The launcher **checks the peer (pid + DR, P8)**, boots the job
-   out, then sends the inherited environment and, for a handover, the successor secret. The child
-   acks and serves.
+   `RunAtLoad=true`, `KeepAlive=false`, `AbandonProcessGroup=true`,
+   **`ProcessType=Interactive`** and `LimitLoadToSessionType=Aqua`.
+3. The job runs `deckhand-core hold --ready ready` (or `deckhand-core-serve serve --ready ready`)
+   as its own process. *As first built* it ran `deckhand-core __detach <ready>`, which forked a
+   `setsid` child and the launcher then booted the job out; that child belonged to no job and
+   outlived a logout in the dead login (#202). Now the job stays loaded while its process runs,
+   and launchd stops it when the login ends.
+4. The process connects to `ready`. The launcher **checks the peer (pid + DR, P8)**, then sends
+   the inherited environment and, for a handover, the successor secret. The process acks and
+   serves. A failure boots the job out (which stops its process); a job whose process ended is
+   swept by a later launch.
 
 A failed bootstrap falls back to a direct spawn, with a logged warning.
 
@@ -496,7 +500,7 @@ S2 facts (macOS 26.6.2):
 | Quit Deckhand and Stop All Sessions… | `quit` (class `app_quit`): persist, `GOODBYE{shutdown}`, exit. |
 | Core crashes (M4+) | The holder relaunches it **through the launchd launcher** (backoff as holder.rs:423-447), so the core never descends from the holder. |
 | App crashes (M1) | Nothing restarts it. Sessions run on, and the next launch adopts them. |
-| Logout or reboot | Everything stops; today's restore follows. |
+| Logout or reboot | Everything stops; today's restore follows. As first built it was not so (#202): the core and the holder belonged to no launchd job once the launcher booted the job out, so a logout left them running in the dead login. Now each is its job's own process, which launchd stops at logout; and the next login's window replaces a core from another login, and that core the holder (audit session check, `src/core/login_session.odin`); a launch that fails with launchd's `141: Reentrancy avoided` has no direct fallback. A real logout has not been checked by hand. |
 
 Rejected:
 - **The window spawning the core** (fork + setsid). Herdr's reason, "macOS kills the app's
@@ -829,8 +833,8 @@ Every step ships on its own.
 |---|---|---|---|
 | Q0 | ✅ **PTY master fds CLOEXEC** (merged, #18) | Closing a tab reliably hangs it up | done |
 | S1 | ✅ **VT snapshot spike: GO** via GHOSTSNP (exact in 360/360; the formatter is the fallback). Branch `spike/vt-snapshot` 6bf748e. | §5.5, §7.2 | done |
-| S2 | ✅ **Platform spike** on macOS 26.6.2: live audit tokens, launchd detach, re-exec and keeper confirmed; `/dev/fd/N` exec fails; ad-hoc runtime can't load CEF; quarantine kills. **Still owed:** macOS 14/15, Force Quit, logout (manual, before M1 ships). | §5.3, §6, §7.3 | done (14/15 owed) |
-| M1 | **Holder in front of today's single-process app**, ad hoc allowed (§5.4). It covers: the holder (Odin, no ghostty or sokol); its wire and golden vectors; re-exec with dry run and keeper; the successor secret; the HMAC key; MAC'd `tokens.json`/`handover.json`; launchd detach; stable `core.sock` and the runtime dir move; offsets and exact handover on quit and update; the `instance.lock` SH rule; release hooks and env overrides compiled out; the updater test against the current release. **Broken into four PRs in §10.1.** **Doc changes:** PROTOCOL.md §1, CLAUDE.md §4a (an updated plugin reaches kept Claude tabs only after a restart, which the bar offers), PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md. | **Quitting, crashing or updating Deckhand no longer stops pi, Claude or shells**, and the screens come back. **While the app is closed:** no status or bell; the `deckhand` CLI and Claude hooks fail (a `/clear` id goes unrecorded, so restore may resume the old conversation); held prompts wait; Atlas jobs don't run; **job runs stop when the app exits** (as today); in-flight requests are lost. | 7–9 weeks |
+| S2 | ✅ **Platform spike** on macOS 26.6.2: live audit tokens, launchd detach, re-exec and keeper confirmed; `/dev/fd/N` exec fails; ad-hoc runtime can't load CEF; quarantine kills. **Still owed:** macOS 14/15, Force Quit (manual, before M1 ships). Logout was found in use (#202): detached processes survive it, so the next login replaces them. | §5.3, §6, §7.3 | done (14/15 owed) |
+| M1 | **Holder in front of today's single-process app**, ad hoc allowed (§5.4). It covers: the holder (Odin, no ghostty or sokol); its wire and golden vectors; re-exec with dry run and keeper; the successor secret; the HMAC key; MAC'd `tokens.json`/`handover.json`; launchd detach; stable `core.sock` and the runtime dir move; offsets and exact handover on quit and update; the `instance.lock` SH rule; release hooks and env overrides compiled out; the updater test against the current release. **Broken into four PRs in §10.1.** **Doc changes:** PROTOCOL.md §1, CLAUDE-TABS.md §4a (an updated plugin reaches kept Claude tabs only after a restart, which the bar offers), PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md. | **Quitting, crashing or updating Deckhand no longer stops pi, Claude or shells**, and the screens come back. **While the app is closed:** no status or bell; the `deckhand` CLI and Claude hooks fail (a `/clear` id goes unrecorded, so restore may resume the old conversation); held prompts wait; Atlas jobs don't run; **job runs stop when the app exits** (as today); in-flight requests are lost. | 7–9 weeks |
 | D0 | **Developer ID** (the user's timing): certificate; `SIGN_IDENTITY_DEFAULT` set to it (one line, `scripts/sign.sh`); `release.sh`'s existing Developer ID and notarization path; CEF signed under the team; hardened runtime and library validation on. The DR checks are already in place from M4 and switch mode by themselves (§5.4). **No longer gates M4** (decision 5, 2026-11-08). | Attacker-grade checks instead of anti-accident ones | ~1 week |
 | M2 | **Boundary** (map M0): `src/core` with no sokol or Clay; the leaks fixed; a core loop. **Three PRs in §10.2.** | Compiler-checked split; hidden windows stop stalling parsing | 2.5–3.5 weeks |
 | M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing. **Four PRs in §10.2.** | The real protocol under every test | 5–7 weeks |
@@ -861,7 +865,7 @@ merges on its own, keeps `main` releasable, and runs its tests in under 3 minute
 | **A. Snapshot and holder wire libraries** (no behaviour change) | GHOSTSNP, continuation, terminal formatter and data-enum bindings, ported from `tools/vt-snapshot-spike/ffi.odin` (6bf748e). Every terminal sets `OPT_CONTINUATION_MAX_BYTES` at creation. One callback-and-theme registration helper, used by `term_start` and by decoded terminals. `snapshot_encode`/`decode` (meta JSON + GHOSTSNP, VT fallback, screen hash). The holder wire codec as its own package, with golden vectors and `released-holder.json`. | `src/ghostty/ghostty.odin`, `tests/abi_sizes.c`, `tests/ghostty_test.odin`, `src/term.odin`, new `src/snapshot.odin` (+ `_test`), new `src/holderwire/` (+ tests), `tests/holder-wire/v1/*.bin`, `tests/vt-corpus/`, `schema/released-holder.json`, DEVELOPING.md (libghostty bump checklist) | ABI sizes; snapshot round trip and determinism by screen hash; continuation-limit failure and retry; wire golden vectors, fuzz pass and grow-only diff. All in `./build.sh test` (+~10 s). | One round | Nothing visible. Terminals behave as before (a regression check on the continuation limit: big OSC 52 pastes, kitty images). |
 | **B. Holder, launch and adopt** (behind `keep_sessions`) | `deckhand-core hold`: spawn, pump, reap, tails, offsets, `FOREGROUND`, ping, refusal while a core is attached, the HMAC key, the TCC disclaim. The launchd detach (`ProcessType=Interactive`, stale sweep, SIGPIPE, peer-checked `ready`). Install to `core/<v>/`, stripping quarantine after verifying. **Unconditional:** the stable `core.sock` and the runtime dir move to Application Support (PROTOCOL.md §1). With the setting on, PTYs go through the holder. On quit: `GOODBYE{handover}`, snapshots and MAC'd `handover.json`. On launch: adopt, or crash-restore from the tails. Also MAC'd `tokens.json` written on every mint and revoke, the read-only ack failing closed, the `instance.lock` SH rule, and the pre-M1 refusal message. | new `src/holder/`, new `src/launchd_darwin.odin`, `src/pty.odin`/`pty_posix.odin` (a holder-backed `Pty`), `src/socket.odin`/`socket_posix.odin`, `src/instance.odin`, `src/persist.odin`, `src/claude.odin` (`claude_pids`, ack state), `src/main.odin`, `build.sh`, `scripts/bundle-app.sh` (`Contents/Helpers/deckhand-core`), new `tests/scripts/keep-sessions.sh`, PROTOCOL.md, PERSISTENCE.md | Holder unit tests over a socketpair (~3 s); MAC tamper tests (<1 s); downgrade lock (<1 s). Scene `keep-sessions.sh` (~40 s): 6 fake terminals, quit, relaunch, screen hash equal; kill -9 the app, then `inexact`; kill -9 the holder, then `holder_lost`; pi reconnect and Claude ancestry. Test mode spawns the holder directly and never bootstraps launchd. S2's programs re-run on macOS 14/15 by hand. | **Two security rounds** | Turn the setting on, start a pi turn and a `top` in a shell, then ⌘Q. Reopen: both are still running, with their screens. |
 | **C. Holder re-exec and keeper** | `UPGRADE`, the dry-run preflight on dup'd masters, the keeper-gated fd handover (live audit token), signal and mask reset, adopt-orphans with `NOTE_EXITSTATUS`, fallback drain, `holder_rev` and its CI check. | `src/holder/upgrade.odin`, `src/holder/keeper.odin`, `src/holder/state.odin` (+ tests), `scripts/check-holder-rev.sh`, `ci.yml` | Re-exec under load (~15 s, a unit test running real processes): 5 upgrades, no gaps, no split input, swapped binary refused, killed image adopted with exit codes | **Combined with D:** one two-round security review of C+D | Dev builds only: the palette's *Restart session holder* runs an upgrade to the same build; sessions don't notice. |
-| **D. Updates keep sessions; release hardening** (turns `keep_sessions` on) | The updater does a §7.2 handover before relaunch, with the successor secret passed through the relaunch helper's `ready` socket. The update prompt is reworded. Release builds compile out the test hooks, the env overrides and `--print-token` (with Settings › Copy a control token added). `release.sh` checks for hook strings. The new zip is installed by **the current release's updater**. The default flips to on. Docs: CLAUDE.md §4a, GUIDE.md (ad-hoc residual, Full Disk Access after updates), DEVELOPING.md "Releases". | `src/update.odin`, `src/update_core.odin`, `src/main.odin`, `build.sh`, `scripts/release.sh`, `tests/scripts/update.sh`, `tests/scripts/release-checks.sh`, docs | `update.sh` extended (~60 s): update from `file://` fixtures with 3 live fake sessions, then screen hashes equal and pids unchanged. `release-checks.sh` (<10 s). The previous-release updater test is release-only (~1 min). | (with C) | Update Deckhand with a pi turn running: the turn carries on through the update. |
+| **D. Updates keep sessions; release hardening** (turns `keep_sessions` on) | The updater does a §7.2 handover before relaunch, with the successor secret passed through the relaunch helper's `ready` socket. The update prompt is reworded. Release builds compile out the test hooks, the env overrides and `--print-token` (with Settings › Copy a control token added). `release.sh` checks for hook strings. The new zip is installed by **the current release's updater**. The default flips to on. Docs: CLAUDE-TABS.md §4a, GUIDE.md (ad-hoc residual, Full Disk Access after updates), DEVELOPING.md "Releases". | `src/update.odin`, `src/update_core.odin`, `src/main.odin`, `build.sh`, `scripts/release.sh`, `tests/scripts/update.sh`, `tests/scripts/release-checks.sh`, docs | `update.sh` extended (~60 s): update from `file://` fixtures with 3 live fake sessions, then screen hashes equal and pids unchanged. `release-checks.sh` (<10 s). The previous-release updater test is release-only (~1 min). | (with C) | Update Deckhand with a pi turn running: the turn carries on through the update. |
 
 Sizes: A 1.5 weeks, B 3–3.5, C 1.5–2, D 1–1.5, so **7–9 weeks** for M1, reviews included. Order:
 A → B → C+D, with C and D on stacked branches and merged together after their combined review. M1 alone delivers most of #4's value.
@@ -1180,7 +1184,9 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
 - [x] M3-G, M3-H, M3-F2 and M4-A to E merged; `separate_core_default_on` is true (the flip's PR).
 - [ ] `./build.sh test` and scenes `--all` green with the default on (done locally for the flip's
   PR, and `--all --in-process` too); the nightly full run green.
-- [ ] **Manual checks:** Force Quit (⌥⌘⎋) of the window and of the core, logout, the minimised
+- [ ] **Manual checks:** Force Quit (⌥⌘⎋) of the window and of the core, logout (done the hard way
+  on 2026-11-25, #202: the core and the holder survived it and the next login attached to them;
+  fixed by the other-login check), the minimised
   window, and macOS 14 and 15 (S2's programs and D's manual list).
 - [ ] **`keep_sessions_default_on := true`** (`src/core/commands.odin`) is a release blocker
   until the user has done the Force Quit, logout and macOS 14/15 checks. If they fail, the line

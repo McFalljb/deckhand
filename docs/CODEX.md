@@ -4,11 +4,11 @@ How Deckhand runs the [Codex CLI](https://github.com/openai/codex) as a tab (new
 in #112): what works, what does not yet, how it was tested, and the rules that keep it safe. The user's view is in
 [GUIDE.md](GUIDE.md#codex-tabs); the wire in [PROTOCOL.md](PROTOCOL.md) ("Claude Code tabs":
 `harness`). Code: `src/core/codex.odin`, and the Claude tab's code it shares
-([CLAUDE.md](CLAUDE.md)): `src/core/claude.odin`, `claude_status.odin`, `dead_tab.odin`,
+([CLAUDE-TABS.md](CLAUDE-TABS.md)): `src/core/claude.odin`, `claude_status.odin`, `dead_tab.odin`,
 `tools/deckhand-cli/hooks.odin`.
 
 **One record, two harnesses.** A Codex tab is a Claude tab record (`Claude_Tab`, `Claude_Record`)
-with `codex` set. Everything that is not about Claude Code itself is shared as it is: the tab's
+with `harness = .Codex` (on the state stream and in the history: the `codex` bool, as before). Everything that is not about Claude Code itself is shared as it is: the tab's
 token and its process check, OSC 7501 status (marks, the bell, the fleet pill, ⌥⌘A, the Attention
 and Deck views), the hooks' `claude.session` and `claude.turn` reports, held prompts, the dead-tab
 bar and Restart, history rows and Resume, the session's place in the left column. A Codex-only
@@ -27,14 +27,15 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   so its SessionStart hook, lazily: before that the tab has no session id and no row), titled by
   that prompt; **Resume** from the row runs `codex resume <id>`; a restored tab resumes when shown.
 - **Held prompts** (`claude_prompt`, Atlas, scripts), with a stricter rule than Claude's (below).
-- **Bars**: signed out, hooks not running; a Codex older than 0.163.0 is not started (§5); not
-  installed.
+- **Bars**: signed out, hooks not running; a Codex older than 0.163.0 runs as a plain tab with a
+  bar (0.157.0 or later; older ones are not started, §5); not installed.
 - **Dead tab**: Restart resumes the conversation (no "Restart with model…").
 - **Comments** (§2a): pending comments go with the user's next message as UserPromptSubmit's
   `additionalContext`, as for Claude; **Send now**, **Send and close** and Changes' **Ask Codex to
   review** work for a Codex tab.
 - **Sessions found on disk** (§2b): Codex conversations of the project's folder in
   `~/.codex/sessions/` (and each account's home) are rows; a click runs `codex resume <id>`.
+  Folders where only Codex ran are projects, as Claude-only ones are.
 - **Palette**: **New Codex tab** in the session on screen.
 - **Deckhand's tools** (phase 2a): the `deckhand` command's show, browser and app commands, as MCP
   tools of a per-run stdio server (§7).
@@ -44,17 +45,21 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   rows, the palette in one of its sessions; Codex runs there, on that machine's own core.
 - **Accounts** (§6a): Codex homes (`CODEX_HOME`) the user adds; a tab of one runs with
   `CODEX_HOME=<home>`, set again after the login profile.
+- **Settings bar** (§9): a Codex file a running Codex reads only at start changed: "Codex settings
+  changed — Restart N idle Codex tabs", over the centre and in a browser's strip.
 
 ## What does not yet
 
-- No profiles per tab (`-p`, `-c profile…` are refused): where a profile layers against Deckhand's
-  trailing `-c` overrides is unchecked, and a profile may carry `features.hooks`, `hooks.*` or
-  `mcp_servers.deckhand`. Revisit after a real-run check.
-- **Rename** changes Deckhand's title only, not Codex's own.
+- **Rename** changes Deckhand's title only: Codex's own name lives in its `session_index.jsonl`,
+  which Deckhand never writes, and Codex 0.167.2 has no command-line way or hook output to set it
+  (only its TUI's own commands and the app-server's `thread/name/set`, a separate Codex process).
 - Conversation ids are one space across harnesses: when a Codex record and Claude Code's own
   transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
-- No hot-reload bars (Claude Code's file watching does not apply), no todos, subagents or
-  background panels.
+- No todos, subagents or background panels: Deckhand's four hooks carry none of it, the plan
+  reaches only app-server clients (`turn/plan/updated`) or the rollout, and Codex 0.167.2's
+  `SubagentStart`/`SubagentStop` and tool hooks have no input shape or trust key checked against a
+  real Codex (a wrong guess would make every Codex tab ask "Hooks need review").
+- No update bar for a newer `codex` on disk (each start checks the version, §5).
 - **Continue this conversation on <machine>** is pi only: a Codex conversation cannot be moved to
   another machine yet ([#115](https://github.com/McFalljb/deckhand/issues/115)).
 - A Codex-only session whose codex exits before its first prompt (no session id yet) is not saved
@@ -116,7 +121,7 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   (a saved tab whose flags fail does not start; the tab says why).
 - **An allowlist** (Codex 0.167.2's `--help`): `-m`/`--model`, `-s`/`--sandbox`,
   `-a`/`--ask-for-approval`, `-c`/`--config`, `--add-dir`, `--local-provider`, `--oss`, `--search`, `--no-alt-screen`, `--strict-config`,
-  `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`; a value as `-m o3`, `-mo3` or
+  `--approve-for-me`, `--dangerously-bypass-approvals-and-sandbox`, `-p`/`--profile` (below); a value as `-m o3`, `-mo3` or
   `--model=o3` (a separate value never starts with `-`: it would take Deckhand's next flag). Refused,
   each with its reason: anything else, so a newer Codex's new flag waits until it is looked at; a
   word that is no flag's value (`codex exec`, `login` … would run a subcommand, else it is a
@@ -125,9 +130,38 @@ $SHELL -l -c '<CODEX_ACCOUNT_SH><CODEX_TAB_CMD>' codex resume <id> <user flags> 
   `--dangerously-bypass-hook-trust`, `--last`, `--all`, `--include-non-interactive`, `-i`/`--image`,
   `-h`, `-V`; `--enable`, `--disable` and a `-c` under `features` (Codex features are set in the
   user's `config.toml`, not per tab: some turn hooks off, `codex_hooks` is an alias of `hooks`, and
-  others bear on the daemon and MCP); `-p`/`--profile` and a `-c` of `profile` or `profiles` (not
-  per tab yet); a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
+  others bear on the daemon and MCP); a `-c` of `profile` or `profiles` (Codex itself rejects the
+  legacy `-c profile=…`; choose one with `-p`); a `-c` whose key (before the first `=`, a dotted path, quotes ignored) is under
   `hooks`, is `mcp_servers` or under `mcp_servers.deckhand`.
+- **Profiles** (checked against real Codex 0.167.2): `-p NAME`, `-pNAME`, `--profile NAME` or
+  `--profile=NAME`, NAME a plain name (letters, digits, `_`, `-`, `.`; no `/`; not starting with `-`
+  or `.`: `codex_profile_ok`), placed with the user's other flags before Deckhand's own. Codex layers
+  `$CODEX_HOME/NAME.config.toml` over the base config, and every `-c` over both (base < profile <
+  `-c`), so Deckhand's trailing `-c hooks…` and `-c mcp_servers.deckhand…` still win: its hooks and
+  MCP server ran under `-p`. Codex itself refuses `-p ../x` and the legacy `-c profile=…`, and
+  ignores an unknown name silently. A profile is the user's own config, like `config.toml`: it can
+  turn hooks off (`features.hooks`, which Deckhand's "hooks silent" bar then reports) or bring hooks
+  of its own, which Codex asks the user to review as it does for `config.toml`'s.
+- **Typing them** (the window, `ui_flags.odin`): **New Codex tab with flags…** (the tab strip's **+**,
+  the palette) and **New session with flags…** → **Codex with flags…** open the palette as a one-line field (the flags last used
+  from that window), split as a shell splits words (quotes honoured, nothing expanded:
+  `core.flags_split`), and send them as `args`; the row shows `codex_args_check`'s reason before
+  anything starts (also in a project's menu, and the picker's **With flags…**). A start on another
+  machine sends them as typed, checked and given that machine's own defaults there (CLAUDE-TABS.md §1).
+  The tab's badge (`claude_mode.odin`), in the warning colour, names how its start flags let Codex
+  act without asking, read as full access's rule reads them (`codex_access_choices`): **bypass**
+  (`--dangerously-bypass-approvals-and-sandbox`), **full access** (`-s`/`-c sandbox_mode`
+  `danger-full-access`, every spelling), **never asks** (`-a`/`-c approval_policy` `never`),
+  **approves for you** (`--approve-for-me`); never a safer-sounding one. Codex reports no mode:
+  a Codex tab with no badge is not known to be in the default mode (a mode changed inside Codex
+  or set in `config.toml` or a profile is not seen).
+- **Default Codex flags** (`set_harness_flags` with `"harness": "codex"`, Settings › Coding agents ›
+  Codex › **Default flags…**, the palette's **Default Codex flags…**; `User_Here`; blank in a hub's
+  or a browser's state stream): one line, checked by `codex_args_check` when set
+  and again when used, put before the tab's own flags at each start the user makes (the same starts
+  as full access below); a default flag the tab's flags name too (`-m` and `--model` are one, a `-c`
+  by its key) is left out; never saved into a tab or its history entry
+  (`harness_with_defaults`, `core/harness_flags.odin`).
 - **Full access in new Codex tabs** (`set_claude_default_flags` with `"harness": "codex"`, off by
   default; Settings › Coding agents › Codex and the palette): `User_Here`, so only the user at this
   Mac changes it (never an agent, a script or a machine allowed to connect). Turning it on is
@@ -180,21 +214,47 @@ at each file rather than "the Read tool". Nothing pending: nothing printed. If t
 
 ## 2b. Sessions found on disk
 
-`claude_disk_scan` (`src/core/claude_disk.odin`) lists Codex conversations beside Claude Code's for
-the selected project and Chats. **Read only, never written.**
+`claude_disk_scan` (`src/core/claude_disk.odin`; Codex's lister, first-line reader and saved cache in `src/core/codex_disk.odin`) lists Codex conversations beside Claude Code's for
+the selected project and Chats. **Codex's files are read only, never written.**
 
 - **Where**: `$CODEX_HOME/sessions` or `~/.codex/sessions` (`codex_home`), and each Codex
-  account's `<home>/sessions` (§6a), `YYYY/MM/DD/` folders
-  newest first: at most 60 day folders and 400 files a home (`CODEX_DISK_DAYS_MAX`, `CODEX_DISK_FILES_MAX`),
-  regular files named `rollout-<time>-<uuid>.jsonl` only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
+  account's `<home>/sessions` (§6a), every `YYYY/MM/DD/` folder, newest first (no age or count
+  limit; hard ceilings against a broken folder: 20,000 folders walked and 50,000 files a home,
+  `CODEX_DISK_DIRS_MAX`, `CODEX_DISK_FILES_MAX`; each folder read entry by entry, names only, and
+  no further than 20,000 entries, `codex_disk_dir_entries_max`, so a folder of millions is never
+  statted, kept or sorted whole; only rollout names are statted),
+  regular files named `rollout-<time>-<uuid>.jsonl` or `.jsonl.zst` (Codex Desktop compresses older
+  rollouts with zstd; when both are there, the plain one) only (no symlinks; opened without following one or blocking, and checked again as a regular file), the id from the name
   (`codex_id_ok`). Tests and test mode read only a `CODEX_HOME` they set or a home they added,
   never the real home's `~/.codex`.
-- **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped),
-  through the Claude scan's cache, budget and worker (`found_info`). The payload's `id` must be
-  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source` a string (a
-  subagent's is an object: skipped). The cwd is only compared; no title is read (rows read
-  "Untitled Codex session" with the file's date); nothing from the file reaches a shell, the
-  terminal or the snapshot but the id (a UUID). The file's path is not kept.
+- **What is read**: the first line only (`session_meta`), at most 64 KB (a longer one is skipped;
+  of a `.zst`, only what decodes it, `codex_zst_first_line` with the vendored zstd decoder,
+  `src/zstd`: at most 256 KB of it read, decoded no further than its first newline or the 64 KB
+  line cap, a frame window of at most 8 MiB; a decode error, a truncated file or a cap reached
+  without a newline skips the file, `CODEX_ZST_*`),
+  once per file ever, never on the main thread (`codex_pass`, `codex_disk.odin`). The scan asks
+  for a pass (`codex_disk_refresh`: one at a time, at most one per 10 s) and shows the cache
+  (`codex_disk_found`); the pass lists every home, drops the entries of files gone, reads the
+  first line of each new or changed rollout (size or mtime), and has the rows made again every 64
+  files. What was read and found wanting is remembered; a rollout that could not be read (open,
+  stat or read failed: permissions, an I/O error) is not, so each pass reads it again. The payload's `id` must be
+  the file's, `cwd` absolute and the project's folder or its real path byte for byte (never a path from the file resolved; at most 1,024 bytes, no NUL), `source`
+  `"cli"` (the CLI) or `"vscode"` (Codex Desktop) to be a row (`codex_source_listed`:
+  `codex exec`'s, a subagent's, an object, and any source Deckhand does not know are not). The
+  cwd is only compared; nothing from the file reaches a shell, the terminal or the snapshot but
+  the id (a UUID). The file's path is not kept in a row.
+- **The saved cache**: `codex-sessions.tsv` in the data dir, beside the session-title cache
+  (`titles_load`): a version line (`deckhand codex sessions 1`), then per rollout its size, mtime,
+  created time, source, id, account (home), cwd and path, tab-separated; written atomically, 0600,
+  at the end of a pass that changed anything; at most 100,000 entries (`CODEX_CACHE_MAX`). A file
+  over 64 MB, of another version, or a row over 16 KB, without exactly 8 tab-separated fields (counted
+  before it is split) or that does not parse is not used (those rollouts are
+  read again). A launch reads only new or changed rollouts.
+- **Titles**: each home's `session_index.jsonl` (one object a line: `id`, `thread_name`,
+  `updated_at`; the last line for an id wins), joined to the listed rows only (a row it does not
+  name stays "Untitled Codex session" with the file's date). Read on the pass's worker, again only
+  when its size or mtime changes; its last 16 MB at most, lines over 16 KB skipped; the name made
+  one line as other titles are (`clean_title`, `one_line`, at most 80 bytes). Never written.
 - **Which**: not one Deckhand's history has (its row is the history's), a pi session's id, or an
   id Claude Code's transcript has (one id, one harness: Claude's wins, in the scan and again at
   resume, `claude_conversation_seen`); at most `MAX_SESSIONS`.
@@ -202,6 +262,32 @@ the selected project and Chats. **Read only, never written.**
   project running `codex resume <id>` in the project's folder, under the account whose home it was
   found in (refused once that account is removed); the history keeps it from then on.
   An agent's `open_session` finds only the rows listed for the selected project and Chats.
+- **Codex Desktop's chats**: a listed rollout whose `cwd` is a folder below `~/Documents/Codex`
+  (`HOME`'s spelling, its real path or the folder resolved; `codex_chat_roots`; Chat mode makes
+  `<date>/<slug>` there) is a row in Chats, never a found project, unless that folder is a listed
+  project by its text (one you added stays yours); its click, a resume from the history, a Restart
+  and a relaunch run `codex resume` in that folder only (`Claude_Disk.cwd`, `codex_chat_cwd`): once
+  it is gone they refuse ("the chat's folder is gone"), never the chats folder. A history
+  entry 0.7.0 filed under such a folder's project is re-filed to Chats (saved) once that folder is
+  no listed project (`codex_chats_refile`).
+- **Projects where only Codex ran** (`claude_scan_projects`, Claude's own path, on the Rescan
+  worker): the `cwd` of each listed rollout (source `"cli"` or `"vscode"`), from the found rows'
+  saved cache after a pass on the Rescan worker (`codex_disk_pass_now`, `codex_disk_folders`: a
+  Rescan reads no rollout the cache knows). The cwd is cleaned once, when it enters the cache, so
+  a project and its rows match byte for byte (a trailing slash is the same folder). Merged by
+  folder with pi's and Claude's (`found_project`); never the home folder itself (`HOME`, its
+  real path, or any path that is the same folder by device and inode: a link to it, another case
+  on a case-insensitive volume; a session started in `~` makes no project; a project added there
+  by hand is left as it is). The check fails closed: a folder that cannot be stat'ed now (other than
+  "no such folder"), or any folder while the home folder's own stat failed, is not a found project
+  on that scan; the next tries again. On the main thread (`rescan_now`: a new Chats or main folder) the scan
+  reads no rollout: it takes the cache as it is and starts a pass on the worker, which the next
+  Rescan uses; a folder no one else knows is a project
+  found on disk only, exactly as a Claude-only folder is (`Project.claude`: saved; a Rescan that
+  no longer finds it drops it unless you added, named or opened it; temp and missing folders are
+  hidden by the tidy rules, as any project's). The launch's first scan reads no rollout, and a Rescan follows when a
+  Codex home has a `sessions/` folder (`claude_startup_rescan_due`). Each Codex home's sessions
+  folder is taken on the main thread before the scan (`claude_scan_prepare`).
 
 ## 3. The token and the process check
 
@@ -255,7 +341,10 @@ commands either.
 
 ## 5. Installed, version, signed in
 
-- **Installed**: `codex` on the PATH new tabs get, by stat (never run). The checklist (Settings →
+- **Installed**: `codex` on the PATH new tabs get, by stat, else the login shell's
+  `command -v codex` (on a worker; there meanwhile), never run: the lookup pi and Claude Code use
+  too (`harness_installed`, [HARNESSES.md §6](HARNESSES.md#6-the-harness-manifest)). Its version
+  is read from the path either one found. The checklist (Settings →
   Coding agents) has a Codex row: Install runs `npm install -g @openai/codex@latest` after the
   user's click, as for the other harnesses.
 - **Version**: read from the install's own files, without running `codex`: the npm package's
@@ -266,11 +355,23 @@ commands either.
   cached by its path, size, mtime and inode). Codex writes its helper links under
   `$CODEX_HOME/tmp/arg0` at every start, `--version` too, so that run gets `CODEX_HOME` set to a new
   empty 0700 folder in `$TMPDIR` (`deckhand-codex-XXXXXX`), removed right after: nothing under
-  `~/.codex` is written (#135). Below **0.163.0** (OSC 7501) a Codex tab does not start: the tab
-  says how to update for its install (npm, Homebrew, bun or pnpm: that command; Codex's own
-  installer: run it again, `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the
-  command's refusal says the same in one line (`Codex 0.135.0 is older than 0.163.0: update it
-  with …`), and the checklist offers Update (for Codex's own installer: that command, to copy).
+  `~/.codex` is written (#135). Below **0.163.0** (OSC 7501) and from **0.157.0** (`--no-daemon`,
+  `CODEX_PLAIN_MIN_VERSION`) a Codex tab starts **plain**: `codex [resume <id>] <user flags>
+  --no-daemon -C <cwd>`, with no hooks, no `hooks.state`, no MCP server and **no token** in its
+  environment (nothing of it can reach Deckhand, so the process check has nothing to admit), and a
+  bar (`Codex 0.160.0 is older than 0.163.0: it runs here without Deckhand's hooks and status …
+  Update it with …, then Restart the tab`; Dismiss hides it for that run). Deckhand types nothing
+  into it: `claude_prompt` and every paste but the user's own are refused (`codex_paste_refusal`;
+  held prompts would wait forever for an OSC 7501 that never comes), and the "hooks silent" bar
+  never shows. The plain mark is the core's (`codex_plain_version`; the snapshot's
+  `codex_version_old`), and is kept with the tab's start record in the MAC'd `tokens.json`
+  (`"codex_plain":"0.160.0"`): a plain tab adopted from the session holder after a relaunch is
+  marked again from that record, whatever its token trust and whatever codex is on disk now. Below **0.157.0** a
+  Codex tab does not start: the tab says how to update for its install (npm, Homebrew, bun or
+  pnpm: that command; Codex's own installer: run it again,
+  `curl -fsSL https://chatgpt.com/codex/install.sh | sh`, never npm), the command's refusal says
+  the same in one line (`Codex 0.135.0 is older than 0.157.0: update it with …`), and the
+  checklist offers Update (for Codex's own installer: that command, to copy).
 - **Signed out**: `codex login status` (exit 1), run once per recheck through the login shell on a
   worker when a Codex tab starts or the checklist looks, per Codex home: a tab of an account asks
   under its `CODEX_HOME` (set after the login profile, as the tab's), the checklist for the
@@ -286,14 +387,14 @@ named `.codex/auth.json`, and everything in a Codex home but its config (`config
 `AGENTS.md`, `AGENTS.override.md`, `prompts/`, `skills/`, `rules/`) is refused wherever Deckhand
 refuses Claude's credentials (`settings_credential`: open, show, upload, list, watch, hard links by
 inode): `sessions/` transcripts, `history.jsonl`, logs and databases included. The Codex homes
-(`claude_account_dirs(codex = true)`): `~/.codex`, the default (`CODEX_HOME`), every account's
+(`claude_account_dirs(.Codex)`): `~/.codex`, the default (`CODEX_HOME`), every account's
 home, and a removed account's while it still holds `auth.json` or `sessions/` (one that never
 held Codex's files is given back); never HOME or a folder above it.
 
 ## 6a. Accounts
 
 An account is a **Codex home**: the folder `CODEX_HOME` names (its sign-in, config, sessions).
-Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/CLAUDE.md §1b):
+Claude's accounts code with harness `.Codex` (`src/core/claude_accounts.odin`; docs/CLAUDE-TABS.md §1b):
 
 - **Which**: the default, `CODEX_HOME` as tabs get it when absolute (never HOME or above it), else
   `~/.codex` (`codex_home`); `~/.codex` too while `CODEX_HOME` names another; then the folders the
@@ -329,21 +430,36 @@ Claude's accounts code with `codex` set (`src/core/claude_accounts.odin`; docs/C
   `"harness":"codex"`; all `user` only, as Claude's. Saved as `codex_accounts`,
   `codex_account_last`, `codex_account_default`; the snapshot lists `codex_accounts` as
   `claude_accounts` (labels and folders, no secret).
-- Not done: the setup sheet's accounts step (Claude's lists found folders; Codex finds none),
-  per-account hot-reload or settings-file rows, and a copy button for the sign-in command.
+- Not done: the setup sheet's accounts step (Claude's lists found folders; Codex finds none)
+  and a copy button for the sign-in command. The settings bar (§9) is per account: a home's
+  file marks only its tabs.
+- **Settings files** (Coding agents › Codex › Advanced): each home's `CODEX_CONFIG_FILES` and
+  `CODEX_CONFIG_FOLDERS` (one group per account once there are several), edited by the user as
+  Claude's; `CODEX_VIEW_FILES`/`CODEX_VIEW_FOLDERS` (`hooks.json`, `hooks/`) read-only in the editor
+  (`codex_view_only`); never a Create. A save is refused over a credentials or state file by any
+  name (`settings_credential` on the path and on where it leads at save time), so nothing outside
+  the allowlist in a Codex home is written. `plugins/` stays Codex's (not in the tree, refused);
+  **Plugins** (`codex_plugins.odin`) lists `plugins/cache/<marketplace>/<plugin>/<version>/` by
+  folder names only, read-only (`<plugin>@<marketplace>`, its versions): no file under `plugins/`
+  is opened or listed, and a symlink at any level is skipped.
 - Not checked without a real sign-in: that `codex login status` under an added home answers for
   that home, and that Codex's own sign-in screen in such a tab writes that home's `auth.json`.
 
 ## 7. Deckhand's tools: a per-run MCP server
 
 Codex's sandbox cannot reach Deckhand's socket, so a Codex tab gets the `deckhand` command's tools
-as MCP tools instead. Deckhand passes one more `-c` for the run, one inline table (it replaces a
-server of the user's own named `deckhand` for that run, never merges with it):
+as MCP tools instead. Deckhand passes one more `-c` for the run, one inline table:
 
 ```
 -c 'mcp_servers.deckhand={command="<deckhand-cli>",args=["mcp"],env_vars=["DECKHAND_SOCKET","DECKHAND_CLAUDE_TOKEN","DECKHAND_SHOTS_DIR"],tool_timeout_sec=620}'
 ```
 
+- **It merges with the user's own `[mcp_servers.deckhand]`.** Codex deep-merges the inline table
+  into a table of that name in the user's config (or a profile's): Deckhand's keys (`command`,
+  `args`, `env_vars`, `tool_timeout_sec`) win, and the user's other keys stay, so the user's
+  `enabled = false` turns Deckhand's tools off for their tabs, and their `env` or other timeouts
+  apply. That is the user's own config deciding for their own tabs, not an escalation: it gives
+  the server nothing beyond the tab's token, which `env_vars` passes as before.
 - Codex starts `deckhand-cli mcp` (`tools/deckhand-cli/mcp.odin`) **outside its sandbox**, as its
   own child: the hello's process check (§3) sees a descendant of the tab's process and passes. An
   MCP server does not get the tab's environment: `env_vars` names the variables Codex copies to it,
@@ -392,7 +508,7 @@ tab, which that core checks under its own flag rule (§1a), as it would its own 
   know `harness` and would start Claude Code). A Codex row is listed only by a core that has
   Codex tabs, so its click is forwarded as any row's.
 - **What that machine says** comes back as for its Claude tabs: not installed (`"on <machine>:
-  Codex is not installed …"`), too old (`"on <machine>: Codex 0.135.0 is older than 0.163.0: update it with …"`), signed out as
+  Codex is not installed …"`), too old (`"on <machine>: Codex 0.135.0 is older than 0.157.0: update it with …"`; from 0.157.0 to 0.163.0 it starts plain there), signed out as
   Codex's own sign-in screen in the tab's relayed terminal; its checklist on the machine's row.
   The bars over a tab (signed out, hooks not running) are that machine's core's and are not
   mirrored, as for its Claude tabs; this Mac's own sign-in never puts one over it.
@@ -406,3 +522,40 @@ tab, which that core checks under its own flag rule (§1a), as it would its own 
 - Not checked without a real second machine: a Linux core's `codex` (npm's global bin on its login
   PATH) and Codex's own hook trust there. The `remote-codex` scene runs both cores on one Mac with
   a stand-in codex.
+
+## 9. The settings bar (hot reload)
+
+Claude's bars' model and watcher (`src/core/claude_reload.odin`, [CLAUDE-TABS.md](CLAUDE-TABS.md)), a
+second watcher for Codex tabs (`codex_file_class`, `codex_sources`). Codex has no in-place reload
+of a file a user edits (the app-server's `reloadUserConfig` applies only to its own config writes),
+so the bar offers **Restart**: `codex resume <id>` in the same tab, idle tabs now, busy ones once
+idle, always confirmed (what Codex runs there stops). A tab with no conversation yet (its first
+prompt not sent, or hooks not running) is left alone: the bar says new settings apply when you
+restart it. Idle is known only once Codex's first hook reports (SessionStart comes with the first
+prompt), so a just-resumed tab's queued restart may wait for its next prompt.
+
+- **Watched** (a poll every 2 s while a Codex tab of this Mac runs; another machine's tabs are its
+  core's): each running tab's home's `AGENTS.md`, `AGENTS.override.md`, `hooks.json` and
+  `prompts/` by stamps and folder digests; its `config.toml` by its content less what Codex writes
+  there itself (`codex_config_digest`); and the project's `AGENTS.md`, `AGENTS.override.md` in the
+  cwd and each folder up to the first with a `.git` (none: the cwd only), there or not yet. An
+  editor save of one of those, or of a file in the home's `rules/`, shows the bar at once (a
+  project's `AGENTS.md` only when a running tab reads it).
+- **config.toml**: what Codex writes itself in normal use does not count: tables `[projects.…]`
+  (trust), `[notice…]`, `[hooks.state…]`, `[tui.model_availability_nux]`, `[tui]`'s
+  `screen_reader_detection_done`, and `model` / `model_reasoning_effort` at the top or in a
+  profile (seen in a 0.167.2 home: `projects` trust, the two `tui` entries). The file is read in
+  memory only (at most 1 MiB; a larger one: any change counts) and only its hash is kept. A line
+  filter, not a TOML parser: an inline table or a dotted key holding those (`projects = {…}`,
+  `notice.x = …`) or a quoted header is not taken apart and counts as a change.
+- **Not watched**: `rules/` (Codex appends to `rules/default.rules` itself on "always allow"),
+  `skills/` (Codex watches its skill files itself: the app-server's `skills/changed`), `hooks/`
+  (its scripts run anew each time), a project's `.codex/`, and everything else in a home (its
+  sign-in and state: `codex_credential`, refused by `add`).
+- **Wire**: `claude_restart_changed` and `claude_reload_later` with `"harness":"codex"` (no
+  `update`); the snapshot's `reload.codex` (Claude's `reload.claude` fields; `version` unused);
+  `webbars` kind `codex_reload`, harness `codex`.
+- Not checked against a real Codex: which of these files a running Codex 0.167.2 really re-reads
+  (taken from its docs and its app-server schema: config and instructions at start, skills
+  watched), and the full list of keys it writes into `config.toml`; a Restart of a Codex tab is
+  tested with the stand-in only.

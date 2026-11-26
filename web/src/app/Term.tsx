@@ -4,8 +4,11 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { createTerm, type Fit, type TermView } from "../term.ts";
 import { TermStream } from "../termstream.ts";
+import { ReopenGuard } from "../state.ts";
 import { useApp } from "./ctx.ts";
+import { covering, drawerShown } from "./phone.ts";
 import { storageGet, storageSet } from "../ui/dom.ts";
+import { barsFor } from "./bars.ts";
 
 export interface TermHandle {
   view: TermView;
@@ -23,6 +26,29 @@ const byTab = new Map<number, TermHandle>();
 export function fitFor(tabId: number): Fit | null {
   const h = byTab.get(tabId) ?? focusedHandle;
   return h?.view.fit() ?? null;
+}
+
+// What covers a terminal (a menu, a sheet, the agent drawer…): phone.ts.
+export { covering };
+
+// A phone's own keyboard (its primary pointer a finger): typing goes through the terminal's field
+// (termfield.ts); a stylus phone still counts. A device whose primary pointer is fine (a narrow
+// desktop window, a tablet driven by its trackpad) keeps xterm.js's own keyboard handling (Ctrl+V,
+// Alt+letter as on the desktop). Looked at again when a pointer comes or goes.
+export function touchTyping(): boolean {
+  return window.matchMedia("(pointer: coarse)").matches;
+}
+function useTouchTyping(): boolean {
+  const [on, set] = useState(touchTyping);
+  useEffect(() => {
+    const qs = ["(pointer: coarse)", "(any-pointer: fine)"].map((q) => window.matchMedia(q));
+    const f = () => set(touchTyping());
+    for (const q of qs) q.addEventListener("change", f);
+    return () => {
+      for (const q of qs) q.removeEventListener("change", f);
+    };
+  }, []);
+  return on;
 }
 
 export function termFontSize(phone: boolean): number {
@@ -47,12 +73,16 @@ export function TermPane(props: {
   tabId: number;
   attachable: boolean; // the tab has a terminal the core can stream (running, has_term)
   focused: boolean;
-  keyboard: boolean; // typing goes straight in (desktop, or the phone's raw keys)
+  keyboard: boolean; // typing goes straight in (desktop, or a phone's own keyboard through the terminal's field)
+  inDrawer?: boolean; // the Atlas drawer's own terminal: the drawer does not cover it
   onFocus?: () => void;
   onInput?: (b: Uint8Array) => Uint8Array; // the phone's sticky modifiers
+  armed?: () => boolean; // one of them is down for the next typed character
+  disarm?: () => void; // let them go
   handleRef?: (h: TermHandle | null) => void;
 }) {
   const app = useApp();
+  const touch = useTouchTyping();
   const box = useRef<HTMLDivElement>(null);
   const h = useRef<Held | null>(null);
   const [note, setNote] = useState("");
@@ -68,7 +98,11 @@ export function TermPane(props: {
       const f = latest.current.onInput;
       held.stream.input(f ? f(b) : b);
     };
+    held.plain = (b) => held.stream.input(b);
+    held.armed = () => !!latest.current.armed?.();
+    held.disarm = () => latest.current.disarm?.();
     held.onNote = setNote;
+    held.onClosed = () => reopen();
     setNote(held.note);
     box.current!.appendChild(held.el);
     if (!held.mounted) {
@@ -86,7 +120,11 @@ export function TermPane(props: {
     for (const [k, v] of byTab) if (v === held) byTab.delete(k);
     if (focusedHandle === held) focusedHandle = null;
     held.onNote = () => {};
+    held.onClosed = () => {};
     held.input = () => {};
+    held.plain = () => {};
+    held.armed = () => false;
+    held.disarm = () => {};
     held.el.remove();
     props.handleRef?.(null);
     if (keep && held.stream.attached && held.stream.tabId) keepTerm(held, app.phone);
@@ -104,6 +142,21 @@ export function TermPane(props: {
       hide(true); // Deck, Settings, another session: kept for coming back
     };
   }, []);
+
+  // the tab's process ran again (Restart) after the core closed its stream: the new terminal
+  // (ReopenGuard: bounded, and never stuck); the status change and the close come in either order
+  const status = app.store.tab(props.tabId)?.tab.status;
+  const latestStatus = useRef(status);
+  latestStatus.current = status;
+  const reopen = () => {
+    const t = h.current;
+    if (!t || t.stream.attached || t.stream.tabId !== latest.current.tabId || !app.link.up) return;
+    if (t.guard.want(latestStatus.current, latest.current.attachable)) t.stream.reattach();
+  };
+  useEffect(() => {
+    h.current?.guard.status(status);
+    reopen();
+  }, [status]);
 
   // the tab it shows; again after the link came back (a fresh channel and snapshot)
   const linkUp = app.link.up;
@@ -139,8 +192,23 @@ export function TermPane(props: {
     const t = h.current;
     if (!t) return;
     if (props.focused) focusedHandle = t;
-    t.view.setKeyboard(props.focused && props.keyboard);
-  }, [props.focused, props.keyboard, props.tabId]);
+    // a phone types through the terminal's own field (termfield.ts), the desktop through xterm.js
+    t.view.setKeyboard(props.focused && props.keyboard, app.phone && touch);
+  }, [props.focused, props.keyboard, props.tabId, app.phone, touch]);
+
+  // a touch scroll in a TUI sends what the wheel would only into the pane typed into (the phone's
+  // one tab takes its text field's typing even when its keys do not go straight in), and not while
+  // a menu, sheet or the palette is over it (a coast stops)
+  const reports = props.focused && !covering(app.overlay, drawerShown(app.phone, app.overlay, !!app.store.homeOpen), !!props.inDrawer);
+  useEffect(() => {
+    h.current?.view.setScrollReports(reports);
+  }, [reports, props.tabId]);
+  // a bar that asks something (a permission) comes up over the tab: a coast stops there
+  const found = app.store.tab(props.tabId);
+  const bars = found ? barsFor(app.store, found.tab).length : 0;
+  useEffect(() => {
+    if (bars) h.current?.view.stopScroll();
+  }, [bars]);
 
   useEffect(() => {
     h.current?.view.setLight(light);
@@ -164,7 +232,12 @@ interface Held extends TermHandle {
   mounted: boolean;
   note: string;
   onNote: (s: string) => void;
+  onClosed: () => void; // the core closed the stream (the process went)
+  guard: ReopenGuard; // attaching again after a close
   input: (b: Uint8Array) => void;
+  plain: (b: Uint8Array) => void;
+  armed: () => boolean;
+  disarm: () => void;
 }
 
 const KEEP_DESKTOP = 6;
@@ -176,12 +249,18 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
   el.className = "term-fill";
   const view = createTerm({ light: document.documentElement.dataset.light === "1", fontSize: termFontSize(phone) });
   const stream = new TermStream(app.link, view);
-  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, input: () => {} };
+  const held: Held = { view, stream, el, mounted: false, note: "", onNote: () => {}, onClosed: () => {}, guard: new ReopenGuard(), input: () => {}, plain: () => {}, armed: () => false, disarm: () => {} };
   view.onInput((b) => held.input(b));
+  view.onPlainInput((b) => held.plain(b));
+  view.onArmed(() => held.armed());
+  view.onDisarm(() => held.disarm());
+  view.onScrollInput((b) => held.stream.input(b)); // only while shown: kept ones have reports off
   view.onLink((url) => app.setOverlay({ link: url }));
   stream.events((e) => {
     held.note = e.kind === "error" ? "No terminal for this tab yet." : e.kind === "closed" ? "This tab's terminal closed." : "";
     held.onNote(held.note);
+    if (e.kind === "live") held.guard.live();
+    if (e.kind === "closed") held.onClosed();
   });
   allViews.add(held);
   return held;
@@ -189,6 +268,7 @@ function newHeld(app: ReturnType<typeof useApp>, phone: boolean): Held {
 
 function keepTerm(held: Held, phone: boolean): void {
   held.view.setKeyboard(false);
+  held.view.setScrollReports(false);
   held.stream.focus(false);
   const tab = held.stream.tabId;
   const old = kept.get(tab);

@@ -8,6 +8,7 @@ import "base:runtime"
 import "core:encoding/json"
 import jg "../jsonguard"
 import "core:fmt"
+import "core:reflect"
 import "core:strings"
 import "core:unicode/utf8"
 
@@ -43,6 +44,21 @@ get_u64 :: proc(r: ^Rd, k: string) -> u64 {
 }
 
 @(private = "file")
+// An optional model word (pi.status's model, provider, thinking level): cleaned here, where it
+// enters (claude_model_clean: at most CLAUDE_MODEL_MAX bytes of [A-Za-z0-9._:/@[\]-]), so the
+// state, the events and the log all get the same value; anything else is "" (none said).
+get_model_word :: proc(r: ^Rd, k: string) -> string {
+	v, ok := r.obj[k]
+	if !ok do return ""
+	s, is := v.(json.String)
+	if !is {
+		if r.err == "" do r.err = strings.concatenate({k, " must be a string"}, context.temp_allocator)
+		return ""
+	}
+	clean := claude_model_clean(s)
+	return clean == "" ? "" : strings.clone(clean, r.a)
+}
+
 get_str :: proc(r: ^Rd, k: string, optional := false) -> string {
 	v, ok := r.obj[k]
 	if !ok {
@@ -90,13 +106,6 @@ opt_f64 :: proc(r: ^Rd, k: string) -> Maybe(f64) {
 	return nil
 }
 
-// A UI-only flag: read only from the window's own commands (Rd.ui); anyone else's is ignored.
-@(private = "file")
-ui_flag :: proc(r: ^Rd, k: string) -> bool {
-	if !r.ui do return false
-	return opt_bool(r, k).? or_else false
-}
-
 @(private = "file")
 opt_bool :: proc(r: ^Rd, k: string) -> Maybe(bool) {
 	v, ok := r.obj[k]
@@ -107,12 +116,6 @@ opt_bool :: proc(r: ^Rd, k: string) -> Maybe(bool) {
 		return nil
 	}
 	return bool(b)
-}
-
-@(private = "file")
-opt_string :: proc(r: ^Rd, k: string) -> Maybe(string) {
-	if _, ok := r.obj[k]; !ok do return nil
-	return get_str(r, k)
 }
 
 @(private = "file")
@@ -434,18 +437,28 @@ enum_by_name :: proc(s: string, names: [$E]string) -> (E, bool) {
 	return {}, false
 }
 
-// new_claude_tab's and new_claude_session's harness: "claude" (or none) or "codex" (codex.odin).
+// set_harness_flags's harness: one of HARNESS_KEYS (required).
+harness_key :: proc(r: ^Rd) -> Harness {
+	s := get_str(r, "harness")
+	defer delete(s, r.a)
+	for k, h in HARNESS_KEYS do if k == s do return h
+	if r.err == "" do r.err = "harness must be pi, claude or codex"
+	return .Pi
+}
+
+// A Claude tab's (or Claude command's) harness: "claude" (or none) is .Claude, "codex" .Codex
+// (codex.odin); never .Pi.
 @(private = "file")
-harness_codex :: proc(r: ^Rd) -> bool {
+harness_claude_tab :: proc(r: ^Rd) -> Harness {
 	v, has := r.obj["harness"]
-	if !has do return false
+	if !has do return .Claude
 	s, _ := v.(json.String)
 	switch string(s) {
-	case "claude": return false
-	case "codex":  return true
+	case "claude": return .Claude
+	case "codex":  return .Codex
 	}
 	if r.err == "" do r.err = "harness must be claude or codex"
-	return false
+	return .Claude
 }
 
 // An enum from its wire name (json_write.odin tables).
@@ -637,240 +650,16 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	r := Rd{obj = obj, a = allocator, ui = ui}
 	t, _ := obj["type"].(json.String)
 	switch t {
-	case "add_project":         cmd = Add_Project{cwd = get_str(&r, "cwd"), machine = opt_u64(&r, "machine")}
-	case "select_project":      cmd = Select_Project{project_id = get_u64(&r, "project_id")}
-	case "rename_project":      cmd = Rename_Project{project_id = get_u64(&r, "project_id"), name = get_str(&r, "name")}
-	case "open_session":        cmd = Open_Session_Cmd{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id")}
-	case "new_chat":            cmd = New_Chat{project_id = get_u64(&r, "project_id")}
-	case "focus_session":       cmd = Focus_Session{session = get_u64(&r, "session"), reopen = ui_flag(&r, "reopen")}
-	case "show_no_session":     cmd = Show_No_Session{}
-	case "next_needing_you":    cmd = Next_Needing_You{back = opt_bool(&r, "back").? or_else false}
-	case "close_session":       cmd = Close_Session{session = get_u64(&r, "session"), confirm = get_str(&r, "confirm", optional = true), ask = ui_flag(&r, "ask"), comments = opt_comments(&r)}
-	case "new_shell_tab":       cmd = New_Shell_Tab{session = get_u64(&r, "session"), cwd = get_str(&r, "cwd", optional = true), pane = opt_u64(&r, "pane")}
-	case "split_pane":
-		d, ok := pane_dir_parse(get_str(&r, "direction"))
-		if !ok && r.err == "" do r.err = "direction: right, down, left or up"
-		cmd = Split_Pane{pane = opt_u64(&r, "pane"), direction = d, tab_id = opt_u64(&r, "tab_id"), no_focus = !(opt_bool(&r, "focus").? or_else true)}
-	case "close_pane":          cmd = Close_Pane{pane = get_u64(&r, "pane")}
-	case "focus_pane":          cmd = Focus_Pane{pane = opt_u64(&r, "pane"), direction = get_str(&r, "direction", optional = true)}
-	case "move_tab":            cmd = Move_Tab{tab_id = get_u64(&r, "tab_id"), pane = get_u64(&r, "pane"), index = opt_index(&r, "index").? or_else -1}
-	case "set_split":           cmd = Set_Split{split = get_u64(&r, "split"), ratio = opt_f32(&r, "ratio").? or_else -1}
-	case "equalize_panes":      cmd = Equalize_Panes{session = opt_u64(&r, "session")}
-	case "zoom_pane":           cmd = Zoom_Pane{pane = opt_u64(&r, "pane"), zoom = opt_bool(&r, "zoom")}
-	case "close_tab":           cmd = Close_Tab{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true), comments = opt_comments(&r)}
-	case "focus_tab":           cmd = Focus_Tab{tab_id = get_u64(&r, "tab_id")}
-	case "copy_selection":      cmd = Copy_Selection{tab_id = get_u64(&r, "tab_id")}
-	case "terminal_link":       cmd = Terminal_Link{tab_id = get_u64(&r, "tab_id"), url = get_str(&r, "url"), external = opt_bool(&r, "external").? or_else false}
-	case "send_text":           cmd = Send_Text{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text"), generated = opt_bool(&r, "generated").? or_else false}
-	case "set_focus":           cmd = Set_Focus{widget = get_str(&r, "widget", optional = true)}
-	case "set_layout":          cmd = Set_Layout{left_width = opt_f32(&r, "left_width"), right_width = opt_f32(&r, "right_width"), left_open = opt_bool(&r, "left_open"), right_open = opt_bool(&r, "right_open"), drawer_width = opt_f32(&r, "drawer_width"), drawer_pinned = opt_bool(&r, "drawer_pinned")}
-	case "set_panel":           cmd = Set_Panel{panel = get_str(&r, "panel"), open = get_bool(&r, "open")}
-	case "cancel_confirmation": cmd = Cancel_Confirmation{token = get_str(&r, "token")}
-	case "rescan":              cmd = Rescan{}
-	case "refresh_shell_env":   cmd = Refresh_Shell_Env{}
-	case "quit":                cmd = Quit{confirm = get_str(&r, "confirm", optional = true), stop_sessions = opt_bool(&r, "stop_sessions").? or_else false}
-	case "get_state":           cmd = Get_State{}
-	case "list_commands":       cmd = List_Commands{}
-	case "set_home":            cmd = Set_Home{open = get_bool(&r, "open")}
-	case "set_chats_dir":       cmd = Set_Folder{kind = .Chats, path = get_str(&r, "path", optional = true)} // the old name
-	case "set_home_dir":        cmd = Set_Home_Dir{path = get_str(&r, "path", optional = true), create = opt_bool(&r, "create").? or_else false, setup = ui_flag(&r, "setup")}
-	case "set_folder":          cmd = Set_Folder{kind = get_enum(&r, "kind", FOLDER_NAMES), path = get_str(&r, "path", optional = true)}
-	case "setup_sheet":         cmd = Setup_Sheet{open = get_bool(&r, "open")}
-	case "set_chats_readonly":  cmd = Set_Chats_Readonly{on = get_bool(&r, "on")}
-	case "set_pi_extension":    cmd = Set_Pi_Extension{name = get_str(&r, "name"), on = get_bool(&r, "on")}
-	case "set_claude_default_flags": cmd = Set_Claude_Default_Flags{skip_permissions = get_bool(&r, "skip_permissions"), codex = harness_codex(&r), confirm = get_str(&r, "confirm", optional = true)}
-	case "set_pinned":          cmd = Set_Pinned{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), pinned = get_bool(&r, "pinned"), index = opt_index(&r, "index")}
-	case "set_hidden":          cmd = Set_Hidden{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), hidden = get_bool(&r, "hidden")}
-	case "set_sort":            cmd = Set_Sort{section = get_enum(&r, "section", SORT_SECTION_NAMES), by = get_enum(&r, "by", SORT_BY_NAMES)}
-	case "set_row_expanded":    cmd = Set_Row_Expanded{path = get_str(&r, "path"), expanded = get_bool(&r, "expanded")}
-	case "set_sidebar_view":    cmd = Set_Sidebar_View{view = get_enum(&r, "view", SIDEBAR_VIEW_NAMES)}
-	case "set_sidebar_folded":  cmd = Set_Sidebar_Folded{section = get_enum(&r, "section", FOLD_NAMES), folded = get_bool(&r, "folded")}
-	case "set_filter":          cmd = Set_Filter{text = opt_string(&r, "text"), running = opt_bool(&r, "running"), waiting = opt_bool(&r, "waiting"), pinned = opt_bool(&r, "pinned"), show_hidden = opt_bool(&r, "show_hidden")}
-	case "reveal":              cmd = Reveal_Path{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true)}
-	case "session_info":        cmd = Session_Info{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id"), to = get_str(&r, "to", optional = true)}
-	case "copy_path":           cmd = Copy_Path{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true)}
-	case "set_agent_name":      cmd = Set_Agent_Name{name = get_str(&r, "name")}
-	case "set_agent_model":     cmd = Set_Agent_Model{model = get_str(&r, "model", optional = true)}
-	case "agent_model_picker":  cmd = Agent_Model_Picker{}
-	case "set_notify":          cmd = Set_Notify{on = get_bool(&r, "on")}
-	case "set_tidy_projects":   cmd = Set_Tidy_Projects{on = get_bool(&r, "on")}
-	case "set_keep_sessions":   cmd = Set_Keep_Sessions{on = get_bool(&r, "on")}
-	case "set_separate_core":   cmd = Set_Separate_Core{on = get_bool(&r, "on")}
-	case "set_remote_machines": cmd = Set_Remote_Machines{on = get_bool(&r, "on")}
-	case "set_machines_reachable": cmd = Set_Machines_Reachable{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
-	case "set_web_access":      cmd = Set_Web_Access{on = get_bool(&r, "on"), confirm = get_str(&r, "confirm", optional = true)}
-	case "set_web_listen":      cmd = Set_Web_Listen{address = get_str(&r, "address")}
-	case "web_pair":            cmd = Web_Pair{}
-	case "web_devices":         cmd = Web_Devices{}
-	case "file_read":           cmd = File_Read{path = get_str(&r, "path"), since = get_str(&r, "since", true)}
-	case "file_save":           cmd = File_Save{path = get_str(&r, "path"), text = get_str(&r, "text"), base = get_str(&r, "base", true), force = opt_bool(&r, "force").? or_else false}
-	case "web_watch":           cmd = Web_Watch{projects = get_ids(&r, "projects", WEB_WATCH_IN_MAX)}
-	case "web_settings":        cmd = Web_Settings{open = get_bool(&r, "open")}
-	case "job_draft":           cmd = job_draft_read(&r)
-	case "web_revoke":          cmd = Web_Revoke{id = get_str(&r, "id")}
-	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name", optional = true), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}
-	case "machine_remove":      cmd = Machine_Remove{no = get_u64(&r, "no"), confirm = get_str(&r, "confirm", optional = true)}
-	case "machine_rename":      cmd = Machine_Rename{no = get_u64(&r, "no"), name = get_str(&r, "name")}
-	case "machine_connect":     cmd = Machine_Connect{no = get_u64(&r, "no")}
-	case "machine_login":       cmd = Machine_Login{no = get_u64(&r, "no")}
-	case "machine_install":     cmd = Machine_Install{no = get_u64(&r, "no"), cancel = opt_bool(&r, "cancel").? or_else false}
-	case "machine_linger":      cmd = Machine_Linger{no = get_u64(&r, "no")}
-	case "pi_handoff":          cmd = Pi_Handoff{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id"), to_project_id = get_u64(&r, "to_project_id"), run = get_str(&r, "run", optional = true), folder = get_str(&r, "folder")}
-	case "pi_handoff_part":     cmd = Pi_Handoff_Part{project_id = get_u64(&r, "project_id"), offset = get_u64(&r, "offset"), data = get_str(&r, "data"), last = opt_bool(&r, "last").? or_else false}
-	case "machine_open_page":   cmd = Machine_Open_Page{no = get_u64(&r, "no"), port = get_u64(&r, "port"), path = get_str(&r, "path", optional = true)}
-	case "holder_replace":      cmd = Holder_Replace{stop = get_bool(&r, "stop")}
-	case "holder_recover":      cmd = Holder_Recover{stop = opt_bool(&r, "stop").? or_else false}
-	case "core_handover":       cmd = Core_Handover{to = get_str(&r, "to")}
-	case "copy_control_token":  cmd = Copy_Control_Token{}
-	case "update_check":        cmd = Update_Check{}
-	case "update_skip":         cmd = Update_Skip{}
-	case "update_later":        cmd = Update_Later{}
-	case "update_download":     cmd = Update_Download{}
-	case "update_install":      cmd = Update_Install{confirm = get_str(&r, "confirm", optional = true)}
-	case "set_update_check":    cmd = Set_Update_Check{on = get_bool(&r, "on")}
-	case "set_confirm_policy":  cmd = Set_Confirm_Policy{caller = get_enum(&r, "caller", CALLER_NAMES), class = get_enum(&r, "class", CLASS_NAMES), mode = get_enum(&r, "mode", MODE_NAMES)}
-	case "set_close_confirm":   cmd = Set_Close_Confirm{tab_kind = get_enum(&r, "tab_kind", TAB_KIND_NAMES), rule = get_enum(&r, "rule", CLOSE_NAMES)}
-	case "set_theme":           cmd = Set_Theme{name = get_enum(&r, "name", THEME_NAMES)}
-	case "set_reduce_motion":   cmd = Set_Reduce_Motion{on = get_bool(&r, "on")}
-	case "set_dim_panes":       cmd = Set_Dim_Panes{on = get_bool(&r, "on")}
-	case "set_terminal_text_size": cmd = Set_Terminal_Text_Size{pt = int(min(get_u64(&r, "pt"), 1000))}
-	case "set_appearance":      cmd = Set_Appearance{mode = get_enum(&r, "mode", APPEARANCE_NAMES)}
-	case "set_text_size":       cmd = Set_Text_Size{size = get_enum(&r, "size", TEXT_SIZE_NAMES)}
-	// bridge reports: tab_id optional (0 = the caller's own pi tab)
-	case "pi.session":          cmd = Pi_Session_Update{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id"), session_file = get_str(&r, "session_file", optional = true), cwd = get_str(&r, "cwd", optional = true)}
-	case "pi.status":           cmd = Pi_Status_Update{tab_id = opt_u64(&r, "tab_id"), agent = get_enum(&r, "agent", AGENT_NAMES), waiting = get_bool(&r, "waiting"), question = opt_bool(&r, "question").? or_else false, blockers = get_strings(&r, "blockers")}
-	case "panel.set":           cmd = Panel_Set{tab_id = opt_u64(&r, "tab_id"), panel = get_str(&r, "panel"), title = get_str(&r, "title", optional = true), rows = get_rows(&r, "rows")}
-	case "panel.remove":        cmd = Panel_Remove{tab_id = opt_u64(&r, "tab_id"), panel = get_str(&r, "panel")}
-	case "set_panel_collapsed": cmd = Set_Panel_Collapsed{panel = get_str(&r, "panel"), collapsed = get_bool(&r, "collapsed")}
-	case "pi_prompt":           cmd = Pi_Prompt{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text"), images = get_images(&r, "images")}
-	case "pi_restart":          cmd = Pi_Restart{tab_id = get_u64(&r, "tab_id"), pick_model = opt_bool(&r, "pick_model").? or_else false}
-	case "pi_reload":           cmd = Pi_Reload{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true)}
-	case "pi_reload_all":       cmd = Pi_Reload_All{only_changed = opt_bool(&r, "only_changed").? or_else false, confirm = get_str(&r, "confirm", optional = true)}
-	case "pi_restart_updated":  cmd = Pi_Restart_Updated{confirm = get_str(&r, "confirm", optional = true)}
-	case "pi_reload_later":     cmd = Pi_Reload_Later{restart = opt_bool(&r, "restart").? or_else false}
-	case "pi_wait_idle":        cmd = Pi_Wait_Idle{tab_id = get_u64(&r, "tab_id"), timeout_ms = opt_u64(&r, "timeout_ms")}
-	case "open_file":           cmd = Open_File{path = get_str(&r, "path"), line = int(opt_u64(&r, "line")), col = int(opt_u64(&r, "col")), session = opt_u64(&r, "session"), preview = opt_bool(&r, "preview").? or_else false}
-	case "keep_tab":            cmd = Keep_Tab{tab_id = get_u64(&r, "tab_id")}
-	case "editor_state":        cmd = Editor_State{tab_id = get_u64(&r, "tab_id")}
-	case "save_file":           cmd = Save_File{tab_id = get_u64(&r, "tab_id")}
-	case "goto":                cmd = Goto_Line{tab_id = get_u64(&r, "tab_id"), line = int(get_u64(&r, "line")), col = int(opt_u64(&r, "col"))}
-	case "reload_file":         cmd = Reload_File{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true)}
-	case "keep_buffer":         cmd = Keep_Buffer{tab_id = get_u64(&r, "tab_id")}
-	case "diff_file":           cmd = Diff_File{tab_id = get_u64(&r, "tab_id"), against = get_enum(&r, "against", EDITOR_VIEW_NAMES)}
-	case "set_wrap":            cmd = Set_Wrap{tab_id = get_u64(&r, "tab_id"), on = get_bool(&r, "on")}
-	case "list_dir":            cmd = List_Dir{path = get_str(&r, "path"), ignored = opt_bool(&r, "ignored").? or_else false}
-	case "create_file":         cmd = Create_File{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
-	case "create_dir":          cmd = Create_Dir{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
-	case "rename_path":         cmd = Rename_Path{from = get_str(&r, "from"), to = get_str(&r, "to"), confirm = get_str(&r, "confirm", optional = true)}
-	case "delete_path":         cmd = Delete_Path{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
-	case "reveal_in_finder":    cmd = Reveal_In_Finder{path = get_str(&r, "path")}
-	case "set_left_tab":        cmd = Set_Left_Tab{tab = get_enum(&r, "tab", LEFT_TAB_NAMES)}
-	case "files_expand":        cmd = Files_Expand{path = get_str(&r, "path"), expanded = get_bool(&r, "expanded")}
-	case "files_collapse_all":  cmd = Files_Collapse_All{root = get_str(&r, "root")}
-	case "files_reveal":        cmd = Files_Reveal{path = get_str(&r, "path")}
-	case "set_files_filter":    cmd = Set_Files_Filter{text = get_str(&r, "text", optional = true)}
-	case "list_worktrees":      cmd = List_Worktrees{path = get_str(&r, "path", optional = true)}
-	case "files_set_root":      cmd = Files_Set_Root{base = get_str(&r, "base", optional = true), path = get_str(&r, "path", optional = true)}
-	case "worktree_cleanup":    cmd = Worktree_Cleanup{path = get_str(&r, "path"), confirm = get_str(&r, "confirm", optional = true)}
-	case "worktree_session":    cmd = Worktree_Session{project_id = get_u64(&r, "project_id"), path = get_str(&r, "path")}
-	case "changes_open":        cmd = Changes_Open{session = opt_u64(&r, "session"), path = get_str(&r, "path", optional = true)}
-	case "changes_list":        cmd = Changes_List{tab_id = opt_u64(&r, "tab_id"), path = get_str(&r, "path", optional = true)}
-	case "changes_stage":       cmd = Changes_Stage{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true)}
-	case "changes_unstage":     cmd = Changes_Unstage{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true)}
-	case "changes_discard":     cmd = Changes_Discard{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true), confirm = get_str(&r, "confirm", optional = true), second = opt_bool(&r, "second").? or_else false}
-	case "changes_select":      cmd = Changes_Select{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path", true), scope = get_str(&r, "scope", true), status = get_str(&r, "status", true), more = opt_bool(&r, "more").? or_else false, refresh = opt_bool(&r, "refresh").? or_else false}
-	case "changes_commit":      cmd = Changes_Commit{tab_id = get_u64(&r, "tab_id"), message = get_str(&r, "message")}
-	case "show_file":           cmd = Show_File{path = get_str(&r, "path"), line = int(min(opt_u64(&r, "line"), 1 << 30)), anchor = get_str(&r, "anchor", optional = true), session = opt_u64(&r, "session")}
-	case "markdown_open":       cmd = Markdown_Open{path = get_str(&r, "path"), session = opt_u64(&r, "session"), anchor = get_str(&r, "anchor", optional = true)}
-	case "markdown_view":       cmd = Markdown_Set_View{tab_id = get_u64(&r, "tab_id"), source = opt_bool(&r, "source").? or_else false}
-	case "markdown_scroll":     cmd = Markdown_Scroll{tab_id = get_u64(&r, "tab_id"), anchor = get_str(&r, "anchor", optional = true), line = int(opt_u64(&r, "line"))}
-	case "markdown_link":       cmd = Markdown_Follow{tab_id = get_u64(&r, "tab_id"), url = get_str(&r, "url"), confirm = get_str(&r, "confirm", optional = true)}
-	case "new_app_tab":         cmd = New_App_Tab{session = opt_u64(&r, "session"), name = get_str(&r, "name", optional = true), argv = get_strings(&r, "argv"), command = get_str(&r, "command", optional = true), cwd = get_str(&r, "cwd", optional = true), title = get_str(&r, "title", optional = true)}
-	case "app_restart":         cmd = App_Restart{tab_id = get_u64(&r, "tab_id")}
-	case "app_close":           cmd = App_Close{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true), comments = opt_comments(&r)}
-	case "app_declared":        cmd = App_Declared{session = opt_u64(&r, "session")}
-	case "app_input":           cmd = App_Input{tab_id = get_u64(&r, "tab_id"), events = get_raw_list(&r, "events")}
-	case "app_events":          cmd = App_Events{tab_id = get_u64(&r, "tab_id"), topic = get_str(&r, "topic"), since = opt_u64(&r, "since"), limit = int(min(opt_u64(&r, "limit"), 500))}
-	case "app_call":            cmd = App_Call{tab_id = get_u64(&r, "tab_id"), method = get_str(&r, "method"), params = "params" in r.obj ? get_raw(&r, "params") : "", timeout_ms = int(min(opt_u64(&r, "timeout_ms"), 600000))}
-	case "app_screenshot":
-		sc := App_Screenshot{tab_id = get_u64(&r, "tab_id")}
-		if rv, has := r.obj["rect"]; has {
-			o, is := rv.(json.Object)
-			x, y, w, h := num_of(o["x"]), num_of(o["y"]), num_of(o["w"]), num_of(o["h"])
-			if !is || x == nil || y == nil || w == nil || h == nil {
-				if r.err == "" do r.err = "rect must be {x, y, w, h} (numbers)"
-			} else do sc.rect, sc.has_rect = {x.?, y.?, w.?, h.?}, true
-		}
-		cmd = sc
-	case "app_inspect":         cmd = App_Inspect{tab_id = get_u64(&r, "tab_id"), on = get_bool(&r, "on")}
-	case "notifications_list":  cmd = Notifications_List{limit = int(min(opt_u64(&r, "limit"), NOTICES_MAX))}
-	case "mark_all_read":       cmd = Mark_All_Read{}
-	case "set_unread":          cmd = Set_Unread{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), unread = get_bool(&r, "unread")}
-	case "notifications_mark_read": cmd = Notifications_Mark_Read{id = opt_u64(&r, "id"), session = opt_u64(&r, "session"), all = opt_bool(&r, "all").? or_else false}
-	case "notifications_clear": cmd = Notifications_Clear{}
-	case "set_notifications":
-		sb := Set_Bell{finished = opt_bool(&r, "finished"), waiting = opt_bool(&r, "waiting"), errors = opt_bool(&r, "errors"), jobs = opt_bool(&r, "jobs"), os = opt_bool(&r, "os"), dock = opt_bool(&r, "dock")}
-		sb.macos = bell_choices(&r, "macos", OS_WHEN_NAMES)
-		sb.sound = bell_choices(&r, "sound", BELL_SOUND_NAMES)
-		cmd = sb
-	case "job_list":            cmd = Job_List{unread = opt_bool(&r, "unread").? or_else false}
-	case "job_runs":            cmd = Job_Runs{job = get_str(&r, "job"), limit = int(min(opt_u64(&r, "limit"), 1000))}
-	case "job_run_now":         cmd = Job_Run_Now{job = get_str(&r, "job")}
-	case "job_stop":            cmd = Job_Stop{job = get_str(&r, "job", optional = true)}
-	case "jobs_pause":          cmd = Jobs_Pause{job = get_str(&r, "job", optional = true)}
-	case "jobs_resume":         cmd = Jobs_Resume{job = get_str(&r, "job", optional = true)}
-	case "job_save":            cmd = Job_Save{path = get_str(&r, "path", optional = true), text = get_str(&r, "text"), based_on = get_str(&r, "based_on", optional = true)}
-	case "job_sheet":           cmd = Job_Sheet{open = get_bool(&r, "open"), job = get_str(&r, "job", optional = true), for_project = get_str(&r, "for_project", optional = true)}
-	case "job_create":          cmd = Job_Create{name = get_str(&r, "name", optional = true), schedule = get_str(&r, "schedule", optional = true), prompt = get_str(&r, "prompt", optional = true), folder = get_str(&r, "folder", optional = true), for_project = get_str(&r, "for_project", optional = true)}
-	case "job_mark_read":       cmd = Job_Mark_Read{job = get_str(&r, "job", optional = true), run = get_str(&r, "run", optional = true)}
-	case "job_approve":         return nil, JOB_APPROVE_REMOVED
-	case "job_set_enabled":     cmd = Job_Set_Enabled{job = get_str(&r, "job"), on = get_bool(&r, "on")}
-	case "job_delete":          cmd = Job_Delete{job = get_str(&r, "job"), confirm = get_str(&r, "confirm", optional = true)}
-	case "job_open":            cmd = Job_Open{job = get_str(&r, "job"), what = get_str(&r, "what")}
-	case "set_notes_dir":       cmd = Set_Home_Dir{path = get_str(&r, "path", optional = true)} // the old name
-	case "set_pi_path":         cmd = Set_Pi_Path{path = get_str(&r, "path")}
-	case "set_job_limits":
-		f :: opt_f64
-		n :: proc(r: ^Rd, k: string) -> Maybe(int) {if _, ok := r.obj[k]; !ok do return nil; return int(min(get_u64(r, k), 1 << 30))}
-		t :: proc(r: ^Rd, k: string) -> Maybe(i64) {if _, ok := r.obj[k]; !ok do return nil; return i64(min(get_u64(r, k), 1 << 40))}
-		cmd = Set_Job_Limits{max_cost = f(&r, "max_cost"), day = f(&r, "day"), week = f(&r, "week"), month = f(&r, "month"), timeout = t(&r, "timeout"), stall = t(&r, "stall"), max_turns = n(&r, "max_turns"), concurrency = n(&r, "concurrency"), loop_calls = n(&r, "loop_calls"), fail_pause = n(&r, "fail_pause")}
-	// pending comments (comments.odin); comment_add is internal only
-	case "comment_edit":        cmd = Comment_Edit{comment_id = get_u64(&r, "comment_id"), text = get_str(&r, "text")}
-	case "comment_delete":      cmd = Comment_Delete{comment_id = get_u64(&r, "comment_id")}
-	case "comments_clear":      cmd = Comments_Clear{session = get_u64(&r, "session")}
-	case "comments_send_now":   cmd = Comments_Send_Now{session = get_u64(&r, "session"), tab_id = opt_u64(&r, "tab_id")}
-	case "comments_ask_cancel": cmd = Comments_Ask_Cancel{}
-	case "pi.attached":         cmd = Pi_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
-	// Claude Code tabs (claude.odin)
-	case "new_claude_tab":      cmd = New_Claude_Tab{session = opt_u64(&r, "session"), project_id = opt_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), resume = get_str(&r, "resume", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
-	case "add_claude_account":  cmd = Add_Claude_Account{dir = get_str(&r, "dir"), label = get_str(&r, "label", optional = true), codex = harness_codex(&r)}
-	case "rename_claude_account": cmd = Rename_Claude_Account{account = get_str(&r, "account"), label = get_str(&r, "label", optional = true), codex = harness_codex(&r)}
-	case "remove_claude_account": cmd = Remove_Claude_Account{account = get_str(&r, "account"), codex = harness_codex(&r)}
-	case "set_claude_account_default": cmd = Set_Claude_Account_Default{account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
-	case "claude_resume":       cmd = Claude_Resume{claude_session_id = get_str(&r, "claude_session_id")}
-	case "new_claude_session":  cmd = New_Claude_Session{project_id = get_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
-	case "claude_rename":       cmd = Claude_Rename{claude_session_id = get_str(&r, "claude_session_id"), title = get_str(&r, "title")}
-	case "claude_wait_idle":    cmd = Claude_Wait_Idle{tab_id = get_u64(&r, "tab_id"), timeout_ms = opt_u64(&r, "timeout_ms"), prompt_id = opt_u64(&r, "prompt_id")}
-	case "claude_prompt":       cmd = Claude_Prompt{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text")}
-	case "claude_held":         cmd = Claude_Held_Op{tab_id = get_u64(&r, "tab_id"), op = get_str(&r, "op")}
-	case "claude.session":      cmd = Claude_Session_Report{tab_id = opt_u64(&r, "tab_id"), session_id = get_str(&r, "session_id"), cwd = get_str(&r, "cwd", optional = true), source = get_str(&r, "source", optional = true), transcript_path = get_str(&r, "transcript_path", optional = true), model = get_str(&r, "model", optional = true)}
-	case "claude.readonly_ack": cmd = Claude_Readonly_Ack{tab_id = opt_u64(&r, "tab_id"), nonce = get_str(&r, "nonce")}
-	case "claude.turn":         cmd = Claude_Turn_Report{tab_id = opt_u64(&r, "tab_id"), state = get_str(&r, "state"), title = get_str(&r, "title", optional = true), question = opt_bool(&r, "question").? or_else false, idle_prompt = opt_bool(&r, "idle_prompt").? or_else false}
-	case "claude.comments":     cmd = Claude_Comments{tab_id = opt_u64(&r, "tab_id"), max = int(min(opt_u64(&r, "max"), 1 << 20))}
-	case "claude.attached":     cmd = Claude_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
-	case "claude_restart":      cmd = Claude_Restart{tab_id = get_u64(&r, "tab_id"), pick_model = opt_bool(&r, "pick_model").? or_else false}
-	case "claude_restart_changed": cmd = Claude_Restart_Changed{update = opt_bool(&r, "update").? or_else false, all = opt_bool(&r, "all").? or_else false, confirm = get_str(&r, "confirm", optional = true)}
-	case "claude_reload_later": cmd = Claude_Reload_Later{update = opt_bool(&r, "update").? or_else false}
-	case "claude.todos":        cmd = Claude_Todos{tab_id = opt_u64(&r, "tab_id"), todos = get_todos(&r, "todos"), agent_id = get_str(&r, "agent_id", optional = true), seq = opt_u64(&r, "seq")}
-	case "claude.task":         cmd = Claude_Task{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), task_id = get_str(&r, "task_id"), subject = get_str(&r, "subject", optional = true), active_form = get_str(&r, "active_form", optional = true), status = get_str(&r, "status", optional = true), seq = opt_u64(&r, "seq")}
-	case "claude.model":        cmd = Claude_Model_Report{tab_id = opt_u64(&r, "tab_id"), model = get_str(&r, "model")}
-	case "claude.subagent":     cmd = Claude_Subagent{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), agent_id = get_str(&r, "agent_id", optional = true), agent_type = get_str(&r, "agent_type", optional = true), description = get_str(&r, "description", optional = true), tool_name = get_str(&r, "tool_name", optional = true), seq = opt_u64(&r, "seq")}
-	case "claude.background":   cmd = Claude_Background{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), task_id = get_str(&r, "task_id", optional = true), kind = get_str(&r, "kind", optional = true), description = get_str(&r, "description", optional = true), command = get_str(&r, "command", optional = true), tasks = get_bg_tasks(&r, "tasks"), crons = get_bg_crons(&r, "crons"), seq = opt_u64(&r, "seq")}
-	case "":                    return nil, "missing field type"
+	case "":              return nil, "missing field type"
+	case "set_chats_dir": cmd = Set_Folder{kind = .Chats, path = get_str(&r, "path", optional = true)} // the old name
+	case "set_notes_dir": cmd = Set_Home_Dir{path = get_str(&r, "path", optional = true)} // the old name
+	case "job_approve":   return nil, JOB_APPROVE_REMOVED
 	case:
-		bc, ok := browser_command_parse(t, &r) // below
-		if !ok do return nil, strings.concatenate({"unknown command ", t}, context.temp_allocator)
-		cmd = bc
+		i, known := command_by_name[t]
+		if !known do return nil, strings.concatenate({"unknown command ", t}, context.temp_allocator)
+		info := &command_infos[i]
+		reflect.set_union_variant_typeid(any{&cmd, typeid_of(Command)}, info.id)
+		for first in ([2]bool{true, false}) do for &f in info.fields do if f.first == first do cmd_read_field(&r, info, &f, &cmd)
 	}
 	if r.err != "" {
 		command_free(cmd, allocator)
@@ -878,6 +667,131 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	}
 	return cmd, ""
 }
+
+// One field as its tag says (command_codec.odin).
+@(private = "file")
+cmd_read_field :: proc(r: ^Rd, info: ^Cmd_Info, f: ^Cmd_Field, cmd: ^Command) {
+	if f.no_parse || (f.ui && !r.ui) do return
+	data := rawptr(uintptr(cmd) + f.offset)
+	if f.codec != "" && cmd_read_codec(r, info, f, data, cmd) do return
+	ti := f.ti
+	_, has := r.obj[f.key]
+	if u, is := runtime.type_info_base(ti).variant.(runtime.Type_Info_Union); is && len(u.variants) == 1 && !u.no_nil { // Maybe(T): absent is unset
+		if !has do return
+		ti = u.variants[0]
+		reflect.set_union_variant_typeid(any{data, f.ti.id}, ti.id)
+	} else if !has && f.opt {
+		if d, set := f.def.?; set do cmd_put_number(data, ti, d)
+		return
+	}
+	#partial switch t in runtime.type_info_base(ti).variant {
+	case runtime.Type_Info_Integer:
+		n := get_u64(r, f.key)
+		if m, set := f.max.?; set do n = min(n, m)
+		wire_put_int(data, ti.size, i64(n))
+	case runtime.Type_Info_Float:
+		x: Maybe(f64)
+		if ti.size == 4 {
+			if y, set := opt_f32(r, f.key).?; set do x = f64(y)
+		} else do x = opt_f64(r, f.key)
+		if y, set := x.?; set do cmd_put_number(data, ti, y)
+		else if d, set := f.def.?; set do cmd_put_number(data, ti, d)
+	case runtime.Type_Info_Boolean:
+		wire_put_int(data, ti.size, get_bool(r, f.key) ? 1 : 0)
+	case runtime.Type_Info_String:
+		(^string)(data)^ = get_str(r, f.key)
+	case runtime.Type_Info_Enum:
+		x, set := need(r, f.key)
+		if !set do return
+		s, _ := x.(json.String)
+		for val, i in t.values {
+			name := f.names == nil ? strings.to_lower(t.names[i], context.temp_allocator) : f.names[i64(val) - f.names_min]
+			if name == s {
+				wire_put_int(data, ti.size, i64(val))
+				return
+			}
+		}
+		if r.err == "" do r.err = strings.concatenate({"unknown ", f.key, " ", s}, context.temp_allocator)
+	case runtime.Type_Info_Slice:
+		if t.elem.id == typeid_of(string) {
+			(^[]string)(data)^ = get_strings(r, f.key)
+			return
+		}
+		if r.err == "" do r.err = strings.concatenate({f.key, ": no parser"}, context.temp_allocator)
+	case:
+		if r.err == "" do r.err = strings.concatenate({f.key, ": no parser"}, context.temp_allocator)
+	}
+}
+
+@(private = "file")
+cmd_put_number :: proc(data: rawptr, ti: ^runtime.Type_Info, x: f64) {
+	#partial switch t in runtime.type_info_base(ti).variant {
+	case runtime.Type_Info_Float:
+		if ti.size == 4 do (^f32)(data)^ = f32(x)
+		else do (^f64)(data)^ = x
+	case runtime.Type_Info_Integer:
+		wire_put_int(data, ti.size, i64(x))
+	}
+}
+
+// A field read by hand (its tag's codec=); false: as any other.
+@(private = "file")
+cmd_read_codec :: proc(r: ^Rd, info: ^Cmd_Info, f: ^Cmd_Field, data: rawptr, cmd: ^Command) -> bool {
+	put :: proc(data: rawptr, v: $T) {(^T)(data)^ = v}
+	k := f.key
+	_, has := r.obj[k]
+	switch f.codec {
+	case "comments":    put(data, opt_comments(r))
+	case "inverse":     put(data, !(opt_bool(r, k).? or_else true))
+	case "harness_ct":  put(data, harness_claude_tab(r))
+	case "harness_key": put(data, harness_key(r))
+	case "model_word":  put(data, get_model_word(r, k))
+	case "web_ids":     put(data, get_ids(r, k, WEB_WATCH_IN_MAX))
+	case "todos":       put(data, get_todos(r, k))
+	case "bg_tasks":    put(data, get_bg_tasks(r, k))
+	case "bg_crons":    put(data, get_bg_crons(r, k))
+	case "images":      put(data, get_images(r, k))
+	case "rows":        put(data, get_rows(r, k))
+	case "raw_list":    put(data, get_raw_list(r, k))
+	case "raw":         if has do put(data, get_raw(r, k))
+	case "act_target":  put(data, act_target_of(r))
+	case "mods":        put(data, act_mods_of(r))
+	case "bell_macos":  put(data, bell_choices(r, k, OS_WHEN_NAMES))
+	case "bell_sound":  put(data, bell_choices(r, k, BELL_SOUND_NAMES))
+	case "has":
+		put(data, get_str(r, k, optional = true))
+		put(cmd_sibling(info, cmd, strings.concatenate({"has_", f.name}, context.temp_allocator)), has)
+	case "pane_dir":
+		name := get_str(r, k)
+		d, ok := pane_dir_parse(name)
+		delete(name, r.a)
+		if !ok && r.err == "" do r.err = "direction: right, down, left or up"
+		put(data, d)
+	case "rect":
+		if !has do return true
+		o, is := r.obj[k].(json.Object)
+		x, y, w, h := num_of(o["x"]), num_of(o["y"]), num_of(o["w"]), num_of(o["h"])
+		if !is || x == nil || y == nil || w == nil || h == nil {
+			if r.err == "" do r.err = "rect must be {x, y, w, h} (numbers)"
+		} else {
+			put(data, App_Rect{x.?, y.?, w.?, h.?})
+			put(cmd_sibling(info, cmd, "has_rect"), true)
+		}
+	case "enum_of": // an enum by its names, its error not get_enum's
+		if !has && f.opt do return true
+		v, set := need(r, k)
+		if !set do return true
+		s, is := v.(json.String)
+		if is do for name, i in f.names do if name == s {
+			wire_put_int(data, f.ti.size, i64(i) + f.names_min)
+			return true
+		}
+		if r.err == "" do r.err = strings.concatenate({k, " must be one of its names"}, context.temp_allocator)
+	case: return false
+	}
+	return true
+}
+
 
 // A request envelope: {"id": "7", "type": "command", "v": 1, "command": {...}},
 // {"id": "1", "type": "hello", "v": 1, "token": "..."}, ...
@@ -1052,7 +966,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 				bt.can_forward = opt_bool(&t, "can_forward").? or_else false
 				tab.kind = bt
 			case "claude":
-				tab.kind = Claude_Tab{session_id = get_str(&t, "claude_session_id", optional = true), codex = harness_codex(&t)}
+				tab.kind = Claude_Tab{session_id = get_str(&t, "claude_session_id", optional = true), harness = harness_claude_tab(&t)}
 			case "app":
 				at := App_Tab{argv = get_strings(&t, "argv"), cwd = get_str(&t, "app_cwd", optional = true), exit_code = -1}
 				if s, has := t.obj["app_status"].(json.String); has do for name, k in APP_STATUS_NAMES do if name == s do at.app_status = k
@@ -1174,76 +1088,6 @@ arr :: proc(obj: json.Object, k: string) -> json.Array {
 	return a
 }
 
-// browser tabs' commands (browser_nav.odin)
-@(private = "file")
-browser_command_parse :: proc(t: string, r: ^Rd) -> (cmd: Command, ok: bool) {
-	switch t {
-	case "browser_open":     return Browser_Open{session = opt_u64(r, "session"), url = get_str(r, "url", optional = true)}, true
-	case "browser_navigate": return Browser_Navigate{tab_id = get_u64(r, "tab_id"), url = get_str(r, "url")}, true
-	case "browser_back":     return Browser_Back{tab_id = get_u64(r, "tab_id")}, true
-	case "browser_forward":  return Browser_Forward{tab_id = get_u64(r, "tab_id")}, true
-	case "browser_reload":   return Browser_Reload{tab_id = get_u64(r, "tab_id")}, true
-	case "browser_stop":     return Browser_Stop{tab_id = get_u64(r, "tab_id")}, true
-	// browser_polish.odin
-	case "browser_zoom":
-		step, _ := enum_of(r, "step", BROWSER_ZOOM_STEP_NAMES)
-		return Browser_Zoom{tab_id = get_u64(r, "tab_id"), step = step}, true
-	case "browser_find":       return Browser_Find{tab_id = get_u64(r, "tab_id"), text = get_str(r, "text"), back = opt_bool(r, "back").? or_else false}, true
-	case "browser_find_close": return Browser_Find_Close{tab_id = get_u64(r, "tab_id")}, true
-	case "browser_dialog":     return Browser_Dialog{tab_id = get_u64(r, "tab_id"), ok = get_bool(r, "ok"), text = get_str(r, "text", optional = true)}, true
-	case "browser_permission": return Browser_Permission{tab_id = get_u64(r, "tab_id"), allow = get_bool(r, "allow")}, true
-	case "browser_popup":      return Browser_Popup{tab_id = get_u64(r, "tab_id"), open = get_bool(r, "open")}, true
-	case "browser_edit":
-		op, _ := enum_of(r, "op", BROWSER_EDIT_OP_NAMES)
-		return Browser_Edit{tab_id = get_u64(r, "tab_id"), op = op}, true
-	case "browser_devtools":
-		x, y := i32(-1), i32(-1)
-		if _, has := r.obj["x"]; has do x = i32(min(get_u64(r, "x"), 1 << 20))
-		if _, has := r.obj["y"]; has do y = i32(min(get_u64(r, "y"), 1 << 20))
-		return Browser_Devtools{tab_id = get_u64(r, "tab_id"), x = x, y = y, close = opt_bool(r, "close").? or_else false}, true
-	case "browser_external":   return Browser_External{tab_id = get_u64(r, "tab_id")}, true
-	case "browser_download":
-		op, _ := enum_of(r, "op", BROWSER_DOWNLOAD_OP_NAMES)
-		return Browser_Download{download_id = get_u64(r, "download_id"), op = op}, true
-	// agents read pages (browser_agent.odin)
-	case "browser_tabs":     return Browser_Tabs{session = opt_u64(r, "session")}, true
-	case "browser_read":     return Browser_Read{tab_id = get_u64(r, "tab_id"), mode = get_str(r, "mode", optional = true), selector = get_str(r, "selector", optional = true), max = int(min(opt_u64(r, "max"), 1 << 30))}, true
-	case "browser_screenshot":
-		sc := Browser_Screenshot{tab_id = get_u64(r, "tab_id")}
-		if rv, has := r.obj["rect"]; has {
-			o, is := rv.(json.Object)
-			x, y, w, h := num_of(o["x"]), num_of(o["y"]), num_of(o["w"]), num_of(o["h"])
-			if !is || x == nil || y == nil || w == nil || h == nil {
-				if r.err == "" do r.err = "rect must be {x, y, w, h} (numbers)"
-			} else do sc.rect, sc.has_rect = {x.?, y.?, w.?, h.?}, true
-		}
-		return sc, true
-	case "browser_wait":     return Browser_Page_Wait{tab_id = get_u64(r, "tab_id"), what = get_str(r, "for"), value = get_str(r, "value", optional = true), timeout_ms = int(min(opt_u64(r, "timeout_ms"), 600000))}, true
-	case "browser_console":  return Browser_Console{tab_id = get_u64(r, "tab_id"), since = opt_u64(r, "since"), limit = int(min(opt_u64(r, "limit"), 1000))}, true
-	case "browser_network":  return Browser_Network{tab_id = get_u64(r, "tab_id"), since = opt_u64(r, "since"), limit = int(min(opt_u64(r, "limit"), 1000))}, true
-	case "browser_comments": return Browser_Comments{tab_id = opt_u64(r, "tab_id"), session = opt_u64(r, "session")}, true
-	case "browser_agent_stop": return Browser_Agent_Stop{tab_id = get_u64(r, "tab_id")}, true
-	// agents act on pages (browser_act.odin)
-	case "browser_click":
-		c := Browser_Click{tab_id = get_u64(r, "tab_id"), target = act_target_of(r), double = opt_bool(r, "double").? or_else false, modifiers = act_mods_of(r)}
-		if _, has := r.obj["button"]; has do c.button, _ = enum_of(r, "button", ACT_BUTTON_NAMES)
-		return c, true
-	case "browser_hover":  return Browser_Hover{tab_id = get_u64(r, "tab_id"), target = act_target_of(r)}, true
-	case "browser_scroll": return Browser_Scroll{tab_id = get_u64(r, "tab_id"), target = act_target_of(r), dx = opt_f32(r, "dx").? or_else 0, dy = opt_f32(r, "dy").? or_else 0}, true
-	case "browser_type":
-		return Browser_Type{tab_id = get_u64(r, "tab_id"), selector = get_str(r, "selector", optional = true), text = get_str(r, "text", optional = true), clear = opt_bool(r, "clear").? or_else false, submit = opt_bool(r, "submit").? or_else false}, true
-	case "browser_press":  return Browser_Press{tab_id = get_u64(r, "tab_id"), selector = get_str(r, "selector", optional = true), keys = get_str(r, "keys")}, true
-	case "browser_select":
-		_, has_label := r.obj["label"]
-		_, has_value := r.obj["value"]
-		return Browser_Select{tab_id = get_u64(r, "tab_id"), selector = get_str(r, "selector", optional = true), label = get_str(r, "label", optional = true), value = get_str(r, "value", optional = true), has_label = has_label, has_value = has_value}, true
-	case "browser_upload": return Browser_Upload{tab_id = get_u64(r, "tab_id"), selector = get_str(r, "selector", optional = true), paths = get_strings(r, "paths")}, true
-	case "browser_upload_answer": return Browser_Upload_Answer{tab_id = get_u64(r, "tab_id"), allow = get_bool(r, "allow")}, true
-	case "browser_agent_take_over": return Browser_Agent_Take_Over{tab_id = get_u64(r, "tab_id"), on = get_bool(r, "on")}, true
-	}
-	return nil, false
-}
-
 // An action's target: selector, or x and y (browser_act.odin checks which).
 @(private = "file")
 act_target_of :: proc(r: ^Rd) -> Act_Target {
@@ -1261,7 +1105,12 @@ act_target_of :: proc(r: ^Rd) -> Act_Target {
 @(private = "file")
 act_mods_of :: proc(r: ^Rd) -> int {
 	m := 0
-	for name in get_strings(r, "modifiers") {
+	names := get_strings(r, "modifiers")
+	defer {
+		for n in names do delete(n, r.a)
+		delete(names, r.a)
+	}
+	for name in names {
 		found := false
 		for n, i in ACT_MOD_NAMES do if n == name {
 			m |= 1 << uint(i)
@@ -1270,23 +1119,4 @@ act_mods_of :: proc(r: ^Rd) -> int {
 		if !found && r.err == "" do r.err = "modifiers are alt, control, meta, shift"
 	}
 	return m
-}
-
-// A string field naming one of an enum's values (names: its wire names). The string is not kept.
-@(private = "file")
-enum_of :: proc(r: ^Rd, k: string, names: [$E]string) -> (E, bool) {
-	v, has := need(r, k)
-	if !has do return {}, false
-	s, is := v.(json.String)
-	if is do for name, e in names do if name == s do return e, true
-	if r.err == "" do r.err = strings.concatenate({k, " must be one of its names"}, context.temp_allocator)
-	return {}, false
-}
-
-// job_draft (web_jobs.odin): every field optional but op.
-@(private = "file")
-job_draft_read :: proc(r: ^Rd) -> Job_Draft {
-	c := Job_Draft{op = get_str(r, "op")}
-	for f, i in job_draft_strings(&c) do if i > 0 do f^ = get_str(r, JOB_DRAFT_FIELDS[i], optional = true)
-	return c
 }

@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/deckhand-codex-persist-1795698037636486000","added":true}],"selected_project":"$ROOT/deckhand-codex-persist-1795698037636486000",
+"open_sessions":[{"agent":"claude","claude_session_id":"01a1d0d6-5353-7ff3-9308-ff91070ad530","pi_session_id":"","cwd":"$ROOT/deckhand-codex-persist-1795698037636486000","session_dir":"","project":"$ROOT/deckhand-codex-persist-1795698037636486000","tabs":[{"kind":"codex","claude_session_id":"01a1d0d6-5353-7ff3-9308-ff91070ad530","cwd":"$ROOT/deckhand-codex-persist-1795698037636486000","account":"$ROOT/deckhand-test-home-1795698030385546000/.codex"}],"active_tab":0}],"current_session":0,
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"claude_sessions":[{"id":"01a1d0d6-5353-7ff3-9308-ff91070ad530","cwd":"$ROOT/deckhand-codex-persist-1795698037636486000","project":"$ROOT/deckhand-codex-persist-1795698037636486000","used":1795698037,"account":"$ROOT/deckhand-test-home-1795698030385546000/.codex","codex":true}],
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"remote_machines":false,"codex_account_last":"$ROOT/deckhand-test-home-1795698030385546000/.codex"}}

@@ -10,10 +10,10 @@ assert_screen Claude Code is not installed
 assert_rows sessions Parser design,Tidy the README
 wait 300
 shot claude-sessions/missing-restored
-# the menus have no Claude rows (a one-harness user sees nothing extra)
+# the menus have no Claude rows (a one-harness user sees only pi's: New session with flags…)
 rclickid proj 0
 eventually
-assert_menurows Pin|New session|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+assert_menurows Pin|New session|New session with flags…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
 shot claude-sessions/missing-menu
 key escape
 wait 300

@@ -27,6 +27,7 @@ Palette_Kind :: enum {
 	Page, // "Open a machine's web page…": PORT[/path] on an online machine (machine_page.odin)
 	Machine, // "Remove a machine…", "Connect to a machine": one of the machines (machines.odin)
 	Folder, // "Add folder on <machine>…": a path on that machine (machine_route.odin)
+	Flags, // "… with flags…": the flags of one start (ui_flags.odin)
 }
 
 PALETTE_KIND_NAMES := [Palette_Kind]string {
@@ -39,6 +40,7 @@ PALETTE_KIND_NAMES := [Palette_Kind]string {
 	.Page    = "Page",
 	.Machine = "Machine",
 	.Folder  = "Folder",
+	.Flags   = "Flags",
 }
 
 Palette_Item :: struct {
@@ -56,6 +58,7 @@ Palette_Item :: struct {
 	matched: u64, // title runes that matched (bit i = rune i, first 64)
 	path:    string, // files: absolute path
 	chat:    bool, // a session in Chats (a bubble), not in a project (a folder)
+	why:     string, // flags: why it cannot start ("" = it can)
 }
 
 Palette :: struct {
@@ -72,6 +75,7 @@ Palette :: struct {
 	page_for: u64, // ...on this machine (0 = each online one)
 	folder_for: u64, // folder mode ("Add folder on <machine>…"): the query is a path on this machine (0 = not this mode)
 	machine_pick: Machine_Pick, // machine mode: the query picks a machine to remove or connect to
+	flags_for: core.Command, // flags mode ("… with flags…"): the start the query's flags go to (heap; nil = not this mode)
 }
 
 Machine_Pick :: enum u8 {
@@ -95,6 +99,7 @@ palette_reset :: proc() {
 	palette.pages, palette.page_for = false, 0
 	palette.folder_for = 0
 	palette.machine_pick = .None
+	flags_forget()
 	palette.was_open = true
 }
 
@@ -220,6 +225,7 @@ palette_results :: proc() -> []Palette_Item {
 	if palette.pages do return page_palette_results(tf_text(&palette.field))
 	if palette.folder_for != 0 do return folder_palette_results(tf_text(&palette.field))
 	if palette.machine_pick != .None do return machine_palette_results(tf_text(&palette.field))
+	if palette.flags_for != nil do return flags_palette_results(tf_text(&palette.field))
 	return palette_search(tf_text(&palette.field))
 }
 
@@ -249,6 +255,10 @@ palette_run_index :: proc(i: int) {
 }
 
 palette_run :: proc(it: Palette_Item) {
+	if it.kind == .Flags && it.why != "" {
+		toast_show(it.why, err = true) // refused flags: the field stays open to fix them
+		return
+	}
 	palette_remember(it.key)
 	ui_do(core.Set_Focus{""})
 	switch it.kind {
@@ -283,6 +293,8 @@ palette_run :: proc(it: Palette_Item) {
 		if it.path != "" do ui_do(core.New_App_Tab{session = cs.id, command = it.path})
 	case .Page:
 		if port, path, ok := core.machine_page_spec(it.path); ok do ui_do_menu(core.Machine_Open_Page{no = it.id, port = port, path = path}, "Open web page") // a failure shows (a later one: machine_page.odin)
+	case .Flags:
+		flags_run(it) // ui_flags.odin
 	case .Folder:
 		ui_do(core.Add_Project{cwd = it.path, machine = it.id}) // a refusal, now or from there, is a toast (machine_route.odin)
 	case .Machine:

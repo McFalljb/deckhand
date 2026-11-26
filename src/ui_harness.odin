@@ -399,8 +399,18 @@ new_session_menu_items :: proc(t: core.Menu_New_Session, items: ^[dynamic]core.M
 	p := core.find_project(t.project_id)
 	if p == nil do return
 	what := p.group == .Chats ? "New chat with…" : t.cwd != "" ? fmt.tprintf("New session in %s with…", filepath.base(t.cwd)) : fmt.tprintf("New session in %s with…", core.project_display(p^))
+	if t.flags { // "New session with flags…": each harness that takes flags here (ui_flags.odin)
+		append(items, core.Menu_Item{label = strings.concatenate({strings.trim_suffix(what, "…"), " flags…"}, context.temp_allocator), note = true})
+		flags_picker_items(p, t.cwd, items)
+		return
+	}
 	append(items, core.Menu_Item{label = what, note = true})
 	append(items, ..core.new_session_choices(p, t.cwd))
+	// the same with flags typed first (ui_flags.odin): the picker again, its flags rows
+	if flags_picker_any(p.id, t.cwd) {
+		append(items, core.Menu_Item{sep = true})
+		append(items, core.Menu_Item{label = "With flags…", picker = core.Menu_New_Session{project_id = p.id, cwd = t.cwd, run = t.run, folder = t.folder, flags = true}})
+	}
 }
 
 // Where the picker opens without a click (a shortcut, the palette, the menu bar): under the top
@@ -416,13 +426,27 @@ harness_used :: proc(cmd: core.Command) {
 
 // The user's "New session" in project pid (in cwd, a checkout of it; "" = its folder), see the top.
 // at: where the picker opens (nil = new_session_anchor).
-new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
+new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil, flags := false) {
 	p := core.find_project(pid)
 	if p == nil do return
 	// looked up again (stat only): a harness installed since is offered
-	core.pi_installed_now()
-	core.claude_installed_now()
-	core.codex_installed_now()
+	for h in core.Harness do core.harness_installed_now(h)
+	if flags { // "New session with flags…" (ui_flags.odin): the only one asks at once, else the picker's flags rows
+		rows := make([dynamic]core.Menu_Item, context.temp_allocator)
+		flags_picker_items(p, cwd, &rows)
+		switch len(rows) {
+		case 0: toast_show(core.id_machine(pid) != 0 ? core.machine_no_harness_note(core.id_machine(pid)) : core.NO_HARNESS, err = true)
+		case 1: flags_open(rows[0].cmd)
+		case:
+			run, folder := handoff_picker_identity(p^) // another machine's: what a choice checks again (ui_handoff.odin)
+			menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd, run = run, folder = folder, flags = true}, at.? or_else new_session_anchor())
+			for it, i in menu_items() do if !it.note && !it.sep {
+				menu.selected = i
+				break
+			}
+		}
+		return
+	}
 	items := core.new_session_choices(p, cwd)
 	switch len(items) {
 	case 0:

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code accounts and Claude sessions found on disk in quiet test mode (docs/CLAUDE.md §1b,
+# Claude Code accounts and Claude sessions found on disk in quiet test mode (docs/CLAUDE-TABS.md §1b,
 # §4b): never a real claude, never the user's ~/.claude*. A fake HOME with two fake accounts
 # (~/.claude and ~/.claude-work: fake account files, read by stat only) whose projects/ hold fake
 # transcripts of the project (one each, run outside Deckhand, plus a subagent file that is never a

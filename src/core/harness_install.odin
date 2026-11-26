@@ -46,7 +46,7 @@ harness_run: Harness_Run
 // same, or nothing runs), or Close (dismiss). In process the window calls harness_run_start itself.
 Harness_Install :: struct {
 	item:    string,
-	command: string,
+	command: string `cmd:"-"`,
 	dismiss: bool,
 }
 

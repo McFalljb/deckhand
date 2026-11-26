@@ -49,7 +49,7 @@ import "base:runtime"
 Machine_Open_Page :: struct {
 	no:   u64,
 	port: u64,
-	path: string, // a URL path ("" = "/"): no scheme or host
+	path: string `cmd:"omit"`, // a URL path ("" = "/"): no scheme or host
 }
 
 PAGE_PATH_MAX :: 1024

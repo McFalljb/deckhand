@@ -364,7 +364,7 @@ export function OpenRow({ s, from, mach, peek }: { s: OpenSession; from?: number
   const { store } = app;
   const w = store.webTitle(s.id);
   const fromTab = from ? store.tabs(s.id).find((t) => t.id === from) : undefined;
-  const v = fromTab ? tabView(fromTab) : sessionView(store, s);
+  const v = fromTab ? tabView(store, fromTab) : sessionView(store, s);
   const current = shownSession(app) === s.id;
   const age = v.dot !== "none" && v.dot !== "exited" ? ago(v.since) : "";
   let when = age || (w ? (w.at ? ago(w.at) : "new") : "");

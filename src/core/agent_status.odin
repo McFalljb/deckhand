@@ -612,6 +612,21 @@ Status_Mark :: enum u8 {
 	Error, // stopped with an error: "!"
 }
 
+// As a browser names them (web_view.odin webst:<session>; web/src/status.ts Mark).
+STATUS_MARK_NAMES := [Status_Mark]string {
+	.None       = "none",
+	.Idle       = "idle",
+	.Exited     = "exited",
+	.Working    = "working",
+	.Progress   = "progress",
+	.Waiting    = "waiting",
+	.Permission = "permission",
+	.Question   = "question",
+	.Auth       = "auth",
+	.Done       = "done",
+	.Error      = "error",
+}
+
 // The mark for a status (a tab's, or the tab a row's status came from).
 status_mark :: proc(v: Tab_Status_View) -> Status_Mark {
 	switch v.dot {

@@ -486,7 +486,10 @@ handle_backslash :: proc(sj: ^Subj) -> ^Md_Inline {
 		sj.pos += 1
 		return mk(sj, .Text, sj.s[sj.pos - 1:sj.pos])
 	}
-	if sj.pos < len(sj.s) && skip_line_end(sj) do return mk(sj, .Linebreak)
+	if sj.pos < len(sj.s) && skip_line_end(sj) {
+		skip_spaces(sj) // the next line's leading spaces are not text (a lazy line keeps them in the block)
+		return mk(sj, .Linebreak)
+	}
 	return mk(sj, .Text, "\\")
 }
 

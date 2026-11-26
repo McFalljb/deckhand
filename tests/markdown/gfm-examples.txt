@@ -441,3 +441,26 @@ See www.example.com/a_b, or mail me@example.org.
 <p>````````` x <code>one</code>, <code>.</code>, more <code>two</code>; <code>x</code> end</p>
 ````````````````````````````````
 
+```````````````````````````````` example 9010 Deckhand: no leading spaces on a lazy line after a hard break
+- a
+
+  b\
+ c
+.
+<ul>
+<li>
+<p>a</p>
+<p>b<br />
+c</p>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 9011 Deckhand: no leading tab on a paragraph after a reference definition
+> [ref]: /url
+	tabbed
+.
+<blockquote>
+<p>tabbed</p>
+</blockquote>
+````````````````````````````````

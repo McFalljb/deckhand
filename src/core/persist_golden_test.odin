@@ -120,6 +120,8 @@ pg_case :: proc(b: ^strings.Builder, name, fixture: string, base: map[string]str
 
 @(test)
 persist_golden :: proc(t: ^testing.T) {
+	// State's strings outlive this test (the next one's reset leaves or frees them): the heap's
+	context.allocator = runtime.heap_allocator()
 	root := pg_root()
 	dir := fmt.aprintf("%s/%s", root, PG_FIXTURES)
 	defer delete(dir)

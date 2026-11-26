@@ -173,6 +173,21 @@ export function sessionPanels(tabs: Tab[], panelsOf: (tabId: number) => Panel[])
   return out;
 }
 
+// The phone's own folds in its panels sheet, per session (a fold in one session's sheet never
+// folds another's Todos), never sent to the core (the Mac's folds are set_panel_collapsed).
+export class PanelFolds {
+  private m = new Map<number, Set<string>>();
+  has(session: number, panel: string): boolean {
+    return !!this.m.get(session)?.has(panel);
+  }
+  toggle(session: number, panel: string): void {
+    const s = this.m.get(session) ?? new Set<string>();
+    if (s.has(panel)) s.delete(panel);
+    else s.add(panel);
+    this.m.set(session, s);
+  }
+}
+
 // A panel as drawn: a bridge's first head row is its title ("Todos 3/4"), as the window draws it.
 export function panelView(p: Panel): { head: string; rows: Panel["rows"] } {
   return p.rows[0]?.head ? { head: p.rows[0].text, rows: p.rows.slice(1) } : { head: p.title, rows: p.rows };

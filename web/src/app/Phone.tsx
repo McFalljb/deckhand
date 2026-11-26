@@ -20,7 +20,7 @@ import { agentName, toggleAtlas } from "./Bars.tsx";
 import { unreadCount } from "./Bell.tsx";
 import { TabBars } from "./TabBars.tsx";
 import { modeBadge } from "./harness.ts";
-import { ATLAS_START, atlasNeedsStart, atlasShown, composeSend, drawerShown, panelView, phoneSessionItems, sessionPanels } from "./phone.ts";
+import { ATLAS_START, atlasNeedsStart, atlasShown, composeSend, drawerShown, PanelFolds, panelView, phoneSessionItems, sessionPanels } from "./phone.ts";
 
 const enc = new TextEncoder();
 const SELECT_ROWS = 5000; // Select text: the last rows of the scrollback and the screen
@@ -377,7 +377,8 @@ function PhoneStrip({ s, active }: { s: OpenSession; active: number }) {
 export function PanelsSheet() {
   const app = useApp();
   const id = app.overlay.panels;
-  const [folded, setFolded] = useState<Set<string>>(new Set());
+  const folds = useRef(new PanelFolds()).current; // per session
+  const [, redraw] = useState(0);
   if (id === null) return null;
   const close = () => app.setOverlay({ panels: null });
   const s = app.store.session(id);
@@ -389,7 +390,7 @@ export function PanelsSheet() {
         <div class="panels-scroll">
           {panels.length === 0 ? <p class="empty small">The session's agent publishes its todos, subagents and shells here.</p> : null}
           {panels.map((p) => {
-            const shut = folded.has(p.id);
+            const shut = folds.has(id, p.id);
             const { head, rows } = panelView(p);
             return (
               <section class="panel" key={p.id}>
@@ -398,10 +399,8 @@ export function PanelsSheet() {
                   class="panel-head"
                   aria-expanded={!shut}
                   onClick={() => {
-                    const n = new Set(folded);
-                    if (shut) n.delete(p.id);
-                    else n.add(p.id);
-                    setFolded(n);
+                    folds.toggle(id, p.id);
+                    redraw((n) => n + 1);
                   }}
                 >
                   <Icon name={shut ? "chevron-right" : "chevron-down"} size={12} />

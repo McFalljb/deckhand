@@ -238,3 +238,13 @@ test("file editing on a phone: the editor's text is 16 px (iOS zooms the page in
   assert.deepEqual(codeMetrics(true), { cls: "code-edit phone", lineH: 22 });
   assert.deepEqual(codeMetrics(false), { cls: "code-edit", lineH: 18 });
 });
+
+test("panels on a phone: a fold is that session's own, never another session's", async () => {
+  const { PanelFolds } = await import("../src/app/phone.ts");
+  const f = new PanelFolds();
+  f.toggle(1, "todos");
+  assert.equal(f.has(1, "todos"), true);
+  assert.equal(f.has(2, "todos"), false, "another session's Todos stay open");
+  f.toggle(1, "todos");
+  assert.equal(f.has(1, "todos"), false);
+});

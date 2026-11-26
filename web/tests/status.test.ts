@@ -71,3 +71,11 @@ test("status: a tab strip shows a quiet terminal that printed just now as workin
   assert.equal(strip(pi({ id: 4, agent: "idle", output_recent: true }), ["none", "idle", -1]).dot, "none");
   assert.equal(strip(shell({ id: 4, output_recent: true, unseen: true }), ["unseen", "done", -1]).dot, "unseen");
 });
+
+test("status: what it waits for is the core's (only OSC 7501's), never the tab's own when the bridge speaks", () => {
+  // a pi tab: the bridge waits, an extension's OSC 7501 also said "Run rm?": the Mac says "Waiting for you"
+  const t = pi({ id: 4, agent: "idle", waiting: true, prog: { state: "blocked", kind: "permission", msg: "Run rm?" } });
+  assert.equal(tabView(store([t], { 4: ["waiting", "waiting", -1, ""] as any }), t as any).msg, "");
+  const sh = shell({ id: 4, prog: { state: "blocked", kind: "permission", msg: "Run rm?" } });
+  assert.equal(tabView(store([sh], { 4: ["waiting", "permission", -1, "Run rm?"] as any }), sh as any).msg, "Run rm?");
+});

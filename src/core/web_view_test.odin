@@ -353,6 +353,10 @@ web_status_cases :: proc() -> []Web_Status_Case {
 		// the page's own reading differed (web/tests/status.test.ts STATUS_DIFFERS): the bridge speaks
 		{"pi waiting, OSC 7501 permission", pi({agent = .Idle, waiting = true, prog = blocked(.Permission)}), .Waiting, .Waiting, -1},
 		{"pi working, OSC 7501 at 40%", pi({agent = .Working, prog = working(40)}), .Running, .Working, -1},
+		// what it waits for: OSC 7501's message while OSC 7501 speaks, never under the bridge's dot
+		{"shell blocked, a message", sh({prog = {state = .Blocked, kind = .Permission, progress = -1, msg = "Run rm?"}}), .Waiting, .Permission, -1},
+		{"pi waiting, OSC 7501 with a message", pi({agent = .Idle, waiting = true, prog = {state = .Blocked, kind = .Permission, progress = -1, msg = "Run rm?"}}), .Waiting, .Waiting, -1},
+		{"shell working, a message", sh({prog = {state = .Working, progress = -1, msg = "Building"}}), .Running, .Working, -1},
 	}
 	return slice_clone_temp(cases[:])
 }
@@ -407,6 +411,9 @@ web_view_status_table :: proc(t: ^testing.T) {
 		testing.expectf(t, a[0].(json.String) == ROW_STATUS_NAMES[c.dot], "%s: webst dot %v", c.row, a[0])
 		testing.expectf(t, a[1].(json.String) == STATUS_MARK_NAMES[c.mark], "%s: webst mark %v", c.row, a[1])
 		testing.expectf(t, int(a[2].(json.Float)) == c.progress, "%s: webst progress %v", c.row, a[2])
+		// [3]: what it waits for, only while waiting and only OSC 7501's (the window's ui_sidebar.odin)
+		want_msg := c.row == "shell blocked, a message" ? "Run rm?" : ""
+		testing.expectf(t, len(a) == 4 && a[3].(json.String) == want_msg, "%s: webst msg %v, want %q", c.row, a, want_msg)
 	}
 	// the strongest: a waiting tab (rank 6), the first of them ("pi waiting")
 	want: u64

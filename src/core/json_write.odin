@@ -853,7 +853,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_bool(&to, "loading", bt.loading)
 				kv_bool(&to, "can_back", bt.can_back)
 				kv_bool(&to, "can_forward", bt.can_forward)
-				if bt.blocked_popup != "" do kv_str(&to, "blocked_popup", bt.blocked_popup)
+				if bt.blocked_popup != "" do kv_str(&to, "blocked_popup", browser_url_public(bt.blocked_popup)) // State keeps it as asked (Browser_Popup opens it)
 				// its page: open | waiting (no slot free) | unloaded (opens when shown) | closed (see the tab)
 				if page := window_browser_page(t.id); page != "" do kv_str(&to, "page", page)
 			}

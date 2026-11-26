@@ -39,9 +39,21 @@ browser_url_public :: proc(url: string) -> string {
 }
 
 // For events and logs: a command's address as typed, without user:pass@ also
-// when it has no scheme yet ("NAME:PASSWORD@example.com"). Temp-allocated.
+// when it has no scheme yet ("NAME:PASSWORD@example.com"; a scheme is a :// before the first of
+// /?#@, not one in the query); a mail address keeps mailto: and its domain, not whom
+// ("mailto:<redacted>@example.com"). Temp-allocated.
 browser_url_redacted :: proc(url: string) -> string {
-	if strings.contains(url, "://") do return browser_url_public(url)
+	if i := strings.index(url, "://"); i >= 0 {
+		first := strings.index_any(url, "/?#@")
+		if first < 0 || i <= first do return browser_url_public(url)
+	}
+	if len(url) >= 7 && strings.equal_fold(url[:7], "mailto:") {
+		to := url[7:]
+		end := len(to)
+		if k := strings.index_any(to, "?#"); k >= 0 do end = k
+		at := strings.last_index_byte(to[:end], '@')
+		return at < 0 ? url : strings.concatenate({url[:7], "<redacted>", to[at:]}, context.temp_allocator)
+	}
 	end := len(url)
 	if k := strings.index_any(url, "/?#"); k >= 0 do end = k
 	at := strings.last_index_byte(url[:end], '@')

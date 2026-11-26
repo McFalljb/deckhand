@@ -301,3 +301,72 @@ web_view_filter_is_the_senders :: proc(t: ^testing.T) {
 	for x in web_view_cached(secs[:]) do if x[0] == "webtree" do testing.expect_value(t, x[1], fmt.tprintf(`["%d","%d"]`, a.id, b.id))
 	testing.expect_value(t, state.sidebar.filter, "") // nor the window's
 }
+
+// The status dots and marks a browser shows (#195 item 4), row for row as web/tests/status.test.ts
+// pins the page's own reading: the core's tab_status_view and status_mark give the same, but for
+// the two rows the page read differently (a pi tab with both the bridge and OSC 7501).
+Web_Status_Case :: struct {
+	row:      string,
+	tab:      Tab,
+	dot:      Row_Status,
+	mark:     Status_Mark,
+	progress: int, // percent, -1 none
+}
+
+web_status_cases :: proc() -> []Web_Status_Case {
+	pi :: proc(t: Tab) -> Tab {t := t; t.kind = Pi_Tab{}; return t}
+	sh :: proc(t: Tab) -> Tab {t := t; t.kind = Shell_Tab{}; return t}
+	cl :: proc(ct: Claude_Tab, t: Tab = {}) -> Tab {t := t; t.kind = ct; return t}
+	blocked :: proc(k: Prog_Kind) -> Prog_Summary {return {state = .Blocked, kind = k, progress = -1}}
+	working :: proc(p: i8) -> Prog_Summary {return {state = .Working, progress = p}}
+	cases := [?]Web_Status_Case {
+		{"shell, nothing reported", sh({}), .None, .Idle, -1},
+		{"pi idle", pi({agent = .Idle}), .None, .Idle, -1},
+		{"pi working", pi({agent = .Working}), .Running, .Working, -1},
+		{"pi waiting", pi({agent = .Idle, waiting = true}), .Waiting, .Waiting, -1},
+		{"pi asked a question", pi({agent = .Idle, question = true}), .Question, .Question, -1},
+		{"pi error", pi({agent = .Error}), .Error, .Error, -1},
+		{"pi exited", pi({status = .Exited, agent = .Idle}), .Exited, .Exited, -1},
+		{"pi finished, not seen", pi({agent = .Idle, unseen = true}), .Unseen, .Done, -1},
+		{"pi not reporting yet", pi({}), .None, .Idle, -1},
+		{"shell blocked: permission", sh({prog = blocked(.Permission)}), .Waiting, .Permission, -1},
+		{"shell blocked: question", sh({prog = blocked(.Question)}), .Waiting, .Question, -1},
+		{"shell blocked: auth", sh({prog = blocked(.Auth)}), .Waiting, .Auth, -1},
+		{"shell blocked", sh({prog = blocked(.None)}), .Waiting, .Waiting, -1},
+		{"shell working at 40%", sh({prog = working(40)}), .Running, .Progress, 40},
+		{"shell working", sh({prog = working(-1)}), .Running, .Working, -1},
+		{"shell error", sh({prog = {state = .Error, progress = -1}}), .Error, .Error, -1},
+		{"shell done", sh({prog = {state = .Done, progress = -1}}), .None, .Idle, -1},
+		{"pi exited, OSC 7501 done", pi({status = .Exited, prog = {state = .Done, progress = -1}}), .Exited, .Exited, -1},
+		{"claude turn working", cl({turn = .Working}), .Running, .Working, -1},
+		{"claude turn waiting", cl({turn = .Waiting}), .Waiting, .Waiting, -1},
+		{"claude ended on a question", cl({turn = .Idle, ended = .Question}), .Question, .Question, -1},
+		{"claude ended on an error", cl({turn = .Idle, ended = .Error}), .Error, .Error, -1},
+		{"claude exited mid-turn", cl({turn = .Working}, {status = .Exited}), .None, .Idle, -1},
+		{"claude: OSC 7501 over the hooks", cl({turn = .Waiting}, {prog = working(-1)}), .Running, .Working, -1},
+		{"shell unseen under working", sh({unseen = true, prog = working(-1)}), .Running, .Working, -1},
+		{"shell unseen", sh({unseen = true}), .Unseen, .Done, -1},
+		// the page's own reading differed (web/tests/status.test.ts STATUS_DIFFERS): the bridge speaks
+		{"pi waiting, OSC 7501 permission", pi({agent = .Idle, waiting = true, prog = blocked(.Permission)}), .Waiting, .Waiting, -1},
+		{"pi working, OSC 7501 at 40%", pi({agent = .Working, prog = working(40)}), .Running, .Working, -1},
+	}
+	return slice_clone_temp(cases[:])
+}
+
+@(private = "file")
+slice_clone_temp :: proc(x: []Web_Status_Case) -> []Web_Status_Case {
+	out := make([]Web_Status_Case, len(x), context.temp_allocator)
+	copy(out, x)
+	return out
+}
+
+@(test)
+web_view_status_table :: proc(t: ^testing.T) {
+	for c in web_status_cases() {
+		v := tab_status_view(c.tab)
+		testing.expectf(t, v.dot == c.dot, "%s: dot %v, want %v", c.row, v.dot, c.dot)
+		testing.expectf(t, status_mark(v) == c.mark, "%s: mark %v, want %v", c.row, status_mark(v), c.mark)
+		pct := v.progress < 0 ? -1 : int(v.progress * 100 + 0.5)
+		testing.expectf(t, pct == c.progress, "%s: progress %d, want %d", c.row, pct, c.progress)
+	}
+}

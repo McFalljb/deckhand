@@ -1,0 +1,6 @@
+{"v":1,"holder":"fake-instance-1",
+"projects":[{"cwd":"$ROOT/deckhand-adopt-63945","added":true}],
+"open_sessions":[{"pi_session_id":"eeee-1","cwd":"$ROOT/deckhand-adopt-63945","session_dir":"","project":"$ROOT/deckhand-adopt-63945","tabs":[{"kind":"pi","held":3}],"active_tab":0}],
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{}}}

@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/deckhand-files-open-test-1795697664163887000/proj"},{"cwd":"$ROOT/deckhand-files-open-test-1795697664163887000/other"}],"selected_project":"$ROOT/deckhand-files-open-test-1795697664163887000/proj",
+"open_sessions":[{"pi_session_id":"p-1","cwd":"$ROOT/deckhand-files-open-test-1795697664163887000/other","session_dir":"","project":"$ROOT/deckhand-files-open-test-1795697664163887000/other","tabs":[{"kind":"pi"}],"active_tab":0}],
+"files_sessions":[{"project":"$ROOT/deckhand-files-open-test-1795697664163887000/proj","tabs":[{"kind":"editor","path":"$ROOT/deckhand-files-open-test-1795697664163887000/proj/a.txt"},{"kind":"editor","path":"$ROOT/deckhand-files-open-test-1795697664163887000/proj/b.txt"},{"kind":"markdown","path":"$ROOT/deckhand-files-open-test-1795697664163887000/proj/d.md"}],"active_tab":2,"current":true}],
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"remote_machines":false}}

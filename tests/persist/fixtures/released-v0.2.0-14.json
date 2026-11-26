@@ -1,0 +1,6 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/deckhand-pp-a-1795698201024138000"}],"selected_project":"$ROOT/deckhand-pp-a-1795698201024138000",
+"open_sessions":[{"agent":"claude","claude_session_id":"c4c4c4c4-0000-4000-8000-000000000001","pi_session_id":"","cwd":"$ROOT/deckhand-pp-a-1795698201024138000","session_dir":"","project":"$ROOT/deckhand-pp-a-1795698201024138000","tabs":[{"kind":"claude","claude_session_id":"c4c4c4c4-0000-4000-8000-000000000001","cwd":"$ROOT/deckhand-pp-a-1795698201024138000"},{"kind":"shell","title":"A","cwd":"$ROOT/deckhand-pp-a-1795698201024138000"}],"active_tab":0,"panes":{"tree":{"split":"right","ratio":0.400,"a":{"pane":0},"b":{"pane":1}},"tab_pane":[1,0],"active":[1,0],"focused":1}}],
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{}}}

@@ -1,0 +1,6 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/ext/Users/me/local"}],
+"open_sessions":[{"pi_session_id":"local-1","cwd":"$ROOT/ext/Users/me/local","session_dir":"","project":"$ROOT/ext/Users/me/local","tabs":[{"kind":"shell","title":"sh","cwd":"$ROOT/ext/Users/me/local"}],"active_tab":0}],"current_machine_session":"m3:abc",
+"layout":{"left_width":0,"right_width":0,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"remote_machines":false}}

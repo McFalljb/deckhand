@@ -1,0 +1,8 @@
+{"v":1,
+"projects":[],
+"open_sessions":[],
+"home":{"pi_session_id":"315d3cee-d5b3-8d7d-a9d8-a4f10f925d09","fork_from":"$ROOT/pd-home-388204000/home/2026-10-30T10-00-00-000Z_old-1.jsonl"},
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":true,"drawer_open":true,"panels":[],"collapsed":[]},
+"claude_readonly_ids":["ro-1"],
+"sidebar":{"pinned_projects":["$ROOT/pd-home-388204000/main"]},
+"settings":{"confirm":{},"confirm_close":{},"home_dir":"$ROOT/pd-home-388204000/main","setup_seen":true}}

@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/deckhand-ca-proj-1795698177287236000","added":true}],"selected_project":"$ROOT/deckhand-ca-proj-1795698177287236000",
+"open_sessions":[{"agent":"claude","claude_session_id":"61616161-0000-4000-8000-000000000001","pi_session_id":"","cwd":"$ROOT/deckhand-ca-proj-1795698177287236000","session_dir":"","project":"$ROOT/deckhand-ca-proj-1795698177287236000","tabs":[{"kind":"claude","claude_session_id":"61616161-0000-4000-8000-000000000001","cwd":"$ROOT/deckhand-ca-proj-1795698177287236000","account":"$ROOT/deckhand-ca-home-1795698177285593000/.claude"}],"active_tab":0}],"current_session":0,
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"claude_sessions":[{"id":"61616161-0000-4000-8000-000000000001","cwd":"$ROOT/deckhand-ca-proj-1795698177287236000","project":"$ROOT/deckhand-ca-proj-1795698177287236000","used":1795698177,"account":"$ROOT/deckhand-ca-home-1795698177285593000/.claude"}],
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{},"separate_core":false,"claude_account_last":"$ROOT/deckhand-ca-home-1795698177285593000/.claude","claude_account_default":"$ROOT/deckhand-ca-home-1795698177285593000/.claude-work"}}

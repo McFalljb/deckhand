@@ -1,0 +1,7 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/pi-desk-ws-a-1795698342037288000"},{"cwd":"$ROOT/pi-desk-ws-b-1795698342037401000"}],"selected_project":"$ROOT/pi-desk-ws-a-1795698342037288000",
+"open_sessions":[{"pi_session_id":"aaaa-1","cwd":"$ROOT/pi-desk-ws-a-1795698342037288000","session_dir":"","project":"$ROOT/pi-desk-ws-a-1795698342037288000","tabs":[{"kind":"pi"},{"kind":"browser","url":"https://a.example/two","title":"a.example/two"},{"kind":"browser","url":"http://localhost:3000","title":"Browser"}],"active_tab":2},
+{"pi_session_id":"bbbb-2","cwd":"$ROOT/pi-desk-ws-b-1795698342037401000","session_dir":"","project":"$ROOT/pi-desk-ws-b-1795698342037401000","tabs":[{"kind":"pi"},{"kind":"browser","url":"https://b.example","title":"Browser"}],"active_tab":1}],"current_session":1,
+"layout":{"left_width":300,"right_width":320,"left_open":false,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{},
+"settings":{"confirm":{},"confirm_close":{}}}

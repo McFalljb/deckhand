@@ -1,0 +1,6 @@
+{"v":1,
+"projects":[{"cwd":"$ROOT/tmp/av-proj"}],"selected_project":"$ROOT/tmp/av-proj",
+"open_sessions":[],
+"layout":{"left_width":300,"right_width":320,"left_open":true,"right_open":false,"panels":[],"collapsed":[]},
+"sidebar":{"view":"attention"},
+"settings":{"confirm":{},"confirm_close":{},"reduce_motion":true,"separate_core":false,"remote_machines":false}}

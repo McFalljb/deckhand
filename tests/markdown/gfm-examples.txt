@@ -434,3 +434,10 @@ See www.example.com/a_b, or mail me@example.org.
 </table>
 ````````````````````````````````
 
+
+```````````````````````````````` example 9009 Deckhand: code spans after an unclosed run of backticks
+````````` x `one`, `.`, more `two`; `x` end
+.
+<p>````````` x <code>one</code>, <code>.</code>, more <code>two</code>; <code>x</code> end</p>
+````````````````````````````````
+

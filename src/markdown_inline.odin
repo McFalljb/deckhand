@@ -538,7 +538,9 @@ closing_backticks :: proc(sj: ^Subj, n: int) -> int {
 			sj.pos += 1
 			k += 1
 		}
-		if k <= MAX_BACKTICKS {
+		// the last run of each length: a scan from a later span must not move it back (after a full
+		// scan, a span's closer would else hide the runs after it)
+		if k <= MAX_BACKTICKS && (m.bt_gen[k] != m.gen || m.backticks[k] < sj.pos - k) {
 			m.backticks[k] = sj.pos - k
 			m.bt_gen[k] = m.gen
 		}

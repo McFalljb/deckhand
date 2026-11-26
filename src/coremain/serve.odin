@@ -80,6 +80,9 @@ serve_main :: proc(args: []string) -> int {
 	// a handover's successor: the holder's secret, for its one HELLO (core.successor_given)
 	if ready != "" {
 		if !serve_ready_handshake(ready) do return 1
+		// a launchd job's working dir is the launcher's temp dir (launchd_darwin.odin), removed
+		// once the launch is over: never kept as this core's
+		posix.chdir("/")
 	} else if secret_stdin {
 		buf: [65]u8
 		n := 0

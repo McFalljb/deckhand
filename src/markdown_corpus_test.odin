@@ -96,6 +96,8 @@ markdown_block_lines :: proc(t: ^testing.T) {
 		{"x\n\n\n\n```\n\n\n```\n\n***\n", {1, 5, 10}},
 		{"> ```\n> a\n> ```\n\n- - -\n", {1, 5}},
 		{"text\x00nul\n\n# h\x00\n", {1, 3}},
+		{"```\n\n\nx\n```\n\n---\n", {1, 7}},
+		{"Title\n=====\n\n***\n\n| a |\n|---|\n| |\n", {1, 4, 6}},
 		{"", {}},
 		{"\n\n\n", {}},
 	}

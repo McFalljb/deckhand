@@ -561,8 +561,8 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
 ```
 
 - **The window** is a client. It dials `core.sock` in the runtime dir; when nothing answers it
-  launches a core through launchd (`deckhand-core-serve __detach`, so the core never descends from
-  the window) and waits up to 15 s. The core streams `state.full`, then `state.delta`s; the window
+  launches a core through launchd (a `gui/<uid>` job whose own process is the core, so it never
+  descends from the window and the login's end stops it) and waits up to 15 s. The core streams `state.full`, then `state.delta`s; the window
   decodes them straight into `core.state`, its replica, so the core's read-only helpers work
   unchanged (`core.replica_process`; runtime a window needs but State lacks goes in
   `State.live` and `Tab.live`, `src/core/core_live.odin`). Its commands go to the core and wait
@@ -601,9 +601,12 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
   process over the in-memory transport (`src/core/window_link.odin`), with the same messages.
 - **Quitting** goes through one table, `quit_route` in `src/main.odin`: ⌘Q, the Dock's Quit and
   closing the window close only the window; *Quit Deckhand and Stop All Sessions…* stops the core
-  and the holder. Logout should end everything, but a core and holder started by `__detach`
-  belong to no launchd job once the launcher boots the job out, so launchd does not stop them
-  then (#202): the next login replaces them (above). User-facing behaviour:
+  and the holder; logout ends everything: the core and the holder are each a launchd job's own
+  process in `gui/<uid>` (`LimitLoadToSessionType` Aqua), so launchd sends them SIGTERM when the
+  login ends (the core saves; the holder's sessions end). Before #202 the job ran `__detach`,
+  whose forked child belonged to no job and outlived the logout; one still running from then is
+  replaced by the next login (above). `__detach` stays for an older core's handover launch.
+  User-facing behaviour:
   [How Deckhand runs](GUIDE.md#how-deckhand-runs).
 - **On Linux** there is no window and no Core.app: `core/<version>-<sha12>/` holds
   `deckhand-core-serve` and `deckhand-core`, the core runs as the systemd user unit

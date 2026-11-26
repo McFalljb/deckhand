@@ -464,13 +464,17 @@ The holder disclaims TCC responsibility at start (herdr's `macos_responsibility.
 1. The launcher makes a 0700 temp dir with `job.plist` (0600) and a `ready` socket. The label is
    unique per launch: `dev.deckhand.<core|hold>.<pid>.<ns>`.
 2. It runs `launchctl bootstrap gui/<uid>` and removes the plist. The plist sets
-   `RunAtLoad=true`, `KeepAlive=false`, `AbandonProcessGroup=true` and
-   **`ProcessType=Interactive`**.
-3. The job runs `deckhand-core __detach <ready>`. It forks; the parent exits; the child calls
-   `setsid`, execs, and waits until its ppid is 1.
-4. The child connects to `ready`. The launcher **checks the peer (pid + DR, P8)**, boots the job
-   out, then sends the inherited environment and, for a handover, the successor secret. The child
-   acks and serves.
+   `RunAtLoad=true`, `KeepAlive=false`, `AbandonProcessGroup=true`,
+   **`ProcessType=Interactive`** and `LimitLoadToSessionType=Aqua`.
+3. The job runs `deckhand-core hold --ready ready` (or `deckhand-core-serve serve --ready ready`)
+   as its own process. *As first built* it ran `deckhand-core __detach <ready>`, which forked a
+   `setsid` child and the launcher then booted the job out; that child belonged to no job and
+   outlived a logout in the dead login (#202). Now the job stays loaded while its process runs,
+   and launchd stops it when the login ends.
+4. The process connects to `ready`. The launcher **checks the peer (pid + DR, P8)**, then sends
+   the inherited environment and, for a handover, the successor secret. The process acks and
+   serves. A failure boots the job out (which stops its process); a job whose process ended is
+   swept by a later launch.
 
 A failed bootstrap falls back to a direct spawn, with a logged warning.
 
@@ -496,7 +500,7 @@ S2 facts (macOS 26.6.2):
 | Quit Deckhand and Stop All Sessions… | `quit` (class `app_quit`): persist, `GOODBYE{shutdown}`, exit. |
 | Core crashes (M4+) | The holder relaunches it **through the launchd launcher** (backoff as holder.rs:423-447), so the core never descends from the holder. |
 | App crashes (M1) | Nothing restarts it. Sessions run on, and the next launch adopts them. |
-| Logout or reboot | Everything stops; today's restore follows. **Not so as built (#202):** the core and the holder belong to no launchd job once the launcher boots the job out, so a logout leaves them running in the dead login. The next login's window replaces a core from another login, and that core the holder (audit session check, `src/core/login_session.odin`); a launch that fails with launchd's `141: Reentrancy avoided` has no direct fallback. |
+| Logout or reboot | Everything stops; today's restore follows. As first built it was not so (#202): the core and the holder belonged to no launchd job once the launcher booted the job out, so a logout left them running in the dead login. Now each is its job's own process, which launchd stops at logout; and the next login's window replaces a core from another login, and that core the holder (audit session check, `src/core/login_session.odin`); a launch that fails with launchd's `141: Reentrancy avoided` has no direct fallback. A real logout has not been checked by hand. |
 
 Rejected:
 - **The window spawning the core** (fork + setsid). Herdr's reason, "macOS kills the app's

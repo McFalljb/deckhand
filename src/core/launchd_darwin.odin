@@ -8,20 +8,25 @@ package core
 //      is unique per launch, <prefix><pid>.<ns>: a fixed one fails while loaded (S2).
 //   2. `launchctl bootstrap gui/<uid> job.plist`, then the plist is removed. RunAtLoad, no
 //      KeepAlive (never `launchctl submit`: that makes a KeepAlive job), AbandonProcessGroup,
-//      ProcessType Interactive (it sticks through fork, exec and bootout).
-//   3. The job runs `deckhand-core __detach hold ...` (src/holder/detach.odin): fork, the
-//      parent exits, the child calls setsid and execs `hold --ready`, which waits for ppid 1.
-//   4. The child connects to ready and sends its pid. The launcher checks the peer
+//      ProcessType Interactive, LimitLoadToSessionType Aqua (this login's GUI session).
+//   3. The job runs `deckhand-core hold --ready ready ...` (or `deckhand-core-serve serve`)
+//      itself: the holder or the core is the job's own process, so the job stays loaded while it
+//      runs and launchd stops it (SIGTERM) when the login ends (#202). Before that the job ran
+//      `__detach`, which forked a setsid child and the launcher booted the job out: that child
+//      belonged to no job, outlived a logout and kept running in the dead login.
+//   4. It connects to ready (relative: the job's WorkingDirectory is the temp dir; it leaves for
+//      "/" after the handshake) and sends its pid. The launcher checks the peer
 //      (trust.ready_peer_allowed: the socket's process is that pid, of this user; then its code
 //      by the token read at accept, trust.peer_dr_check: the holder's designated requirement,
-//      P8), that its parent is launchd and that it runs bin; boots the job out (that kills only
-//      the job's own process, long gone); then sends the environment (it carries tokens), and
-//      reads the ack.
+//      P8), that its parent is launchd and that it runs bin; then sends the environment (it
+//      carries tokens), and reads the ack. The job is left loaded; any failure boots it out,
+//      which stops its process.
 //
-// A launcher killed between bootstrap and bootout leaks a loaded job that never runs again:
-// every launch first sweeps our labels that are not running and older than a minute, and
-// abandoned temp dirs. A failed bootstrap or handshake falls back to the direct spawn
-// (holder_install.odin), with a logged warning.
+// A job whose process has ended stays loaded until booted out, as does one a launcher killed
+// mid-launch leaks: every launch first sweeps our labels that are not running and older than a
+// minute, and abandoned temp dirs. A failed bootstrap or handshake falls back to the direct spawn
+// (holder_install.odin), with a logged warning, except when the login has ended
+// (launchd_login_gone).
 //
 //   holder_launch(bin, run, data, env) -> (pid, ok, why)   the entry the app calls
 
@@ -60,8 +65,8 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 	return holder_launch_direct(bin, run, data, env)
 }
 
-// The launchd path alone (tests call it with their prefix). label: the job's, booted out on
-// return whatever happened.
+// The launchd path alone (tests call it with their prefix). label: the job's, left loaded with
+// its process running on success, booted out on every failure.
 launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, launchctl := LAUNCHCTL, mode := "hold", secret := "") -> (pid: i32, label: string, ok: bool, why: string) {
 	launchd_sweep(run, prefix, launchctl)
 	uid := posix.getuid()
@@ -89,9 +94,10 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, la
 	if !lok do return 0, label, false, fmt.tprintf("cannot listen on %s", ready)
 	defer sock_close(lfd)
 	if w := launchd_write_plist(plist, launchd_plist(label, bin, run, data, jdir, mode)); w != "" do return 0, label, false, w
-	// a bootstrap that failed or timed out may still have loaded the job: booted out on every path
-	booted := false
-	defer if !booted do launchd_bootout(domain, label, launchctl)
+	// a bootstrap that failed or timed out may still have loaded the job: booted out on every
+	// path but success (then the job is the running holder or core: #202)
+	launched, answered := false, false
+	defer if !launched do launchd_bootout(domain, label, launchctl)
 	out, st := run_group({launchctl, "bootstrap", domain, plist}, 10 * time.Second, merge_stderr = true)
 	os.remove(plist)
 	if st != .Ok do return 0, label, false, fmt.tprintf("launchctl bootstrap: %v %s", st, strings.trim_space(out))
@@ -103,18 +109,21 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, la
 		if left <= 0 do return 0, label, false, "the detached holder never connected to the ready socket"
 		cfd, aok := sock_accept(lfd, left)
 		if !aok do continue
-		p, w := launchd_ready_serve(cfd, exe, env, domain, label, &booted, deadline, launchctl, secret)
+		p, w := launchd_ready_serve(cfd, exe, env, &answered, deadline, secret)
 		sock_close(cfd)
-		if p > 0 do return p, label, true, ""
+		if p > 0 {
+			launched = true
+			return p, label, true, ""
+		}
 		log_ln("Deckhand: session holder: ready:", w)
-		if booted do return 0, label, false, w // the real child was answered and failed
+		if answered do return 0, label, false, w // the real child was answered and failed
 	}
 }
 
-// One connection on the ready socket: "" and the pid once the child acked, else why not. The job
-// is booted out (booted set) once the peer passed, before the environment goes.
+// One connection on the ready socket: "" and the pid once the child acked, else why not.
+// answered: the peer passed, and the environment goes to it.
 @(private = "file")
-launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, label: string, booted: ^bool, deadline: i64, launchctl: string, secret := "") -> (pid: i32, why: string) {
+launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, answered: ^bool, deadline: i64, secret := "") -> (pid: i32, why: string) {
 	at_accept, tok := trust.peer_read_token(cfd) // before any byte is read
 	line, lok := launchd_read_until(cfd, '\n', 32, deadline)
 	if !lok do return 0, "no pid from the peer"
@@ -124,8 +133,7 @@ launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, la
 	if d, got := trust.peer_dr_check(tok, trust.CORE_IDS); d != .Allow do return 0, fmt.tprintf("refused pid %d: its code: %v (identifier %q, status %d)", claimed, d, got.identifier, got.status)
 	if pp := pid_parent(claimed); pp != 1 do return 0, fmt.tprintf("refused pid %d: its parent is %d, not launchd", claimed, pp)
 	if got := launchd_realpath(holder_pid_exe(claimed)); exe == "" || got != exe do return 0, fmt.tprintf("refused pid %d: it runs %q, not %q", claimed, got, exe)
-	launchd_bootout(domain, label, launchctl)
-	booted^ = true
+	answered^ = true
 	if d := trust.peer_still(at_accept, trust.peer_read(cfd)); d != .Allow do return 0, fmt.tprintf("the peer changed before the environment (%v)", d)
 	sent := env
 	if sent == nil do sent, _ = os.environ(context.temp_allocator) // nil: ours
@@ -205,7 +213,7 @@ launchd_bootout :: proc(domain, label: string, launchctl := LAUNCHCTL) {
 }
 
 // The job (docs/plans/background-core.md §6). WorkingDirectory is the temp dir, so the ready
-// socket goes by its short relative name; the child makes it absolute and leaves for "/".
+// socket goes by its short relative name; the holder or core leaves for "/" once connected.
 launchd_plist :: proc(label, bin, run, data, jdir: string, mode := "hold") -> string {
 	x := launchd_xml
 	b := strings.builder_make(context.temp_allocator)
@@ -215,8 +223,8 @@ launchd_plist :: proc(label, bin, run, data, jdir: string, mode := "hold") -> st
 `)
 	fmt.sbprintf(&b, "  <key>Label</key><string>%s</string>\n", x(label))
 	fmt.sbprint(&b, "  <key>ProgramArguments</key><array>")
-	// a separate core: `__detach serve` (src/coremain), else the holder's `__detach` (hold)
-	args := mode == "serve" ? []string{bin, "__detach", "serve", "--run", run, "--data", data, "--ready", "ready"} : []string{bin, "__detach", "--run", run, "--data", data, "--ready", "ready"}
+	// a separate core: `serve` (src/coremain), else the holder's `hold`: the job's own process (#202)
+	args := []string{bin, mode == "serve" ? "serve" : "hold", "--run", run, "--data", data, "--ready", "ready"}
 	for a in args do fmt.sbprintf(&b, "<string>%s</string>", x(a))
 	fmt.sbprint(&b, "</array>\n")
 	fmt.sbprintf(&b, "  <key>WorkingDirectory</key><string>%s</string>\n", x(jdir))
@@ -228,6 +236,7 @@ launchd_plist :: proc(label, bin, run, data, jdir: string, mode := "hold") -> st
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
   <key>AbandonProcessGroup</key><true/>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
   <key>Umask</key><integer>63</integer>
 </dict></plist>
 `)

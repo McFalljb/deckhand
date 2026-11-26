@@ -19,12 +19,15 @@ RUN2=$(mktemp -d "${TMPDIR:-/tmp}/dkc2.XXXXXX") # the other "machine"'s
 APP=
 FAKE_PI='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600'
 cores() { pgrep -f "deckhand-core-serve serve --run $1" || true; }
+# this scene's connects: the via commands this Mac's core ($RUN) started, its children; never another
+# Deckhand's (a pattern alone would also match the user's own machines' connects)
+connects() { for c in $(cores "$RUN"); do pgrep -P "$c" -f "deckhand-core-serve connect" || true; done; }
 cleanup() {
   cp "$RUN/core.log" "$W/core.log" 2>/dev/null || true
   cp "$RUN2/core.log" "$W/core2.log" 2>/dev/null || true
   [ -n "$APP" ] && kill -9 "$APP" 2>/dev/null || true
   pkill -9 -f "$W/via.sh" 2>/dev/null || true
-  pkill -9 -f "$ROOT/build/deckhand-core-serve connect" 2>/dev/null || true
+  for p in $(connects); do kill -9 "$p" 2>/dev/null || true; done
   for r in "$RUN" "$RUN2"; do
     for p in $(cores "$r"); do kill -9 "$p" 2>/dev/null || true; done
     pkill -9 -f "deckhand-core hold --run $r" 2>/dev/null || true
@@ -141,7 +144,9 @@ grep -q "^SOCKET=$RUN2/core.sock$" "$W/env.txt" || fail "codex there got another
 grep -q "^TOKEN=set$" "$W/env.txt" || fail "codex there got no token"
 python3 -I "$W/check.py" "$CTL" tab || fail "this Mac's get_state has no Codex tab of that machine"
 # the end: the link drops, the window quits
-pkill -f "$ROOT/build/deckhand-core-serve connect" || true
+C=$(connects)
+[ -n "$C" ] || { echo "remote-codex: no connect of this core's to drop"; exit 1; }
+kill $C
 wait "$APP" || true
 APP=
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command|core refused" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then

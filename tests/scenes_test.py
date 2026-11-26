@@ -105,6 +105,29 @@ class Freshness(unittest.TestCase):
             self.assertIn(top, scenes.APP_INPUTS)
 
 
+class CoreSweep(unittest.TestCase):
+    """The runner's sweep kills a scene's cores and holders, never the developer's own Deckhand
+    run from the same checkout (its data dir is not under build/)."""
+    R = "/src/deckhand"
+    CORE = R + "/build/Deckhand.app/Contents/Helpers/Deckhand Core.app/Contents/MacOS/deckhand-core-serve"
+
+    def test_a_scenes_core_and_holder(self):
+        self.assertEqual(scenes.scene_core(f"{self.CORE} serve --run /tmp/dkrt.x --data {self.R}/build/remote-terms/data", self.R),
+                         ("/tmp/dkrt.x", f"{self.R}/build/remote-terms/data"))
+        self.assertIsNotNone(scenes.scene_core(f"{self.R}/build/deckhand-core hold --run /tmp/r --data {self.R}/build/test-data --x 1", self.R))
+
+    def test_the_developers_own_deckhand_from_this_checkout(self):
+        home = "/Users/me/Library/Application Support/Deckhand"
+        self.assertIsNone(scenes.scene_core(f"{self.CORE} serve --run {home}/run --data {home}", self.R))
+        self.assertIsNone(scenes.scene_core(f"{self.R}/build/deckhand-core hold --run {home}/run --data {home}", self.R))
+        # a data dir that only starts like build/ ("build-old"), or climbs out of it
+        self.assertIsNone(scenes.scene_core(f"{self.CORE} serve --run /tmp/r --data {self.R}/build-old/data", self.R))
+        self.assertIsNone(scenes.scene_core(f"{self.CORE} serve --run /tmp/r --data {self.R}/build/../data", self.R))
+
+    def test_another_checkouts(self):
+        self.assertIsNone(scenes.scene_core(f"/elsewhere/build/deckhand-core hold --run /tmp/r --data /elsewhere/build/x", self.R))
+
+
 class RunnerLimits(unittest.TestCase):
     """A scene killed for its timeout is not tried again, and a run's time budget leaves the rest
     unstarted (the summary always prints before CI's job timeout)."""

@@ -24,7 +24,7 @@ export function tabView(store: Store, t: Tab): TabView {
   const m = store.tabMark(t.id);
   if (!m) return { ...NONE, since: t.status_since ?? 0 };
   const dot = m[0] as Dot;
-  return { dot, mark: m[1] as Mark, progress: m[2] < 0 ? -1 : m[2] / 100, msg: dot === "waiting" ? (t.prog?.msg ?? "") : "", since: t.status_since ?? 0 };
+  return { dot, mark: m[1] as Mark, progress: m[2] < 0 ? -1 : m[2] / 100, msg: m[3] ?? "", since: t.status_since ?? 0 };
 }
 
 // A tab strip's status: a quiet tab that printed in the last moment shows working (src/ui.odin

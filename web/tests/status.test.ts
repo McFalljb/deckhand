@@ -40,9 +40,9 @@ test("status: a tab's dot, mark and progress are the core's (progress: its perce
   }
 });
 
-test("status: what it waits for is OSC 7501's message, only while waiting; since is the tab's", () => {
+test("status: what it waits for is the message the core sent; since is the tab's", () => {
   const t = shell({ id: 4, status_since: 7, prog: { state: "blocked", kind: "question", msg: "Deploy?" } });
-  const w = tabView(store([t], { 4: ["waiting", "question", -1] }), t as any);
+  const w = tabView(store([t], { 4: ["waiting", "question", -1, "Deploy?"] as any }), t as any);
   assert.equal(w.msg, "Deploy?");
   assert.equal(w.since, 7);
   const b = shell({ id: 4, prog: { state: "working", kind: "", msg: "Building" } });

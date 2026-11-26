@@ -97,7 +97,7 @@ export interface MachineView {
 //   Projects tree's order [[key, depth, kids, forced]]; webp:<key> a tree row; websl:<p> a
 //   project's session ids in order, webs:<p>:<id> its rows; webcl / webc:<id> the Chats;
 //   webbars the tabs' bars as text (app/bars.ts); webst:<id> an open session's status marks
-//   {from, tabs {<tab>: [dot, mark, progress %]}} (status.ts).
+//   {from, tabs {<tab>: [dot, mark, progress %, msg]}} (status.ts).
 export interface WebProjectRow {
   key: string;
   id: number; // 0: a group row (its folder in path)
@@ -375,11 +375,11 @@ export class Store {
     return this.sections.get("tabs:" + sessionId) ?? [];
   }
 
-  // A tab's status mark as the core computed it (webst:<session>: [dot, mark, progress %]).
-  tabMark(tabId: number): [string, string, number] | undefined {
+  // A tab's status mark as the core computed it (webst:<session>: [dot, mark, progress %, what it waits for]).
+  tabMark(tabId: number): [string, string, number, string?] | undefined {
     if (this.marksAt !== this.marksStamp) {
       this.marks.clear();
-      for (const [k, v] of this.sections) if (k.startsWith("webst:") && v?.tabs) for (const [id, m] of Object.entries(v.tabs)) this.marks.set(Number(id), m as [string, string, number]);
+      for (const [k, v] of this.sections) if (k.startsWith("webst:") && v?.tabs) for (const [id, m] of Object.entries(v.tabs)) this.marks.set(Number(id), m as [string, string, number, string?]);
       this.marksAt = this.marksStamp;
     }
     return this.marks.get(tabId);
@@ -388,7 +388,7 @@ export class Store {
   markFrom(sessionId: number): number {
     return this.sections.get("webst:" + sessionId)?.from ?? 0;
   }
-  private marks = new Map<number, [string, string, number]>();
+  private marks = new Map<number, [string, string, number, string?]>();
   private marksAt = -1;
   private marksStamp = 0;
 

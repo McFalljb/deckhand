@@ -32,7 +32,8 @@ package core
 //                 web_bars_json)
 //   webst:<id>    an open session's status marks (Atlas's too): {from (the tab its row's mark is
 //                 from: session_row_status; 0 = none), tabs {<tab id>: [dot, mark, progress
-//                 (percent, -1 = none)]}}: tab_status_view and status_mark, as the window draws them
+//                 (percent, -1 = none), msg (what it waits for: OSC 7501's message while waiting,
+//                 else "")]}}: tab_status_view and status_mark, as the window draws them
 //
 // Computed only when something it reads changed (web_view_cached: a hash of the other sections,
 // the open sessions' file stamps and the watched lists), and never reading a disk on a flush:
@@ -333,7 +334,9 @@ web_view_build :: proc(out: ^[dynamic][2]string) {
 		for t, i in s.tabs {
 			v := tab_status_view(t)
 			pct := v.progress < 0 ? -1 : int(v.progress * 100 + 0.5)
-			fmt.sbprintf(&b, `%s"%d":["%s","%s",%d]`, i > 0 ? "," : "", t.id, ROW_STATUS_NAMES[v.dot], STATUS_MARK_NAMES[status_mark(v)], pct)
+			fmt.sbprintf(&b, `%s"%d":["%s","%s",%d,`, i > 0 ? "," : "", t.id, ROW_STATUS_NAMES[v.dot], STATUS_MARK_NAMES[status_mark(v)], pct)
+			json_quote(&b, v.dot == .Waiting ? v.msg : "") // what it waits for: OSC 7501's (the bridge's dot has none)
+			strings.write_byte(&b, ']')
 		}
 		strings.write_string(&b, "}}")
 		put(out, fmt.tprintf("webst:%d", s.id), &b)

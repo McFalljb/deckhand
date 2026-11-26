@@ -436,5 +436,5 @@ web_view_status_none :: proc(t: ^testing.T) {
 	out := web_view_cached(secs[:])
 	j := ""
 	for x in out do if x[0] == fmt.tprintf("webst:%d", s.id) do j = x[1]
-	testing.expect_value(t, j, fmt.tprintf(`{{"from":0,"tabs":{{"%d":["none","idle",-1],"%d":["none","idle",-1]}}}}`, s.tabs[0].id, s.tabs[1].id))
+	testing.expect_value(t, j, fmt.tprintf(`{{"from":0,"tabs":{{"%d":["none","idle",-1,""],"%d":["none","idle",-1,""]}}}}`, s.tabs[0].id, s.tabs[1].id))
 }

@@ -43,6 +43,7 @@ browser_url_public :: proc(url: string) -> string {
 // /?#@, not one in the query); a mail address keeps mailto: and its domain, not whom
 // ("mailto:<redacted>@example.com"). Temp-allocated.
 browser_url_redacted :: proc(url: string) -> string {
+	if strings.has_prefix(url, "//") do return strings.concatenate({"//", strings.trim_prefix(browser_url_public(strings.concatenate({"x:", url}, context.temp_allocator)), "x://")}, context.temp_allocator) // scheme-relative: as with one
 	if i := strings.index(url, "://"); i >= 0 {
 		first := strings.index_any(url, "/?#@")
 		if first < 0 || i <= first do return browser_url_public(url)

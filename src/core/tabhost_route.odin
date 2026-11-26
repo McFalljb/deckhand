@@ -482,6 +482,7 @@ tab_host_result_read :: proc(obj: json.Object, text: string) -> (r: Result, err:
 		r.confirm_token = string(nc["token"].(json.String) or_else "")
 		r.confirm_summary = string(nc["summary"].(json.String) or_else "")
 		r.confirm_by_user = string(nc["by"].(json.String) or_else "") == "user"
+		if id, iok := nc["id"].(json.Integer); iok && id > 0 do r.confirm_id = u64(id)
 	}
 	if _, has := ro["data"]; has {
 		// the data as the window wrote it (raw JSON), not re-marshalled

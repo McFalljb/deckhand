@@ -493,6 +493,7 @@ write_pending_confirmations :: proc(b: ^strings.Builder, list: []Pending_Confirm
 		kv_str(&o, "summary", p.summary)
 		kv_str(&o, "caller", caller_kind_name(p.caller.kind))
 		kv_str(&o, "class", CLASS_NAMES[p.class])
+		kv_u64(&o, "id", p.id)
 		key(&o, "command")
 		write_command(b, p.command, redact = true)
 		obj_end(&o)
@@ -514,6 +515,7 @@ write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {
 		if !redact && r.confirm_token != "" do kv_str(&c, "token", r.confirm_token)
 		kv_str(&c, "summary", r.confirm_summary)
 		kv_str(&c, "by", r.confirm_by_user ? "user" : "caller")
+		if r.confirm_id != 0 do kv_u64(&c, "id", r.confirm_id)
 		obj_end(&c)
 	}
 	if r.data != "" {
@@ -548,6 +550,7 @@ event_json :: proc(ev: Event, full := false) -> string {
 		kv_bool(&w, "changed", e.changed)
 		key(&w, "command")
 		write_command(&b, e.command, redact = true)
+		if e.confirmation != 0 do kv_u64(&w, "confirmation", e.confirmation) // the user's confirmed run of that pending confirmation
 		key(&w, "result")
 		write_result(&b, e.result, redact = true)
 	case Finished_Event:

@@ -903,6 +903,9 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 			log_fln("Deckhand: BUG: the window process ran %s on its replica (it is the core's to run)", command_type(cmd))
 		}
 	}
+	outer_consumed := confirmation_consumed // a command run inside another's: its own
+	confirmation_consumed = 0
+	defer confirmation_consumed = outer_consumed
 	if !caller_may(caller, cmd) {
 		r = fail("not allowed for this caller")
 	} else if mr, routed := machine_route(cmd, caller, request_id); routed {
@@ -953,7 +956,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	_, q4 := cmd.(Editor_State)
 	_, q5 := cmd.(List_Dir)
 	_, q6 := cmd.(Find_Files) // a project's paths: its caller's only, as list_dir
-	if !q1 && !q2 && !q3 && !q4 && !q5 && !q6 do emit_event(Command_Event{request_id = request_id, caller = caller, version = state.version, changed = changed, command = cmd, result = r})
+	if !q1 && !q2 && !q3 && !q4 && !q5 && !q6 do emit_event(Command_Event{request_id = request_id, caller = caller, version = state.version, changed = changed, command = cmd, result = r, confirmation = confirmation_consumed})
 	return r
 }
 
@@ -2143,6 +2146,9 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 	return pane_add_tab(s, Tab{id = new_id(), kind = Shell_Tab{}, title = title, status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 }
 
+// The pending confirmation the command now running consumed (confirm_gate), for its event.
+confirmation_consumed: u64
+
 // Policy check for a destructive command of `class`. Auto: go ahead.
 // Without a token: park it and ask; the token goes only to a caller that may
 // use it (the user, or a caller trusted for this class). With a token: it must
@@ -2160,7 +2166,7 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 			if p.caller != caller do continue
 			mine += 1
 			if !same_target(p.command, cmd) do continue
-			r = {error = "needs_confirmation", confirm_summary = p.summary}
+			r = {error = "needs_confirmation", confirm_summary = p.summary, confirm_id = p.id}
 			if caller.kind == .UI || mode == .Trusted do r.confirm_token = p.token
 			else do r.confirm_by_user = true
 			return r, false, false
@@ -2172,9 +2178,10 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 			command = command_clone(cmd, context.allocator),
 			class   = class,
 			caller  = caller,
+			id      = new_id(),
 		}
 		append(&state.pending_confirmations, p)
-		r = {error = "needs_confirmation", confirm_summary = p.summary}
+		r = {error = "needs_confirmation", confirm_summary = p.summary, confirm_id = p.id}
 		if caller.kind == .UI || mode == .Trusted do r.confirm_token = p.token
 		else do r.confirm_by_user = true
 		window_confirmation_parked(p.summary, r.confirm_by_user) // the bar shows it (window_link.odin)
@@ -2185,6 +2192,7 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 		by_user := caller.kind == .UI
 		by_trusted := !force_ask && caller == p.caller && confirm_mode(p.caller, p.class) == .Trusted
 		if !by_user && !by_trusted do return fail("only the user can confirm this, in Deckhand"), false, false
+		confirmation_consumed = p.id // the run's command event says which (run_command)
 		ordered_remove(&state.pending_confirmations, i)
 		window_state_changed() // consumed: callers that go on (Quit) may answer "not changed"
 		return {}, true, true

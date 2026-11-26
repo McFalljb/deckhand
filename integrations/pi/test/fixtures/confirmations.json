@@ -1,13 +1,13 @@
 {"cases":[
 {"sent":{"type":"markdown_link","tab_id":4,"url":"https://user:pass@host.example/p?code=abc123&state=xyz#frag"},
-"reply":{"ok":false,"error":"needs_confirmation","needs_confirmation":{"summary":"A script asks: open https://host.example/p?code=abc123&state=xyz#frag?","by":"user"}},
-"state":{"pending_confirmations":[{"summary":"A script asks: open https://host.example/p?code=abc123&state=xyz#frag?","caller":"control","class":"open_link","command":{"type":"markdown_link","tab_id":4,"url":"https://host.example/p?code=abc123&state=xyz#frag"}}]},
-"event":{"v":1,"type":"event","event":"command","request_id":0,"caller":"ui","version":3,"changed":true,"command":{"type":"markdown_link","tab_id":4,"url":"https://host.example/p?code=abc123&state=xyz#frag","confirm":"<redacted>"},"result":{"ok":true}}},
+"reply":{"ok":false,"error":"needs_confirmation","needs_confirmation":{"summary":"A script asks: open https://host.example/p?code=abc123&state=xyz#frag?","by":"user","id":6}},
+"state":{"pending_confirmations":[{"summary":"A script asks: open https://host.example/p?code=abc123&state=xyz#frag?","caller":"control","class":"open_link","id":6,"command":{"type":"markdown_link","tab_id":4,"url":"https://host.example/p?code=abc123&state=xyz#frag"}}]},
+"event":{"v":1,"type":"event","event":"command","request_id":0,"caller":"ui","version":3,"changed":true,"command":{"type":"markdown_link","tab_id":4,"url":"https://host.example/p?code=abc123&state=xyz#frag","confirm":"<redacted>"},"confirmation":6,"result":{"ok":true}}},
 {"sent":{"type":"markdown_link","tab_id":4,"url":"https://docs.example/a?q=1#sec"},
-"reply":{"ok":false,"error":"needs_confirmation","needs_confirmation":{"summary":"A script asks: open https://docs.example/a?q=1#sec?","by":"user"}},
-"state":{"pending_confirmations":[{"summary":"A script asks: open https://docs.example/a?q=1#sec?","caller":"control","class":"open_link","command":{"type":"markdown_link","tab_id":4,"url":"https://docs.example/a?q=1#sec"}}]},
-"event":{"v":1,"type":"event","event":"command","request_id":0,"caller":"ui","version":5,"changed":true,"command":{"type":"markdown_link","tab_id":4,"url":"https://docs.example/a?q=1#sec","confirm":"<redacted>"},"result":{"ok":true}}},
+"reply":{"ok":false,"error":"needs_confirmation","needs_confirmation":{"summary":"A script asks: open https://docs.example/a?q=1#sec?","by":"user","id":7}},
+"state":{"pending_confirmations":[{"summary":"A script asks: open https://docs.example/a?q=1#sec?","caller":"control","class":"open_link","id":7,"command":{"type":"markdown_link","tab_id":4,"url":"https://docs.example/a?q=1#sec"}}]},
+"event":{"v":1,"type":"event","event":"command","request_id":0,"caller":"ui","version":5,"changed":true,"command":{"type":"markdown_link","tab_id":4,"url":"https://docs.example/a?q=1#sec","confirm":"<redacted>"},"confirmation":7,"result":{"ok":true}}},
 {"sent":{"type":"markdown_link","tab_id":4,"url":"mailto:alice@example.com?subject=hi"},
-"reply":{"ok":false,"error":"needs_confirmation","needs_confirmation":{"summary":"A script asks: open a mail to alice@example.com?subject=hi?","by":"user"}},
-"state":{"pending_confirmations":[{"summary":"A script asks: open a mail to alice@example.com?subject=hi?","caller":"control","class":"open_link","command":{"type":"markdown_link","tab_id":4,"url":"mailto:<redacted>@example.com?subject=hi"}}]},
-"event":{"v":1,"type":"event","event":"command","request_id":0,"caller":"ui","version":7,"changed":true,"command":{"type":"markdown_link","tab_id":4,"url":"mailto:<redacted>@example.com?subject=hi","confirm":"<redacted>"},"result":{"ok":true}}}]}
+"reply":{"ok":false,"error":"needs_confirmation","needs_confirmation":{"summary":"A script asks: open a mail to alice@example.com?subject=hi?","by":"user","id":8}},
+"state":{"pending_confirmations":[{"summary":"A script asks: open a mail to alice@example.com?subject=hi?","caller":"control","class":"open_link","id":8,"command":{"type":"markdown_link","tab_id":4,"url":"mailto:<redacted>@example.com?subject=hi"}}]},
+"event":{"v":1,"type":"event","event":"command","request_id":0,"caller":"ui","version":7,"changed":true,"command":{"type":"markdown_link","tab_id":4,"url":"mailto:<redacted>@example.com?subject=hi","confirm":"<redacted>"},"confirmation":8,"result":{"ok":true}}}]}

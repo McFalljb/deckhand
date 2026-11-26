@@ -145,20 +145,20 @@ export default function (pi: ExtensionAPI) {
 	 * confirmation gone from the state (checked at the start, on the user's and Deckhand's own
 	 * events, and after a `dropped` event stream).
 	 */
-	function confirmation(cmd: R, ms: number, signal?: AbortSignal): Promise<R> {
+	function confirmation(cmd: R, ms: number, signal?: AbortSignal, id?: number): Promise<R> {
 		const timeout = `the user has not answered in Deckhand after ${ms / 1000}s; the confirmation stays pending there. Do not resend; check desk_state later`;
 		return wait(ms, signal, timeout, (done) => {
 			let parked: R = cmd; // Deckhand's own copy once seen: the fields to match
 			const check = () =>
 				void getState()
 					.then((st) => {
-						const p = parkedFor(st, cmd);
+						const p = parkedFor(st, cmd, id);
 						if (p) parked = p;
 						else done({ ok: false, outcome: "the confirmation is no longer pending in Deckhand and no confirmed run was seen (most likely cancelled); check desk_state, do not resend" });
 					})
 					.catch(() => {});
 			const listen = (ev: R) => {
-				if (confirmedBy(ev, parked)) return done({ ok: ev.result?.ok === true, outcome: "the user confirmed it in Deckhand", result: ev.result });
+				if (confirmedBy(ev, parked, id)) return done({ ok: ev.result?.ok === true, outcome: "the user confirmed it in Deckhand", result: ev.result });
 				if (ev.caller === "ui" || ev.caller === "internal") check();
 			};
 			listeners.add(listen);
@@ -374,7 +374,7 @@ export default function (pi: ExtensionAPI) {
 				if (nc.by === "caller")
 					return text(`${JSON.stringify(result)}\nThe user lets this caller confirm this kind of command itself. Resend the same command with "confirm": "<token>" only if the user asked for exactly this; otherwise send cancel_confirmation with the token.`);
 				onUpdate?.({ content: [{ type: "text", text: `Waiting for the user to confirm in Deckhand: ${nc.summary ?? cmd.type}` }], details: undefined });
-				const out = await confirmation(cmd, ms, signal);
+				const out = await confirmation(cmd, ms, signal, typeof nc.id === "number" ? nc.id : undefined); // its id: the snapshot's and events' command is redacted
 				return text(`Needed the user's confirmation in Deckhand (${nc.summary ?? cmd.type}): ${out.outcome ?? out.error}.${out.result ? ` Result: ${resultText(out.result)}` : ""}`);
 			},
 		});

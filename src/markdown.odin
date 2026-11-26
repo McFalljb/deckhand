@@ -293,6 +293,19 @@ MD_PARSER :: struct {
 	syntax:                   proc "c" (),
 }
 
+// The layouts md4c.h has (sizeof and offsetof from clang, 64-bit macOS): a binding that drifts
+// from them reads the wrong bytes out of md4c's details.
+#assert(size_of(MD_ATTRIBUTE) == 32 && offset_of(MD_ATTRIBUTE, size) == 8 && offset_of(MD_ATTRIBUTE, substr_offsets) == 24)
+#assert(size_of(MD_BLOCK_UL_DETAIL) == 8 && offset_of(MD_BLOCK_UL_DETAIL, mark) == 4)
+#assert(size_of(MD_BLOCK_OL_DETAIL) == 12 && offset_of(MD_BLOCK_OL_DETAIL, mark_delimiter) == 8)
+#assert(size_of(MD_BLOCK_LI_DETAIL) == 12 && offset_of(MD_BLOCK_LI_DETAIL, task_mark) == 4 && offset_of(MD_BLOCK_LI_DETAIL, task_mark_offset) == 8)
+#assert(size_of(MD_BLOCK_H_DETAIL) == 4 && size_of(MD_BLOCK_TABLE_DETAIL) == 12 && size_of(MD_BLOCK_TD_DETAIL) == 4)
+#assert(size_of(MD_BLOCK_CODE_DETAIL) == 72 && offset_of(MD_BLOCK_CODE_DETAIL, fence_char) == 64)
+#assert(size_of(MD_SPAN_A_DETAIL) == 72 && offset_of(MD_SPAN_A_DETAIL, is_autolink) == 64)
+#assert(size_of(MD_SPAN_IMG_DETAIL) == 64 && offset_of(MD_SPAN_IMG_DETAIL, title) == 32)
+#assert(size_of(MD_PARSER) == 64 && offset_of(MD_PARSER, text) == 40 && offset_of(MD_PARSER, syntax) == 56)
+#assert(int(MD_BLOCKTYPE.TD) == 15 && int(MD_SPANTYPE.DEL) == 6 && int(MD_TEXTTYPE.HTML) == 6)
+
 @(private = "file")
 @(default_calling_convention = "c")
 foreign md4c_lib {

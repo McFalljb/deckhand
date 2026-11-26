@@ -496,7 +496,7 @@ S2 facts (macOS 26.6.2):
 | Quit Deckhand and Stop All Sessions… | `quit` (class `app_quit`): persist, `GOODBYE{shutdown}`, exit. |
 | Core crashes (M4+) | The holder relaunches it **through the launchd launcher** (backoff as holder.rs:423-447), so the core never descends from the holder. |
 | App crashes (M1) | Nothing restarts it. Sessions run on, and the next launch adopts them. |
-| Logout or reboot | Everything stops; today's restore follows. |
+| Logout or reboot | Everything stops; today's restore follows. **Not so as built (#202):** the core and the holder belong to no launchd job once the launcher boots the job out, so a logout leaves them running in the dead login. The next login's window replaces a core from another login, and that core the holder (audit session check, `src/core/login_session.odin`); a launch that fails with launchd's `141: Reentrancy avoided` has no direct fallback. |
 
 Rejected:
 - **The window spawning the core** (fork + setsid). Herdr's reason, "macOS kills the app's
@@ -829,7 +829,7 @@ Every step ships on its own.
 |---|---|---|---|
 | Q0 | ✅ **PTY master fds CLOEXEC** (merged, #18) | Closing a tab reliably hangs it up | done |
 | S1 | ✅ **VT snapshot spike: GO** via GHOSTSNP (exact in 360/360; the formatter is the fallback). Branch `spike/vt-snapshot` 6bf748e. | §5.5, §7.2 | done |
-| S2 | ✅ **Platform spike** on macOS 26.6.2: live audit tokens, launchd detach, re-exec and keeper confirmed; `/dev/fd/N` exec fails; ad-hoc runtime can't load CEF; quarantine kills. **Still owed:** macOS 14/15, Force Quit, logout (manual, before M1 ships). | §5.3, §6, §7.3 | done (14/15 owed) |
+| S2 | ✅ **Platform spike** on macOS 26.6.2: live audit tokens, launchd detach, re-exec and keeper confirmed; `/dev/fd/N` exec fails; ad-hoc runtime can't load CEF; quarantine kills. **Still owed:** macOS 14/15, Force Quit (manual, before M1 ships). Logout was found in use (#202): detached processes survive it, so the next login replaces them. | §5.3, §6, §7.3 | done (14/15 owed) |
 | M1 | **Holder in front of today's single-process app**, ad hoc allowed (§5.4). It covers: the holder (Odin, no ghostty or sokol); its wire and golden vectors; re-exec with dry run and keeper; the successor secret; the HMAC key; MAC'd `tokens.json`/`handover.json`; launchd detach; stable `core.sock` and the runtime dir move; offsets and exact handover on quit and update; the `instance.lock` SH rule; release hooks and env overrides compiled out; the updater test against the current release. **Broken into four PRs in §10.1.** **Doc changes:** PROTOCOL.md §1, CLAUDE-TABS.md §4a (an updated plugin reaches kept Claude tabs only after a restart, which the bar offers), PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md. | **Quitting, crashing or updating Deckhand no longer stops pi, Claude or shells**, and the screens come back. **While the app is closed:** no status or bell; the `deckhand` CLI and Claude hooks fail (a `/clear` id goes unrecorded, so restore may resume the old conversation); held prompts wait; Atlas jobs don't run; **job runs stop when the app exits** (as today); in-flight requests are lost. | 7–9 weeks |
 | D0 | **Developer ID** (the user's timing): certificate; `SIGN_IDENTITY_DEFAULT` set to it (one line, `scripts/sign.sh`); `release.sh`'s existing Developer ID and notarization path; CEF signed under the team; hardened runtime and library validation on. The DR checks are already in place from M4 and switch mode by themselves (§5.4). **No longer gates M4** (decision 5, 2026-11-08). | Attacker-grade checks instead of anti-accident ones | ~1 week |
 | M2 | **Boundary** (map M0): `src/core` with no sokol or Clay; the leaks fixed; a core loop. **Three PRs in §10.2.** | Compiler-checked split; hidden windows stop stalling parsing | 2.5–3.5 weeks |
@@ -1180,7 +1180,9 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
 - [x] M3-G, M3-H, M3-F2 and M4-A to E merged; `separate_core_default_on` is true (the flip's PR).
 - [ ] `./build.sh test` and scenes `--all` green with the default on (done locally for the flip's
   PR, and `--all --in-process` too); the nightly full run green.
-- [ ] **Manual checks:** Force Quit (⌥⌘⎋) of the window and of the core, logout, the minimised
+- [ ] **Manual checks:** Force Quit (⌥⌘⎋) of the window and of the core, logout (done the hard way
+  on 2026-11-25, #202: the core and the holder survived it and the next login attached to them;
+  fixed by the other-login check), the minimised
   window, and macOS 14 and 15 (S2's programs and D's manual list).
 - [ ] **`keep_sessions_default_on := true`** (`src/core/commands.odin`) is a release blocker
   until the user has done the Force Quit, logout and macOS 14/15 checks. If they fail, the line

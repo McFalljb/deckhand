@@ -254,6 +254,11 @@ start fresh.
   a new one**. Either way, new tabs keep running again.
 - **Stop All Sessions, a logout or a restart of the Mac**: everything stops. The next start
   restores your sessions. Scheduled jobs wait until Deckhand runs again.
+- **A Deckhand Core or session holder left from an earlier login**: programs started there can't
+  look up accounts, reach the system's DNS or use the GPU compiler, so Deckhand replaces them when
+  you open it: a toast says "Replaced Deckhand's core from an earlier login", and another how many
+  sessions restart. As after Stop All, pi, Claude and Codex resume their conversations and shells
+  start fresh.
 
 **When Deckhand Core stops by itself.** With no window, no tab's program running, no job run, no
 scheduled job and nothing running on another machine it is linked to (whose alerts it shows) for

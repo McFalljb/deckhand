@@ -69,6 +69,7 @@ Client :: struct {
 	// a separate core (client_core.odin): the link is core.sock, `state` is core.state itself
 	sock:      ^cw.Sock_Transport,
 	core_pid:  i32,
+	replaced_other_login: bool, // client_core_dial stopped a core from another login (#202): toasted once attached
 	abandoned: map[string]bool, // results that came past CLIENT_WAIT: dropped when they come
 	focus_wait: string, // a separate core: the last Set_Focus's id, waited for before the next event (client_before_event; heap)
 	lost:      bool, // the core's connection ended

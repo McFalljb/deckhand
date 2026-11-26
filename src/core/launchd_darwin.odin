@@ -30,6 +30,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
 import "core:time"
 
@@ -40,6 +41,7 @@ holder_label_prefix := "dev.deckhand.hold."
 // How long the launcher waits for the detached child's pid, and then for its ack.
 holder_ready_timeout := 10 * time.Second
 LAUNCHCTL :: "/bin/launchctl" // tests pass a stand-in to launchd_launch
+launchd_launchctl := LAUNCHCTL // what holder_launch and core_launch run (tests: a stand-in)
 LAUNCHD_STALE_AGE :: 60 * time.Second // a job or temp dir this old is a dead launcher's
 LAUNCHD_JOB_DIR :: "job-" // <run>/job-<6 hex>: short, the ready socket's path must fit in sun_path
 
@@ -51,8 +53,9 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 		return 0, false, fmt.tprintf("the runtime dir %s is too long for the session holder's socket (sun_path is %d bytes)", run, SUN_PATH_MAX + 1)
 	}
 	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env)
-	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, holder_label_prefix)
+	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, holder_label_prefix, launchctl = launchd_launchctl)
 	if lok do return lpid, true, ""
+	if launchd_login_gone(lwhy) do return 0, false, launchd_login_gone_note("session holder", lwhy)
 	log_ln("Deckhand: session holder: the launchd launch failed:", lwhy, "- starting it directly")
 	return holder_launch_direct(bin, run, data, env)
 }
@@ -288,6 +291,23 @@ launchd_sweep :: proc(run, prefix: string, launchctl := LAUNCHCTL) {
 	}
 }
 
+// Whether a failed launch says this process's login has ended (#202): a process that outlived a
+// logout keeps the dead login's bootstrap port, and launchctl then fails with "141: Reentrancy
+// avoided" (seen as "Bootstrap failed: 141: Reentrancy avoided"). A direct start would put the
+// new process in that dead login too (no account lookups, no system DNS, no Metal compiler), so
+// there is no fallback then: the launch fails, and login_gone is set (a core then exits:
+// src/coremain serve.odin).
+launchd_login_gone :: proc(why: string) -> bool {
+	return strings.contains(why, "Reentrancy avoided") || strings.contains(why, "failed: 141:")
+}
+
+@(private = "file")
+launchd_login_gone_note :: proc(what, why: string) -> string {
+	sync.atomic_store(&login_gone, true)
+	log_ln("Deckhand:", what, ": not started: this process runs in a login that has ended (", why, ")")
+	return fmt.tprintf("this process runs in a login that has ended, so no %s is started from it (%s)", what, why)
+}
+
 // The labels a separate core's launches use (deckhand-core serve).
 core_label_prefix := "dev.deckhand.core."
 
@@ -311,8 +331,9 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 		env = with
 	}
 	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env, "serve", secret)
-	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, mode = "serve", secret = secret)
+	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, launchctl = launchd_launchctl, mode = "serve", secret = secret)
 	if lok do return lpid, true, ""
+	if launchd_login_gone(lwhy) do return 0, false, launchd_login_gone_note("background core", lwhy)
 	log_ln("Deckhand: background core: the launchd launch failed:", lwhy, "- starting it directly")
 	return holder_launch_direct(bin, run, data, env, "serve", secret)
 }

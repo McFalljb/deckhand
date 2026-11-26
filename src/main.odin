@@ -247,6 +247,10 @@ init_separate :: proc(note := "") -> bool {
 	}
 	if core.autotest_active do fmt.printfln("[autotest] core: attached to pid %d", client.core_pid)
 	if note != "" do toast_show(note)
+	if client.replaced_other_login {
+		client.replaced_other_login = false
+		toast_show(CORE_OTHER_LOGIN_TOAST)
+	}
 	// `deckhand DIR`: DIR's project, and a new chat there once the pane has a size
 	if app_args.dir != "" {
 		r, _ := client_call_wait(core.Add_Project{cwd = app_args.dir}, 5 * time.Second)

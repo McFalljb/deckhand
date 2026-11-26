@@ -32,6 +32,7 @@ import "base:runtime"
 import "core:strconv"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:time"
 import "core"
 import cw "corewire"
@@ -215,6 +216,10 @@ client_core_reconnect :: proc() -> string {
 	client.lost = false
 	why := client_core_subscribe()
 	if why == "" && core.autotest_active do fmt.printfln("[autotest] core: reattached to pid %d", client.core_pid)
+	if why == "" && client.replaced_other_login {
+		client.replaced_other_login = false
+		toast_show(CORE_OTHER_LOGIN_TOAST)
+	}
 	app.redraw = true
 	return why
 }
@@ -248,6 +253,16 @@ client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, wh
 		if fd, ok := core.sock_connect(path); ok {
 			if core.window_token_read(run) != "" {
 				hello, why = client_core_hello(fd, run)
+				if why == "" && hello.other_login {
+					// a core from another login (#202): stopped, and one launched from this login
+					client_core_stop_other_login(fd, hello.pid)
+					core.sock_close(fd)
+					client.replaced_other_login = true
+					hello = {}
+					deadline = time.tick_add(time.tick_now(), CORE_START_WAIT)
+					last_launch = {}
+					continue
+				}
 				if why == "" do return
 				core.sock_close(fd)
 				return
@@ -294,9 +309,48 @@ client_core_launch :: proc(run, data: string, from_tab := false) -> string {
 
 // What the core's hello reply said (client_core_handover_to decides on it).
 Core_Hello :: struct {
-	skew:  cw.Skew,
-	build: string, // the core's two binaries' hash (core.core_build_of)
+	skew:        cw.Skew,
+	build:       string, // the core's two binaries' hash (core.core_build_of)
+	other_login: bool, // the core runs in another login (#202): no hello was sent; client_core_dial replaces it
+	pid:         i32, // with other_login: the core's
 }
+
+CORE_OTHER_LOGIN_STOP_WAIT :: 20 * time.Second // its SIGTERM's save and handover, then SIGKILL
+
+// A core from another login (#202, core/login_session.odin): a process that outlived a logout,
+// whose sessions can't reach the login's services. It gets SIGTERM, its clean stop (the workspace
+// saved, the holder said a handover goodbye, so its supervisor relaunches nothing), and SIGKILL
+// after CORE_OTHER_LOGIN_STOP_WAIT. Only while pid is still the process on fd (checked before the
+// SIGTERM) and, after that, the same process (its start time and a core binary: never a reused pid).
+// The core this window then launches finds that login's holder and replaces it too.
+client_core_stop_other_login :: proc(fd: core.Sock_Fd, pid: i32) {
+	if pid <= 0 || trust.peer_read(fd).pid != pid do return
+	id, ok := core.lock_proc_ident(pid)
+	if !ok do return
+	start := id.start
+	same :: proc(pid: i32, start: i64) -> bool {
+		now, ok := core.lock_proc_ident(pid)
+		return ok && now.start == start && strings.has_suffix(now.exe, "/" + core.CORE_SERVE_BIN)
+	}
+	if !same(pid, start) do return
+	fmt.eprintln("Deckhand: background core: pid", pid, "runs in another login; stopping it and starting one here")
+	if core.autotest_active do fmt.printfln("[autotest] core: replacing pid %d from another login", pid)
+	posix.kill(posix.pid_t(pid), .SIGTERM)
+	deadline := time.tick_add(time.tick_now(), CORE_OTHER_LOGIN_STOP_WAIT)
+	for same(pid, start) && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(50 * time.Millisecond)
+	if same(pid, start) {
+		fmt.eprintln("Deckhand: background core: pid", pid, "did not stop within 20 s; killing it")
+		posix.kill(posix.pid_t(pid), .SIGKILL)
+		for _ in 0 ..< 50 {
+			if !same(pid, start) do break
+			time.sleep(20 * time.Millisecond)
+		}
+	}
+}
+
+// The toast after a window replaced a core from another login.
+CORE_OTHER_LOGIN_TOAST :: "Replaced Deckhand's core from an earlier login: your sessions restart here."
+
 
 // The window's half of the framed hello on fd (connected to core.sock). "" = the link is up.
 @(private = "file")
@@ -304,6 +358,10 @@ client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> (hello: Core_Hello, 
 	peer: trust.Peer
 	peer, why = core.core_peer_check(fd) // before a byte is sent (B4)
 	if why != "" do return
+	// another login's core (#202): nothing is sent to it (client_core_dial replaces it)
+	if _, tok := trust.peer_read_token(fd); core.login_other(core.login_asid_peer(tok, peer.pid), core.login_asid_own()) {
+		return {other_login = true, pid = peer.pid}, ""
+	}
 	token := core.window_token_read(run)
 	line := fmt.tprintf("{{\"id\":\"w\",\"v\":%d,\"type\":\"hello\",\"framed\":true,\"token\":\"%s\"}}\n", core.PROTOCOL_VERSION, token)
 	if !core.sock_write_all(fd, transmute([]u8)line) do return {}, "the background core closed the connection"

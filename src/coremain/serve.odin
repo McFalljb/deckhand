@@ -102,6 +102,7 @@ serve_main :: proc(args: []string) -> int {
 	if !serve_platform_prepare(run) do return 1
 	core.home_root = strings.clone(data)
 	core.window_floor_load() // the window floor of earlier runs (window_sock.odin)
+	core.login_note(i32(posix.getpid())) // test builds: this core's login, for a window's check (login_session.odin)
 	if why := core.instance_guard(core.home_root, !core.autotest_active || core.hook_env(.Runtime_Dir) != ""); why != "" {
 		core.log_ln("deckhand-core serve:", why)
 		core.core_refused_write(run, why) // its window says why (client_core_dial)
@@ -259,6 +260,12 @@ serve_loop :: proc() {
 		loop_again = core.output_backlog() && terms_bytes_in() != before
 		if core.core_idle_due(&loop.idle_since, core.core_idle_facts(), time.tick_now()) {
 			core.log_fln("deckhand-core serve: no window, no tab's process, no job run and nothing running on a linked machine for %v: exiting", core.CORE_IDLE_EXIT)
+			loop.quit = true
+		}
+		// a holder (or a core) could not be started because this core's login has ended (#202,
+		// core.launchd_login_gone): it stops as for the idle exit, rather than run on in a dead login
+		if sync.atomic_load(&core.login_gone) {
+			core.log_ln("deckhand-core serve: this login has ended (launchd refuses its launches): exiting")
 			loop.quit = true
 		}
 		free_all(context.temp_allocator)

@@ -76,6 +76,7 @@ Hook :: enum u8 {
 	Test_Ssh, // a via machine's install runs this in place of `ssh … <target>`, the remote command after it (machine_install.odin)
 	Core_Release, // file:///dir/: the Linux core's release (release.json, the tarball, its .sig) instead of GitHub's (machine_install.odin)
 	Core_Version, // X.Y.Z: the version this core says (core_version); a handover's successor no longer has it (core_handover.odin)
+	Test_Asid, // N: this process's login (audit session) as the other-login checks see it (login_session.odin)
 }
 
 when TEST_HOOKS {
@@ -122,6 +123,7 @@ when TEST_HOOKS {
 		.Test_Ssh         = "DECKHAND_TEST_SSH",
 		.Core_Release     = "DECKHAND_TEST_CORE_RELEASE",
 		.Core_Version     = "DECKHAND_TEST_CORE_VERSION",
+		.Test_Asid        = "DECKHAND_TEST_ASID",
 	}
 }
 

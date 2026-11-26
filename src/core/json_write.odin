@@ -483,6 +483,23 @@ write_command_hook :: proc(w: ^Jw, cmd: Command, mode: Cmd_Mode) -> bool {
 	return true
 }
 
+// get_state's pending_confirmations: each one's question, who asked, its class and its command
+// (redacted: no token).
+write_pending_confirmations :: proc(b: ^strings.Builder, list: []Pending_Confirmation) {
+	strings.write_byte(b, '[')
+	for p, i in list {
+		if i > 0 do strings.write_byte(b, ',')
+		o := obj_begin(b)
+		kv_str(&o, "summary", p.summary)
+		kv_str(&o, "caller", caller_kind_name(p.caller.kind))
+		kv_str(&o, "class", CLASS_NAMES[p.class])
+		key(&o, "command")
+		write_command(b, p.command, redact = true)
+		obj_end(&o)
+	}
+	strings.write_byte(b, ']')
+}
+
 // ---- results and events ----
 
 write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {
@@ -1051,18 +1068,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		obj_end(&f)
 	}
 	key(&w, "pending_confirmations")
-	strings.write_byte(b, '[')
-	for p, i in s.pending_confirmations {
-		if i > 0 do strings.write_byte(b, ',')
-		o := obj_begin(b)
-		kv_str(&o, "summary", p.summary)
-		kv_str(&o, "caller", caller_kind_name(p.caller.kind))
-		kv_str(&o, "class", CLASS_NAMES[p.class])
-		key(&o, "command")
-		write_command(b, p.command, redact = true)
-		obj_end(&o)
-	}
-	strings.write_byte(b, ']')
+	write_pending_confirmations(b, s.pending_confirmations[:])
 	// the close prompt (comments.odin): a tab, or a session (tab_id 0), closed with comments not sent
 	if s.comments_ask != {} {
 		key(&w, "comments_ask")

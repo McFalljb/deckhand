@@ -838,6 +838,7 @@ Result :: struct {
 	confirm_token:   string, // set with error "needs_confirmation" if this caller may confirm: resend with it
 	confirm_summary: string,
 	confirm_by_user: bool, // needs_confirmation: only the user can confirm (in the UI)
+	confirm_id:      u64, // needs_confirmation: the pending confirmation's id (Pending_Confirmation.id)
 	data:            string, // query results (JSON)
 	remote:          u64, // the machine that answered (machine_route.odin's route_result only; 0 = this one): "machine" beside data, never in it, so no local command's data can claim it
 }

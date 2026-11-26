@@ -113,6 +113,62 @@ markdown_link_question_redacted :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
+md_events: [dynamic]string
+
+// What Atlas's desk_run sees of a web or mail link it asks to follow (the pi bridge's
+// confirmation wait, integrations/pi/lib/commands.ts parkedFor and confirmedBy): the command it
+// sends, Deckhand's needs_confirmation reply, get_state's pending_confirmations and the event of
+// the user's confirmed run, as the core writes them, for links that the redacted encoding
+// changes (user:pass@, a query and a fragment, a mail address). Written to
+// build/pi-confirmations.json; integrations/pi/test/fixtures/confirmations.json must be the same
+// (the pi tests drive the bridge with it).
+@(test)
+markdown_link_confirmations_for_pi :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	URLS :: [?]string{"https://user:pass@host.example/p?code=abc123&state=xyz#frag", "https://docs.example/a?q=1#sec", "mailto:alice@example.com?subject=hi"}
+	doc := strings.builder_make(context.temp_allocator)
+	for u in URLS do fmt.sbprintf(&doc, "[x](%s)\n\n", u)
+	_, tab := md_setup(t, "a.md", strings.to_string(doc))
+	saved := core.window.test_event
+	defer core.window.test_event = saved
+	core.window.test_event = proc(ev: core.Event) {
+		if e, ok := ev.(core.Command_Event); ok && e.caller.kind == .UI do append(&md_events, strings.clone(core.event_json(ev), runtime.heap_allocator()))
+	}
+	out := strings.builder_make(context.temp_allocator)
+	strings.write_string(&out, "{\"cases\":[")
+	for u, i in URLS {
+		clear(&md_events)
+		cmd := core.Markdown_Follow{tab_id = tab, url = u}
+		r := core.run_command(cmd, {kind = .Control})
+		testing.expect_value(t, r.error, "needs_confirmation")
+		pend := strings.builder_make(context.temp_allocator)
+		core.write_pending_confirmations(&pend, state.pending_confirmations[:])
+		reply := strings.builder_make(context.temp_allocator)
+		core.write_result(&reply, r)
+		token := state.pending_confirmations[len(state.pending_confirmations) - 1].token
+		ok := core.run_command(core.Markdown_Follow{tab_id = tab, url = u, confirm = token}, {kind = .UI})
+		testing.expect(t, ok.ok, ok.error)
+		testing.expect_value(t, len(md_events), 1)
+		// the confirmation's id, in all three: the reply, the snapshot's entry, the confirmed run's event
+		id := fmt.tprintf("%d", r.confirm_id)
+		testing.expect(t, r.confirm_id != 0, "the reply has an id")
+		testing.expectf(t, strings.contains(strings.to_string(reply), fmt.tprintf(`"id":%s`, id)), "reply: %s", strings.to_string(reply))
+		testing.expectf(t, strings.contains(strings.to_string(pend), fmt.tprintf(`"id":%s`, id)), "pending: %s", strings.to_string(pend))
+		testing.expectf(t, len(md_events) > 0 && strings.contains(md_events[0], fmt.tprintf(`"confirmation":%s`, id)), "event: %v", md_events)
+		if i > 0 do strings.write_byte(&out, ',')
+		fmt.sbprintf(&out, "\n{{\"sent\":%s,\n\"reply\":%s,\n\"state\":{{\"pending_confirmations\":%s}},\n\"event\":%s}}", core.command_json(cmd), strings.to_string(reply), strings.to_string(pend), len(md_events) > 0 ? md_events[0] : "null")
+	}
+	strings.write_string(&out, "]}\n")
+	for e in md_events do delete(e)
+	clear(&md_events)
+	got := strings.to_string(out)
+	root := strings.trim_suffix(strings.trim_right(#directory, "/"), "/src")
+	_ = os.write_entire_file(fmt.tprintf("%s/build/pi-confirmations.json", root), transmute([]u8)got)
+	want, err := os.read_entire_file(fmt.tprintf("%s/integrations/pi/test/fixtures/confirmations.json", root), context.temp_allocator)
+	testing.expectf(t, err == nil && string(want) == got, "integrations/pi/test/fixtures/confirmations.json differs from what the core writes (build/pi-confirmations.json)")
+}
+
+@(private = "file")
 md_tab_of :: proc(id: u64) -> core.Markdown_Tab {
 	_, tab, _ := core.find_tab(id)
 	if tab == nil do return {}

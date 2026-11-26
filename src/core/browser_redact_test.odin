@@ -19,6 +19,8 @@ browser_url_redacted_shapes :: proc(t: ^testing.T) {
 		{"mailto:alice@example.com", "mailto:<redacted>@example.com"},
 		{"MAILTO:alice@example.com?subject=hi", "MAILTO:<redacted>@example.com?subject=hi"},
 		{"mailto:", "mailto:"},
+		// scheme-relative: as with a scheme
+		{"//user:pass@host.example/x", "//host.example/x"},
 		{"example.com", "example.com"},
 	}
 	for c in cases do testing.expectf(t, browser_url_redacted(c[0]) == c[1], "%q: want %q, got %q", c[0], c[1], browser_url_redacted(c[0]))

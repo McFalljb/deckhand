@@ -134,29 +134,29 @@ Reload_Info :: struct {
 // pi_reload_all: reload every running pi tab (only_changed: those a watched
 // file changed for); idle ones now, the others once idle.
 Pi_Reload_All :: struct {
-	only_changed: bool,
-	confirm:      string, // class session_restart
+	only_changed: bool `cmd:"omit"`,
+	confirm:      string `cmd:"omit,log=token,full"`, // class session_restart
 }
 // pi_restart_updated: restart the pi tabs that started with another pi
 // version than the one on disk; idle ones now, the others once idle.
 Pi_Restart_Updated :: struct {
-	confirm: string, // class session_restart
+	confirm: string `cmd:"omit,log=token,full"`, // class session_restart
 }
 // pi_reload_later: hide the reload bar (restart: the restart bar) until
 // the next change and drop the reloads (restarts) still queued.
 Pi_Reload_Later :: struct {
-	restart: bool,
+	restart: bool `cmd:"omit"`,
 }
 // Internal: watched files changed (after the debounce), or pi's version on
 // disk is known or changed. paths: at most RELOAD_CHANGED_MAX, more: how
 // many others; scopes: each once, "" (every pi tab), RELOAD_SCOPE_ATLAS,
 // or a folder (tabs at or below it).
 Reload_Watch :: struct {
-	paths:     []string,
-	more:      int,
-	scopes:    []string,
-	version:   string, // "" = unchanged
-	from_save: bool,
+	paths:     []string `cmd:"key=files,codec=files"`,
+	more:      int `cmd:"-"`,
+	scopes:    []string `cmd:"-"`,
+	version:   string `cmd:"omit"`, // "" = unchanged
+	from_save: bool `cmd:"-"`,
 }
 // Internal: one step of a tab's reload or restart (its Tab.reload.step):
 // pi.reload, or pi.wait_idle before a restart, or the start after the old
@@ -572,54 +572,6 @@ write_tab_reload :: proc(b: ^strings.Builder, t: Tab_Reload) {
 	strings.write_string(b, `,"note":`)
 	json_quote(b, t.note)
 	strings.write_byte(b, '}')
-}
-
-// After "type" in an event's command object.
-reload_write :: proc(b: ^strings.Builder, cmd: Command) {
-	#partial switch c in cmd {
-	case Pi_Reload_All:
-		if c.only_changed do strings.write_string(b, `,"only_changed":true`)
-		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
-	case Pi_Restart_Updated:
-		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
-	case Pi_Reload_Later:
-		if c.restart do strings.write_string(b, `,"restart":true`)
-	case Reload_Watch:
-		fmt.sbprintf(b, `,"files":%d`, len(c.paths) + c.more)
-		if c.version != "" {
-			strings.write_string(b, `,"version":`)
-			json_quote(b, c.version)
-		}
-	case Reload_Kick:
-		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
-	}
-}
-
-reload_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
-	#partial switch c in cmd {
-	case Pi_Reload_All:      return Pi_Reload_All{only_changed = c.only_changed, confirm = strings.clone(c.confirm, a)}
-	case Pi_Restart_Updated: return Pi_Restart_Updated{confirm = strings.clone(c.confirm, a)}
-	case Reload_Watch:
-		paths := make([]string, len(c.paths), a)
-		scopes := make([]string, len(c.scopes), a)
-		for x, i in c.paths do paths[i] = strings.clone(x, a)
-		for x, i in c.scopes do scopes[i] = strings.clone(x, a)
-		return Reload_Watch{paths = paths, more = c.more, scopes = scopes, version = strings.clone(c.version, a), from_save = c.from_save}
-	}
-	return cmd
-}
-
-reload_free :: proc(cmd: Command, a: runtime.Allocator) {
-	#partial switch c in cmd {
-	case Pi_Reload_All:      delete(c.confirm, a)
-	case Pi_Restart_Updated: delete(c.confirm, a)
-	case Reload_Watch:
-		for x in c.paths do delete(x, a)
-		for x in c.scopes do delete(x, a)
-		delete(c.paths, a)
-		delete(c.scopes, a)
-		delete(c.version, a)
-	}
 }
 
 // ---- watching (runtime, main thread) ----

@@ -53,14 +53,14 @@ FOLDER_DOES := [Folder_Kind]string {
 // User-only: the main folder ("" = not set). create: make it first (the
 // setup sheet's "Create ~/Deckhand").
 Set_Home_Dir :: struct {
-	path:   string,
-	create: bool,
-	setup:  bool, // the setup sheet's Done (UI only): closes it when this succeeds, else shows why there
+	path:   string `cmd:"opt"`,
+	create: bool `cmd:"omit"`,
+	setup:  bool `cmd:"ui,omit"`, // the setup sheet's Done (UI only): closes it when this succeeds, else shows why there
 }
 // User-only: a subfolder's override ("" = <main>/<name>).
 Set_Folder :: struct {
-	kind: Folder_Kind,
-	path: string,
+	kind: Folder_Kind `cmd:"names=folder"`,
+	path: string `cmd:"opt"`,
 }
 // User-only: the first-run sheet opens; closing it (Done or Skip) marks
 // setup as seen, so it does not open by itself again.

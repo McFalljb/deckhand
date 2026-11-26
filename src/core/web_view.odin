@@ -81,7 +81,7 @@ web_watch_gen: u64
 
 // The page opened (or still has open) these projects in its tree: list their sessions.
 Web_Watch :: struct {
-	projects: []u64, // at most WEB_WATCH_MAX are kept
+	projects: []u64 `cmd:"codec=web_ids"`, // at most WEB_WATCH_MAX are kept
 }
 
 web_watch_apply :: proc(c: Web_Watch) -> Result {

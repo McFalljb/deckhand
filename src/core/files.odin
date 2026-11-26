@@ -22,7 +22,7 @@ import "core:strings"
 import "core:time"
 
 Set_Left_Tab :: struct {
-	tab: Left_Tab,
+	tab: Left_Tab `cmd:"names=left_tab"`,
 }
 // Expands or collapses a folder in its tree (collapsing keeps the folders
 // below expanded for the next time, as file managers do).
@@ -39,7 +39,7 @@ Files_Reveal :: struct {
 	path: string,
 }
 Set_Files_Filter :: struct {
-	text: string,
+	text: string `cmd:"opt"`,
 }
 // Gitignored rows leave the tree (hide) or show again, dimmed (the default). Saved.
 Set_Files_Hide_Ignored :: struct {

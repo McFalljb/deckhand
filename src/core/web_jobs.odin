@@ -12,7 +12,6 @@ package core
 //              → {text (as the preview shows it), err (what Create/Save would refuse), next, next_ok}
 //   op "read"  (text: Edit as note's) → {form (null: it stays a note), form_err, err (the parse's)}
 
-import "base:runtime"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
@@ -21,27 +20,28 @@ import "core:sys/posix"
 JOB_DRAFT_OWNERS_MAX :: 40 // projects listed in the picker, as the window's
 
 Job_Draft :: struct {
-	op:          string,
-	job:         string,
-	for_project: string, // open: the owner preselected; write: the form's
-	folder:      string,
-	name:        string,
-	preset:      string, // manual | hourly | every_hours | daily | weekdays | custom
-	every_n:     string,
-	at:          string,
-	custom:      string,
-	prompt:      string,
-	access:      string,
-	notify:      string,
-	model:       string,
-	hours:       string,
-	max_cost:    string,
-	timeout:     string,
-	max_turns:   string,
-	base:        string,
-	id, date:    string,
-	path:        string,
-	text:        string,
+	op:           string `cmd:"omit,req"`,
+	job:          string `cmd:"omit"`,
+	for_project:  string `cmd:"omit,red=bytes"`, // open: the owner preselected; write: the form's
+	folder:       string `cmd:"omit,red=bytes"`,
+	name:         string `cmd:"omit,red=bytes"`,
+	preset:       string `cmd:"omit,red=bytes"`, // manual | hourly | every_hours | daily | weekdays | custom
+	every_n:      string `cmd:"omit,red=bytes"`,
+	at:           string `cmd:"omit,red=bytes"`,
+	custom:       string `cmd:"omit,red=bytes"`,
+	prompt:       string `cmd:"omit,red=bytes"`,
+	access:       string `cmd:"omit,red=bytes"`,
+	notify:       string `cmd:"omit,red=bytes"`,
+	model:        string `cmd:"omit,red=bytes"`,
+	hours:        string `cmd:"omit,red=bytes"`,
+	max_cost:     string `cmd:"omit,red=bytes"`,
+	timeout:      string `cmd:"omit,red=bytes"`,
+	max_turns:    string `cmd:"omit,red=bytes"`,
+	base:         string `cmd:"omit,red=bytes"`,
+	id:           string `cmd:"omit,red=bytes"`,
+	date:         string `cmd:"omit,red=bytes"`,
+	path:         string `cmd:"omit,red=bytes"`,
+	text:         string `cmd:"omit,red=bytes"`,
 }
 
 JOB_DRAFT_PRESETS := [Sched_Preset]string {
@@ -249,42 +249,6 @@ web_extra_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 	}
 	return fail("not a browser view command"), false
 }
-
-web_extra_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
-	#partial switch c in cmd {
-	case Job_Draft:
-		x := c
-		for &f in job_draft_strings(&x) do f^ = strings.clone(f^, allocator)
-		return x
-	case Web_Settings: return c
-	}
-	return cmd
-}
-
-web_extra_free :: proc(cmd: Command, allocator: runtime.Allocator) {
-	#partial switch c in cmd {
-	case Job_Draft:
-		x := c
-		for f in job_draft_strings(&x) do delete(f^, allocator)
-	}
-}
-
-web_extra_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Job_Draft:    return "job_draft"
-	case Web_Settings: return "web_settings"
-	}
-	return ""
-}
-
-// Its fields' names, in job_draft_strings' order.
-JOB_DRAFT_FIELDS := [?]string{"op", "job", "for_project", "folder", "name", "preset", "every_n", "at", "custom", "prompt", "access", "notify", "model", "hours", "max_cost", "timeout", "max_turns", "base", "id", "date", "path", "text"}
-
-// A Job_Draft's strings (temp slice of pointers into c).
-job_draft_strings :: proc(c: ^Job_Draft) -> []^string {
-	return slice.clone([]^string{&c.op, &c.job, &c.for_project, &c.folder, &c.name, &c.preset, &c.every_n, &c.at, &c.custom, &c.prompt, &c.access, &c.notify, &c.model, &c.hours, &c.max_cost, &c.timeout, &c.max_turns, &c.base, &c.id, &c.date, &c.path, &c.text}, context.temp_allocator)
-}
-
 
 // A job's note: a regular file, never through a link put in its place (as file_read), at most
 // JOB_NOTE_MAX.

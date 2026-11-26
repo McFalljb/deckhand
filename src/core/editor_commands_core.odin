@@ -18,10 +18,10 @@ Editor_Tab :: struct {
 
 Open_File :: struct {
 	path:    string, // absolute, or relative to the session's folder
-	line:    int, // 1-based; 0 = keep the cursor
-	col:     int,
-	session: u64, // open session (0 = the current one)
-	preview: bool, // a preview tab: replaces the session's clean preview tab (a file already open is only focused)
+	line:    int `cmd:"omit,nonneg"`, // 1-based; 0 = keep the cursor
+	col:     int `cmd:"omit,nonneg"`,
+	session: u64 `cmd:"omit"`, // open session (0 = the current one)
+	preview: bool `cmd:"omit"`, // a preview tab: replaces the session's clean preview tab (a file already open is only focused)
 }
 
 // A preview tab becomes an ordinary one (double-click, editing).
@@ -39,14 +39,15 @@ Save_File :: struct {
 
 Goto_Line :: struct {
 	tab_id:    u64,
-	line, col: int,
+	line: int `cmd:"pos"`,
+	col: int `cmd:"omit,nonneg"`,
 }
 
 // Discards the buffer for the file on disk (confirms while it has unsaved
 // changes, class tab_close; the banner's Reload button is that confirmation).
 Reload_File :: struct {
 	tab_id:  u64,
-	confirm: string,
+	confirm: string `cmd:"omit,red=token"`,
 }
 
 // "Keep mine": the buffer stays as it is after the file changed on disk.
@@ -57,7 +58,7 @@ Keep_Buffer :: struct {
 // A read-only diff of a file tab against git HEAD or the file on disk.
 Diff_File :: struct {
 	tab_id:  u64,
-	against: Editor_View, // Diff_Head or Diff_Disk
+	against: Editor_View `cmd:"names=editor_view"`, // Diff_Head or Diff_Disk
 }
 
 Set_Wrap :: struct {
@@ -67,32 +68,32 @@ Set_Wrap :: struct {
 
 List_Dir :: struct {
 	path:    string,
-	ignored: bool, // also list gitignored entries (marked "ignored")
-	since:   string, // the hash of the listing the caller has: unchanged, it answers same (no entries)
+	ignored: bool `cmd:"omit"`, // also list gitignored entries (marked "ignored")
+	since:   string `cmd:"omit"`, // the hash of the listing the caller has: unchanged, it answers same (no entries)
 }
 
 // create_file, create_dir and rename_path confirm (class fs_write) for a
 // control caller outside its own project (Atlas, bound to Home, has none).
 Create_File :: struct {
 	path:    string,
-	confirm: string,
+	confirm: string `cmd:"omit,red=token"`,
 }
 
 Create_Dir :: struct {
 	path:    string,
-	confirm: string,
+	confirm: string `cmd:"omit,red=token"`,
 }
 
 Rename_Path :: struct {
 	from, to: string,
-	confirm:  string,
+	confirm:  string `cmd:"omit,red=token"`,
 }
 
 Delete_Path :: struct {
-	path:    string, // moved to the Trash; confirms (class delete)
-	paths:   []string, // a batch (path, if given, is one more): all checked before any moves, one confirmation (fs_delete_plan)
-	confirm: string,
-	undoable: bool, // the user's own delete in the window's Files tree: no confirmation when every item gets a restore id (fs_restore_promised; the window's Undo puts them back)
+	path:    string `cmd:"opt,codec=delete_path"`, // moved to the Trash; confirms (class delete)
+	paths:   []string `cmd:"omit"`, // a batch (path, if given, is one more): all checked before any moves, one confirmation (fs_delete_plan)
+	confirm: string `cmd:"omit,red=token,last"`,
+	undoable: bool `cmd:"omit"`, // the user's own delete in the window's Files tree: no confirmation when every item gets a restore id (fs_restore_promised; the window's Undo puts them back)
 }
 
 Reveal_In_Finder :: struct {
@@ -104,15 +105,16 @@ Reveal_In_Finder :: struct {
 // as create_file (class fs_write). Long-running: pending, then a finished event.
 Fs_Copy :: struct {
 	from, to: string,
-	unique:   bool,
-	confirm:  string,
+	unique:   bool `cmd:"omit"`,
+	confirm:  string `cmd:"omit,red=token"`,
 }
 
 // The fuzzy file filter the Files tree has, for a browser (fs_find_files): root a project folder
 // ("" = the caller's), limit results (0 = 100, at most 500).
 Find_Files :: struct {
-	root, query: string,
-	limit:       int,
+	root: string `cmd:"omit"`,
+	query: string,
+	limit:       int `cmd:"omit,nonneg,max=FIND_FILES_MAX"`,
 }
 
 // Puts an item delete_path moved to the Trash back where it was, by the restore id its result
@@ -123,7 +125,8 @@ Restore_Path :: struct {
 
 // Internal: a worker refreshed a project's file list (NUL-separated paths).
 File_List_Done :: struct {
-	root, out: string,
+	root: string,
+	out: string `cmd:"-"`,
 }
 
 // ---- the project's files (rows in command_table.odin): the core's own, no window needed ----

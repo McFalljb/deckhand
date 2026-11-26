@@ -655,7 +655,7 @@ core/inbox.odin     command inbox: any thread submits, the main thread drains
 core/events.odin    events, the command log, own-event filter
 core/socket.odin    control socket: hello and tokens, subscriptions, pi-tab bridge routing
 core/ctl.odin       `deckhand --ctl`: a tiny socket client for scripts and tests
-core/json_*.odin    hand-written JSON (PROTOCOL.md)
+core/json_*.odin    JSON (PROTOCOL.md); a command's follows its struct's `cmd` tags (command_codec.odin)
 core/term.odin      one terminal, the core's side: PTY (or the holder's), libghostty-vt, size
 core/term_stream.odin, term_view_stream.odin  a terminal's bytes streamed to the window's copy
 term_view.odin      the window's side of a terminal: drawing, selection, input encoding

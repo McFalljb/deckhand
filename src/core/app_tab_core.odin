@@ -29,12 +29,12 @@ App_Tab :: struct {
 
 // Commands (rows in command_table.odin).
 New_App_Tab :: struct {
-	session: u64, // 0 = the one on screen (a pi or Claude tab: its own)
-	name:    string, // an app the session's .deckhand/apps.json declares (a pi or Claude tab: only this), or
-	argv:    []string, // what to run (argv[0] on PATH), or
-	command: string, // a command line for /bin/sh -c
-	cwd:     string, // inside the session's folder ("" = it)
-	title:   string,
+	session: u64 `cmd:"omit"`, // 0 = the one on screen (a pi or Claude tab: its own)
+	name:    string `cmd:"omit,last"`, // an app the session's .deckhand/apps.json declares (a pi or Claude tab: only this), or
+	argv:    []string `cmd:"codec=app_argv"`, // what to run (argv[0] on PATH), or
+	command: string `cmd:"omit,red=-"`, // a command line for /bin/sh -c
+	cwd:     string `cmd:"omit"`, // inside the session's folder ("" = it)
+	title:   string `cmd:"omit"`,
 }
 
 App_Restart :: struct {
@@ -44,40 +44,40 @@ App_Restart :: struct {
 // Close an app tab: close_tab for an app tab, which a session's own agents may send too.
 App_Close :: struct {
 	tab_id:   u64,
-	confirm:  string, // the user's close rule may ask (close_needs_confirm)
-	comments: Comments_Choice, // pending comments made on it: send or drop (as close_tab)
+	confirm:  string `cmd:"omit,red=token"`, // the user's close rule may ask (close_needs_confirm)
+	comments: Comments_Choice `cmd:"omit,names=comments,codec=comments"`, // pending comments made on it: send or drop (as close_tab)
 }
 
 // The apps a session's .deckhand/apps.json declares (what new_app_tab's name opens).
 App_Declared :: struct {
-	session: u64, // 0 = the caller's own (the user and scripts: the one on screen)
+	session: u64 `cmd:"omit"`, // 0 = the caller's own (the user and scripts: the one on screen)
 }
 
 App_Input :: struct {
 	tab_id: u64,
-	events: []string, // JSON objects (TAB-PROTOCOL `input` without type/v), sent with "source":"agent"
+	events: []string `cmd:"log=len,full,codec=raw_list"`, // JSON objects (TAB-PROTOCOL `input` without type/v), sent with "source":"agent"
 }
 
 App_Events :: struct {
 	tab_id: u64,
 	topic:  string, // "log" for tab.log events, ...
-	since:  u64, // events after this seq
-	limit:  int,
+	since:  u64 `cmd:"omit"`, // events after this seq
+	limit:  int `cmd:"log=-,full,omit,pos,max=500"`,
 }
 
 // Any method of the app's own (tab.describe lists them), passed through.
 App_Call :: struct {
 	tab_id:     u64,
 	method:     string, // the request's `type` on the app's line
-	params:     string, // a JSON object ("" = none): its fields go on the line as given
-	timeout_ms: int,
+	params:     string `cmd:"codec=raw"`, // a JSON object ("" = none): its fields go on the line as given
+	timeout_ms: int `cmd:"log=-,full,omit,pos,max=600000"`,
 }
 
 // The frame on show (the slot Deckhand holds), as a PNG under the data dir.
 App_Screenshot :: struct {
 	tab_id:   u64,
-	rect:     App_Rect, // the tab's logical px
-	has_rect: bool, // false: the whole frame
+	rect:     App_Rect `cmd:"codec=rect"`, // the tab's logical px
+	has_rect: bool `cmd:"log=-,noparse"`, // false: the whole frame
 }
 
 // Draw the app's boxes (tab.boxes) over the tab; hovering shows a box's label.
@@ -99,20 +99,20 @@ App_Box :: struct {
 // Internal: the app answered a request Deckhand sent it.
 App_Call_Done :: struct {
 	tab_id: u64,
-	wire:   string, // our request id on the app's connection
+	wire:   string `cmd:"-"`, // our request id on the app's connection
 	ok:     bool,
-	error:  string,
-	code:   string,
-	data:   string, // JSON
-	from_worker: bool, // a screenshot worker's, not the app's (only it may finish an "s…" wire)
-	file:   string, // the worker's PNG: deleted if its request is gone
+	error:  string `cmd:"-"`,
+	code:   string `cmd:"-"`,
+	data:   string `cmd:"-"`, // JSON
+	from_worker: bool `cmd:"-"`, // a screenshot worker's, not the app's (only it may finish an "s…" wire)
+	file:   string `cmd:"-"`, // the worker's PNG: deleted if its request is gone
 }
 
 // Internal: the app's status changed (the frame loop saw it).
 App_Update :: struct {
 	tab_id:    u64,
-	status:    App_Status,
-	exit_code: int,
+	status:    App_Status `cmd:"names=app_status"`,
+	exit_code: int `cmd:"codec=exit_code"`,
 }
 
 APP_EVENTS_MAX :: 500
@@ -241,8 +241,8 @@ APP_SOCKET_OP_NAMES := [App_Socket_Op]string{.Mint = "mint", .Send = "send", .Fo
 
 App_Socket :: struct {
 	tab_id: u64,
-	op:     App_Socket_Op,
-	line:   string, // Send: one line for the program
+	op:     App_Socket_Op `cmd:"names=app_socket_op"`,
+	line:   string `cmd:"-"`, // Send: one line for the program
 }
 
 app_socket_apply :: proc(c: App_Socket) -> Result {

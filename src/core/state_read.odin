@@ -547,7 +547,6 @@ wire_read_struct :: proc(v: json.Value, data: rawptr, name: string, st: runtime.
 	return ""
 }
 
-@(private = "file")
 wire_put_int :: proc(data: rawptr, size: int, n: i64) {
 	switch size {
 	case 1: (^u8)(data)^ = u8(n)
@@ -586,6 +585,14 @@ wire_free :: proc(data: rawptr, ti: ^runtime.Type_Info, a: runtime.Allocator) {
 		return // scalars: nothing held
 	}
 	mem.zero(data, ti.size)
+}
+
+// wire_clone without the read budget (the inbox's copy of a command, inbox.odin).
+wire_clone_unlimited :: proc(src, dst: rawptr, ti: ^runtime.Type_Info, a: runtime.Allocator) {
+	saved := read_budget
+	read_budget = max(int)
+	wire_clone(src, dst, ti, a)
+	read_budget = saved
 }
 
 // Copies the value at src (type ti) into dst (zeroed), its strings and arrays allocated with a

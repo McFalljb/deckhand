@@ -82,23 +82,23 @@ Claude_Account_Setting :: struct {
 // "codex", as on every account command).
 Add_Claude_Account :: struct {
 	dir:   string,
-	label: string, // "" = from the folder's name
-	harness: Harness, // .Claude or .Codex
+	label: string `cmd:"omit"`, // "" = from the folder's name
+	harness: Harness `cmd:"codec=harness_ct"`, // .Claude or .Codex
 }
 Rename_Claude_Account :: struct {
 	account: string, // its label or folder
-	label:   string, // "" = from the folder's name again
-	harness: Harness, // .Claude or .Codex
+	label:   string `cmd:"opt"`, // "" = from the folder's name again
+	harness: Harness `cmd:"codec=harness_ct"`, // .Claude or .Codex
 }
 Remove_Claude_Account :: struct {
 	account: string,
-	harness: Harness, // .Claude or .Codex
+	harness: Harness `cmd:"codec=harness_ct"`, // .Claude or .Codex
 }
 // The account new Claude (.Codex: Codex) sessions start with (unless their project last used
 // another): its label or folder; "" = the environment's default again.
 Set_Claude_Account_Default :: struct {
-	account: string,
-	harness: Harness, // .Claude or .Codex
+	account: string `cmd:"opt"`,
+	harness: Harness `cmd:"codec=harness_ct"`, // .Claude or .Codex
 }
 
 CLAUDE_ACCOUNT_LABEL_MAX :: 40
@@ -660,68 +660,6 @@ claude_account_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		return {ok = true}, true
 	}
 	return fail("not an account command"), false
-}
-
-claude_account_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Add_Claude_Account:    return "add_claude_account"
-	case Rename_Claude_Account: return "rename_claude_account"
-	case Remove_Claude_Account: return "remove_claude_account"
-	case Set_Claude_Account_Default: return "set_claude_account_default"
-	}
-	return ""
-}
-
-claude_account_write :: proc(b: ^strings.Builder, cmd: Command) {
-	harness := Harness.Claude
-	#partial switch c in cmd {
-	case Add_Claude_Account:
-		strings.write_string(b, `,"dir":`)
-		json_quote(b, c.dir)
-		if c.label != "" {
-			strings.write_string(b, `,"label":`)
-			json_quote(b, c.label)
-		}
-		harness = c.harness
-	case Rename_Claude_Account:
-		strings.write_string(b, `,"account":`)
-		json_quote(b, c.account)
-		strings.write_string(b, `,"label":`)
-		json_quote(b, c.label)
-		harness = c.harness
-	case Remove_Claude_Account:
-		strings.write_string(b, `,"account":`)
-		json_quote(b, c.account)
-		harness = c.harness
-	case Set_Claude_Account_Default:
-		strings.write_string(b, `,"account":`)
-		json_quote(b, c.account)
-		harness = c.harness
-	}
-	if harness_is_codex(harness) do strings.write_string(b, `,"harness":"codex"`) // Claude's wire is unchanged
-}
-
-claude_account_clone :: proc(cmd: Command, allocator := context.allocator) -> Command {
-	#partial switch c in cmd {
-	case Add_Claude_Account:    return Add_Claude_Account{dir = strings.clone(c.dir, allocator), label = strings.clone(c.label, allocator), harness = c.harness}
-	case Rename_Claude_Account: return Rename_Claude_Account{account = strings.clone(c.account, allocator), label = strings.clone(c.label, allocator), harness = c.harness}
-	case Remove_Claude_Account: return Remove_Claude_Account{account = strings.clone(c.account, allocator), harness = c.harness}
-	case Set_Claude_Account_Default: return Set_Claude_Account_Default{account = strings.clone(c.account, allocator), harness = c.harness}
-	}
-	return cmd
-}
-
-claude_account_free :: proc(cmd: Command, allocator := context.allocator) {
-	#partial switch c in cmd {
-	case Add_Claude_Account:
-		delete(c.dir, allocator)
-		delete(c.label, allocator)
-	case Rename_Claude_Account:
-		delete(c.account, allocator)
-		delete(c.label, allocator)
-	case Remove_Claude_Account: delete(c.account, allocator)
-	case Set_Claude_Account_Default: delete(c.account, allocator)
-	}
 }
 
 // The snapshot's accounts (no secrets: labels and folders): Claude's, then Codex's.

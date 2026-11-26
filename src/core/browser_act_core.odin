@@ -17,50 +17,51 @@ Act_Button :: enum u8 {
 
 Browser_Click :: struct {
 	tab_id:    u64,
-	target:    Act_Target,
-	button:    Act_Button,
-	double:    bool,
-	modifiers: int, // ACT_MOD_*
+	target:    Act_Target `cmd:"codec=act_target"`,
+	button:    Act_Button `cmd:"omit,names=act_button,codec=enum_of"`,
+	double:    bool `cmd:"omit"`,
+	modifiers: int `cmd:"omit,codec=mods"`, // ACT_MOD_*
 }
 
 Browser_Type :: struct {
 	tab_id:   u64,
-	selector: string, // "" = the focused element
-	text:     string,
-	clear:    bool, // select the field's content and delete it first
-	submit:   bool, // press Enter after
+	selector: string `cmd:"omit"`, // "" = the focused element
+	text:     string `cmd:"opt,red=len:text_bytes"`,
+	clear:    bool `cmd:"omit"`, // select the field's content and delete it first
+	submit:   bool `cmd:"omit"`, // press Enter after
 }
 
 Browser_Press :: struct {
 	tab_id:   u64,
-	selector: string, // focus it first ("" = where focus is)
+	selector: string `cmd:"omit"`, // focus it first ("" = where focus is)
 	keys:     string, // chords, space separated: "Shift+Tab Enter"
 }
 
 Browser_Scroll :: struct {
 	tab_id: u64,
-	target: Act_Target, // none: the page at its centre
-	dx, dy: f32, // CSS px; none: the target into view
+	target: Act_Target `cmd:"codec=act_target"`, // none: the page at its centre
+	dx: f32 `cmd:"omit"`, // CSS px; none: the target into view
+	dy: f32 `cmd:"omit"`, // CSS px; none: the target into view
 }
 
 Browser_Select :: struct {
 	tab_id:    u64,
-	selector:  string,
-	label:     string,
-	value:     string,
-	has_label: bool,
-	has_value: bool,
+	selector:  string `cmd:"omit"`,
+	label:     string `cmd:"codec=has"`,
+	value:     string `cmd:"codec=has"`,
+	has_label: bool `cmd:"log=-,noparse"`,
+	has_value: bool `cmd:"log=-,noparse"`,
 }
 
 Browser_Hover :: struct {
 	tab_id: u64,
-	target: Act_Target,
+	target: Act_Target `cmd:"codec=act_target"`,
 }
 
 Browser_Upload :: struct {
 	tab_id:   u64,
-	selector: string,
-	paths:    []string,
+	selector: string `cmd:"omit"`,
+	paths:    []string `cmd:"red=len:files"`,
 }
 
 Browser_Upload_Answer :: struct {
@@ -71,7 +72,7 @@ Browser_Upload_Answer :: struct {
 // A requester's cancel (socket.odin: its cancel line, or its connection closing): Deckhand's own.
 Request_Cancel :: struct {
 	request_id: u64,
-	closed:     bool, // the connection closed
+	closed:     bool `cmd:"-"`, // the connection closed
 }
 
 Browser_Agent_Take_Over :: struct {

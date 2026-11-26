@@ -563,8 +563,8 @@ fs_root_of :: proc(path: string) -> string {
 // the core's file models (the Files tree's, git status, worktrees, the Changes tabs) follow, as
 // the window's own do. flags: the watcher's, per path.
 Fs_Changed :: struct {
-	paths: []string,
-	flags: []u32,
+	paths: []string `cmd:"log=len"`,
+	flags: []u32 `cmd:"-"`,
 }
 
 fs_model_tick :: proc() {

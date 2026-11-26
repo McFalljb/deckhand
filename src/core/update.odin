@@ -98,23 +98,25 @@ Update_Skip :: struct {} // skip the offered version
 Update_Later :: struct {} // hide the bar until the next offer
 Update_Download :: struct {} // "Update": download and check the offered version
 Update_Install :: struct { 	// "Restart to update": swap the prepared bundle in and relaunch
-	confirm: string,
+	confirm: string `cmd:"omit,red=token"`,
 }
 Set_Update_Check :: struct {
 	on: bool,
 }
 // internal (workers, the timer)
 Update_Env :: struct {
-	version, bundle, why_not: string,
+	version: string,
+	bundle:  string `cmd:"-"`,
+	why_not: string,
 }
 Update_Tick :: struct {}
 Update_Checked :: struct {
-	body: string, // the release JSON
+	body: string `cmd:"log=len:bytes"`, // the release JSON
 	err:  string,
 }
 Update_Prepared :: struct {
-	staged: string,
-	cdhash: string, // the signed one
+	staged: string `cmd:"-"`,
+	cdhash: string `cmd:"-"`, // the signed one
 	err:    string,
 }
 
@@ -945,70 +947,6 @@ update_state_json :: proc(b: ^strings.Builder) {
 	fmt.sbprintf(b, `,"dismissed":%v,"can_install":%v,"last_check":%d,"message":`, u.dismissed, u.can_install, u.last_ok)
 	json_quote(b, u.message)
 	strings.write_byte(b, '}')
-}
-
-update_command_name :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Update_Check:     return "update_check"
-	case Update_Skip:      return "update_skip"
-	case Update_Later:     return "update_later"
-	case Update_Download:  return "update_download"
-	case Update_Install:   return "update_install"
-	case Set_Update_Check: return "set_update_check"
-	case Update_Env:       return "update_env"
-	case Update_Tick:      return "update_tick"
-	case Update_Checked:   return "update_checked"
-	case Update_Prepared:  return "update_prepared"
-	}
-	return ""
-}
-
-// The fields on the wire (events, the log), after "type": never the release body or a
-// confirmation token.
-update_write :: proc(b: ^strings.Builder, cmd: Command) {
-	#partial switch c in cmd {
-	case Set_Update_Check:
-		fmt.sbprintf(b, `,"on":%v`, c.on)
-	case Update_Env:
-		strings.write_string(b, `,"version":`)
-		json_quote(b, c.version)
-		strings.write_string(b, `,"why_not":`)
-		json_quote(b, c.why_not)
-	case Update_Checked:
-		fmt.sbprintf(b, `,"bytes":%d,"err":`, len(c.body))
-		json_quote(b, c.err)
-	case Update_Prepared:
-		strings.write_string(b, `,"err":`)
-		json_quote(b, c.err)
-	}
-}
-
-update_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
-	s :: proc(v: string, a: runtime.Allocator) -> string {return strings.clone(v, a)}
-	#partial switch c in cmd {
-	case Update_Install:  return Update_Install{confirm = s(c.confirm, a)}
-	case Update_Env:      return Update_Env{version = s(c.version, a), bundle = s(c.bundle, a), why_not = s(c.why_not, a)}
-	case Update_Checked:  return Update_Checked{body = s(c.body, a), err = s(c.err, a)}
-	case Update_Prepared: return Update_Prepared{staged = s(c.staged, a), cdhash = s(c.cdhash, a), err = s(c.err, a)}
-	}
-	return cmd
-}
-
-update_free :: proc(cmd: Command, a: runtime.Allocator) {
-	#partial switch c in cmd {
-	case Update_Install: delete(c.confirm, a)
-	case Update_Env:
-		delete(c.version, a)
-		delete(c.bundle, a)
-		delete(c.why_not, a)
-	case Update_Checked:
-		delete(c.body, a)
-		delete(c.err, a)
-	case Update_Prepared:
-		delete(c.staged, a)
-		delete(c.cdhash, a)
-		delete(c.err, a)
-	}
 }
 
 // Tests: the saved paths as an earlier run left them.

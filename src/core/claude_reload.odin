@@ -77,26 +77,26 @@ Claude_Reload_Info :: struct {
 // claude_restart_changed: restart the running Claude tabs a changed file needs it for (update:
 // those on an older claude; all: every one, changed or not); idle ones now, busy ones once idle.
 Claude_Restart_Changed :: struct {
-	update:  bool,
-	all:     bool,
-	confirm: string, // class session_restart
-	harness: Harness, // .Codex: the Codex tabs (codex_file_class; no update bar); else Claude's
+	update:  bool `cmd:"omit"`,
+	all:     bool `cmd:"omit"`,
+	confirm: string `cmd:"omit,log=token,full,last"`, // class session_restart
+	harness: Harness `cmd:"codec=harness_ct"`, // .Codex: the Codex tabs (codex_file_class; no update bar); else Claude's
 }
 // claude_reload_later: hide the bar (update: the update bar), drop waiting restarts.
 Claude_Reload_Later :: struct {
-	update:  bool,
-	harness: Harness, // .Codex: the Codex bar; else Claude's
+	update:  bool `cmd:"omit"`,
+	harness: Harness `cmd:"codec=harness_ct"`, // .Codex: the Codex bar; else Claude's
 }
 // Internal: watched Claude files changed (after the debounce), or claude's version on disk is
 // known or changed. Scopes as Reload_Watch's ("" every Claude tab, else a folder).
 Claude_Reload_Watch :: struct {
-	paths:     []string,
-	more:      int,
-	scopes:    []string,
-	version:   string, // "" = unchanged
-	ident:     string,
-	from_save: bool,
-	harness:   Harness, // .Codex: Codex's files (no version); else Claude's
+	paths:     []string `cmd:"key=files,codec=files"`,
+	more:      int `cmd:"-"`,
+	scopes:    []string `cmd:"-"`,
+	version:   string `cmd:"omit,last"`, // "" = unchanged
+	ident:     string `cmd:"-"`,
+	from_save: bool `cmd:"-"`,
+	harness:   Harness `cmd:"codec=harness_ct"`, // .Codex: Codex's files (no version); else Claude's
 }
 // Internal: a Claude tab whose restart waited for idle restarts now, if still idle.
 Claude_Reload_Kick :: struct {
@@ -107,7 +107,7 @@ Claude_Reload_Kick :: struct {
 // confirms. Nothing restarts such a tab automatically.
 Claude_Restart_Anyway :: struct {
 	tab_id:  u64,
-	confirm: string, // class session_restart
+	confirm: string `cmd:"omit,log=token,full"`, // class session_restart
 }
 
 // What a waiting restart's note says of a tab whose subagents are all silent (busy_why): the
@@ -682,71 +682,6 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		return {ok = true}, true
 	}
 	return fail("not a Claude reload command"), false
-}
-
-// For events and the command log; confirmation tokens never.
-claude_reload_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Claude_Restart_Changed: return "claude_restart_changed"
-	case Claude_Reload_Later:    return "claude_reload_later"
-	case Claude_Reload_Watch:    return "claude_reload_watch"
-	case Claude_Reload_Kick:     return "claude_reload_kick"
-	case Claude_Restart_Anyway:  return "claude_restart_anyway"
-	}
-	return ""
-}
-
-claude_reload_write :: proc(b: ^strings.Builder, cmd: Command) {
-	#partial switch c in cmd {
-	case Claude_Restart_Changed:
-		if c.update do strings.write_string(b, `,"update":true`)
-		if c.all do strings.write_string(b, `,"all":true`)
-		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
-		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
-	case Claude_Reload_Later:
-		if c.update do strings.write_string(b, `,"update":true`)
-		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
-	case Claude_Reload_Watch:
-		fmt.sbprintf(b, `,"files":%d`, len(c.paths) + c.more)
-		if harness_is_codex(c.harness) do strings.write_string(b, `,"harness":"codex"`)
-		if c.version != "" {
-			strings.write_string(b, `,"version":`)
-			json_quote(b, c.version)
-		}
-	case Claude_Reload_Kick:
-		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
-	case Claude_Restart_Anyway:
-		fmt.sbprintf(b, `,"tab_id":%d`, c.tab_id)
-		if c.confirm != "" do strings.write_string(b, `,"confirm":"<redacted>"`)
-	}
-}
-
-claude_reload_clone :: proc(cmd: Command, a: runtime.Allocator) -> Command {
-	#partial switch c in cmd {
-	case Claude_Restart_Changed: return Claude_Restart_Changed{update = c.update, all = c.all, confirm = strings.clone(c.confirm, a), harness = c.harness}
-	case Claude_Restart_Anyway:  return Claude_Restart_Anyway{tab_id = c.tab_id, confirm = strings.clone(c.confirm, a)}
-	case Claude_Reload_Watch:
-		paths := make([]string, len(c.paths), a)
-		scopes := make([]string, len(c.scopes), a)
-		for x, i in c.paths do paths[i] = strings.clone(x, a)
-		for x, i in c.scopes do scopes[i] = strings.clone(x, a)
-		return Claude_Reload_Watch{paths = paths, more = c.more, scopes = scopes, version = strings.clone(c.version, a), ident = strings.clone(c.ident, a), from_save = c.from_save, harness = c.harness}
-	}
-	return cmd
-}
-
-claude_reload_free :: proc(cmd: Command, a: runtime.Allocator) {
-	#partial switch c in cmd {
-	case Claude_Restart_Changed: delete(c.confirm, a)
-	case Claude_Restart_Anyway:  delete(c.confirm, a)
-	case Claude_Reload_Watch:
-		for x in c.paths do delete(x, a)
-		for x in c.scopes do delete(x, a)
-		delete(c.paths, a)
-		delete(c.scopes, a)
-		delete(c.version, a)
-		delete(c.ident, a)
-	}
 }
 
 // The snapshot's "claude" object of "reload".

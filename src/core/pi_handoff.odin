@@ -61,15 +61,15 @@ Pi_Handoff :: struct {
 	project_id:    u64, // this Mac's project
 	pi_session_id: string, // its pi session, whose transcript file is here
 	to_project_id: u64, // the project of the same name on another machine (packed: not an id field, so it never routes the command)
-	run:           string, // that machine's core run when its row was drawn
+	run:           string `cmd:"opt"`, // that machine's core run when its row was drawn
 	folder:        string, // and that project's folder then
 }
 
 Pi_Handoff_Part :: struct {
 	project_id: u64, // the receiving machine's project
 	offset:     u64, // where data goes: the bytes taken so far
-	data:       string, // base64
-	last:       bool, // the copy is whole
+	data:       string `cmd:"red=bytes"`, // base64
+	last:       bool `cmd:"omit"`, // the copy is whole
 }
 
 // ---- this Mac: the menu's rows ----

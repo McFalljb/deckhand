@@ -18,7 +18,7 @@ PI_RENAME_BUSY :: "pi is busy: rename it once it is idle"
 
 Pi_Rename :: struct {
 	pi_session_id: string,
-	name:          string, // trimmed; one line
+	name:          string `cmd:"red=bytes"`, // trimmed; one line
 }
 
 // The pi tab that can rename session id now: its open session on this Mac (not Home), its pi

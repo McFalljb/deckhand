@@ -7,16 +7,16 @@ package core
 // repository's status (Git_Status_Done).
 Git_Head_Done :: struct {
 	tab_id:  u64,
-	gen:     u64, // Git_Gutter.load_gen when it started
-	path:    string,
-	in_repo: bool,
+	gen:     u64 `cmd:"-"`, // Git_Gutter.load_gen when it started
+	path:    string `cmd:"-"`,
+	in_repo: bool `cmd:"-"`,
 	tracked: bool,
-	head:    string,
+	head:    string `cmd:"-"`,
 }
 
 Git_Status_Done :: struct {
 	root: string,
-	gen:  u64, // Git_Status.gen when it started
+	gen:  u64 `cmd:"-"`, // Git_Status.gen when it started
 	ok:   bool,
-	out:  string, // git status --porcelain=v1 -z
+	out:  string `cmd:"-"`, // git status --porcelain=v1 -z
 }

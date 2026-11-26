@@ -24,7 +24,7 @@ Claude_Ended :: enum u8 {
 
 // From the tab's own plugin: its model changed (PostModelSwitch; also restoring it on resume).
 Claude_Model_Report :: struct {
-	tab_id: u64,
+	tab_id: u64 `cmd:"opt"`,
 	model:  string,
 }
 

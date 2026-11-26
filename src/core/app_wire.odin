@@ -24,51 +24,6 @@ APP_STATUS_NAMES := [App_Status]string {
 	.Exited         = "exited",
 }
 
-app_command_clone :: proc(cmd: Command, allocator := context.allocator) -> Command {
-	s :: proc(x: string, a := context.allocator) -> string {return strings.clone(x, a)}
-	ss :: proc(x: []string, a := context.allocator) -> []string {
-		out := make([]string, len(x), a)
-		for v, i in x do out[i] = strings.clone(v, a)
-		return out
-	}
-	#partial switch c in cmd {
-	case New_App_Tab:   return New_App_Tab{session = c.session, name = s(c.name, allocator), argv = ss(c.argv, allocator), command = s(c.command, allocator), cwd = s(c.cwd, allocator), title = s(c.title, allocator)}
-	case App_Close:     return App_Close{tab_id = c.tab_id, confirm = s(c.confirm, allocator), comments = c.comments}
-	case App_Input:     return App_Input{tab_id = c.tab_id, events = ss(c.events, allocator)}
-	case App_Events:    return App_Events{tab_id = c.tab_id, topic = s(c.topic, allocator), since = c.since, limit = c.limit}
-	case App_Call:      return App_Call{tab_id = c.tab_id, method = s(c.method, allocator), params = s(c.params, allocator), timeout_ms = c.timeout_ms}
-	case App_Call_Done: return App_Call_Done{tab_id = c.tab_id, wire = s(c.wire, allocator), ok = c.ok, error = s(c.error, allocator), code = s(c.code, allocator), data = s(c.data, allocator), from_worker = c.from_worker, file = s(c.file, allocator)}
-	}
-	return cmd
-}
-
-app_command_free :: proc(cmd: Command, allocator := context.allocator) {
-	ss :: proc(x: []string, a := context.allocator) {
-		for v in x do delete(v, a)
-		delete(x, a)
-	}
-	#partial switch c in cmd {
-	case New_App_Tab:
-		ss(c.argv, allocator)
-		delete(c.name, allocator)
-		delete(c.command, allocator)
-		delete(c.cwd, allocator)
-		delete(c.title, allocator)
-	case App_Close:  delete(c.confirm, allocator)
-	case App_Input:  ss(c.events, allocator)
-	case App_Events: delete(c.topic, allocator)
-	case App_Call:
-		delete(c.method, allocator)
-		delete(c.params, allocator)
-	case App_Call_Done:
-		delete(c.wire, allocator)
-		delete(c.error, allocator)
-		delete(c.code, allocator)
-		delete(c.file, allocator)
-		delete(c.data, allocator)
-	}
-}
-
 // An app's answer, from its line as sent (socket.odin): data verbatim (no
 // re-marshal); an error's code and its other fields (traceback, path…) go in data.
 App_Result :: struct {

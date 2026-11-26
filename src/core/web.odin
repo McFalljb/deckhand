@@ -51,7 +51,7 @@ WEB_ACCESS_QUESTION :: "Allow browsers to connect to this machine? A browser you
 
 Set_Web_Access :: struct {
 	on:      bool,
-	confirm: string, // turning it on: the user confirms first (WEB_ACCESS_QUESTION)
+	confirm: string `cmd:"omit,red=token"`, // turning it on: the user confirms first (WEB_ACCESS_QUESTION)
 }
 
 Set_Web_Listen :: struct {

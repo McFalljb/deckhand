@@ -28,8 +28,8 @@ WEB_FILE_MAX :: 4 << 20 // a file a browser views or saves: at most this many by
 // browser has; the same file answers {same: true} without its text.
 File_Read :: struct {
 	path:  string, // absolute
-	since: string,
-	image: bool, // the bytes of a PNG, JPEG, GIF, BMP or WebP (base64, its type from its first bytes) instead of text
+	since: string `cmd:"omit"`,
+	image: bool `cmd:"omit"`, // the bytes of a PNG, JPEG, GIF, BMP or WebP (base64, its type from its first bytes) instead of text
 }
 
 // Saves a browser's edit of a project's text file (an existing regular file, replaced atomically,
@@ -37,9 +37,9 @@ File_Read :: struct {
 // (data.code "changed") unless force.
 File_Save :: struct {
 	path:  string, // absolute
-	text:  string,
-	base:  string,
-	force: bool,
+	text:  string `cmd:"red=len:text_bytes"`,
+	base:  string `cmd:"omit"`,
+	force: bool `cmd:"omit"`,
 }
 
 @(private = "file")

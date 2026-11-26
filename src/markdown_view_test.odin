@@ -227,3 +227,55 @@ markdown_source_stays_read_only :: proc(t: ^testing.T) {
 	editor_reopen(e)
 	testing.expect(t, e.readonly, "read-only after editor_reopen")
 }
+
+// The preview's safety rules, over tests/markdown/corpus/safety.md: raw HTML is never shown as
+// markup (an HTML block shows its text, inline tags are dropped), an image is never fetched nor
+// followed (it is not a link), and following a link opens only http, https and mailto outside
+// Deckhand: javascript:, data:, file:, vbscript: and other schemes are refused however they are
+// spelled (case, entities, escapes, angle brackets, references, autolinks).
+@(test)
+markdown_safety_rules :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, tab := md_setup(t, "safety.md", #load("../tests/markdown/corpus/safety.md", string))
+	v := md_view_of(tab)
+	testing.expect(t, v != nil && v.laid, "laid out")
+	shown := md_shown_text()
+	for tag in ([]string{"<a ", "<img", "<iframe", "<script", "<style", "<div", "onerror", "onclick", "<title", "<textarea"}) {
+		testing.expectf(t, !strings.contains(strings.to_lower(shown, context.temp_allocator), tag), "the preview shows %q:\n%s", tag, shown)
+	}
+	testing.expect(t, strings.contains(shown, "markdown inside an html block"), "an HTML block's text is shown")
+	// images are not links: not in the link list, and not followable
+	for u in v.lay.links {
+		testing.expectf(t, !strings.has_prefix(u, "https://tracker.") && u != "data:image/png;base64,iVBORw0KGgo=", "an image's source is a link: %q", u)
+	}
+	r := core.run_command(core.Markdown_Follow{tab_id = tab, url = "https://tracker.example.com/pixel.gif"}, {kind = .UI})
+	testing.expect_value(t, r.error, "not a link of this document")
+	r = core.run_command(core.Markdown_Follow{tab_id = tab, url = "javascript:alert(2)"}, {kind = .UI})
+	testing.expect_value(t, r.error, "not a link of this document")
+	// every link of the document, clicked by the user: only web and mail links leave Deckhand
+	links := make([dynamic]string, context.temp_allocator)
+	for u in v.lay.links do append(&links, strings.clone(u, context.temp_allocator))
+	testing.expect(t, len(links) >= 25, fmt.tprintf("%d links", len(links)))
+	refused := 0
+	for u in links {
+		before := len(opened)
+		r = core.run_command(core.Markdown_Follow{tab_id = tab, url = u}, {kind = .UI})
+		core.inbox_drain()
+		scheme := ""
+		for c, i in u {
+			if c == ':' {
+				if i > 1 do scheme = strings.to_lower(u[:i], context.temp_allocator)
+				break
+			}
+			if !(c < 128 && is_ascii_alnum(u8(c)) || c == '+' || c == '-' || c == '.') do break
+		}
+		web := scheme == "http" || scheme == "https" || scheme == "mailto"
+		if len(opened) > before do testing.expectf(t, web, "opened %q", u)
+		if scheme != "" && !web {
+			testing.expectf(t, !r.ok && len(opened) == before, "followed %q (%v)", u, r)
+			refused += 1
+		}
+	}
+	testing.expect(t, refused >= 15, fmt.tprintf("%d dangerous links refused", refused))
+	testing.expect(t, len(opened) >= 4, fmt.tprintf("%d web links opened", len(opened)))
+}

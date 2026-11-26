@@ -87,7 +87,7 @@ lazy continuation</p>
 <li><input disabled="" type="checkbox"> open task</li>
 <li><input checked="" disabled="" type="checkbox"> done task</li>
 <li><input checked="" disabled="" type="checkbox"> upper done task</li>
-<li><input disabled="" type="checkbox"> </li>
+<li><input disabled="" type="checkbox"></li>
 <li>[x]no space after</li>
 <li>not a task [ ] here
 <ul>
@@ -211,9 +211,18 @@ alert("not run")
 </table>
 </li>
 </ul>
-<p>| not | a table |
-| --- |
-| x | y |</p>
+<table>
+<thead>
+<tr>
+<th>not</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>x</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <p>Final paragraph with <a href="/reference-url" title="Ref Title">ref</a> and <a href="with%20spaces.md" title="single">case ref</a> and <a href="/reference-url" title="Ref Title">full</a>.</p>
 <p>Unclosed fence follows</p>
@@ -302,7 +311,6 @@ Document line=1
     Item line=76 task=2
       Paragraph line=76
     Item line=77 task=1
-      Paragraph line=77
     Item line=78
       Paragraph line=78
     Item line=79
@@ -373,7 +381,11 @@ Document line=1
         Table_Row line=149
           Table_Cell line=149
           Table_Cell line=149
-  Paragraph line=151
+  Table line=151 aligns=["None"]
+    Table_Row line=151 header
+      Table_Cell line=151
+    Table_Row line=153
+      Table_Cell line=153
   Thematic_Break line=157
   Paragraph line=161
   Paragraph line=163

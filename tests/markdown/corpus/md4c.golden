@@ -1,0 +1,162 @@
+<h1>Where md4c parses differently from the parser before it</h1>
+<p>Each case below rendered differently before the switch to md4c (#195); the golden file pins how it
+renders now. The pull request lists what each one did before.</p>
+<h2>A table after a paragraph line</h2>
+<p>Results:
+| a | b |
+|---|---|
+| 1 | 2 |</p>
+<h2>A delimiter row with fewer cells than the header</h2>
+<table>
+<thead>
+<tr>
+<th>one</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>x</td>
+</tr>
+</tbody>
+</table>
+<h2>A table ends only at a blank line</h2>
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+</tr>
+<tr>
+<td>## heading after the table</td>
+</tr>
+</tbody>
+</table>
+<h2>A pipe in a code span in a table cell</h2>
+<table>
+<thead>
+<tr>
+<th>command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ls | wc -l</code></td>
+</tr>
+</tbody>
+</table>
+<h2>Single tildes inside a word</h2>
+<p>H~2~O and E=mc~2~</p>
+<h2>Indented HTML after a paragraph</h2>
+<p>para</p>
+    <div>indented four</div>
+<h2>A thematic break after a reference definition</h2>
+<hr />
+<h2>Looseness after an HTML block in an item</h2>
+<ul>
+<li>
+<div>
+html
+</div>
+</li>
+<li>item</li>
+<li>item two</li>
+</ul>
+<h2>An item that starts with indented code</h2>
+<ol>
+<li>
+<pre><code>code
+</code></pre>
+para</li>
+</ol>
+<h2>A reference definition then a list in an item</h2>
+<ul>
+<li>
+<ul>
+<li>nested</li>
+</ul>
+</li>
+</ul>
+<h2>Continuation lines keep no indentation</h2>
+<ol>
+<li>
+<h2>heading</h2>
+<p>back<br />
+slash</p>
+</li>
+</ol>
+<h2>Backticks: a long run that never closes</h2>
+<p>````````` x <code>code one</code>, <code>.</code>, more <code>code two</code>; <code>x</code> end</p>
+<h2>An empty task item</h2>
+<ul>
+<li><input disabled="" type="checkbox"></li>
+<li><input checked="" disabled="" type="checkbox"> done</li>
+</ul>
+---- blocks
+Document line=1
+  Heading line=1 level=1 anchor="where-md4c-parses-differently-from-the-parser-before-it"
+  Paragraph line=3
+  Heading line=6 level=2 anchor="a-table-after-a-paragraph-line"
+  Paragraph line=8
+  Heading line=13 level=2 anchor="a-delimiter-row-with-fewer-cells-than-the-header"
+  Table line=15 aligns=["None"]
+    Table_Row line=15 header
+      Table_Cell line=15
+    Table_Row line=17
+      Table_Cell line=17
+  Heading line=19 level=2 anchor="a-table-ends-only-at-a-blank-line"
+  Table line=21 aligns=["None"]
+    Table_Row line=21 header
+      Table_Cell line=21
+    Table_Row line=23
+      Table_Cell line=23
+    Table_Row line=24
+      Table_Cell line=24
+  Heading line=26 level=2 anchor="a-pipe-in-a-code-span-in-a-table-cell"
+  Table line=28 aligns=["None"]
+    Table_Row line=28 header
+      Table_Cell line=28
+    Table_Row line=30
+      Table_Cell line=30
+  Heading line=32 level=2 anchor="single-tildes-inside-a-word"
+  Paragraph line=34
+  Heading line=36 level=2 anchor="indented-html-after-a-paragraph"
+  Paragraph line=38
+  Html_Block line=39
+  Heading line=41 level=2 anchor="a-thematic-break-after-a-reference-definition"
+  Thematic_Break line=44
+  Heading line=46 level=2 anchor="looseness-after-an-html-block-in-an-item"
+  List line=48 ordered=false start=0 bullet='-' tight=true
+    Item line=48
+      Html_Block line=48
+    Item line=52
+      Paragraph line=52
+    Item line=53
+      Paragraph line=53
+  Heading line=55 level=2 anchor="an-item-that-starts-with-indented-code"
+  List line=57 ordered=true start=1 bullet='.' tight=true
+    Item line=57
+      Code_Block line=57 info=""
+      Paragraph line=59
+  Heading line=61 level=2 anchor="a-reference-definition-then-a-list-in-an-item"
+  List line=63 ordered=false start=0 bullet='-' tight=false
+    Item line=63
+      List line=65 ordered=false start=0 bullet='-' tight=true
+        Item line=65
+          Paragraph line=65
+  Heading line=67 level=2 anchor="continuation-lines-keep-no-indentation"
+  List line=69 ordered=true start=1 bullet='.' tight=false
+    Item line=69
+      Heading line=69 level=2 anchor="heading"
+      Paragraph line=71
+  Heading line=74 level=2 anchor="backticks-a-long-run-that-never-closes"
+  Paragraph line=76
+  Heading line=78 level=2 anchor="an-empty-task-item"
+  List line=80 ordered=false start=0 bullet='-' tight=true
+    Item line=80 task=1
+    Item line=81 task=2
+      Paragraph line=81
+---- links

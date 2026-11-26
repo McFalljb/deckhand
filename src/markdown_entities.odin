@@ -1,6 +1,6 @@
 package main
 
-// Named character references for Markdown (markdown_inline.odin): the whole
+// Named character references for Markdown (md_entity in markdown.odin): the whole
 // HTML5 table (https://html.spec.whatwg.org/entities.json), the 2125 names that
 // end in ';' (the 2,231 entries also count legacy names without one, which
 // CommonMark does not take). Unknown names stay literal text, as CommonMark

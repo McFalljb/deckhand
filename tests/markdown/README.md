@@ -1,7 +1,8 @@
 # Markdown spec examples
 
-The Markdown parser's tests (`src/markdown_test.odin`) render these examples to HTML and
-compare them with the expected output.
+The Markdown parser's tests (`src/markdown_test.odin`: md4c, `vendor/md4c/`, and the tree
+`src/markdown.odin` builds from it) render these examples to HTML and compare them with the
+expected output.
 
 | File | Source | Licence |
 |---|---|---|
@@ -11,6 +12,12 @@ compare them with the expected output.
 Both files keep the spec's format: an example is the line
 ````````````````````````````````` example N Section`, the Markdown, a line with a single `.`,
 the HTML, and a closing line of 32 backticks; `→` stands for a tab.
+
+GFM examples 203 and 9006 are skipped (`MD4C_GFM_DIFFERS` in `src/markdown_test.odin`): md4c's
+table rules differ there (a delimiter row with fewer cells than the header still makes a table; a
+table cannot start right after a paragraph line). `corpus/` pins those and md4c's other
+differences from the parser before it (`corpus/md4c.md`), and the tree of a few documents
+(`src/markdown_corpus_test.odin`; `DECKHAND_MD_GOLDEN=write` rewrites the `.golden` files).
 
 Left out on purpose: CommonMark examples 606, 608, 611 and 612 (bare URLs and e-mail
 addresses that GFM's autolink extension links, which we follow), and the GFM spec's copies of
@@ -38,7 +45,8 @@ while i < len(lines):
     i += 1
 PY
 DECKHAND_MD_SPEC=/tmp/examples.txt odin test src -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_NAMES=main.markdown_spec_report
+# (after a ./build.sh: src links build/md4c.a)
 ```
 
-Last run (2026-11-01): CommonMark 0.31.2: 648/652 (the four above); GFM spec extension
-sections: all pass.
+Last run (2026-11-26, md4c 0.6.0): CommonMark 0.31.2: 648/652 (the four above); GFM spec
+extension sections: as with the parser before it, but for table example 203.

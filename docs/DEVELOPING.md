@@ -55,7 +55,8 @@ builds without browser tabs and without the download.
 
 On its first run `build.sh` also compiles the sokol C libraries, Clay (from the pinned
 `vendor/clay/clay.h` into `build/clay-odin/`, next to a copy of the submodule's Odin bindings), the
-CoreText text backend and stb_truetype. `src/` imports `build/clay-odin`, so `odin test src` and
+CoreText text backend, stb_truetype and md4c (the Markdown parser, from `vendor/md4c/` into
+`build/md4c.a`). `src/` imports `build/clay-odin`, so `odin test src` and
 the editor's Odin tooling need one `./build.sh` first. (The submodule's prebuilt macOS `clay.a`
 targets macOS 15, so it is not used.) The core's one C library, zstd's decoder (it reads Codex's
 compressed rollouts), is compiled by `scripts/build-zstd.sh` from `vendor/zstd/zstddeclib.c` (zstd's
@@ -318,6 +319,7 @@ so the Windows library keeps strong compiler_rt symbols; Windows linking is unte
 | Odin | dev-2026-09 |
 | CEF | `vendor/cef/VERSION` |
 | Browser client (`web/`): esbuild, TypeScript, Preact, xterm.js | `web/package.json`, locked in `web/package-lock.json`; Node 22.18+ |
+| md4c (Markdown) | `v0.6.0` (`vendor/md4c/VERSION`: the commit and checksums) |
 | tree-sitter + 13 grammars | lib `v0.27.1`; grammars at pinned tags in `vendor/tree-sitter/` (`VERSIONS`; refresh with `scripts/vendor-tree-sitter.sh`) |
 
 libghostty-vt's C ABI is not stable yet, and `src/ghostty/ghostty.odin` is hand-written for
@@ -697,7 +699,7 @@ core/settings_files.odin  Settings' files and rows: agents' settings files by an
 core/settings_registry.odin  every setting: its section, card, label, action and command
 ui_settings_page.odin  the Settings page (⌘,): sections, search, cards; the gear is Quick settings (ui_toolbar.odin)
 editor*.odin, core/editor*_core.odin  editor tabs
-markdown*.odin      the Markdown parser and preview
+markdown*.odin      Markdown tabs: the tree from md4c (vendor/md4c) and the preview
 browser*.odin, core/browser*.odin  browser tabs (BROWSER.md); app_tab.odin, frames.odin app tabs (ENGINE-BRIDGE.md)
 core/panes*.odin, panes_drag.odin, ui_panes.odin  split panes
 actions.odin        user-facing actions (label, shortcut, command): the palette, buttons, menus

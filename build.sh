@@ -343,6 +343,9 @@ case "$MODE" in
     python3 -B tests/scenes_test.py -q
     # every environment read names a known variable (test knobs go through hook_env)
     python3 -I scripts/check-env-reads.py
+    # a test stops only what it started: no unscoped pkill or killall in tests/ (and the check's test)
+    python3 -I scripts/check-scoped-kills.py
+    sh tests/check-scoped-kills-test.sh
     # the Deckhand CLI for Claude tabs (its tests share a fake environment: one thread)
     odin test tools/deckhand-cli -out:build/deckhand-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
     build_claude

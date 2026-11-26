@@ -71,8 +71,13 @@ MD
 (cd "$P/recipe-box" && git init -q && git add . \
   && git -c user.name=demo -c user.email=demo@example.invalid -c commit.gpgsign=false commit -qm init)
 
-# the core and the demo pis outlive the window (sessions keep running): stop this run's ones
-stop_left() { pkill -f "$ROOT/build/(Deckhand\.app|deckhand)|$ROOT/tests/scripts/demo-pi\.py" 2>/dev/null || true; }
+# the core and the demo pis outlive the window (sessions keep running): stop this run's ones, the
+# core and holder of its own runtime dir ($W/data/run) only, never a Deckhand the user runs from
+# this checkout's build
+stop_left() {
+  pkill -f -- "--run $W/data/run( |$)" 2>/dev/null || true
+  pkill -f "$ROOT/tests/scripts/demo-pi\.py" 2>/dev/null || true
+}
 trap stop_left EXIT
 HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/zsh DECKHAND_SCRIPT=tests/scripts/readme-shot.txt \
   DECKHAND_DATA_DIR="$W/data" DECKHAND_BIN="$ROOT/build/deckhand" \

@@ -738,22 +738,45 @@ agy_accounts_sync :: proc() -> string {
 
 // Every folder Deckhand guards as agy's (agy_credential): each account's profile, every folder
 // found, the removed ones while they hold agy's files, agy's own default profile when it does, and
-// <root>/profiles itself. Never HOME or above it. Temp.
+// <root>/profiles itself; each as written and where it leads. Never HOME or above it. Made once a
+// frame or core tick (a tree asks for every entry), again when the accounts may differ. Temp.
+@(private = "file")
+dirs_cache: struct {
+	frame, gen: u64,
+	list:       [dynamic]string, // heap
+	ok:         bool,
+}
+
 agy_profile_dirs :: proc() -> []string {
-	out := make([dynamic]string, context.temp_allocator)
-	h := agy_home_now()
-	add :: proc(out: ^[dynamic]string, d, h: string) {
-		c := clean_abs(d)
-		if c == "" || c == "/" || slice.contains(out[:], c) do return
-		if h != "" && (within(h, c) || within(fs_real(h), fs_real(c))) do return // HOME or above: never all of it
-		append(out, c)
+	heap := runtime.heap_allocator()
+	c := &dirs_cache
+	frame := app_frames_called + core_loop.ticks
+	if !c.ok || c.frame != frame || c.gen != agy_accounts_gen {
+		accts := agy_accounts() // reads the file again when it changed (bumps the gen)
+		for d in c.list do delete(d, heap)
+		clear(&c.list)
+		if c.list.allocator.procedure == nil do c.list = make([dynamic]string, heap)
+		h := agy_home_now()
+		add :: proc(out: ^[dynamic]string, d, h: string) {
+			for x in ([2]string{clean_abs(d), fs_real(clean_abs(d))}) {
+				if x == "" || x == "/" do continue
+				dup := false
+				for y in out do if y == x do dup = true
+				if dup do continue
+				if h != "" && (within(h, x) || within(fs_real(h), x)) do continue // HOME or above: never all of it
+				append(out, strings.clone(x, runtime.heap_allocator()))
+			}
+		}
+		add(&c.list, agy_profiles_root(), h)
+		for a in accts do add(&c.list, a.dir, h)
+		for d in found_dirs do add(&c.list, d, h)
+		for d in file_load().removed do if agy_profile_marked(d) do add(&c.list, d, h)
+		if d := agy_default_home(); agy_profile_marked(d) do add(&c.list, d, h)
+		c.frame, c.gen, c.ok = frame, agy_accounts_gen, true
 	}
-	add(&out, agy_profiles_root(), h)
-	for a in agy_accounts() do add(&out, a.dir, h)
-	for d in found_dirs do add(&out, d, h)
-	for d in file_load().removed do if agy_profile_marked(d) do add(&out, d, h)
-	if d := agy_default_home(); agy_profile_marked(d) do add(&out, d, h)
-	return out[:]
+	out := make([]string, len(c.list), context.temp_allocator)
+	for d, i in c.list do out[i] = strings.clone(d, context.temp_allocator)
+	return out
 }
 
 // Whether p (under the profile d) is the user's own config agy reads: GEMINI.md and AGENTS.md at its
@@ -802,9 +825,10 @@ agy_credential :: proc(p: string) -> bool {
 		for x in homes do if x != "" && (d == x || under(x, d)) do return true
 		return false
 	}
-	for d in agy_profile_dirs() do for c in ([2]string{d, fs_real(d)}) {
+	profiles := agy_profiles_root()
+	for c in agy_profile_dirs() {
 		if home_or_above(c, homes) || !under(p, c) do continue
-		if c == agy_profiles_root() || c == fs_real(agy_profiles_root()) do return true // all of it
+		if c == profiles || c == fs_real(profiles) do return true // all of it
 		return !config_entry(p, c)
 	}
 	for d := filepath.dir(p); !home_or_above(d, homes); d = filepath.dir(d) {

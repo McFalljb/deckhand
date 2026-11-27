@@ -188,9 +188,15 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   the agy in their name is gone. Before each
   launch, folders whose pi and agy processes are both gone are removed (t3code's
   `retireAntigravityRuntimeTempDirs` removes all of them, as one process owns its profile; pi
-  processes share one). Closing agy: its stdin first, SIGTERM if it is still there after 1 s,
-  SIGKILL after 5 s more. agy's own children are not killed as a group (nor in t3code): an open
-  risk once approvals let agy run commands.
+  processes share one). agy runs as the leader of its own process group (spawned detached), and
+  every signal goes to the group, so what agy starts ends with it (t3code signals agy alone).
+  Closing agy: its stdin first, SIGTERM to the group if agy is still there after 1 s, SIGKILL
+  after 2 s more; once agy exits, whatever is left in its group is ended (SIGTERM, then SIGKILL)
+  before its run folder is removed. All of a pi's agy processes close in parallel, so the end of a
+  session or quitting waits about 3 s at most; pi's own exit SIGTERMs every group at once. The
+  sweep ends an agy whose pi is gone (only if its command line names the profile, so never a reused
+  pid) and what a dead agy left in its group, then removes the folder. A run folder is made only
+  when agy is started.
 - **Mode and model, fail closed, before every prompt**: agy's own `config_option_update` and
   `current_mode_update` for the session are tracked whether or not a turn runs (as t3code does).
   Before every prompt, `continue` included, the session is set to `default` again (no request when
@@ -242,11 +248,13 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `session/cancel` and waits 10 s, then stops the process. Usage is agy's per-turn
   `PromptResponse.usage`; cost 0. pi's summaries (compaction, branch summaries) are answered
   without agy; replays (`disableContinuation`) are refused.
-- **Open points**: two pi processes taking over the same stale session lock at the same instant
-  could both hold it (a rename-based lock would close that); the record keeps a file per agy
-  session per profile, never pruned (each capped at 200 answers); quitting pi waits for each agy to
-  end, up to 6 s for one that ignores its stdin and SIGTERM; a command that makes a run folder and
-  then never starts agy leaves the folder until the next sweep after this pi exits.
+- **Locks and pruning** (`lib/agy-lock.ts`): a session's lock and `accounts.json.lock` are
+  written to a temp file and hard-linked into place, so they appear whole and only when no lock is
+  there; a lock with no content counts as held for 2 s. A stale lock (its pid gone) is renamed
+  aside under a unique name and taken over only if the file moved is the one seen stale (its
+  inode); else it is put back. Each launch's sweep prunes a session record not written for 30 days
+  (its agy session is then not picked up again: a new one, with catch-up text), locks whose
+  process is gone, and lock temp files over an hour old.
 - **Tests**: `test/antigravity.test.ts` against `test/fake-agy.mjs`, a stand-in agy (t3code's
   fixtures' shapes; it checks the method against the profile's settings and its environment, and
   logs the variables it got), with a temporary HOME and accounts folder; never a real agy. `test/temp-home.ts`, imported first

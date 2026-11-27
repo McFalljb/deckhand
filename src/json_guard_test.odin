@@ -659,6 +659,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/pi_integration.odin", "manifest_load", "jg.unmarshal", "", ""},
 		{"src/core/reload.odin", "settings_digest", "jg.parse", "", ""},
 		{"src/core/reload.odin", "pkg_version", "jg.parse", "", ""},
+		{"src/core/agy_detect.odin", "agy_json", "jg.parse", "", ""}, // accounts.json's agyPath, agy-seen.json (size-checked first)
 		{"src/core/reload.odin", "pkg_name", "jg.parse", "", ""},
 		{"src/core/reload.odin", "add_settings_paths", "jg.parse", "", ""},
 		{"src/core/reload.odin", "add_local", "jg.parse", "", ""},

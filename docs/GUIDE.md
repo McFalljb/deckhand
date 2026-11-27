@@ -1778,6 +1778,13 @@ recommended items. **Install…**, **Update…** and **Show…** open the setup 
 step, where the command shows and runs. **Refresh** looks again. pi's card shows only when pi is
 installed; Claude Code's files once it has been used.
 
+pi's card also has **Antigravity (through pi)**: whether Google's Antigravity CLI (agy) is there
+for pi's Antigravity models (see [Google Antigravity in pi tabs](#google-antigravity-in-pi-tabs-preview)).
+Deckhand finds it the way pi does: the path set with `/antigravity path`, else `agy` on your
+`PATH`, and shows the version agy last reported in a pi tab. It never runs agy to look, and
+never installs it: when it is missing the row says to install agy 1.5.18 or newer from
+Google's getting-started page.
+
 **pi.** Its files: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),
 `modes.json`, `keybindings.json`, `mcp.json`, your global instructions file (`AGENTS.md` or
 similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills`, `extensions` and `themes`.

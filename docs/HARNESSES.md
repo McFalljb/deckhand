@@ -382,8 +382,9 @@ wire form of its own there too.
 **A row** (`Harness_Row`): `harness`; `id` (stable: the state snapshot, Settings rows, the
 runner); `name`; `kind` (`Harness`, `Built_In`: Deckhand's own, ships in the app, never installed,
 or `Third_Party`); `need` (`Required` or `Recommended`); `min_version`; `detect` (`Binary`,
-`Integration`, `Pi_Package` with `detect_arg` the npm name), always by looking, never by running;
-`install` (the command when it is missing; "" for built-ins); `update` per install layout (§7) or
+`Integration`, `Pi_Package` with `detect_arg` the npm name, `Agy`), always by looking, never by running;
+`install` (the command when it is missing; "" for built-ins and for `antigravity`, which is shown
+only); `update` per install layout (§7) or
 `update_any` for a third-party item; `why` (one line); `source` (where the command comes from).
 
 | id | Harness | Kind | Need | Min | Detected by | Install | Source |
@@ -395,6 +396,7 @@ or `Third_Party`); `need` (`Required` or `Recommended`); `min_version`; `detect`
 | `pi-ask-user` | pi | third-party | recommended | — | `npm:pi-ask-user…` in `packages` | `pi install npm:pi-ask-user@0.17.0` | npmjs.com/package/pi-ask-user; pin: a version in daily use; no advisories (edlsh/pi-ask-user) |
 | `pi-web-access` | pi | third-party | recommended | 0.24.1 (GHSA-8phw-6qw6-xhq6) | `npm:pi-web-access…` in `packages` | `pi install npm:pi-web-access@0.47.0` | npmjs.com/package/pi-web-access; pin: npm's latest on 2026-11-09; minimum: the GHSA-8phw-6qw6-xhq6 fix (nicobailon/pi-web-access advisory, ≤ 0.24.0) |
 | `rpiv-btw` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-btw…` in `packages` | `pi install npm:@juicesharp/rpiv-btw@2.15.0` | npmjs.com/package/@juicesharp/rpiv-btw; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
+| `antigravity` | pi | third-party | recommended | 1.5.1 (`AGY_MIN_VERSION`) | the path `/antigravity path` saved in `<data dir>/antigravity/accounts.json` when it is an executable file, else `agy` on the tabs' PATH (`agy_detect`, as `lib/acp.ts` `findAgy`); version from `agy-seen.json`, which the extension writes when agy reports it, trusted only while the binary's size and mtime match. Never run | — (shown only: "install agy 1.5.18+" and Google's link; Deckhand never installs agy) | antigravity.google/docs/getting-started |
 | `claude` | Claude Code | harness | required | 2.1.295 (`CLAUDE_MIN_VERSION`) | `claude` on the tabs' PATH or in `~/.local/bin`, `~/.claude/local`, else the login shell's `command -v claude`; version from where it links (`claude_version_of`) | `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh \| bash` | code.claude.com/docs/en/setup, "Native Install (Recommended)" |
 | `claude-plugin` | Claude Code | built in | required | (Claude 2.1.295) | `integrations/claude-code` in the build | — | §5 |
 | `codex` | Codex | harness | required | 0.163.0 (`CODEX_MIN_VERSION`) | `codex` on the tabs' PATH, else the login shell's `command -v codex`; version from where it links (the npm package's `package.json`, Homebrew's `Caskroom/codex/<v>/`, Codex's installer's `releases/<v>-<target>/`), else `codex --version` under a throwaway `CODEX_HOME` (`codex_version_of`); signed in: `codex login status` per Codex home (exit 1 = signed out, a note), run on a worker | `npm install -g @openai/codex@latest` | github.com/openai/codex README |

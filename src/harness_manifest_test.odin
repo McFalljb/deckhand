@@ -842,7 +842,7 @@ harness_agy_detect :: proc(t: ^testing.T) {
 	testing.expect_value(t, bin, fmt.tprintf("%s/agy", bin_dir))
 	testing.expect_value(t, v, "")
 	// the saved path first, when it is an executable file
-	hm_write(fmt.tprintf("%s/accounts.json", data), fmt.tprintf(`{"agyPath":"%s","accounts":[]}`, saved), 0o600)
+	hm_write(fmt.tprintf("%s/accounts.json", data), fmt.tprintf(`{{"agyPath":"%s","accounts":[]}}`, saved), 0o600)
 	bin, _ = core.agy_detect(data, bin_dir)
 	testing.expect_value(t, bin, saved)
 	hm_write(fmt.tprintf("%s/accounts.json", data), `{"agyPath":"/nowhere/agy","accounts":[]}`, 0o600)
@@ -850,10 +850,10 @@ harness_agy_detect :: proc(t: ^testing.T) {
 	testing.expect_value(t, bin, fmt.tprintf("%s/agy", bin_dir))
 	// the version agy reported, only while the binary is the one it was seen as
 	_, st := core.path_stat(bin)
-	hm_write(fmt.tprintf("%s/agy-seen.json", data), fmt.tprintf(`{"path":"%s","size":%d,"mtime":%d,"version":"1.5.18"}`, bin, st.size, st.mtime / 1_000_000_000), 0o600)
+	hm_write(fmt.tprintf("%s/agy-seen.json", data), fmt.tprintf(`{{"path":"%s","size":%d,"mtime":%d,"version":"1.5.18"}}`, bin, st.size, st.mtime / 1_000_000_000), 0o600)
 	_, v = core.agy_detect(data, bin_dir)
 	testing.expect_value(t, v, "1.5.18")
-	hm_write(fmt.tprintf("%s/agy-seen.json", data), fmt.tprintf(`{"path":"%s","size":%d,"mtime":%d,"version":"1.5.18"}`, bin, st.size + 1, st.mtime / 1_000_000_000), 0o600)
+	hm_write(fmt.tprintf("%s/agy-seen.json", data), fmt.tprintf(`{{"path":"%s","size":%d,"mtime":%d,"version":"1.5.18"}}`, bin, st.size + 1, st.mtime / 1_000_000_000), 0o600)
 	_, v = core.agy_detect(data, bin_dir)
 	testing.expect_value(t, v, "")
 	// nothing on the PATH, nothing saved: none

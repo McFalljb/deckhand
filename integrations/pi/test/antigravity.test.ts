@@ -764,6 +764,20 @@ test("model and thinking: pi's model id and level select agy's; an unknown model
 	}
 });
 
+
+test("finding 3: an abort while pi's onPayload hook runs ends the turn aborted, and no prompt reaches agy", async () => {
+	const r = rig();
+	try {
+		const ac = new AbortController();
+		const { msg } = await r.turn("hi", { options: { signal: ac.signal, onPayload: async () => void ac.abort() } });
+		assert.equal(msg.stopReason, "aborted");
+		assert.deepEqual(r.prompts(), [], "nothing sent: there is no turn to cancel");
+		const next = await r.turn("again");
+		assert.equal(next.msg.stopReason, "stop", "the session goes on");
+	} finally {
+		await r.ag.closeAll();
+	}
+});
 test("abort: session/cancel, the turn ends aborted, and the session goes on", async () => {
 	const r = rig();
 	try {

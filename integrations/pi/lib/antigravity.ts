@@ -404,9 +404,15 @@ export function createAntigravity(o: AntigravityOptions) {
 			}
 			answer.msg.responseId = agy.sessionId;
 			if (signal?.aborted) return answer.finish("aborted", "Request was aborted");
+			// listening from here: an abort while pi's onPayload hook runs is not lost
+			const ABORT = Symbol("abort"), GONE = Symbol("no answer");
+			const abortSeen = new Promise<typeof ABORT>((resolve) => signal?.addEventListener("abort", () => resolve(ABORT), { once: true }));
+			signal?.addEventListener("abort", onAbort, { once: true });
 			let payload: any = { sessionId: agy.sessionId, prompt: plan.blocks };
 			const replaced = await options.onPayload?.(payload, model);
 			if (replaced !== undefined) payload = replaced;
+			// aborted before the prompt went out: nothing reached agy, so there is no turn to cancel
+			if (aborted || signal?.aborted) return answer.finish("aborted", "Request was aborted");
 			answer.start();
 			st.sink = {
 				update: (u: any) => {
@@ -442,9 +448,6 @@ export function createAntigravity(o: AntigravityOptions) {
 					answer.note(`✗ declined: ${what} (Deckhand does not grant Antigravity approvals yet)`);
 				},
 			};
-			const ABORT = Symbol("abort"), GONE = Symbol("no answer");
-			const abortSeen = new Promise<typeof ABORT>((resolve) => signal?.addEventListener("abort", () => resolve(ABORT), { once: true }));
-			signal?.addEventListener("abort", onAbort, { once: true });
 			let response: any;
 			try {
 				const turn = agy.prompt(payload.prompt ?? plan.blocks);

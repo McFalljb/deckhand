@@ -131,8 +131,11 @@ Google Antigravity CLI over ACP (`agy acp`: JSON-RPC 2.0, one message per line o
 drives it. agy runs the whole turn (model, tools, system prompt) and keeps the conversation and the
 sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or calls Google.
 
-- **Dormant without agy.** `findAgy` (`lib/acp.ts`): `DECKHAND_AGY_PATH` (absolute, executable),
-  else `agy` or `antigravity` on `PATH`; a few stats at load. Not found: the extension registers
+- **Dormant without agy.** `findAgy` (`lib/acp.ts`): the `agyPath` the user set with
+  `/antigravity path` in `accounts.json` (used only when it is an absolute path to an executable
+  file, never looked up; else ignored, and the status says so), else `agy` or `antigravity` on
+  `PATH`; a few stats at load. No environment variable picks the binary (what Deckhand ships reads
+  only the variables `scripts/check-env-reads.py` lists). Not found: the extension registers
   nothing. Found: the accounts' providers, `/antigravity`, `/antigravity-login`, and hooks for
   `session_start`, `session_shutdown` and `session_before_compact`. No tools or flags.
 - **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
@@ -145,9 +148,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   available here" (-32603) mean "not signed in", and the error names the account's command.
 - **Accounts** (`lib/agy-accounts.ts`, after t3code's provider instances): `accounts.json` in
   `<data dir>/antigravity` (macOS `~/Library/Application Support/Deckhand`, or `pi-desk` when only
-  that exists; Linux `$XDG_DATA_HOME/deckhand` or `~/.local/share/deckhand`; `DECKHAND_ANTIGRAVITY_DIR`
-  overrides) holds names, methods (`oauth-personal`, `oauth-business`, `gemini-api-key`,
-  `agent-platform`) and GCP project/location, mode 0600, never a secret. The account `default` is
+  that exists; Linux `$XDG_DATA_HOME/deckhand` or `~/.local/share/deckhand`; tests set `HOME`)
+  holds names, methods (`oauth-personal`, `oauth-business`, `gemini-api-key`, `agent-platform`),
+  GCP project/location and agy's path when set, mode 0600, never a secret. The account `default` is
   implicit (a Google account). Each account is a provider (`antigravity`, `antigravity-<name>`)
   and a profile, `profiles/<name>` (0700): agy runs as `agy acp --gemini-dir <profile>
   --app-data-dir antigravity-acp`, with the method in `antigravity-acp/settings.json`, and the
@@ -174,7 +177,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `acp_token.json`, which is never read, or a key in pi's store) and, with a UI, a menu;
   `add <name> [method]`, `login`, `logout` (agy's ACP `logout`, when advertised; the history
   stays), `remove` (confirmed; its provider unregistered and its profile deleted; `default` stays)
-  and `models [name]`. `/antigravity-login` is the default account's sign-in. Gemini Enterprise
+  `models [name]` and `path [/abs/agy]` (sets agy's path after the same check, or with no
+  argument clears it; every account's provider then runs the new binary). `/antigravity-login` is
+  the default account's sign-in. Gemini Enterprise
   signs in by agy's own browser flow (`authenticate`, its link shown, up to 5 minutes).
   `SUBSCRIPTION_REQUIRED` from agy becomes a message that links https://antigravity.google/docs/plans.
 - **Approvals: none yet.** Every `session/request_permission` is answered `reject_once` (else

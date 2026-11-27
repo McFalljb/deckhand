@@ -241,6 +241,10 @@ out of quota. Each account has its own agy profile, so its sign-in and history s
 - **`/antigravity remove <name>`** removes an account, its profile and its history. The default
   account stays.
 - **`/antigravity models <name>`** lists an account's models again.
+- **`/antigravity path /full/path/to/agy`** runs that agy instead of the one on your `PATH` (it must
+  be an executable file); **`/antigravity path`** alone goes back to your `PATH`. If no agy is on
+  your `PATH` at all, Antigravity's commands are not there either: add agy's folder to your `PATH`
+  first.
 
 An API key or Google variable in pi's environment (`GEMINI_API_KEY`, `GOOGLE_API_KEY`,
 `GOOGLE_CLOUD_PROJECT` and the like) never reaches agy, so it cannot bill a key instead of your
@@ -260,7 +264,6 @@ names the command to run.
 - agy keeps the conversation itself. When pi compacts, it keeps a short note instead of a summary.
   If another model answered earlier in the session, or you went back in `/tree`, Deckhand starts a
   new agy session and gives it the conversation so far as text.
-- Deckhand uses the agy on your `PATH`; to use another one, see [HARNESSES.md §3a](HARNESSES.md#3a-antigravity-in-pi-tabs-preview).
 
 ## How Deckhand runs
 

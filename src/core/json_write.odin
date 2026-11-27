@@ -148,6 +148,7 @@ FOLD_NAMES := [Sidebar_Fold]string {
 	.Projects = "projects",
 	.Chats    = "chats",
 	.This_Mac = "this_mac",
+	.Usage    = "usage",
 }
 
 // ---- commands ----
@@ -970,6 +971,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		}
 		strings.write_byte(b, ']')
 	}
+	if !writing_tab_view do usage_snapshot_json(b, s.usage) // quota and usage per account (usage.odin): numbers and labels, never the account's id
 	claude_history_json(b, s.claude_history[:], s.claude_disk[:], s.claude_disk_chats[:]) // Claude sessions Deckhand ran (claude.odin); not in a pi or Claude tab's own view
 	key(&w, "home")
 	{

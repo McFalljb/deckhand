@@ -57,12 +57,13 @@ assert_not_drawn M2
 assert_drawn Add a machine…
 # this Mac's own header (its name from the core's live section)
 assert_drawn this Mac
+# an online machine's menu (its core takes a hub's add_project: Add folder on m2…, #136)
 rclickid machhead 1
-assert_menurows Open web page…|-|Rename…|Remove…|-|Machines settings…
+assert_menurows Add folder on m2…|Open web page…|-|Rename…|Remove…|-|Machines settings…
 key escape
 # its "…" opens the same menu; an online machine's header has no other button
 clickid machmore 1
-assert_menurows Open web page…|-|Rename…|Remove…|-|Machines settings…
+assert_menurows Add folder on m2…|Open web page…|-|Rename…|Remove…|-|Machines settings…
 key escape
 # this Mac's "…" (and right click): add a machine, or its settings
 clickid machmore 0
@@ -77,6 +78,9 @@ wait 500
 assert_drawn Machines
 assert_not_drawn experimental
 assert_not_drawn via ·
+# (m2's row puts the switch below this window's fold: the page's search finds it)
+type allow other
+eventually
 assert_drawn Allow other
 clickid spi @deckhand:machine-reachable
 wait 500
@@ -84,6 +88,9 @@ assert_drawn Allow other machines to connect to this Mac?
 clickid confirm_no
 wait 300
 waitstate 3000 settings.machines_reachable false
+# Esc clears the search, then leaves the page
+key escape
+wait 300
 key escape
 wait 300
 assert_rows open -

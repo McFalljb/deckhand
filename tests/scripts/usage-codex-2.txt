@@ -1,0 +1,23 @@
+# The USAGE section, run 2 (tests/scripts/usage-codex.sh): after a restart the rows come back
+# from the saved workspace with their age (the script made them ten minutes old: due), still
+# folded: no read while folded. Unfolded: every account read.
+wait 1500
+window_active on
+assert_state sidebar.folded.usage true
+assert_state usage.# 4
+assert_state usage.0.status ok
+assert_state usage.0.bars.0.percent 42
+assert_state usage.1.bars.1.level full
+assert_state usage.3.status no_limits
+assert_state usage.0.tried_at 0
+assert_state usage.0.line 5h 42% · 10m ago
+assert_state usage.1.line wk 97% · 10m ago
+wait 3000
+assert_state usage.0.tried_at 0
+assert_state usage.0.reading false
+# unfolded: every account read again (Key's error stays the same)
+clickid navhead 4
+waitstate 5000 sidebar.folded.usage false
+waitstate 60000 usage.3.error failed to fetch codex rate limits: 503
+shot usage-codex/restored
+quit

@@ -761,14 +761,10 @@ fs_create_file :: proc(path: string, caller: Caller) -> (abs: string, err: strin
 	if e != "" do return "", e
 	if os.exists(p) do return "", "already exists"
 	if os.make_directory_all(filepath.dir(p)) != nil && path_kind(filepath.dir(p)) != .Dir do return "", "cannot create its folder"
-	// in pi's config folders (settings_editable: prompts/, skills/, extensions/, themes/; never a
-	// credential's name) a private file is taken for a credential (settings_credential), so the
-	// file made there is 0644 whatever the umask; asked before it exists (by name and place only)
-	config := false
-	if _, ok := settings_editable(p); ok do config = true
+	// the user's umask decides its mode, in pi's folders too: they are protected by name, not mode
+	// (settings_credential)
 	f, ferr := os.open(p, {.Write, .Create, .Excl}, os.Permissions_Default_File)
 	if ferr != nil do return "", fmt.tprintf("cannot create: %v", ferr)
-	if config do os.fchmod(f, os.perm_number(0o644))
 	os.close(f)
 	fs_changed_ours(p)
 	return p, ""

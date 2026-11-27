@@ -22,7 +22,9 @@ macOS 14 or later on Apple silicon (arm64), [Odin](https://odin-lang.org/) `dev-
 `clang` from the Xcode command line tools. Intel Macs can build Deckhand, but without browser
 tabs: CEF is wired up for arm64 only. Node 22.18 or later runs the pi integration's tests
 (`./build.sh test` skips them without `node`) and builds the browser client
-([below](#the-browser-client)). To run what you build you need at least one coding
+([below](#the-browser-client)). The test runners need `python3`; macOS's 3.9 will do, except for
+the `codex` scene, whose fake Codex reads TOML (`tomllib`, Python 3.11 or later: the scene takes
+the first `python3` on `PATH` that has it, else Homebrew's). To run what you build you need at least one coding
 agent on your login shell's `PATH`: [pi](https://pi.dev) 1.4.0 or newer (Atlas and jobs need pi),
 Claude Code 2.1.295 or newer, or Codex 0.163.0 or newer. The pi integration and the Claude Code
 plugin ship with Deckhand (`integrations/`); Codex gets its hooks and tools per run
@@ -688,6 +690,7 @@ core/login_env.odin the login shell's environment (Launch environment, below)
 core/sessions.odin, titles.odin  pi's sessions and their titles
 core/claude*.odin   Claude Code tabs (CLAUDE-TABS.md); ../tools/deckhand-cli/ the CLI its plugin runs
 core/codex.odin     Codex tabs: command line, per-run hooks and MCP server, version rule (CODEX.md)
+core/usage.odin, usage_codex.odin, ui_usage.odin  quota and usage per account: the entries and rows, Codex's app-server source, the USAGE section (GUIDE.md "Usage", CODEX.md §6b)
 core/harness*.odin, ui_harness.odin  which coding agents are installed; the checklist's install and update
 core/pi_integration.odin  the bundled pi integration (HARNESSES.md)
 core/agent.odin, drawer.odin  Atlas and its drawer (ATLAS.md)

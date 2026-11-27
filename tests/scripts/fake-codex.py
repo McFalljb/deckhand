@@ -33,11 +33,26 @@ Deckhand starts it in a Codex tab's PTY as
 - FAKE_CODEX_LOG: JSON lines: {"argv"}, {"hook", "exit", "out", "err"} (out must stay empty),
   {"prompt"}.
 - FAKE_CODEX_TOKEN_FILE: the tab's token is appended to it (the scene checks no log holds it).
+- `app-server` (Deckhand's usage read, src/core/usage_codex.odin): JSON lines on stdio as Codex's
+  app-server speaks them. It answers `initialize` (clientInfo.name must be "deckhand"; codexHome =
+  CODEX_HOME, else ~/.codex) and `account/rateLimits/read` (params.excludeResetCreditDetails must be
+  true); any other method, a request before initialize or a bad id is logged as BAD and answered
+  with an error. The home's sign-in decides the answer as Codex's would: no auth.json, "codex
+  account authentication required to read rate limits"; an auth.json, the home's
+  fake-usage.json's "result" (else a default: 5h 42%, wk 18%, plan plus), or its "mode":
+  "apikey" ("chatgpt authentication required…"), "error" (an internal error), "silent" (never
+  answers the read), "slow" (answers after "delay_ms"). A notification goes out after initialize
+  (Deckhand must skip it). Deckhand must never read auth.json: the scene makes each home's a FIFO,
+  and every start checks that no reader holds it open (BAD otherwise). Nothing under the home is
+  written. FAKE_CODEX_USAGE_LOG: one JSON line per run: {"home", "methods", "client", "bad",
+  "start", "end"} (times in seconds, so the scene can check one read at a time).
 """
 
+import errno
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import time
@@ -270,8 +285,123 @@ class Fake:
         out("done")
 
 
+def auth_reader_attached(path):
+    """Whether someone holds the FIFO at path open for reading (a writer's non-blocking open then
+    succeeds; with no reader it fails with ENXIO). A plain file: no FIFO, nothing to tell."""
+    try:
+        if not stat.S_ISFIFO(os.stat(path).st_mode):
+            return False
+    except FileNotFoundError:
+        return False
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+    except OSError as e:
+        if e.errno == errno.ENXIO:
+            return False
+        raise
+    os.close(fd)
+    return True
+
+
+DEFAULT_USAGE = {
+    "rateLimits": {
+        "limitId": "codex", "limitName": None, "planType": "plus",
+        "primary": {"usedPercent": 42, "windowDurationMins": 300, "resetsAt": int(time.time()) + 3 * 3600},
+        "secondary": {"usedPercent": 18, "windowDurationMins": 10080, "resetsAt": int(time.time()) + 4 * 86400},
+        "credits": {"hasCredits": False, "unlimited": False, "balance": None},
+        "rateLimitReachedType": None, "someFutureField": {"x": 1},
+    },
+    "rateLimitsByLimitId": None,
+    "accountId": "fake-account-1",
+}
+
+
+def app_server():
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.environ.get("HOME", "/nonexistent"), ".codex")
+    auth = os.path.join(home, "auth.json")
+    run = {"home": home, "methods": [], "client": None, "bad": [], "start": time.time()}
+    usage_log = os.environ.get("FAKE_CODEX_USAGE_LOG", "")
+
+    def done(code=0):
+        run["end"] = time.time()
+        if auth_reader_attached(auth):
+            run["bad"].append("auth.json is held open by a reader")
+        if usage_log:
+            with open(usage_log, "a") as f:
+                f.write(json.dumps(run) + "\n")
+        sys.exit(code)
+
+    if auth_reader_attached(auth):
+        run["bad"].append("auth.json is held open by a reader at start")
+    conf = {}
+    try:
+        with open(os.path.join(home, "fake-usage.json")) as f:
+            conf = json.load(f)
+    except (FileNotFoundError, ValueError):
+        pass
+
+    def send(obj):
+        sys.stdout.write(json.dumps(obj) + "\n")
+        sys.stdout.flush()
+
+    inited = False
+    while True:
+        line = sys.stdin.readline()
+        if not line:
+            done()
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            run["bad"].append("not JSON: " + line[:80])
+            continue
+        method, mid = msg.get("method"), msg.get("id")
+        run["methods"].append(method)
+        if "jsonrpc" in msg:
+            run["bad"].append("a jsonrpc field (Codex's app-server omits it)")
+        if method == "initialize":
+            info = (msg.get("params") or {}).get("clientInfo") or {}
+            run["client"] = info.get("name")
+            if info.get("name") != "deckhand" or not info.get("version"):
+                run["bad"].append(f"clientInfo {info}")
+            if mid != 1 or inited:
+                run["bad"].append(f"initialize id {mid}")
+            inited = True
+            send({"id": mid, "result": {"codexHome": home, "platformFamily": "unix", "platformOs": "macos", "userAgent": "fake-codex/0.167.2"}})
+            send({"method": "account/rateLimits/updated", "params": {"rateLimits": {}}})  # a notification: skipped
+        elif method == "initialized":
+            if mid is not None:
+                run["bad"].append("initialized with an id")
+        elif method == "account/rateLimits/read":
+            if not inited:
+                run["bad"].append("a read before initialize")
+            if (msg.get("params") or {}).get("excludeResetCreditDetails") is not True:
+                run["bad"].append("excludeResetCreditDetails not true")
+            mode = conf.get("mode", "ok")
+            if mode == "silent":
+                continue
+            if mode == "slow":
+                time.sleep(conf.get("delay_ms", 1000) / 1000)
+            if not os.path.lexists(auth):  # Codex's own check: its sign-in is there (a stat here)
+                send({"id": mid, "error": {"code": -32600, "message": "codex account authentication required to read rate limits"}})
+            elif mode == "apikey":
+                send({"id": mid, "error": {"code": -32600, "message": "chatgpt authentication required to read rate limits"}})
+            elif mode == "error":
+                send({"id": mid, "error": {"code": -32603, "message": "failed to fetch codex rate limits: 503"}})
+            else:
+                send({"id": mid, "result": conf.get("result", DEFAULT_USAGE)})
+        else:
+            run["bad"].append(f"method {method}")
+            if mid is not None:
+                send({"id": mid, "error": {"code": -32601, "message": "not in this fake"}})
+
+
 def main():
     argv = sys.argv[1:]
+    if argv[:1] == ["app-server"]:
+        app_server()
     if argv[:2] == ["login", "status"]:
         sys.exit(1 if os.environ.get("FAKE_CODEX_SIGNED_OUT") == "1" else 0)
     log({"argv": argv})

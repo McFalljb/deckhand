@@ -68,6 +68,7 @@ STATE_WIRE_SKIPS := [?]Wire_Skip {
 	{"Notices", "os_recent", .Core_Only, "OS notification pacing (not in the snapshot either)"},
 	{"Notices", "burst_start", .Core_Only, "OS notification pacing"},
 	{"Notices", "burst_n", .Core_Only, "OS notification pacing"},
+	{"Usage_Account", "account_hash", .Core_Only, "usage.odin merges two homes on one account in the core; the account's hash never leaves it"},
 	{"Pane", "rect", .Window_Only, "framebuffer pixels the window lays out (§10.2)"},
 	{"Pane", "frame", .Window_Only, "framebuffer pixels the window lays out (§10.2)"},
 	{"Open_Session", "tabs", .Section, "tabs:<session id>"},
@@ -98,6 +99,7 @@ STATE_SECTIONS := [?]State_Section {
 	{"claude", {"claude_history", "claude_readonly_ids", "claude_disk", "claude_disk_chats"}},
 	{"live", {"live"}}, // a separate core's runtime the window shows (core_live.odin)
 	{"machines", {"machines"}}, // other machines over SSH and their links (machines.odin)
+	{"usage", {"usage"}}, // quota and usage per account (usage.odin)
 }
 
 // Sections named in §5.8 that are not State (nothing sends them yet).

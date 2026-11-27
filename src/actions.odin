@@ -436,6 +436,11 @@ ACTIONS := [?]Action {
 		return core.Set_Dim_Panes{on = state.settings.dim_panes_off}, true
 	}, detail = proc() -> string {return state.settings.dim_panes_off ? "off" : "on"}, done = proc() -> string {return turns("Dim inactive panes", !state.settings.dim_panes_off)}},
 	{id = "rescan", make = proc() -> (core.Command, bool) {return core.Rescan{}, true}, done = proc() -> string {return "Rescanning sessions…"}},
+	// the USAGE section's accounts read now (core usage.odin): only while it has accounts (Codex installed)
+	{id = "refresh_usage", label = "Refresh usage", make = proc() -> (core.Command, bool) {
+		if len(state.usage) == 0 do return nil, false
+		return core.Refresh_Usage{}, true
+	}, detail = proc() -> string {return "plan limits, from each agent"}},
 	// login_env.odin: Dock and Finder launches only (a terminal's environment is that terminal's)
 	{id = "refresh_shell_env", make = proc() -> (core.Command, bool) {return core.Refresh_Shell_Env{}, true}, detail = proc() -> string {
 		return core.login_env.gui ? "new tabs only" : "uses the terminal's"

@@ -616,6 +616,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	animating, pulsing, ages_shown = false, false, false
 	flash_lit_n, shine_drawn = 0, false
 	drawer_laid_out = false
+	usage_section_shown = false // usage_section sets it again (ui_usage.odin)
 	pulse_drawn = pulse_step()
 	age_minute_drawn = age_minute()
 	ui_win_w = w
@@ -1476,6 +1477,7 @@ Hit :: union {
 	Hit_Machine_More, // its header's "…": its menu
 	Hit_Machine_Add, // + Add a machine…
 	Hit_Machine_Add_Folder, // + Add folder on <machine>… (its empty list)
+	Hit_Usage_Row, // a USAGE row: its hover (ui_usage.odin)
 	// the toolbar, settings popover, shortcuts sheet (ui_toolbar.odin)
 	Hit_Button,
 	Hit_Pop,
@@ -1545,6 +1547,7 @@ Hit_Machine_Head :: distinct u64 // a machine's header (machine number)
 Hit_Machine_More :: distinct u64 // another machine's header's "…" (machine number)
 Hit_Machine_Add :: struct {}
 Hit_Machine_Add_Folder :: distinct u64 // machine number
+Hit_Usage_Row :: distinct int // a USAGE row (index into state.usage): its hover (ui_usage.odin)
 Hit_Button :: distinct Button
 Hit_Pop :: distinct Pop_Item
 Hit_Sheet_Close :: struct {}

@@ -17,6 +17,8 @@ beside shells, an editor, browser tabs and files. The app is Odin (`src/`, the c
 - Build: `./build.sh` (`./build.sh run` to build and run). On a Mac where nix's `clang`/`ld` come
   before Xcode's on `PATH`, run `PATH=/usr/bin:$PATH ./build.sh ...`: the build expects `clang`
   from the Xcode command line tools ([Requirements](docs/DEVELOPING.md#requirements)).
+  That `PATH` makes `python3` Apple's 3.9; scenes whose fakes need `tomllib` want a Homebrew
+  `python3` (3.11+) first.
 - Every change: `./build.sh test`, plus `./build.sh scenes --changed` if it touches the app or a
   scene. A change in `web/`: `cd web && npm run check`. The full table:
   [What to run](docs/TESTING.md#what-to-run).

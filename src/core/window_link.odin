@@ -167,6 +167,9 @@ when TEST_HOOKS {
 // The window is attached (test mode over core.sock: not while detach_window holds it off).
 window_attached :: proc() -> bool {return link != nil && !link.held_off}
 
+// A window is attached, not a hub (another machine's core) nor a paired browser.
+window_link_is_window :: proc() -> bool {return window_attached() && !link.hub && !link.web}
+
 // Attaches the window: the only way to get the ui caller (main.odin's client, at init). Returns
 // the window's end of the transport. on_frames is called after the core sends it anything.
 // Main thread.

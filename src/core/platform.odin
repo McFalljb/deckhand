@@ -24,6 +24,9 @@ Platform :: struct {
 	// while no frames run (hidden, minimised, App Nap); core_loop.odin decides what it does. nil:
 	// nothing (unit tests: frames, or the tests themselves, tick the core)
 	core_timer:     proc(every: time.Duration, fire: proc()),
+	// main thread: before a tick the timer runs outside a frame (frames stopped: hidden, minimised,
+	// occluded), the window sends what changed of its facts (client_facts). nil: nothing
+	before_timer_tick: proc(),
 }
 // What was the window's here (the clipboard, links, Reveal in Finder, the folder picker, the
 // appearance, whether it has the keyboard) is the window's own (src/win_os.odin): the core asks

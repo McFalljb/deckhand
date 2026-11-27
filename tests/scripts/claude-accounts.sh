@@ -9,6 +9,7 @@
 # Writes build/claude-accounts/ and build/shots/claude-accounts/. Needs ./build.sh.
 # Usage: tests/scripts/claude-accounts.sh
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"

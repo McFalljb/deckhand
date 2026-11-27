@@ -330,17 +330,25 @@ spawn_failures_and_bad_sizes :: proc(t: ^testing.T) {
 	fails(t, h, f, 5, "too many rows")
 	sh_spawn(f, 6, "exit 0", cols = 70000)
 	fails(t, h, f, 6, "cols past u16")
-	spawn_ok(t, h, f, 8, "sleep 5")
+	spawn_ok(t, h, f, 8, "sleep 30") // outlives the wait below (a holder_free ends it)
 	sh_spawn(f, 8, "exit 0")
 	fails(t, h, f, 8, "id in use")
 	// a RESIZE out of range is ignored
 	fake_send(f, .Resize, 8, holderwire.Resize{cols = 100000, rows = 30, xpixel = 1, ypixel = 1})
 	fake_send(f, .Resize, 8, holderwire.Resize{cols = 100, rows = 0, xpixel = 1, ypixel = 1})
 	pump(h, 20 * time.Millisecond, f)
-	ws: Winsize
-	ioctl(h.terms[0].master, TIOCGWINSZ, &ws)
-	testing.expect_value(t, ws, Winsize{ws_row = 24, ws_col = 80, ws_xpixel = 640, ws_ypixel = 384})
+	// a failed spawn's terminal stays in h.terms until the reaper collects its child, which under
+	// load takes longer than the pump: wait for that (bounded), then read terminal 8 by its id
+	start := time.tick_now()
+	for len(h.terms) > 1 && time.tick_since(start) < 5 * time.Second do pump(h, 5 * time.Millisecond, f)
 	testing.expect_value(t, len(h.terms), 1)
+	t8: ^Term
+	for x in h.terms do if x.id == 8 do t8 = x
+	testing.expect(t, t8 != nil, "terminal 8 is gone")
+	if t8 == nil do return
+	ws: Winsize
+	ioctl(t8.master, TIOCGWINSZ, &ws)
+	testing.expect_value(t, ws, Winsize{ws_row = 24, ws_col = 80, ws_xpixel = 640, ws_ypixel = 384})
 }
 
 // Pixel sizes at SPAWN and RESIZE reach the PTY; the child sees the new size.

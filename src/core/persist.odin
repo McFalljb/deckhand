@@ -526,6 +526,18 @@ workspace_json :: proc() -> string {
 		strings.write_byte(&w.b, ']')
 	}
 
+	// quota and usage last read (usage.odin): numbers and labels, so a restart shows them with their age
+	{
+		ub := strings.builder_make(context.temp_allocator)
+		usage_json(&ub)
+		if strings.to_string(ub) != "[]" {
+			strings.write_string(&w.b, ",\n")
+			w.first = true
+			k(&w, "usage")
+			strings.write_string(&w.b, strings.to_string(ub))
+		}
+	}
+
 	// the left column: only what differs from the defaults (the filter is not saved)
 	sb := state.sidebar
 	strings.write_string(&w.b, ",\n")
@@ -1015,6 +1027,7 @@ workspace_restore :: proc(text: string) -> string {
 	// Claude Code sessions Deckhand ran (an older file's "readonly" marks and claude_readonly_ids
 	// are ignored)
 	recs := make([dynamic]Claude_Record, context.temp_allocator)
+	usage_restore(root["usage"]) // usage.odin: the last reads, shown with their age
 	if list, is := root["claude_sessions"].(json.Array); is {
 		for v in list {
 			o, ok := v.(json.Object)

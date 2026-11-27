@@ -29,7 +29,7 @@ const slots = () => globalThis as Record<symbol, string | undefined>;
  */
 export function adoptEnv(): void {
 	const g = slots();
-	for (const name of Object.keys(process.env)) {
+	for (const name of Object.keys(process.env)) { // env-read-ok: adoptEnv lists the names to take DECKHAND_* out
 		if (!name.startsWith("DECKHAND_")) continue;
 		const v = process.env[name]; // env-read-ok: adoptEnv: DECKHAND_* only
 		delete process.env[name]; // env-read-ok: adoptEnv: DECKHAND_* only

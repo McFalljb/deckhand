@@ -229,6 +229,7 @@ Pop_Item :: enum {
 	Bell_Jobs,
 	Bell_OS,
 	Agent_Model, // the agent's model: pi's selector in its terminal
+	Chats_Readonly, // retired (#133): never drawn; kept so the rows after it keep their ids
 	Chats_Folder,
 	Chats_Folder_Default, // only while another folder is set
 	Rescan,
@@ -305,6 +306,7 @@ POP_ACTIONS := [Pop_Item]string {
 	.Sound_Errors      = "bell_sound_errors",
 	.Sound_Jobs        = "bell_sound_jobs",
 	.Agent_Model       = "agent_model_pop",
+	.Chats_Readonly    = "", // retired: not drawn
 	.Chats_Folder      = "chats_dir",
 	.Chats_Folder_Default = "chats_dir_default",
 	.Rescan            = "rescan",
@@ -334,7 +336,7 @@ pop_item_shown :: proc(it: Pop_Item) -> bool {
 	#partial switch it {
 	case .Reload_Pi, .Restart_Claude: return action_ok(POP_ACTIONS[it])
 	case .Agent_Model: return core.atlas_offered()
-	case .Bell_OS: return false
+	case .Bell_OS, .Chats_Readonly: return false
 	}
 	return true
 }
@@ -972,6 +974,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return changes_tip(x)
 	case Hit_Group, Hit_Kids:
 		return tree_tip(h), ""
+	case Hit_Usage_Row:
+		return usage_row_tip(int(x)), ""
 	// a status dot's source and age (agent_status.odin); none without a dot
 	case Hit_Session:
 		if id := core.open_session_any(string(x)); id != 0 do return core.session_explain(core.find_session(id)), ""

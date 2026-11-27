@@ -12,6 +12,7 @@
 # keychain is touched. Skipped (exit 0) when it is not in the keychain (CI, another Mac).
 # Usage: tests/scripts/sign-dr.sh
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 ID="Deckhand Self-Signed"

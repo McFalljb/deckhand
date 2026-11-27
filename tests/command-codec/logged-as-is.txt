@@ -196,6 +196,7 @@ Update_Checked.err
 Update_Env.version
 Update_Env.why_not
 Update_Prepared.err
+Usage_Done.key
 Web_Revoke.id
 Worktree_Cleanup.path
 Worktree_Cleanup_Done.err

@@ -7,8 +7,9 @@
 # only), its row once SessionStart came, a permission (the waiting mark, the bell), held prompts and
 # their refusals, quit. Run 2 (codex-2.txt): the tab comes back and resumes (codex resume <id>);
 # closed, Resume from its row. Run 3 (codex-3.txt): signed out (its bar until the login screen is
-# answered). Run 4 (codex-4.txt): a Codex older than 0.163.0 is refused, with how to update.
-# Then the fake's log is checked. Needs build/deckhand and build/deckhand-cli (./build.sh). Writes build/codex/ and build/shots/codex/.
+# answered). Run 4 (codex-4.txt): a Codex older than 0.157.0 is refused, with how to update.
+# Then the fake's log is checked. Needs build/deckhand and build/deckhand-cli (./build.sh), and a
+# python3 with tomllib (3.11+) for the fake. Writes build/codex/ and build/shots/codex/.
 # Usage: tests/scripts/codex.sh
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -34,10 +35,17 @@ codex_stub() { # DIR VERSION
   ln -sf "$pkg/bin/codex.js" "$1/bin/codex"
 }
 codex_stub "$W/npm" 0.167.2
-codex_stub "$W/npm-old" 0.160.0
+codex_stub "$W/npm-old" 0.156.0 # below CODEX_PLAIN_MIN_VERSION: refused
 LOG="$W/codex.log"
-# the fake needs tomllib (Python 3.11+): this scene's python3, not the tab's login PATH's (macOS's 3.9)
-PY=$(python3 -c 'import sys, tomllib; print(sys.executable)') || { echo "codex scene: python3 has no tomllib (3.11+ needed)"; exit 1; }
+# the fake needs tomllib (Python 3.11+): the first python3 on this scene's PATH that has it, else
+# Homebrew's (a PATH with /usr/bin first, as the build wants, finds macOS's 3.9); never the tab's
+# login PATH's
+PY=
+for c in python3 python3.14 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  PY=$("$c" -I -c 'import sys, tomllib; print(sys.executable)' 2>/dev/null) && break
+  PY=
+done
+[ -n "$PY" ] || { echo "codex scene: no python3 with tomllib (Python 3.11+ needed; docs/DEVELOPING.md#requirements)"; exit 1; }
 fail=0
 for n in 1 2 3 4; do
   RUN=$(mktemp -d "${TMPDIR:-/tmp}/pdx.XXXXXX")

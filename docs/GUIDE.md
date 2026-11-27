@@ -418,7 +418,7 @@ settings. The Developer ID will close that gap.
   [Codex](#codex-tabs) conversation in a project: a session of its own, beside your pi sessions,
   whose main tab is Claude or Codex, with no pi tab.
 
-The Sessions tab has three sections:
+The Sessions tab has three sections, and a fourth at its foot:
 
 - **Open**: every open session, the one on screen first. A project's session shows a folder icon
   and `project ·` before its title; a chat shows a speech bubble. Only shown while something is
@@ -428,6 +428,9 @@ The Sessions tab has three sections:
   The selected project is expanded with its sessions (the first eight, then **Show more**),
   and **+ New session**. Its Claude sessions are listed with its pi sessions, marked **Claude**.
 - **Chats**: your chats, with **+ New chat**.
+- **Usage**: after Chats and the other machines, how much of each coding-agent account's plan
+  limits you have used (Codex for now; see [Usage](#usage)). Click its header to fold it to one
+  line per account.
 
 **Other machines** (with **Machines over SSH** on, as it is by default). **+ Add a machine…** at
 the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
@@ -865,6 +868,53 @@ do is up to the chats folder's own instructions, which you write: its `AGENTS.md
   there, and that folder becomes an ordinary project. **Chats folder: back to the default**
   undoes it (the main folder's `chats/`, or `~/Chats` without a main folder). The same as
   Settings › Folders' chats row (see [Your folders](#your-folders)).
+
+### Usage
+
+The **USAGE** section at the foot of the Sessions tab (after Chats and the other machines) shows
+how much of each coding-agent account's plan limits you have used, as the agent itself reports
+it. For now that is Codex: one row per Codex account (Settings › Coding agents › Codex), once
+Codex is installed. Claude Code, pi and Antigravity rows, other machines' accounts and a full
+Usage page come later.
+
+- **A row**: the account's name and how old its numbers are (*4m ago*), then one bar per limit
+  window: **5h** (the five-hour window) and **wk** (the weekly one), each with the percent used
+  and when it resets (*resets 15:40*, or *Tue 9:00* further off). A bar turns amber from 80% and
+  red from 95%, or when Codex says a limit is reached (the row then also says *limit reached*);
+  the percent is always written beside it, so the colour is never the only sign; *?* is a
+  percent Codex did not say. A reset time already gone when Codex answered reads *reset passed*.
+  A narrow column drops the reset time first.
+- **Instead of bars**: *not read yet*; *no plan limits (API key)* (an account signed in with an
+  API key has no plan windows); *signed out* (sign in on Codex's own screen in a Codex tab of
+  that account, or run `CODEX_HOME=<its folder> codex login`); *can't read: …* (Codex could not
+  answer, and why).
+- **Point at a row** for the plan, every window (a model's own limits too), credits, where the
+  numbers come from (*Codex app-server*), the account's folder and when it was read, and why the
+  last read failed, if it did.
+- **Folded** (click **USAGE**): one line per account, its fullest window (*5h 82% · 4m ago*).
+- **Old numbers**: a row read more than an hour ago fades. Once a window's reset time has passed
+  since the read, it says *reset at 15:40, no new data* instead of an old percent. A read that
+  fails keeps the last numbers (the hover says why). After a restart the last numbers show again,
+  with their age.
+- **When it reads**: only while you can see the section: the left column open on the Sessions
+  tab (By project, not the Attention view), the section unfolded and scrolled into view, and the
+  window shown (not hidden, minimised, on another Space or behind a locked screen). Then every 5
+  minutes, and 30 seconds after a turn in a Codex tab of that account ends (at most once a minute
+  per account), one account at a time. **Refresh usage** (the palette) reads every account now,
+  folded or not; it is yours only (agents and scripts can't run it).
+- **Two folders, one account**: when two Codex homes are signed in to the same ChatGPT account
+  they share one row (the first one's), and the hover names both folders.
+- **Where the numbers come from**: Deckhand asks Codex itself. It runs `codex app-server` with the
+  account's `CODEX_HOME` (as its tabs get it), asks it for the account's rate limits, and stops it;
+  Codex makes the request with its own sign-in. **Deckhand never reads `auth.json` or any other
+  credential and never calls a ChatGPT endpoint itself.** It keeps only the numbers, labels and
+  times (in `workspace.json`, so a restart shows them); the account's id is kept only as a
+  one-way hash under a random key of this Mac's own (`usage-salt` in Deckhand's data dir), to tell
+  two folders on one account apart, and is never shown nor sent anywhere. An email address in
+  Codex's error words is taken out. Each read starts Codex as a tab would, so Codex does its own
+  start-up work (it may refresh its model list and plugins and write its own files in that home);
+  it doesn't start your MCP servers. Codex marks this request as experimental: after a Codex
+  update a row may say *can't read* until Deckhand follows.
 
 ## Tabs
 
@@ -1459,6 +1509,8 @@ older one from 0.157.0 runs as a plain terminal tab (below).
   `CODEX_HOME`, else `~/.codex`) sets nothing. Like `~/.codex`, every account's sign-in, sessions
   and state stay out of the editor and Files (its `config.toml`, `AGENTS.md`, `prompts/`,
   `skills/`, `rules/` are yours). [CODEX.md](CODEX.md) has the details.
+- **Usage**: each account's 5-hour and weekly limits show in the Sessions tab's USAGE section,
+  read from Codex itself ([Usage](#usage)).
 
 ### Comments for the agent
 
@@ -1566,9 +1618,29 @@ Deckhand has a small code editor with syntax highlighting.
   say they can't be shown. WebP shows in a browser only; an SVG opens as text (a browser also
   previews it).
 - Deckhand does not open other binary files, files over 20 MB, or **credential files**: pi's sign-ins
-  (`auth.json` and similar), other private files in pi's folder, and Claude's and Codex's sign-ins
-  and state. They show "Credentials file: managed by pi (/login), not opened". A project's `.env`
-  opens and saves like any file.
+  (`auth.json` and similar), secret-looking files in pi's folder, and Claude's and Codex's
+  sign-ins and state. They show "Credentials file: managed by pi (/login), not opened". In pi's
+  folder (`~/.pi/agent`) Deckhand goes by names, never a file's mode, so a strict umask (`077`,
+  every file private) hides nothing of yours. It looks at every part of the path below the folder:
+  - pi's sign-in files at its top: `auth.json`, `oauth.json`, `mcp-auth.json`, `models-store.json`,
+    `cursor-sdk*.json`, and everything in `intercom/`;
+  - anything inside a folder for secrets: `credentials/`, `secrets/`, `tokens/` (singular too),
+    `.secrets/`, `.ssh/`, `.gnupg/`, `.aws/`, `.azure/`, `.docker/`, `.kube/`, `.password-store/`,
+    and `.git/` (its config can hold a token in a remote's address);
+  - files named `.env` or `.env.*`, `.npmrc`, `.netrc`, `.pypirc`, `.git-credentials`, `.pgpass`,
+    `.htpasswd`, `.dockercfg`, `.s3cfg`, `.boto`; keys and certificates (`*.key`, `*.pem`, `*.p12`,
+    `id_*`); and data files (`.json`, `.jsonl`, `.txt`, `.yaml`, `.yml`, `.toml`, `.ini`, `.conf`,
+    `.cfg`, or no extension) whose name says `token`, `secret` or `credential`. Code and docs with
+    those words in their names (`session-tokens.js`, `credential-source.ts`) and other dotfiles
+    (`.gitignore`, `.prettierrc`, `.github/`) are yours to open and edit;
+  - any other name for pi's sign-in files (a link to `auth.json`), checked again on the file
+    actually opened (its real path, so a link swapped in after the check is caught too).
+
+  A hard link to some other protected file under an ordinary name is not caught: Deckhand would
+  have to refuse every file with more than one link, which package installers such as pnpm make.
+  If `PI_CODING_AGENT_DIR` points at a broad folder (your home), these rules cover everything under
+  it, so a project's `.git/` and `.env` there are hidden too: point it at pi's own folder. A
+  project's `.env` elsewhere opens and saves like any file.
 
 ## Markdown tabs
 
@@ -2836,6 +2908,7 @@ to you (`0700`), and its files are `0600`:
 | `jobs/<id>/` | each job's state, its runs (`runs/`) and pi's sessions of them (`sessions/`) |
 | `jobs/scheduler.log` | what the scheduler did: runs started, skipped and why |
 | `update.json` | [updates](#updates): the setting, a skipped version, when it last checked |
+| `usage-salt` | a random key of this Mac's own, for the one-way hash of a Codex account's id ([Usage](#usage)) |
 | `core/`, `run/` | Deckhand Core and the session holder: the installed cores, the sockets and their logs; PERSISTENCE.md has these and the other files |
 | `updates/` | an update being downloaded and checked (removed afterwards) |
 
@@ -2900,7 +2973,7 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 ### Privacy
 
 - Deckhand never shows, opens or logs credential files (coding agents' sign-ins and state,
-  private files in pi's folder), not on the Settings page, in the Files tab's editor, or to Atlas.
+  secret-looking names in pi's folder: [Editor tabs](#editor-tabs)), not on the Settings page, in the Files tab's editor, or to Atlas.
 - Connection tokens for the control socket are never logged or saved.
 - Deckhand's only network call of its own is the [update check](#updates) (and the download
   you start with **Update**), to GitHub. Only pi (and its extensions) talk to model providers.
@@ -3262,6 +3335,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
 | Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts, Codex's rollouts) |
+| Refresh usage |  | read every coding-agent account's plan limits now, for the USAGE section (Codex's own app-server, one account at a time), folded or not; yours only ([Usage](#usage)) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |

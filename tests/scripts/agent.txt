@@ -46,9 +46,9 @@ clickid drawer_model
 waitfor [model selector] 5000
 assert_state focus.id agent_input
 shot agent/model-selector
-# the palette does the same
+# the palette does the same (its title is the setting's, "Atlas's model…", since #124)
 key k cmd
-type change model
+type atlas model
 assert_palette 0 action:agent_model
 key escape
 wait 200

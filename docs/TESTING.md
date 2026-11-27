@@ -65,7 +65,8 @@ setting's opt-out). `--separate-core` forces a separate core and leaves out scen
 (`tests/linux-release-check.sh`).
 
 `scenes-full.yml` (nightly and on demand, **Actions › Scenes (full) › Run workflow**): required +
-full in four shards, where a full-tier failure is only a warning; the required scenes
+full in four shards, where a scene that fails again on its retry fails the run, full tier included
+(one that passes on the retry is reported FLAKY); the required scenes
 `--in-process` in two shards (also on every push to main); and the strict time budgets as a report.
 Neither runs paid scenes, manual tools, or scenes tagged `noci`. A scene moves to the required
 tier once it has passed in the nightly run a few times.
@@ -86,7 +87,7 @@ All of these run in `./build.sh test`.
 | `odin check … -target:linux_amd64`, `odin check … -define:DECKHAND_TEST_HOOKS=false` | the Linux core and holder type-check; the release builds (Mac app and core, Linux core) compile without test hooks | ~1 s each |
 | `tests/scripts/install-test.sh` | `scripts/install.sh`'s checks before any download (fake `uname`, `sysctl`, `pgrep`; no network) | ~1 s |
 | `src/*_test.odin`, `src/core/*_test.odin` (`tests/unit.py`) | the command layer: every command, callers, confirmations, persistence (`persist_golden_test`: saved workspaces from released versions read back, `tests/persist/`), the socket, the replica, quit routes, idle exit, Claude and pi launches, jobs, the editor, the layout audit, the docs listing every action and command; other machines (`machines*_test`, `machine_install_test`, `machine_page_test`, `machine_route_test`, `machine_mirror_test`, `remote_view_test`, `machine_rows_test`, `machine_header_test`); what needs you and the views over it (`needing_you_test`, `attention_view_test`, `fleet_test`, `deck_view_test`, `deck_modal_test`, `peek_test`, `status_marks_test`, `flash_test`); `keyboard_pack_test`, `pane_motion_test`, `border_draw_test`, `handoff_test`; Codex tabs (`codex_test`), Continue on another machine (`pi_handoff_test`), the Settings page and registry (`settings_page_test`, `settings_registry_test`, `settings_user_here_test`), the Linux unit (`systemd_unit_test`) | ~30–40 s on 6 processes |
-| `tests/scenes_test.py`, `scripts/check-env-reads.py` | the `--changed` selection; every environment read names a known variable | <1 s |
+| `tests/scenes_test.py`, `scripts/check-env-reads.py` and its test | the `--changed` selection; every environment read names a known variable (a literal or a same-file constant; an alias of `process.env` or NSProcessInfo's environment by anything but a literal key refused) | <1 s |
 | `scripts/check-scoped-kills.py` and its test | a test or scene stops only the processes it started: every `pkill` names its own runtime or work dir, a test-only program or a parent pid it holds, and no `killall` (a bare pattern would also stop the Deckhand you are using, its core and machine connections) | <1 s |
 | `tools/deckhand-cli` tests | the `deckhand` CLI: arguments, hooks, the MCP server | <1 s |
 | the fake app (`tests/fake-app`) | builds the app-tab stand-in the scenes need | ~5 s |
@@ -151,6 +152,7 @@ Typical times and tags are in `tests/scenes.txt`; each script's header says what
 | `app-tab`, `app-calls`, `app-open` | app tabs: frames, input, resize, crash, restart; `app_call` under load; an agent opens only its project's declared app |
 | `comments` | pending comments from a page and the fake app reaching the agent |
 | `claude`, `claude-accounts`, `claude-feeds`, `claude-runtime`, `claude-sessions`, `claude-wait` | Claude Code tabs with a fake claude running the plugin's hooks and CLI ([CLAUDE-TABS.md](CLAUDE-TABS.md)) |
+| `usage-codex`, `usage-section` | the USAGE section: a fake Codex app-server per home (`fake-codex.py app-server`; each home's `auth.json` a FIFO that no reader may hold): reads one at a time, the twin of an account merged, API key and signed out, the hover, a narrow column, Refresh usage, folded, a restart (saved reads, no read while folded); rows from a saved workspace (faded, a reset passed), no read while folded, hidden or on the Files tab, only the accounts due. Their unit tests: `usage_test` (Codex's app-server answers, the rows, staleness, merging, the salt, saving, when reads may run), `usage_section_layout` and `usage_visible_only_when_drawn` (the layout audit), `core_loop_timer_sends_window_facts` |
 | `codex` | Codex tabs with a fake codex that checks Deckhand's command line (`--no-daemon`, the hooks' TOML and trust hashes) and runs its hooks at the first prompt; signed out, too old ([CODEX.md](CODEX.md)) |
 | `agent`, `run-home`, `agent-show`, `agent-status`, `panels`, `bell` | Atlas's drawer, show a file, OSC 7501 status, right-column panels, the bell |
 | `pi-chat-start` (smoke) | every start of a chat's pi is full pi with the bundled integration and `DECKHAND_*` |
@@ -283,6 +285,11 @@ The causes seen so far, and the rule each one taught:
 - **State left by the previous test** (late git results landing on the next test's editor). Wait
   for in-flight work in setup, and keep ids increasing across tests.
 - **Shared system state** (the system pasteboard, a `$TMPDIR` sweep). Keep it per scene.
+- **The developer's umask.** With 077 every fixture file is 0600, and Deckhand takes a private
+  file in pi's agent folder for a sign-in (not listed, watched or opened): `settings` and `reload`
+  saw none of theirs. The runner and `fresh-build.sh` set 022.
+- **A row id by number** (`pop N`). Ids come from an enum's order: retire a row in place, never
+  remove it (`pop_item_ids_stay_put`).
 - **Order that depends on the clock** (commits in the same second). Give fixtures fixed dates.
 - **Rows found by position.** Use `clickid`/`rclickid NAME @PATH`, so a new row above can't move it.
 - **A fake's writes in the wrong order** (argv before env). Write what the test reads last.

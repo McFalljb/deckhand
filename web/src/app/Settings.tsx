@@ -17,6 +17,7 @@ export interface WebSetItem {
   acts: string[];
   arg: string;
   codex: boolean;
+  agy?: boolean; // an Antigravity account's row (src/core/agy_accounts.odin): arg is its name
 }
 export interface WebSetting {
   id: string;
@@ -561,7 +562,23 @@ function ItemRow({ s, it }: { s: WebSetting; it: WebSetItem }) {
   const app = useApp();
   const [edit, setEdit] = useState<Edit | null>(null);
   const harness = it.codex ? { harness: "codex" } : {};
+  // Antigravity accounts: their own commands (an agy profile folder, used in place)
+  const agyAct = (a: string) => {
+    switch (a) {
+      case "rename":
+        return setEdit({ key: a, title: "Rename the account", placeholder: "", text: it.label, save: (t) => (t ? { type: "rename_antigravity_account", account: it.arg, label: t } : null) });
+      case "default":
+        return app.run({ type: "set_antigravity_account_default", account: it.arg });
+      case "remove":
+        return app.run({ type: "remove_antigravity_account", account: it.arg });
+      case "add":
+        return setEdit({ key: a, title: "Add an agy profile folder", placeholder: "~/.gemini-work", text: "", save: (t) => (t ? { type: "add_antigravity_account", dir: t } : null) });
+      case "scan":
+        return app.run({ type: "rescan" });
+    }
+  };
   const act = (a: string) => {
+    if (it.agy) return agyAct(a);
     switch (a) {
       case "connect":
         return app.run({ type: "machine_connect", no: Number(it.arg) });

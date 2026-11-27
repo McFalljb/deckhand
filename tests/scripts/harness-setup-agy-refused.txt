@@ -1,0 +1,27 @@
+# Install agy… refused (agy_install.odin; tests/scripts/harness-setup.sh, run 5): the same fixture
+# release, but no stand-in for the signature: the real codesign refuses the fixture (it is not
+# Google's), nothing is put at the fake ~/.local/bin/agy, the reason shows on the row and in a toast,
+# and Install agy… is offered again.
+wait 1500
+assert_state focus.id setup
+key escape
+eventually
+assert_state focus.kind terminal
+key comma cmd
+wait 300
+clickid spi @Agents
+wait 500
+eventually
+assert_drawn Install agy…
+clickid spi @harness:antigravity
+eventually
+assert_state pending_confirmations.# 1
+clickid confirm_yes
+eventually 30000
+assert_toast agy was not installed: agy is not signed with Google's Developer ID (EQHXZ8M8AV): nothing was installed
+wait 500
+shot harness-setup/agy-refused-dark
+eventually
+assert_drawn Failed: agy is not signed
+assert_drawn Install agy…
+quit

@@ -22,6 +22,7 @@ KNOWN = {
     "HOME", "TMPDIR", "SHELL", "PATH", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME",
     "PI_CODING_AGENT_DIR", "CLAUDE_CONFIG_DIR", "PI_KIT_NOTES_DIR",
     "CLAUDE_CODE_PROJECT_DIR_NAME",  # Claude Code's own (the user's env): how it names project folders
+    "GEMINI_HOME",  # agy's own (the user's env, as tabs get it): agy's default profile, found by stat and guarded (agy_accounts.odin)
     "CODEX_HOME",  # Codex's own (the user's env, as tabs get it): its folder, which the credential guard refuses (codex.odin)
     "NVM_DIR", "FNM_DIR",  # nvm's and fnm's folders as tabs get them: harness binaries looked for there by stat (harness.odin)
     "CFFIXED_USER_HOME",  # browser.odin: only a test-mode check that the scene set it

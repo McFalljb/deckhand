@@ -11,6 +11,11 @@
 #   3. too old: pi 1.3.0 (npm) and Claude Code 2.1.100 (native): Update, pi's integration not loaded;
 #      without DECKHAND_INSTALL_CMD test mode refuses the run (exit 127).
 #   4. nix and mise: pi 1.3.0 in a nix store, Claude Code 2.1.100 under mise: shown only, Copy.
+#   5. agy refused: pi installed, no agy; Settings' Install agy… from a fixture release (file:,
+#      DECKHAND_TEST_AGY_RELEASE) into a fake ~/.local/bin (DECKHAND_TEST_AGY_BIN_DIR): the real
+#      codesign refuses the fixture; nothing is installed, no private folder is left.
+#   6. agy: the same with DECKHAND_TEST_AGY_SIGNED=1 (the fixture is not Google's): installed, its
+#      agy-seen.json written as the extension writes it; never run (a script that would say so).
 # Screenshots: build/shots/harness-setup/. Needs ./build.sh.
 # Usage: tests/scripts/harness-setup.sh
 set -eu
@@ -89,6 +94,38 @@ fake_pi "$H4" "$H4/fake/nix/store/0abc-pi-coding-agent-1.3.0/lib/node_modules/@e
 fake_claude "$H4" "$H4/.local/share/mise/installs/claude-code/2.1.100/bin/claude"
 run nix "$H4" DECKHAND_INSTALL_CMD="$ROOT/tests/scripts/fake-install.sh"
 chk "nothing ran" '[ ! -e "$H4/install-argv.txt" ]'
+
+# 5 and 6. Install agy… from a fixture release: a tarball with the one member `antigravity`, and
+# the manifest naming it with its real SHA-512 (the platform's names as agy_platform's)
+case "$(uname -m)" in
+  arm64) AP=darwin_arm64 AF=darwin-arm AT=cli_mac_arm64.tar.gz ;;
+  *) AP=darwin_amd64 AF=darwin-x64 AT=cli_mac_x64.tar.gz ;;
+esac
+AR="$W/agy-release"
+mkdir -p "$AR/src" "$AR/manifests" "$AR/antigravity-cli/1.5.18-123/$AF"
+printf '#!/bin/sh\necho "fixture agy (tests): never run" >&2\nexit 1\n' > "$AR/src/antigravity"
+chmod 755 "$AR/src/antigravity"
+COPYFILE_DISABLE=1 /usr/bin/tar --no-mac-metadata --no-xattrs -czf "$AR/antigravity-cli/1.5.18-123/$AF/$AT" -C "$AR/src" antigravity
+SUM=$(/usr/bin/shasum -a 512 "$AR/antigravity-cli/1.5.18-123/$AF/$AT" | cut -d' ' -f1)
+printf '{"version":"1.5.18","url":"file://%s/antigravity-cli/1.5.18-123/%s/%s","sha512":"%s"}\n' "$AR" "$AF" "$AT" "$SUM" > "$AR/manifests/$AP.json"
+for name in agy-refused agy; do
+  H="$W/home-$name"
+  fake_pi "$H" "$H/.pi/agent/lib/node_modules/@earendil-works/pi-coding-agent" 1.5.0
+  mkdir -p "$W/data-$name/antigravity"
+  printf '{"agyPath":"%s","accounts":[]}\n' "$H/.local/bin/agy" > "$W/data-$name/antigravity/accounts.json"
+done
+H5="$W/home-agy-refused"
+run agy-refused "$H5" DECKHAND_TEST_AGY_RELEASE="file://$AR/" DECKHAND_TEST_AGY_BIN_DIR="$H5/.local/bin"
+chk "agy refused: nothing at ~/.local/bin/agy" '[ ! -e "$H5/.local/bin/agy" ]'
+chk "agy refused: no private folder left" '[ -z "$(ls -A "$H5/.local/bin" 2>/dev/null)" ]'
+chk "agy refused: no agy-seen.json" '[ ! -e "$W/data-agy-refused/antigravity/agy-seen.json" ]'
+H6="$W/home-agy"
+run agy "$H6" DECKHAND_TEST_AGY_RELEASE="file://$AR/" DECKHAND_TEST_AGY_BIN_DIR="$H6/.local/bin" DECKHAND_TEST_AGY_SIGNED=1
+chk "agy: installed, the fixture's bytes, 0755" 'cmp -s "$H6/.local/bin/agy" "$AR/src/antigravity" && [ -x "$H6/.local/bin/agy" ] && [ "$(stat -f %Lp "$H6/.local/bin/agy")" = 755 ]'
+chk "agy: nothing else in ~/.local/bin (no private folder left)" '[ "$(ls -A "$H6/.local/bin")" = agy ]'
+chk "agy: agy-seen.json as the extension writes it" 'grep -qF "{\"path\":\"$H6/.local/bin/agy\",\"size\":$(stat -f %z "$H6/.local/bin/agy"),\"mtime\":$(stat -f %m "$H6/.local/bin/agy"),\"version\":\"1.5.18\"}" "$W/data-agy/antigravity/agy-seen.json" && [ "$(stat -f %Lp "$W/data-agy/antigravity/agy-seen.json")" = 600 ]'
+chk "agy: accounts.json untouched" 'grep -qF "\"agyPath\":\"$H6/.local/bin/agy\"" "$W/data-agy/antigravity/accounts.json"'
+chk "agy: never run" '! grep -qs "fixture agy (tests): never run" "$W/run-agy.log" "$W/run-agy-refused.log"'
 
 if [ $fail = 1 ]; then echo "harness-setup scene failed (logs: $W/run-*.log)"; exit 1; fi
 echo "harness-setup scene ok"

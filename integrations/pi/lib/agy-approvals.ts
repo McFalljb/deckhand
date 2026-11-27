@@ -32,6 +32,7 @@ import os from "node:os";
 import path from "node:path";
 import { type AgentAnswer, answerAgentRequest } from "./acp.ts";
 import { checkCommand as guardrailsCheck, redact } from "./guardrails.ts";
+import { dataRoot, profileConfigEntry, profileDirs, profileMarked } from "./agy-accounts.ts";
 
 export type ApprovalMode = "allow" | "ask";
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["allow", "ask"];
@@ -190,9 +191,33 @@ export function insideFolder(paths: string[], root: string, cwd = root): boolean
 
 // pi's own config files at the top of its agent dir: never credentials by their mode alone
 const AGENT_CONFIG_FILES = new Set(["settings.json", "models.json", "keybindings.json", "mcp.json", "modes.json", "agents.override.md", "agents.md", "claude.md", "system.md", "append_system.md"]);
-// agy's and Gemini's sign-ins: the ACP token in every profile (~/.gemini's and Deckhand's per
-// account, lib/agy-accounts.ts hasSavedLogin), Gemini CLI's OAuth files
+// agy's and Gemini's sign-ins by name anywhere: the ACP token (lib/agy-accounts.ts hasSavedLogin),
+// Gemini CLI's OAuth files
 const AGY_TOKEN_FILES = new Set(["acp_token.json", "oauth_creds.json", "google_accounts.json"]);
+
+/**
+ * Whether `p` (absolute, real or as written) is inside an agy profile and not the user's own config
+ * there (GEMINI.md, AGENTS.md, skills): the core's agy_credential. Profiles: profileDirs (every
+ * account's, Deckhand's profiles folder whole, agy's default and removed ones while marked), and any
+ * folder above `p` (below HOME) that holds agy's marks.
+ */
+function inAgyProfile(p: string, env: NodeJS.ProcessEnv): boolean {
+	const home = path.resolve(env.HOME || os.homedir());
+	const root = dataRoot(env);
+	const profilesRoot = path.join(root, "profiles");
+	for (const d of profileDirs(root, env)) {
+		for (const c of new Set([d, canonical(d) ?? d])) {
+			if (!p.startsWith(`${c}/`)) continue;
+			if (d === profilesRoot) return true;
+			return !profileConfigEntry(p.slice(c.length + 1));
+		}
+	}
+	for (let d = path.dirname(p); d !== "/" && d !== home && !home.startsWith(`${d}/`) && d !== path.dirname(d); d = path.dirname(d)) {
+		if (d === path.join(home, "Library") || path.dirname(d) === "/Users") continue; // never a user's home
+		if (profileMarked(d)) return !profileConfigEntry(p.slice(d.length + 1));
+	}
+	return false;
+}
 
 const expandHome = (d: string, home: string) => (d === "~" ? home : d.startsWith("~/") ? path.join(home, d.slice(2)) : d);
 
@@ -201,9 +226,11 @@ const expandHome = (d: string, home: string) => (d === "~" ? home : d.startsWith
  * the core's credential_path (src/core/settings_files.odin) by its name rules: pi's sign-ins in its
  * agent dir (auth.json, models-store.json, cursor-sdk*.json, intercom/, and any other private file
  * there but pi's config), Claude Code's (.credentials.json, .claude.json, .claude.json.*), Codex's
- * (auth.json in .codex or CODEX_HOME), plus agy's and Gemini's tokens (AGY_TOKEN_FILES), which the
- * core does not list. The core also matches Claude's and Codex's account folders and hard links;
- * this is the subset an ACP request can be checked against cheaply. Case-insensitive, as on APFS.
+ * (auth.json in .codex or CODEX_HOME), everything in an agy profile but GEMINI.md, AGENTS.md and
+ * skills (inAgyProfile: the core's agy_credential, over lib/agy-accounts.ts's accounts), plus
+ * Gemini CLI's OAuth files by name. The core also matches Claude's and Codex's account folders and
+ * hard links; this is the subset an ACP request can be checked against cheaply. Names compare
+ * case-insensitively, as on APFS (profile folders as written and as real paths).
  */
 export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env): boolean {
 	const home = env.HOME || os.homedir();
@@ -214,6 +241,7 @@ export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env):
 		const lc = c.toLowerCase();
 		const base = path.basename(lc);
 		if (AGY_TOKEN_FILES.has(base)) return true;
+		if (inAgyProfile(c, env)) return true;
 		if (base === ".credentials.json" || base === ".claude.json" || base.startsWith(".claude.json.")) return true;
 		if (base === "auth.json" && path.basename(path.dirname(lc)) === ".codex") return true;
 		if (env.CODEX_HOME && base === "auth.json" && path.dirname(lc) === path.resolve(expandHome(env.CODEX_HOME, home)).toLowerCase()) return true;

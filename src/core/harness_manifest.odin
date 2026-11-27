@@ -145,7 +145,7 @@ HARNESS_MANIFEST := [?]Harness_Row {
 	{
 		harness = .Pi, id = "antigravity", name = "Antigravity (through pi)", kind = .Third_Party, need = .Recommended, min_version = AGY_MIN_VERSION, detect = .Agy,
 		why = "Optional: Google Antigravity models in pi tabs, through your own agy CLI (the bundled antigravity extension)",
-		source = "https://antigravity.google/docs/getting-started (Google's own installer; Deckhand never installs or starts agy)",
+		source = "https://antigravity.google/docs/getting-started (Google's own installer; on a Mac, Settings' Install agy… does its steps with more checks and never runs agy: agy_install.odin)",
 	},
 	{
 		harness = .Claude, id = "claude", name = "Claude Code", kind = .Harness, need = .Required, min_version = CLAUDE_MIN_VERSION, detect = .Binary,
@@ -762,7 +762,9 @@ harness_settings_rows :: proc() -> []Settings_File_Row {
 			case .Built_In:    label = "  Deckhand integration"
 			case .Third_Party: label = fmt.tprintf("  %s", r.name)
 			}
-			append(&out, Settings_File_Row{group = "agents", label = label, detail = harness_item_text(it), path = strings.concatenate({HARNESS_SETTINGS_ROW, r.id}, context.temp_allocator), button = button})
+			detail := harness_item_text(it)
+			if r.detect == .Agy do button, detail = agy_settings_row(it) // Install agy… / Update agy… (agy_install.odin)
+			append(&out, Settings_File_Row{group = "agents", label = label, detail = detail, path = strings.concatenate({HARNESS_SETTINGS_ROW, r.id}, context.temp_allocator), button = button})
 		}
 	}
 	return out[:]

@@ -1,4 +1,5 @@
-// Imported first by every test that loads extensions/antigravity: HOME and XDG_DATA_HOME point into
+// Imported first by every test that loads extensions/antigravity: HOME (and XDG_DATA_HOME, which
+// Deckhand's data dir no longer follows, kept in the temp folder all the same) point into
 // a fresh temporary folder for the whole test process, so Deckhand's data dir (where the
 // Antigravity accounts and agy profiles live), ~/.gemini and os.homedir() are never the user's.
 // assertTempData() refuses to go on when they are not (a test that set them back, or forgot this).

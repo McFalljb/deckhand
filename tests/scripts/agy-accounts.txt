@@ -1,0 +1,95 @@
+# Antigravity accounts (tests/scripts/agy-accounts.sh): the first-run sheet's Antigravity step,
+# then Settings › Coding agents › Antigravity.
+wait 1500
+assert_state focus.id setup
+assert_state focus.steps 5
+key enter
+wait 100
+key enter
+wait 100
+key enter
+wait 200
+assert_state focus.step agy_accounts
+assert_state focus.agy_accounts.# 4
+assert_state focus.agy_accounts.0.label Default
+assert_state focus.agy_accounts.0.default true
+assert_state focus.agy_accounts.1.label Gemini
+assert_state focus.agy_accounts.2.label Work
+assert_state focus.agy_accounts.3.label Lab
+shot agy-accounts/setup-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot agy-accounts/setup-light
+ui_command {"type":"set_appearance","mode":"dark"}
+# Add folder…: an agy profile outside HOME
+hover setupbtn 10
+eventually
+assert_tip Pick an agy profile folder (hidden folders: ⇧⌘.)
+pick_folder $datadir/../outside/Team agy
+clickid setupbtn 10
+eventually
+assert_state focus.agy_accounts.# 5
+assert_state focus.agy_accounts.4.label Team agy
+assert_state focus.agy_accounts.4.added true
+# HOME itself: refused, the list unchanged
+clickid setuppath
+wait 100
+type ~
+key enter
+wait 100
+assert_state focus.agy_accounts.# 5
+key escape
+wait 100
+# rename Work, untick Lab, Work is the default
+clickid setuplabel 2
+wait 100
+type Job
+key enter
+eventually
+assert_state focus.agy_accounts.2.label Job
+clickid setupkeep 3
+eventually
+assert_state focus.agy_accounts.3.keep false
+clickid setupdef 2
+eventually
+assert_state focus.agy_accounts.2.default true
+shot agy-accounts/setup-filled-dark
+# nothing written before Done (the scan wrote what it found)
+assert_state antigravity_accounts.# 4
+key enter
+eventually
+assert_state focus.step folders
+clickid setupbtn 3
+eventually
+assert_state focus.kind terminal
+assert_state antigravity_accounts.# 4
+assert_state antigravity_accounts.0.name default
+assert_state antigravity_accounts.1.signed_in keychain
+assert_state antigravity_accounts.2.label Job
+assert_state antigravity_accounts.2.chosen true
+assert_state antigravity_accounts.2.signed_in yes
+assert_state antigravity_accounts.3.source added
+# Settings › Coding agents › Antigravity: each account's row, Rename…
+key comma cmd
+wait 300
+assert_state focus.id settings_page
+clickid spi @Agents
+wait 500
+type antigravity
+eventually
+assert_drawn Job
+assert_drawn Team agy
+shot agy-accounts/settings-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot agy-accounts/settings-light
+ui_command {"type":"set_appearance","mode":"dark"}
+ui_command {"type":"rename_antigravity_account","account":"work","label":"Research"}
+eventually
+assert_state antigravity_accounts.2.label Research
+ui_command {"type":"rescan"}
+wait 500
+assert_state antigravity_accounts.# 4
+key escape
+wait 200
+quit

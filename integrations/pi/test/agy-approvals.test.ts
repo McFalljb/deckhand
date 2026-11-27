@@ -10,7 +10,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { agyEnv } from "../lib/acp.ts";
 import { credentialPath, credentialsInCommand, decide, insideFolder, pathsOf, ToolCallTracker } from "../lib/agy-approvals.ts";
-import { dataRoot } from "../lib/agy-accounts.ts";
+import { approvalsOf, dataRoot, updateAccounts } from "../lib/agy-accounts.ts";
 import { createAntigravity } from "../lib/antigravity.ts";
 import { piRules } from "./pi-rules.ts";
 
@@ -218,6 +218,42 @@ test("credentialPath mirrors the core's names (pi's sign-ins and private files, 
 	assert.deepEqual(credentialsInCommand("cat ~/.pi/agent/auth.json | head", "/w", env), ["~/.pi/agent/auth.json"]);
 	assert.deepEqual(credentialsInCommand('jq . "$HOME/.claude.json"', "/w", env), ["/Users/u/.claude.json"]);
 	assert.deepEqual(credentialsInCommand("npm test -- --grep auth", "/w", env), []);
+});
+
+test("credentialPath guards every agy profile as the core does: Deckhand's profiles whole, a folder used in place, agy's default ~/.gemini and any marked folder, all but GEMINI.md, AGENTS.md and skills", () => {
+	const home = mkdtempSync(path.join(TMP_ROOT, "home-"));
+	const env = { HOME: home } as any;
+	const root = dataRoot(env);
+	const own = mkdtempSync(path.join(TMP_ROOT, "own-profile-"));
+	mkdirSync(root, { recursive: true });
+	writeFileSync(path.join(root, "accounts.json"), JSON.stringify({ accounts: [{ name: "mine", method: "oauth-personal", dir: own, source: "added" }] }));
+	const gem = path.join(home, ".gemini");
+	mkdirSync(path.join(gem, "antigravity"), { recursive: true });
+	writeFileSync(path.join(gem, "antigravity", "installation_id"), "x");
+	const marked = mkdtempSync(path.join(TMP_ROOT, "marked-"));
+	mkdirSync(path.join(marked, "antigravity-acp"));
+	writeFileSync(path.join(marked, "antigravity-acp", "installation_id"), "x");
+	for (const p of [path.join(root, "profiles", "default", "GEMINI.md"), path.join(root, "profiles", "x", "antigravity", "brain", "a.md"), path.join(own, "antigravity", "conversations", "c.pb"), path.join(own, "settings.json"), path.join(gem, "antigravity", "brain", "t.md"), path.join(gem, "settings.json"), path.join(marked, "history.db")])
+		assert.equal(credentialPath(p, env), true, p);
+	for (const p of [path.join(own, "GEMINI.md"), path.join(own, "AGENTS.md"), path.join(own, "config", "skills", "s", "SKILL.md"), path.join(gem, "antigravity-cli", "skills", "x.md"), path.join(gem, "config", "skills.json"), path.join(marked, "AGENTS.md"), path.join(home, "project", "a.ts")])
+		assert.equal(credentialPath(p, env), false, p);
+});
+
+test("approvals in accounts.json: kept through another writer's change (the core's fields, unknown keys), read by approvalsOf", async () => {
+	const home = mkdtempSync(path.join(TMP_ROOT, "home-"));
+	const root = dataRoot({ HOME: home } as any);
+	mkdirSync(root, { recursive: true });
+	const file = path.join(root, "accounts.json");
+	// as the core writes it: its own fields, one we do not know, and our approvals
+	writeFileSync(file, JSON.stringify({ defaultAccount: "work", accounts: [{ name: "work", method: "oauth-personal", label: "Work", storage: "file", coreOnly: 1, approvals: "ask" }] }));
+	assert.equal(approvalsOf(root, "work"), "ask");
+	await updateAccounts(root, (accounts) => ({ accounts: accounts.map((a) => ({ ...a, label: "Work 2" })) }));
+	const after = JSON.parse(readFileSync(file, "utf8"));
+	assert.deepEqual(after.accounts, [{ name: "work", method: "oauth-personal", label: "Work 2", storage: "file", coreOnly: 1, approvals: "ask" }]);
+	assert.equal(after.defaultAccount, "work");
+	await updateAccounts(root, (accounts) => ({ accounts: accounts.map((a) => ({ ...a, approvals: undefined })) }));
+	assert.equal(JSON.parse(readFileSync(file, "utf8")).accounts[0].approvals, undefined);
+	assert.equal(approvalsOf(root, "work"), "allow");
 });
 
 test("pathsOf: locations, diffs and agy's path fields; a part without a readable path makes them unknown", () => {

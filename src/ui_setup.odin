@@ -15,7 +15,9 @@ package main
 //      picker or a typed path; one without Claude Code's files is added with a warning), choose
 //      the default. Done writes the same setting Settings → Claude accounts edits. One account
 //      or none: no step; the last step's line says which.
-//   4. The layout as a small tree, then Done.
+//   4. Antigravity accounts, only when two or more are found (agy_accounts.odin: agy profiles, by
+//      stat): the same, for pi's antigravity extension (Settings → Antigravity accounts).
+//   5. The layout as a small tree, then Done.
 //
 // It opens by itself once when no main folder is set (setup_due; test mode
 // only with DECKHAND_FIRST_RUN=1), and from "Set up Deckhand…" (the palette,
@@ -57,6 +59,10 @@ Setup_UI :: struct {
 	acct_msg_err: bool,
 	edit:         int, // the field being typed in: SETUP_EDIT_NONE, SETUP_EDIT_PATH, or an account's label
 	field:        Text_Field,
+	// the Antigravity accounts step (agy_accounts.odin; shown when two or more were found)
+	agy_show:     bool,
+	agy_accounts: [dynamic]core.Setup_Account,
+	agy_default:  int,
 }
 setup_ui: Setup_UI = {edit = SETUP_EDIT_NONE}
 
@@ -87,18 +93,25 @@ Hit_Setup :: struct {
 	index: int,
 }
 
-// The sheet's steps now: 4, or 5 with the accounts step.
-setup_steps :: proc() -> int {return setup_ui.acct_show ? 5 : 4}
+// The sheet's steps now: 4, and one more for each accounts step shown.
+setup_steps :: proc() -> int {return 4 + (setup_ui.acct_show ? 1 : 0) + (setup_ui.agy_show ? 1 : 0)}
 
 setup_step_kind :: proc() -> core.Setup_Step {
-	switch setup_ui.step {
-	case 0: return .Agents
-	case 1: return .Main
-	case 2: return .Chats
-	case 3: return setup_ui.acct_show ? .Accounts : .Folders
-	}
-	return .Folders
+	kinds := make([dynamic]core.Setup_Step, context.temp_allocator)
+	append(&kinds, core.Setup_Step.Agents, core.Setup_Step.Main, core.Setup_Step.Chats)
+	if setup_ui.acct_show do append(&kinds, core.Setup_Step.Accounts)
+	if setup_ui.agy_show do append(&kinds, core.Setup_Step.Agy_Accounts)
+	append(&kinds, core.Setup_Step.Folders)
+	return setup_ui.step >= 0 && setup_ui.step < len(kinds) ? kinds[setup_ui.step] : .Folders
 }
+
+// The accounts step on screen: Antigravity's or Claude's list, and its default.
+@(private = "file")
+agy_step :: proc() -> bool {return setup_step_kind() == .Agy_Accounts}
+@(private = "file")
+acct_list :: proc() -> ^[dynamic]core.Setup_Account {return agy_step() ? &setup_ui.agy_accounts : &setup_ui.accounts}
+@(private = "file")
+acct_def :: proc() -> ^int {return agy_step() ? &setup_ui.agy_default : &setup_ui.acct_default}
 
 // A run on the coding agents step keeps the sheet where it is (its terminal shows there).
 @(private = "file")
@@ -143,6 +156,7 @@ setup_begin :: proc() {
 		if c != nil && c.cwd == core.real_path(home_chats) && len(state.chats) > 0 do u.separate = true
 	}
 	setup_accounts_begin()
+	setup_agy_accounts_begin()
 	core.harness_checklist_refresh() // looked at again each time the sheet opens
 }
 
@@ -153,6 +167,7 @@ account_free :: proc(a: ^core.Setup_Account) {
 	delete(a.dir)
 	delete(a.label)
 	delete(a.orig_label)
+	delete(a.name)
 }
 
 // The accounts found now (a fresh look, stat only), and the ones the user removed before
@@ -185,6 +200,7 @@ setup_account_add :: proc(path: string) -> (ok: bool, msg: string) {
 	d, err := core.folder_arg(path)
 	if err != "" || d == "" do return false, d == "" && err == "" ? "Type a folder's path" : "Type a full path (/… or ~/…)"
 	if core.path_kind(d) != .Dir do return false, fmt.tprintf("%s: no such folder", core.fs_display(d))
+	if agy_step() do return setup_agy_account_add(d)
 	if why := core.claude_account_dir_refused(d, .Claude); why != "" {
 		if strings.has_prefix(why, "a Claude Code config folder is not your home") do return false, "Not your home folder or above it: pick the Claude Code config folder itself"
 		return false, fmt.tprintf("%s%s", strings.to_upper(why[:1], context.temp_allocator), why[1:])
@@ -222,28 +238,32 @@ setup_account_picked :: proc(path: string) {
 // it to the environment's.
 setup_account_toggle :: proc(i: int) {
 	u := &setup_ui
-	if i < 0 || i >= len(u.accounts) || u.accounts[i].fixed do return
-	u.accounts[i].keep = !u.accounts[i].keep
-	if !u.accounts[i].keep && u.acct_default == i do u.acct_default = 0
+	list, def := acct_list(), acct_def()
+	if i < 0 || i >= len(list^) || list^[i].fixed do return
+	list^[i].keep = !list^[i].keep
+	if !list^[i].keep && def^ == i do def^ = 0
 	u.touched = true
 }
 
 // The default for new Claude sessions (ticks it).
 setup_account_set_default :: proc(i: int) {
 	u := &setup_ui
-	if i < 0 || i >= len(u.accounts) do return
-	u.accounts[i].keep = true
-	u.acct_default = i
+	list := acct_list()
+	if i < 0 || i >= len(list^) do return
+	list^[i].keep = true
+	acct_def()^ = i
 	u.touched = true
 }
 
 // A new label ("" = from the folder's name again).
 setup_account_set_label :: proc(i: int, label: string) {
 	u := &setup_ui
-	if i < 0 || i >= len(u.accounts) do return
+	list := acct_list()
+	if i < 0 || i >= len(list^) do return
 	l := core.cut_utf8(strings.trim_space(core.one_line(label, context.temp_allocator)), core.CLAUDE_ACCOUNT_LABEL_MAX)
-	if l == "" do l = u.accounts[i].fixed ? "Claude" : core.claude_account_label_of(u.accounts[i].dir, .Claude)
-	set_str(&u.accounts[i].label, l)
+	if l == "" && agy_step() do l = list^[i].fixed ? "Default" : core.agy_label_of(list^[i].dir)
+	if l == "" do l = list^[i].fixed ? "Claude" : core.claude_account_label_of(list^[i].dir, .Claude)
+	set_str(&list^[i].label, l)
 	u.touched = true
 }
 
@@ -271,13 +291,75 @@ setup_accounts_done :: proc() {
 	}
 }
 
+// ---- the Antigravity accounts step (agy_accounts.odin) ----
+
+// The accounts now (a fresh look, stat only) and the ones the user removed before (unticked);
+// the default chosen before is pre-selected.
+setup_agy_accounts_begin :: proc() {
+	u := &setup_ui
+	for &a in u.agy_accounts do account_free(&a)
+	clear(&u.agy_accounts)
+	u.agy_default = 0
+	core.agy_accounts_refresh()
+	for a in core.agy_accounts() {
+		append(&u.agy_accounts, core.Setup_Account{dir = strings.clone(a.dir), label = strings.clone(a.label), orig_label = strings.clone(a.label), name = strings.clone(a.name), keep = true, was_kept = true, fixed = a.source == .Default, marked = a.source == .Default || a.source == .Profile || core.agy_profile_marked(a.dir)})
+		if a.chosen do u.agy_default = len(u.agy_accounts) - 1
+	}
+	for d in core.agy_removed_dirs() {
+		if core.path_kind(d) != .Dir || !core.agy_profile_marked(d) do continue
+		l := core.agy_label_of(d)
+		append(&u.agy_accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(l), orig_label = strings.clone(l), marked = true})
+	}
+	u.agy_show = len(u.agy_accounts) >= 2
+}
+
+// A folder for the Antigravity list (setup_account_add, on that step): not refused, not listed
+// yet; added with a warning when it has none of agy's files.
+setup_agy_account_add :: proc(d: string) -> (ok: bool, msg: string) {
+	u := &setup_ui
+	if core.within(d, core.agy_profiles_root()) do return false, "That is one of Deckhand's own Antigravity profiles: it is listed already"
+	if why := core.agy_account_dir_refused(d); why != "" do return false, fmt.tprintf("%s%s", strings.to_upper(why[:1], context.temp_allocator), why[1:])
+	for &a, i in u.agy_accounts do if a.dir == d || core.fs_real(a.dir) == core.fs_real(d) {
+		if !a.keep do setup_account_toggle(i)
+		return false, fmt.tprintf("%s is already listed (%s)", core.fs_display(d), a.label)
+	}
+	marked := core.agy_profile_marked(d)
+	append(&u.agy_accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(core.agy_label_of(d)), orig_label = strings.clone(""), keep = true, hand = true, marked = marked})
+	if !marked do return true, "It has no agy files yet: added anyway; agy makes them when you sign in (/antigravity login in a pi tab)."
+	return true, ""
+}
+
+// Done: the same commands Settings → Antigravity accounts sends.
+setup_agy_accounts_done :: proc() {
+	u := &setup_ui
+	if !u.agy_show do return
+	// renames in two steps, as Claude's: labels swapped between two accounts would clash
+	for a, i in u.agy_accounts do if a.keep && !a.hand && a.was_kept && a.label != a.orig_label do ui_do(core.Rename_Antigravity_Account{account = a.name, label = fmt.tprintf("(renaming %d)", i)})
+	for a in u.agy_accounts {
+		if a.hand {
+			if a.keep do ui_do(core.Add_Antigravity_Account{dir = a.dir, label = a.label != core.agy_label_of(a.dir) ? a.label : ""})
+			continue
+		}
+		if !a.keep {
+			if a.was_kept && !a.fixed do ui_do(core.Remove_Antigravity_Account{account = a.name})
+			continue
+		}
+		if !a.was_kept do ui_do(core.Add_Antigravity_Account{dir = a.dir, label = a.label != core.agy_label_of(a.dir) ? a.label : ""})
+		else if a.label != a.orig_label do ui_do(core.Rename_Antigravity_Account{account = a.name, label = a.label})
+	}
+	if u.agy_default >= 0 && u.agy_default < len(u.agy_accounts) && u.agy_accounts[u.agy_default].keep {
+		a := u.agy_accounts[u.agy_default]
+		ui_do(core.Set_Antigravity_Account_Default{account = a.name != "" ? a.name : a.dir})
+	}
+}
+
 // Starts typing in a label (i >= 0) or the path field; what was being typed is kept first.
 @(private = "file")
 edit_begin :: proc(which: int) {
 	u := &setup_ui
 	edit_end(true)
 	u.edit = which
-	if which >= 0 && which < len(u.accounts) do tf_set(&u.field, u.accounts[which].label)
+	if which >= 0 && which < len(acct_list()^) do tf_set(&u.field, acct_list()^[which].label)
 	else if which == SETUP_EDIT_PATH do tf_end(&u.field, false)
 }
 
@@ -387,11 +469,13 @@ setup_next :: proc() {
 	}
 	if u.step < setup_steps() - 1 {
 		u.step += 1
+		set_str(&u.acct_msg, "") // each accounts step says its own
 		return
 	}
 	main := setup_main_path()
 	set_str(&u.err, "")
 	setup_accounts_done()
+	setup_agy_accounts_done()
 	// chats first: the main folder then makes chats/ only when chats live there
 	if u.separate {
 		if !os.is_dir(u.chats) do os.make_directory_all(u.chats) // setup is the user's explicit choice
@@ -421,7 +505,7 @@ setup_sheet_op :: proc(op: core.Setup_Sheet_Op, why: string) {
 // The sheet as get_state shows it (window.setup_state).
 setup_state_now :: proc() -> (core.Setup_State, bool) {
 	u := &setup_ui
-	return {step = setup_step_kind(), steps = setup_steps(), err = u.err, acct_show = u.acct_show, accounts = u.accounts[:], acct_default = u.acct_default, acct_msg = u.acct_msg}, true
+	return {step = setup_step_kind(), steps = setup_steps(), err = u.err, acct_show = u.acct_show, accounts = u.accounts[:], acct_default = u.acct_default, acct_msg = u.acct_msg, agy_show = u.agy_show, agy_accounts = u.agy_accounts[:], agy_default = u.agy_default}, true
 }
 
 @(private = "file")
@@ -430,6 +514,7 @@ setup_back :: proc() {
 	if run_holds() do return
 	if setup_ui.step > 0 do setup_ui.step -= 1
 	set_str(&setup_ui.err, "")
+	set_str(&setup_ui.acct_msg, "")
 }
 
 // ---- layout ----
@@ -485,13 +570,19 @@ tree_line :: proc(depth: int, name, does: string, room: f32) {
 accounts_body :: proc(w: f32) {
 	th := theme()
 	u := &setup_ui
-	para("An account is a Claude Code config folder (what CLAUDE_CONFIG_DIR names). API-key, Bedrock or Vertex sign-ins come from your environment and need no folder.", th.text_secondary)
-	para("Tick the ones Deckhand should offer; click a name to change it. New Claude sessions start in the default.", th.text_muted)
+	agy := agy_step()
+	if agy {
+		para("An Antigravity account is an agy profile folder (what agy's GEMINI_HOME names), for Google Antigravity in pi tabs. Folders are used where they are; you sign in from a pi tab (/antigravity login <name>).", th.text_secondary)
+		para("Tick the ones pi should offer; click a name to change it. pi's antigravity tool uses the default when no account is named.", th.text_muted)
+	} else {
+		para("An account is a Claude Code config folder (what CLAUDE_CONFIG_DIR names). API-key, Bedrock or Vertex sign-ins come from your environment and need no folder.", th.text_secondary)
+		para("Tick the ones Deckhand should offer; click a name to change it. New Claude sessions start in the default.", th.text_muted)
+	}
 	def_w := text_w("○ Default", FONT_UI_SMALL) + px(SP_2)
-	for a, i in u.accounts {
+	for a, i in acct_list()^ {
 		hov_row := false
 		if h, ok := ui_hover.(Hit_Setup); ok && h.index == i && (h.what == .Acct_Keep || h.what == .Acct_Label || h.what == .Acct_Default) do hov_row = true
-		sel := i == u.acct_default && a.keep
+		sel := i == acct_def()^ && a.keep
 		if clay.UI(clay.ID("setupacct", u32(i)))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), pu(SP_2), pu(SP_1), pu(SP_1)}, childGap = pu(SP_2), childAlignment = {y = .Top}},
 			backgroundColor = cc(hov_row ? mix(th.bg_elevated, th.text, TINT_BUTTON) : th.bg_elevated),
@@ -518,7 +609,10 @@ accounts_body :: proc(w: f32) {
 					clay.TextDynamic(clip(a.label, room, WEIGHT_BOLD), txt(a.keep ? th.text : th.text_muted, WEIGHT_BOLD))
 				}
 				at := core.fs_display(a.dir)
-				if !a.marked do at = fmt.tprintf("%s · no Claude Code files yet", at)
+				if agy {
+					if !a.marked do at = fmt.tprintf("%s · no agy files yet", at)
+					else if a.fixed do at = fmt.tprintf("%s · Deckhand's own profile", at)
+				} else if !a.marked do at = fmt.tprintf("%s · no Claude Code files yet", at)
 				else if a.fixed do at = fmt.tprintf("%s · what `claude` uses in your shell", at)
 				clay.TextDynamic(clip(at, room, FONT_UI_SMALL), txt(a.marked ? th.text_muted : th.waiting, FONT_UI_SMALL))
 			}
@@ -567,7 +661,7 @@ setup_layout :: proc(w, h: f32) {
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + SP_1)),
 			border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		}) {
-			titles := [core.Setup_Step]string{.Agents = "Your coding agents", .Main = "Where should Deckhand keep your files?", .Chats = "Where should chats run?", .Accounts = "Claude Code accounts", .Folders = "Your folders"}
+			titles := [core.Setup_Step]string{.Agents = "Your coding agents", .Main = "Where should Deckhand keep your files?", .Chats = "Where should chats run?", .Accounts = "Claude Code accounts", .Agy_Accounts = "Antigravity accounts", .Folders = "Your folders"}
 			kind := setup_step_kind()
 			step := fmt.tprintf("Step %d of %d", u.step + 1, setup_steps())
 			if clay.UI(clay.ID("setup_head"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_1), pu(SP_1), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
@@ -606,7 +700,7 @@ setup_layout :: proc(w, h: f32) {
 					if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), 0, 0, 0}}}) {
 						button(clay.ID("setupbtn", u32(Setup_Hit_Kind.Choose_Chats)), "Choose separate folder…", false, ui_hover == Hit(Hit_Setup{what = .Choose_Chats}))
 					}
-				case .Accounts:
+				case .Accounts, .Agy_Accounts:
 					accounts_body(box_w - px(2 * SP_3))
 				case .Folders:
 					main := setup_main_path()
@@ -636,10 +730,10 @@ setup_layout :: proc(w, h: f32) {
 setup_hit :: proc() -> Hit {
 	for k in Setup_Hit_Kind do if k != .Option && clay.PointerOver(clay.ID("setupbtn", u32(k))) do return Hit_Setup{what = k}
 	if setup_step_kind() == .Agents do if h := harness_step_hit(); h != nil do return h
-	if setup_step_kind() == .Accounts {
+	if setup_step_kind() == .Accounts || setup_step_kind() == .Agy_Accounts {
 		if clay.PointerOver(clay.ID("setup_field_box")) do return Hit_Setup{what = setup_ui.edit == SETUP_EDIT_PATH ? .Acct_Path : .Acct_Label, index = setup_ui.edit}
 		if clay.PointerOver(clay.ID("setuppath")) do return Hit_Setup{what = .Acct_Path, index = SETUP_EDIT_PATH}
-		for _, i in setup_ui.accounts {
+		for _, i in acct_list()^ {
 			if clay.PointerOver(clay.ID("setupkeep", u32(i))) do return Hit_Setup{what = .Acct_Keep, index = i}
 			if clay.PointerOver(clay.ID("setuplabel", u32(i))) do return Hit_Setup{what = .Acct_Label, index = i}
 			if clay.PointerOver(clay.ID("setupdef", u32(i))) do return Hit_Setup{what = .Acct_Default, index = i}
@@ -658,13 +752,13 @@ setup_tip :: proc(h: Hit_Setup) -> (string, string) {
 	case .Choose_Chats: return "Pick the folder chats run in", ""
 	case .Option:       return "", "↑↓"
 	case .Acct_Keep:
-		if h.index >= 0 && h.index < len(setup_ui.accounts) && setup_ui.accounts[h.index].fixed do return "The account `claude` uses in your shell: always offered", ""
+		if h.index >= 0 && h.index < len(acct_list()^) && acct_list()^[h.index].fixed do return agy_step() ? "Deckhand's own Antigravity profile: always offered" : "The account `claude` uses in your shell: always offered", ""
 		return "Offer this account in Deckhand (unticked: left out; its folder is not touched)", ""
 	case .Acct_Label:   return "Rename (its name in Deckhand only)", "Enter"
-	case .Acct_Default: return "New Claude sessions start in this account unless their project last used another", ""
-	case .Acct_Path:    return "A Claude Code config folder anywhere (what CLAUDE_CONFIG_DIR names)", "Enter"
+	case .Acct_Default: return agy_step() ? "pi's antigravity tool and /antigravity commands use this account when none is named" : "New Claude sessions start in this account unless their project last used another", ""
+	case .Acct_Path:    return agy_step() ? "An agy profile folder anywhere (what agy's GEMINI_HOME names)" : "A Claude Code config folder anywhere (what CLAUDE_CONFIG_DIR names)", "Enter"
 	case .Acct_Add:     return "Add the folder typed here", "Enter"
-	case .Acct_Pick:    return "Pick a Claude Code config folder (hidden folders: ⇧⌘.)", ""
+	case .Acct_Pick:    return agy_step() ? "Pick an agy profile folder (hidden folders: ⇧⌘.)" : "Pick a Claude Code config folder (hidden folders: ⇧⌘.)", ""
 	case .Agent_Action, .Agent_Copy: return harness_step_tip(h), ""
 	case .Agent_Close:  return "Close the output (the checklist was checked again)", ""
 	}

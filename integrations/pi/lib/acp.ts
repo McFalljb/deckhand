@@ -75,6 +75,15 @@ export function agyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv 
 	return Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("DECKHAND_")));
 }
 
+/**
+ * The environment every agy Deckhand starts runs with: `env`, with its run folder as TMPDIR and
+ * agy's self-update off (agy updates itself during interactive runs; Deckhand never lets it, a
+ * session, a probe or the login alike).
+ */
+export function spawnEnv(env: NodeJS.ProcessEnv, runDir: string | undefined): NodeJS.ProcessEnv {
+	return { ...env, ...(runDir ? { TMPDIR: runDir } : {}), AGY_CLI_DISABLE_AUTO_UPDATE: "true" };
+}
+
 export class AcpError extends Error {
 	code?: number;
 	data?: unknown;
@@ -246,7 +255,7 @@ export class AcpConnection {
 		const env = this.opts.env ?? agyEnv();
 		let child: ChildProcess;
 		try {
-			child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: runDir ? { ...env, TMPDIR: runDir } : env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+			child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: spawnEnv(env, runDir), stdio: ["pipe", "pipe", "pipe"], detached: true });
 		} catch (e) {
 			endRun(runDir);
 			throw e;

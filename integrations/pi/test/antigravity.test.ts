@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
-import { AgySession, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
+import { AgySession, agyVersion, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
 import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
 import { fileLedger } from "../lib/agy-ledger.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
@@ -961,6 +961,19 @@ test("gap A5: an agy run folder is made only when agy starts, and removed when i
 	assert.ok(!existsSync(made[1]), "a start that throws leaves no folder");
 	assert.deepEqual(readdirSync(tmp), []);
 });
+test("agy 1.5.18: every agy Deckhand starts (sessions, probes, the login) has AGY_CLI_DISABLE_AUTO_UPDATE=true, whatever env it is given", async () => {
+	const f = fake({ AGY_CLI_DISABLE_AUTO_UPDATE: "false" });
+	const c = new AcpConnection(FAKE, ["acp"], { cwd: f.cwd, env: f.env });
+	c.start();
+	await c.request("initialize", initializeParams());
+	await c.close();
+	await agyVersion({ agyPath: FAKE, cwd: f.cwd, env: f.env });
+	await agyLogin({ agyPath: FAKE, cwd: f.cwd, env: f.env, showLink: () => {}, askCode: async () => "good-code" });
+	const starts = f.read().filter((m) => m.argv);
+	assert.equal(starts.length, 3);
+	for (const s of starts) assert.equal(s.env.AGY_CLI_DISABLE_AUTO_UPDATE, "true", s.argv.join(" "));
+});
+
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));

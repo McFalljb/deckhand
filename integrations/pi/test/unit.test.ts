@@ -1428,7 +1428,7 @@ async function deskHarness(answer: (cmd: any, reply: (m: any) => void) => void, 
 		events: { on: (e: string, f: any) => (listeners.set(e, [...(listeners.get(e) ?? []), f]), () => {}), emit: (e: string, x: any) => listeners.get(e)?.forEach((f) => f(x)) },
 		sendMessage: () => {},
 	};
-	const saved = { s: process.env.DECKHAND_SOCKET, t: process.env.DECKHAND_CONTROL_TOKEN };
+	const saved = { s: process.env.DECKHAND_SOCKET, t: process.env.DECKHAND_CONTROL_TOKEN, tab: process.env.DECKHAND_TOKEN };
 	process.env.DECKHAND_SOCKET = sockPath;
 	process.env.DECKHAND_CONTROL_TOKEN = "ctl";
 	if (withBrowser) {
@@ -1450,6 +1450,11 @@ async function deskHarness(answer: (cmd: any, reply: (m: any) => void) => void, 
 		if (saved.s === undefined) delete process.env.DECKHAND_SOCKET;
 		else process.env.DECKHAND_SOCKET = saved.s;
 		if (saved.t !== undefined) process.env.DECKHAND_CONTROL_TOKEN = saved.t;
+		if (withBrowser) {
+			(globalThis as any)[Symbol.for("deckhand.bridge.token")] = undefined;
+			if (saved.tab === undefined) delete process.env.DECKHAND_TOKEN;
+			else process.env.DECKHAND_TOKEN = saved.tab;
+		}
 		rmSync(dir, { recursive: true, force: true });
 	};
 	return { tools, got, close };

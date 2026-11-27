@@ -688,6 +688,7 @@ core/login_env.odin the login shell's environment (Launch environment, below)
 core/sessions.odin, titles.odin  pi's sessions and their titles
 core/claude*.odin   Claude Code tabs (CLAUDE-TABS.md); ../tools/deckhand-cli/ the CLI its plugin runs
 core/codex.odin     Codex tabs: command line, per-run hooks and MCP server, version rule (CODEX.md)
+core/usage.odin, usage_codex.odin, ui_usage.odin  quota and usage per account: the entries and rows, Codex's app-server source, the USAGE section (GUIDE.md "Usage", CODEX.md §6b)
 core/harness*.odin, ui_harness.odin  which coding agents are installed; the checklist's install and update
 core/pi_integration.odin  the bundled pi integration (HARNESSES.md)
 core/agent.odin, drawer.odin  Atlas and its drawer (ATLAS.md)

@@ -314,7 +314,7 @@ settings. The Developer ID will close that gap.
   [Codex](#codex-tabs) conversation in a project: a session of its own, beside your pi sessions,
   whose main tab is Claude or Codex, with no pi tab.
 
-The Sessions tab has three sections:
+The Sessions tab has three sections, and a fourth at its foot:
 
 - **Open**: every open session, the one on screen first. A project's session shows a folder icon
   and `project ·` before its title; a chat shows a speech bubble. Only shown while something is
@@ -324,6 +324,9 @@ The Sessions tab has three sections:
   The selected project is expanded with its sessions (the first eight, then **Show more**),
   and **+ New session**. Its Claude sessions are listed with its pi sessions, marked **Claude**.
 - **Chats**: your chats, with **+ New chat**.
+- **Usage**: after Chats and the other machines, how much of each coding-agent account's plan
+  limits you have used (Codex for now; see [Usage](#usage)). Click its header to fold it to one
+  line per account.
 
 **Other machines** (with **Machines over SSH** on, as it is by default). **+ Add a machine…** at
 the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
@@ -761,6 +764,45 @@ do is up to the chats folder's own instructions, which you write: its `AGENTS.md
   there, and that folder becomes an ordinary project. **Chats folder: back to the default**
   undoes it (the main folder's `chats/`, or `~/Chats` without a main folder). The same as
   Settings › Folders' chats row (see [Your folders](#your-folders)).
+
+### Usage
+
+The **USAGE** section at the foot of the Sessions tab (after Chats and the other machines) shows
+how much of each coding-agent account's plan limits you have used, as the agent itself reports
+it. For now that is Codex: one row per Codex account (Settings › Coding agents › Codex), once
+Codex is installed. Claude Code, pi and Antigravity rows, other machines' accounts and a full
+Usage page come later.
+
+- **A row**: the account's name and how old its numbers are (*4m ago*), then one bar per limit
+  window: **5h** (the five-hour window) and **wk** (the weekly one), each with the percent used
+  and when it resets (*resets 15:40*, or *Tue 9:00* further off). A bar turns amber from 80% and
+  red from 95%, or when Codex says a limit is reached; the percent is always written beside it,
+  so the colour is never the only sign. A narrow column drops the reset time first.
+- **Instead of bars**: *not read yet*; *no plan limits (API key)* (an account signed in with an
+  API key has no plan windows); *signed out* (sign in on Codex's own screen in a Codex tab of
+  that account, or run `CODEX_HOME=<its folder> codex login`); *can't read: …* (Codex could not
+  answer, and why).
+- **Point at a row** for the plan, every window (a model's own limits too), credits, where the
+  numbers come from (*Codex app-server*), the account's folder and when it was read, and why the
+  last read failed, if it did.
+- **Folded** (click **USAGE**): one line per account, its fullest window (*5h 82% · 4m ago*).
+- **Old numbers**: a row read more than an hour ago fades. Once a window's reset time has passed
+  since the read, it says *reset at 15:40, no new data* instead of an old percent. A read that
+  fails keeps the last numbers (the hover says why). After a restart the last numbers show again,
+  with their age.
+- **When it reads**: only while the section is unfolded and the window is shown (not hidden or
+  minimised): every 5 minutes, and 30 seconds after a turn in a Codex tab of that account ends
+  (at most once a minute per account), one account at a time. **Refresh usage** (the palette)
+  reads every account now, folded or not.
+- **Two folders, one account**: when two Codex homes are signed in to the same ChatGPT account
+  they share one row (the first one's), and the hover names both folders.
+- **Where the numbers come from**: Deckhand asks Codex itself. It runs `codex app-server` with the
+  account's `CODEX_HOME` (as its tabs get it), asks it for the account's rate limits, and stops it;
+  Codex makes the request with its own sign-in. **Deckhand never reads `auth.json` or any other
+  credential and never calls a ChatGPT endpoint itself.** It keeps only the numbers, labels and
+  times (in `workspace.json`, so a restart shows them); the account's id is kept only as a
+  one-way hash, to tell two folders on one account apart, and is never shown. Codex marks this
+  request as experimental: after a Codex update a row may say *can't read* until Deckhand follows.
 
 ## Tabs
 
@@ -1315,6 +1357,8 @@ older one from 0.157.0 runs as a plain terminal tab (below).
   `CODEX_HOME`, else `~/.codex`) sets nothing. Like `~/.codex`, every account's sign-in, sessions
   and state stay out of the editor and Files (its `config.toml`, `AGENTS.md`, `prompts/`,
   `skills/`, `rules/` are yours). [CODEX.md](CODEX.md) has the details.
+- **Usage**: each account's 5-hour and weekly limits show in the Sessions tab's USAGE section,
+  read from Codex itself ([Usage](#usage)).
 
 ### Comments for the agent
 
@@ -3095,6 +3139,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
 | Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts, Codex's rollouts) |
+| Refresh usage |  | read every coding-agent account's plan limits now, for the USAGE section (Codex's own app-server, one account at a time), folded or not ([Usage](#usage)) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |

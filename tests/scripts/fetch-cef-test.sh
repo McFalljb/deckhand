@@ -7,6 +7,7 @@
 # Needs the real archive in ~/Library/Caches/deckhand/cef/downloads (cloned, cp -c).
 # Usage: tests/scripts/fetch-cef-test.sh
 set -u
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 FILE=$(sed -n 's/^CEF_FILE_macosarm64=//p' vendor/cef/VERSION)

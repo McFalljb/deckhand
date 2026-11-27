@@ -3,6 +3,7 @@
 # and long names, a fake pi, and a shell tab printing tests/scripts/text-sample.sh.
 # Usage: tests/scripts/text-shots.sh SCRIPT [BINARY]   (shots land in build/shots/)
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 export DECKHAND_SCALE=${DECKHAND_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

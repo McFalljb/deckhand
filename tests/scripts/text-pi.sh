@@ -2,6 +2,7 @@
 # Real pi (your HOME, a cheap model) in a scratch project, playing
 # tests/scripts/text-pi.txt. Usage: tests/scripts/text-pi.sh [BINARY]
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"

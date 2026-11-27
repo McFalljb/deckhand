@@ -6,6 +6,7 @@
 # rate-limit error, code 1) or "hup" (SIGHUP). Screenshots: build/shots/dead-tab/.
 # Usage: tests/scripts/dead-tab.sh [SCRIPT]
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"

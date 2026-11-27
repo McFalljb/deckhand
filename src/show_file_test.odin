@@ -439,3 +439,51 @@ show_file_peek_reads_little :: proc(t: ^testing.T) {
 	_ = os.write_entire_file(bin, transmute([]u8)string("\x7fELF\x00\x01"))
 	testing.expect(t, strings.has_prefix(core.show_file_peek(bin), "Binary"), "binary from the first chunk")
 }
+
+// An agent (pi or Claude) never shows an Antigravity profile's sign-in or state (agy_accounts.odin):
+// a found profile's token, conversations and logs, Deckhand's own profiles whole, any
+// acp_token.json by name, a link to one; a profile's GEMINI.md is the user's and shows.
+@(test)
+show_file_refuses_agy_profiles :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	a, _, _, dir, outside := sf_reset(t)
+	defer sf_done(dir)
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
+	defer os.set_env("HOME", old_home)
+	home := core.fs_real(fmt.aprintf("%s/home", outside))
+	os.make_directory_all(home)
+	home = core.fs_real(home, context.allocator)
+	os.set_env("HOME", home)
+	defer core.agy_accounts_refresh()
+	put :: proc(p, text: string) {
+		os.make_directory_all(filepath.dir(p))
+		_ = os.write_entire_file(p, transmute([]u8)text)
+	}
+	work := fmt.tprintf("%s/.gemini-work", home)
+	put(fmt.tprintf("%s/antigravity-acp/installation_id", work), "id\n")
+	put(fmt.tprintf("%s/antigravity-acp/acp_token.json", work), "{}\n")
+	put(fmt.tprintf("%s/antigravity-acp/brain.md", work), "# a conversation\n")
+	put(fmt.tprintf("%s/log/acp-server-1-2.log", work), "log\n")
+	put(fmt.tprintf("%s/GEMINI.md", work), "# rules\n")
+	own := fmt.tprintf("%s/profiles/default", core.agy_root())
+	put(fmt.tprintf("%s/notes.md", own), "# in Deckhand's own profile\n")
+	core.agy_accounts_refresh()
+	out := core.fs_real(outside, context.allocator)
+	_ = os.symlink(fmt.tprintf("%s/antigravity-acp/brain.md", work), fmt.tprintf("%s/link.md", out))
+	pi := core.Caller{kind = .Panel, tab_id = sf_tab(a, 0)}
+	claude := core.Caller{kind = .Panel, tab_id = sf_tab(a, 1), claude = true}
+	for caller in ([]core.Caller{pi, claude}) {
+		for p in ([]string{
+			fmt.tprintf("%s/antigravity-acp/acp_token.json", work),
+			fmt.tprintf("%s/antigravity-acp/brain.md", work),
+			fmt.tprintf("%s/log/acp-server-1-2.log", work),
+			fmt.tprintf("%s/notes.md", own),
+			fmt.tprintf("%s/link.md", out),
+		}) {
+			r := core.run_command(core.Show_File{path = p}, caller)
+			testing.expectf(t, !r.ok && strings.contains(r.error, "redentials"), "%s shown to %v: %v", p, caller, r)
+		}
+		r := core.run_command(core.Show_File{path = fmt.tprintf("%s/GEMINI.md", work)}, caller)
+		testing.expectf(t, r.ok, "a profile's GEMINI.md shows: %s", r.error)
+	}
+}

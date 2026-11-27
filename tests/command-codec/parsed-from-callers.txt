@@ -2,6 +2,12 @@
 # their tag has none of noparse, - or ui (command_codec_test.odin's command_codec_decisions). A
 # field not listed here fails that test until its tag says it is the core's, or it is added
 # here on purpose.
+Add_Antigravity_Account.dir
+Add_Antigravity_Account.gcp_location
+Add_Antigravity_Account.gcp_project
+Add_Antigravity_Account.label
+Add_Antigravity_Account.method
+Add_Antigravity_Account.name
 Add_Claude_Account.dir
 Add_Claude_Account.harness
 Add_Claude_Account.label
@@ -422,8 +428,11 @@ Quit.confirm
 Quit.stop_sessions
 Reload_File.confirm
 Reload_File.tab_id
+Remove_Antigravity_Account.account
 Remove_Claude_Account.account
 Remove_Claude_Account.harness
+Rename_Antigravity_Account.account
+Rename_Antigravity_Account.label
 Rename_Claude_Account.account
 Rename_Claude_Account.harness
 Rename_Claude_Account.label
@@ -446,6 +455,7 @@ Session_Info.project_id
 Session_Info.to
 Set_Agent_Model.model
 Set_Agent_Name.name
+Set_Antigravity_Account_Default.account
 Set_Appearance.mode
 Set_Bell.dock
 Set_Bell.errors

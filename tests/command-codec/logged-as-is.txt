@@ -5,6 +5,12 @@
 # Browser_Update.title and Restore_Session.tabs' titles: as State's tab titles, not redacted
 # (PROTOCOL.md §6); Restore_Session.tabs' browser tabs' cwd (their URL) loses user:pass@
 # (json_write.odin's write_command_hook).
+Add_Antigravity_Account.dir
+Add_Antigravity_Account.gcp_location
+Add_Antigravity_Account.gcp_project
+Add_Antigravity_Account.label
+Add_Antigravity_Account.method
+Add_Antigravity_Account.name
 Add_Claude_Account.dir
 Add_Claude_Account.label
 Add_Project.cwd
@@ -139,7 +145,10 @@ Pi_Status_Update.provider
 Pi_Status_Update.thinking
 Program_Status.summary
 Reload_Watch.version
+Remove_Antigravity_Account.account
 Remove_Claude_Account.account
+Rename_Antigravity_Account.account
+Rename_Antigravity_Account.label
 Rename_Claude_Account.account
 Rename_Claude_Account.label
 Rename_Path.from
@@ -160,6 +169,7 @@ Session_Info.pi_session_id
 Session_Info.to
 Set_Agent_Model.model
 Set_Agent_Name.name
+Set_Antigravity_Account_Default.account
 Set_Claude_Account_Default.account
 Set_Files_Filter.text
 Set_Filter.text

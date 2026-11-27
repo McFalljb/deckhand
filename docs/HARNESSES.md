@@ -185,6 +185,33 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   --app-data-dir antigravity-acp`, with the method in `antigravity-acp/settings.json`, and the
   user's `~/.gemini` `config/skills`, `antigravity-cli/skills`, `config/skills.json`, `AGENTS.md`
   and `GEMINI.md` linked in. No automatic switching, rotation or fallback between accounts.
+- **Deckhand's side** (`src/core/agy_accounts.odin`): the core is the accounts' UI (Settings ›
+  Coding agents › Antigravity, the setup sheet's step, `add_antigravity_account`,
+  `rename_antigravity_account`, `remove_antigravity_account`, `set_antigravity_account_default`:
+  the user's only, so an agent never names a folder). One file is the list, so pi outside Deckhand
+  keeps working and neither side keeps a copy to drift: the core implements `agy-lock.ts`'s
+  protocol byte for byte (lock content `{"pid":N}` hard-linked from `.new-<pid>-<random>`; stale
+  when the pid is gone, or empty and older than 2 s; taken over by rename to `.stale-…` and an
+  inode check), waits at most 200 ms (else "try again"), re-reads inside the lock, never writes
+  over a file that is not a JSON object, and writes temp + rename. Discovery is by stat only,
+  never opening a file: agy's default profile (`GEMINI_HOME` as tabs get it, else `~/.gemini`),
+  `~/.gemini*`, `~/.config/gemini*` (or `$XDG_CONFIG_HOME/gemini*`), folders holding
+  `antigravity-acp/acp_token.json` (agy's file sign-in) or an `installation_id` under
+  `antigravity-acp/` or `antigravity/` (agy writes one on its first run), at most 32; new ones are
+  written in as `source: "found"` unless in `removedDirs`; a found one whose folder is gone is
+  dropped. Unlisted folders under `profiles/` are listed too. Signed in by stat: the file sign-in;
+  `Keychain` for the keyring account; `Key` for API-key methods (pi's store). **Keyring or
+  file** (verified with agy 1.5.18 and a throwaway profile, no sign-in: with `SSH_CONNECTION` its
+  log says "Using file-based token storage because SSH session detected"; without it nothing, the
+  keyring; `AGY_ACP_FORCE_FILE_STORAGE=1` or `true` without SSH: still the keyring): a keyring
+  sign-in cannot be seen by stat, nor told from another profile's, so at most one account uses
+  it, agy's own default profile when found without a file sign-in; every other profile is file
+  mode. **The guard** (`agy_credential`, in `settings_credential`): any `acp_token.json`; all of
+  `profiles/`; in every listed, found or removed-but-marked profile and any folder holding agy's
+  marks, everything but `GEMINI.md`, `AGENTS.md`, `config/skills/`, `config/skills.json` and
+  `antigravity-cli/skills/`; the sign-in files' hard links; the profiles are credential places for
+  the Files tree. An account folder may not be HOME or above it, nor hold a project, the main,
+  chats or data folder, nor be, be inside or hold a Claude config folder or Codex home.
 - **agy's environment** (`agyEnvFor`): pi's, without t3code's list (`GEMINI_API_KEY`,
   `GOOGLE_API_KEY`, `GOOGLE_CLOUD_*`, `GOOGLE_GENAI_USE_VERTEXAI`,
   `GCLOUD_PROJECT`, `CLOUDSDK_CORE_PROJECT`, `AGY_ACP_*`, `GEMINI_HOME`, `BROWSER`, …, matched

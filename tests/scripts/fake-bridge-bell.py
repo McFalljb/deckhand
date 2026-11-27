@@ -5,6 +5,9 @@ status script per session (aaaa-1, bbbb-2 of the fake store), BELL_DELAY
 seconds apart (default 5):
   aaaa-1  working, then idle      (a run that ends: "finished")
   bbbb-2  working, then waiting   (a dialog: "waiting for you")
+bbbb-2 waits BELL_GAP seconds longer (default 3) before waiting: both fakes start within a
+fraction of a second of each other, so with the same delay which status came first was the
+runner's call (bell.txt expects aaaa-1's "finished" first; CI got "waiting" once).
 It also answers pi.prompt: the prompt's text is the next status (working,
 idle, error, waiting), or "later:STATUS" for that status BELL_DELAY seconds
 on. It stays connected, like a bridge.
@@ -38,6 +41,8 @@ while True:
     if plan and time.time() >= due:
         status(plan.pop(0))
         due = time.time() + delay
+        if who == "bbbb-2" and plan == ["waiting"]:
+            due += float(os.environ.get("BELL_GAP", "3"))
     r, _, _ = select.select([sock], [], [], 0.2)
     if not r:
         continue

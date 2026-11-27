@@ -383,17 +383,19 @@ export type CommandOutcome = { result: Record<string, any> } | { error: string }
  * app tools add app_call, app_screenshot, app_input, app_events and get_state (its own session's
  * view, to list its app tabs), and new_app_tab (by its project's apps.json name), app_restart,
  * app_close and app_declared; Deckhand keeps a pi tab to its own session and to declared names.
+ * desk_show adds show_file (a pi tab's own session; Home may name one).
  */
 export const BROWSER_COMMANDS: ReadonlySet<string> = new Set([
 	"browser_tabs", "browser_open", "browser_navigate", "browser_read", "browser_screenshot", "browser_wait", "browser_console", "browser_network", "browser_comments",
 	"browser_click", "browser_type", "browser_press", "browser_scroll", "browser_select", "browser_hover", "browser_upload",
 	"app_call", "app_screenshot", "app_input", "app_events", "get_state",
 	"new_app_tab", "app_restart", "app_close", "app_declared",
+	"show_file",
 ]);
 /** Why a command may not go over deckhand:command / deckhand:control:command, or undefined. */
 export function browserRefusal(cmd: unknown): string | undefined {
 	const type = (cmd as Record<string, unknown> | undefined)?.type;
-	if (typeof type !== "string" || !BROWSER_COMMANDS.has(type)) return `This route forwards only the browser tools' commands (${[...BROWSER_COMMANDS].join(", ")}), not ${JSON.stringify(type ?? null)}.`;
+	if (typeof type !== "string" || !BROWSER_COMMANDS.has(type)) return `This route forwards only the commands of the browser, app and desk_show tools (${[...BROWSER_COMMANDS].join(", ")}), not ${JSON.stringify(type ?? null)}.`;
 }
 
 /**

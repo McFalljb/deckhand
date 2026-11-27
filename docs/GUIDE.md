@@ -260,7 +260,7 @@ names the command to run.
 - agy keeps the conversation itself. When pi compacts, it keeps a short note instead of a summary.
   If another model answered earlier in the session, or you went back in `/tree`, Deckhand starts a
   new agy session and gives it the conversation so far as text.
-- For a different agy than the one on your `PATH`, set `DECKHAND_AGY_PATH` to its full path.
+- Deckhand uses the agy on your `PATH`; to use another one, see [HARNESSES.md §3a](HARNESSES.md#3a-antigravity-in-pi-tabs-preview).
 
 ## How Deckhand runs
 

@@ -115,6 +115,17 @@ function serve() {
 		...(env.FAKE_AGY_NO_MODES === "1" && !noModes(s) ? { modes: { currentModeId: s.mode, availableModes: [{ id: "default", name: "Default" }, { id: "auto", name: "Auto" }] } } : {}),
 	});
 
+	function drift(s, what) {
+		if (what === "mode") {
+			s.mode = "auto";
+			s.drifted = true;
+			update(s.id, { sessionUpdate: "current_mode_update", currentModeId: "auto" });
+		} else if (what === "model") {
+			s.model = "gemini-3.8-flash";
+			update(s.id, { sessionUpdate: "config_option_update", configOptions: configOptions(s) });
+		}
+	}
+
 	async function prompt(id, p) {
 		const s = sessions.get(p.sessionId);
 		if (!s) return send({ id, error: { code: -32602, message: "unknown session" } });
@@ -125,9 +136,14 @@ function serve() {
 		s.turns++;
 		const turn = { sessionId: s.id, id, cancelled: false, stubborn: /stubborn/.test(said) };
 		active = turn;
+		// agy changing its own mode or model: FAKE_AGY_DRIFT_DURING=mode (in turn 1, before its
+		// answer), FAKE_AGY_DRIFT_BETWEEN=mode|model (just after turn 1 ended); FAKE_AGY_DRIFT_STICKY=1:
+		// a drifted mode cannot be set back
+		if (s.turns === 1 && env.FAKE_AGY_DRIFT_DURING) drift(s, env.FAKE_AGY_DRIFT_DURING);
 		const end = (stopReason, usage) => {
 			if (active === turn) active = undefined;
 			send({ id, result: { stopReason, ...(usage ? { usage } : {}) } });
+			if (s.turns === 1 && env.FAKE_AGY_DRIFT_BETWEEN) setTimeout(() => drift(s, env.FAKE_AGY_DRIFT_BETWEEN), 5);
 		};
 		const sid = s.id;
 		if (/crash/.test(said)) {
@@ -259,7 +275,7 @@ function serve() {
 			case "session/set_config_option": {
 				const s = sessions.get(params.sessionId);
 				if (!s) return send({ id, error: { code: -32602, message: "unknown session" } });
-				if (params.configId === "mode") s.mode = env.FAKE_AGY_MODE_STUCK === "1" ? s.mode : params.value;
+				if (params.configId === "mode") s.mode = env.FAKE_AGY_MODE_STUCK === "1" || (s.drifted && env.FAKE_AGY_DRIFT_STICKY === "1") ? s.mode : params.value;
 				else if (params.configId === "model") s.model = params.value;
 				else if (params.configId === "thinking_level") s.thinking = params.value;
 				else return send({ id, error: { code: -32602, message: `unknown option ${params.configId}` } });

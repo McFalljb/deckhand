@@ -85,7 +85,11 @@ export class AgySession {
 			runDir: o.runDir,
 			env: o.env ?? agyEnv(),
 			spawnImpl: o.spawnImpl,
-			onUpdate: (p) => o.onUpdate?.(p),
+			// agy's own changes to its session (mode, options) are tracked whether or not a turn runs
+			onUpdate: (p) => {
+				self?.track(p);
+				o.onUpdate?.(p);
+			},
 			onAgentRequest: o.onAgentRequest,
 			onSignIn: (url) => (o.signIn ? o.signIn.showLink(url) : self?.sawSignIn(url)),
 			onExit: () => o.onExit?.(),
@@ -148,6 +152,23 @@ export class AgySession {
 		this.modes = created.modes;
 		this.models = modelsOf(created);
 		await this.setMode("default");
+	}
+
+	/** agy's session/update for this session: config_option_update replaces the options, current_mode_update sets the mode (and the mode option's value, as t3code does). */
+	track(p: any) {
+		if (!this.sessionId || p?.sessionId !== this.sessionId) return;
+		const u = p.update;
+		if (u?.sessionUpdate === "config_option_update" && Array.isArray(u.configOptions)) this.configOptions = u.configOptions;
+		else if (u?.sessionUpdate === "current_mode_update" && typeof u.currentModeId === "string" && u.currentModeId) {
+			const id = u.currentModeId;
+			if (this.modes) this.modes = { ...this.modes, currentModeId: id };
+			this.configOptions = this.configOptions.map((x: any) => (x?.category === "mode" && x?.type === "select" ? { ...x, currentValue: id } : x));
+		}
+	}
+
+	/** agy's current mode as it last said. */
+	get currentMode(): string | undefined {
+		return this.configOptions.find((x: any) => x?.category === "mode" && x?.type === "select")?.currentValue ?? this.modes?.currentModeId;
 	}
 
 	/**

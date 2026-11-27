@@ -940,6 +940,46 @@ test("finding 7: pi retrying a message agy already got says so; a new message, o
 		await r.ag.closeAll();
 	}
 });
+
+test("round 2, finding 1: agy changing its mode or model between turns is seen; default and the chosen model are set again before the next prompt", async () => {
+	for (const [what, want] of [["mode", /mode default/], ["model", /model gemini-3\.8-pro/]] as const) {
+		const r = rig({ FAKE_AGY_DRIFT_BETWEEN: what });
+		const pro = { ...MODEL, id: "gemini-3.8-pro" }; // a model picked in /model (not agy's own pick)
+		try {
+			await r.turn("one", {}, pro);
+			await new Promise((res) => setTimeout(res, 50)); // agy's update arrives between turns
+			const two = await r.turn("two", {}, pro);
+			assert.equal(two.msg.stopReason, "stop", what);
+			assert.match(textOfMsg(two.msg), want, `${what}: set back before turn 2`);
+		} finally {
+			await r.ag.closeAll();
+		}
+	}
+});
+
+test("round 2, finding 1: agy switching its mode during a turn is shown; the next prompt goes out only once default is back", async () => {
+	const r = rig({ FAKE_AGY_DRIFT_DURING: "mode" });
+	try {
+		const one = await r.turn("one");
+		assert.match(thinkingOf(one.msg), /Antigravity switched to its auto mode during this turn/);
+		const two = await r.turn("two");
+		assert.match(textOfMsg(two.msg), /mode default/);
+	} finally {
+		await r.ag.closeAll();
+	}
+	const s = rig({ FAKE_AGY_DRIFT_BETWEEN: "mode", FAKE_AGY_DRIFT_STICKY: "1" });
+	try {
+		await s.turn("one");
+		await new Promise((res) => setTimeout(res, 50));
+		const before = s.prompts().length;
+		const two = await s.turn("two");
+		assert.equal(two.msg.stopReason, "error");
+		assert.match(two.msg.errorMessage, /cannot confirm that Antigravity runs in its default mode/);
+		assert.equal(s.prompts().length, before, "refused before the prompt");
+	} finally {
+		await s.ag.closeAll();
+	}
+});
 test("abort: session/cancel, the turn ends aborted, and the session goes on", async () => {
 	const r = rig();
 	try {

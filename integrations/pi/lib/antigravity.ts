@@ -435,6 +435,7 @@ export function createAntigravity(o: AntigravityOptions) {
 		}
 		st.busy = true;
 		const titles = new Map<string, string>();
+		let modeNoted = false;
 		let aborted = false;
 		const onAbort = () => {
 			aborted = true;
@@ -447,6 +448,9 @@ export function createAntigravity(o: AntigravityOptions) {
 				agy = got.agy;
 				// agy could not resume (it does not offer session/resume): its new session gets pi's transcript first
 				if (got.lost) plan = { mode: "new", blocks: [{ type: "text", text: catchUpText(plan.prior ?? []) }, ...plan.blocks] };
+				// before every prompt (agy may have changed them since): its default mode, refused if
+				// it cannot be set again, then the chosen model against agy's current options
+				await agy.setMode("default");
 				await agy.selectModel(model.id);
 				await agy.selectThinking(options.reasoning);
 			} catch (e) {
@@ -473,6 +477,17 @@ export function createAntigravity(o: AntigravityOptions) {
 				update: (u: any) => {
 					void options.onProviderStreamEvent?.(u, model);
 					switch (u?.sessionUpdate) {
+						case "current_mode_update":
+						case "config_option_update": {
+							// agy left its default mode mid-turn: what it does now cannot be undone, but it is shown,
+							// and the next prompt goes out only once default is back (setMode above)
+							const mode = agy.currentMode;
+							if (mode && mode !== "default" && !modeNoted) {
+								modeNoted = true;
+								answer.note(`⚠ Antigravity switched to its ${clip1(mode, 40)} mode during this turn; Deckhand sets its default mode again before the next message, and refuses the message if it cannot`);
+							}
+							break;
+						}
 						case "agent_message_chunk":
 							if (u.content?.type === "text") answer.text(String(u.content.text ?? ""));
 							break;

@@ -182,9 +182,15 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   processes share one). Closing agy: its stdin first, SIGTERM if it is still there after 1 s,
   SIGKILL after 5 s more. agy's own children are not killed as a group (nor in t3code): an open
   risk once approvals let agy run commands.
-- **Mode and model, fail closed**: a session (new or resumed) that reports no mode option and no
-  modes, or whose mode option does not take `default`, is refused before any prompt; so is a model
-  other than `default` when agy offers no model option.
+- **Mode and model, fail closed, before every prompt**: agy's own `config_option_update` and
+  `current_mode_update` for the session are tracked whether or not a turn runs (as t3code does).
+  Before every prompt, `continue` included, the session is set to `default` again (no request when
+  it already is) and the chosen model checked against agy's current options. A session that reports
+  no mode option and no modes, or whose mode does not go back to `default`, gets no prompt; so does
+  a model other than `default` when agy offers no model option. A resumed session that cannot
+  confirm `default` gives way to a new one with catch-up text (a new one that cannot is refused).
+  agy changing its mode during a turn cannot be undone: the thinking shows a note, and the next
+  prompt waits for `default`. t3code tracks both updates but does not set the mode again or refuse.
 - **API keys**: `gemini-api-key` and key-based `agent-platform` accounts use pi's own credential
   store: the provider's `auth.apiKey.login` asks with pi's masked secret prompt (`/login
   antigravity-<name>`), pi keeps the key in `~/.pi/agent/auth.json` (0600) like every API key, and
@@ -219,13 +225,19 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   written temp then rename) and a lock (O_EXCL, with the holder's pid; a dead holder's is taken
   over). Otherwise (another provider answered, `/tree` or `/fork` to an older answer, a session
   another pi holds, an agy without `session/resume`, no record) a new agy session gets the
-  transcript as text first. A message pi sends again after a failed turn that had reached agy
-  (its auto-retry) gets a note first that agy may already have it; Deckhand's own error texts do
+  transcript as text first. A turn that reached agy (`session/prompt` went out) and then failed
+  or was aborted stays in agy's session, though pi may drop it from its transcript; a message pi
+  sends again after it (its auto-retry) gets a note first that agy may already have it; Deckhand's own error texts do
   not match pi's retry patterns. Text streams as text, thoughts as thinking, tool calls, plan and
   declined requests as lines of thinking and the status line, never as pi tool calls. Abort sends
   `session/cancel` and waits 10 s, then stops the process. Usage is agy's per-turn
   `PromptResponse.usage`; cost 0. pi's summaries (compaction, branch summaries) are answered
   without agy; replays (`disableContinuation`) are refused.
+- **Open points**: two pi processes taking over the same stale session lock at the same instant
+  could both hold it (a rename-based lock would close that); the record keeps a file per agy
+  session per profile, never pruned (each capped at 200 answers); quitting pi waits for each agy to
+  end, up to 6 s for one that ignores its stdin and SIGTERM; a command that makes a run folder and
+  then never starts agy leaves the folder until the next sweep after this pi exits.
 - **Tests**: `test/antigravity.test.ts` against `test/fake-agy.mjs`, a stand-in agy (t3code's
   fixtures' shapes; it checks the method against the profile's settings and its environment, and
   logs the variables it got), with a temporary HOME and accounts folder; never a real agy. `test/temp-home.ts`, imported first

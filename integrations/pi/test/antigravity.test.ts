@@ -366,12 +366,12 @@ test("without agy: only /antigravity, which says where to get agy; no provider, 
 		await run(pi, "antigravity", "path relative/agy", c);
 		assert.equal(notes.at(-1), "Not an absolute path to an executable file: relative/agy");
 		assert.equal(x.providers.length, 0);
-		// a path from the menu: the providers, hooks and /antigravity-login, now
+		// a path from the menu: the providers and hooks, now (no new command: pi 1.5.2 does not autocomplete one registered after start)
 		const m = { ...c, ui: { ...c.ui, select: async () => "Set agy's path…", input: async () => FAKE } };
 		await run(pi, "antigravity", "", m);
 		assert.match(notes.at(-1)!, new RegExp(`^Antigravity now runs ${FAKE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}: its models are in /model`));
 		assert.deepEqual(x.providers.map((p: any) => p.id), ["antigravity"]);
-		assert.deepEqual([...x.commands.keys()], ["antigravity", "antigravity-login"]);
+		assert.deepEqual([...x.commands.keys()], ["antigravity"]);
 		assert.deepEqual([...x.handlers.keys()].sort(), ["session_before_compact", "session_shutdown", "session_start"]);
 		assert.equal(JSON.parse(readFileSync(path.join(dataRoot(), "accounts.json"), "utf8")).agyPath, FAKE);
 		await run(pi, "antigravity", "status", c);
@@ -408,7 +408,7 @@ function cmdCtx(pi: any, answers: { input?: string[]; select?: string[] } = {}, 
 }
 const run = (pi: any, name: string, args: string, ctx: any) => pi.extensions[0].commands.get(name).handler(args, ctx);
 
-test("with agy: one provider per account (antigravity for the default), /antigravity and /antigravity-login; loading writes and starts nothing", async () => {
+test("with agy: one provider per account (antigravity for the default), only /antigravity (one command, so pi autocompletes it from the start); loading writes and starts nothing", async () => {
 	const f = fake();
 	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
 	mkdirSync(a.root, { recursive: true });
@@ -427,7 +427,7 @@ test("with agy: one provider per account (antigravity for the default), /antigra
 		assert.deepEqual(await w.auth.apiKey.resolve({ credential: { type: "api_key", key: "k" } }), { auth: { apiKey: "k" }, source: "stored credential" });
 		assert.deepEqual(await w.auth.apiKey.login({ prompt: async (q: any) => (assert.equal(q.type, "secret"), " k-typed ") }), { type: "api_key", key: "k-typed" }, "masked prompt");
 		assert.deepEqual(w.getModels()[0].name, "Antigravity: work (agy's default model)");
-		assert.deepEqual([...x.commands.keys()], ["antigravity", "antigravity-login"]);
+		assert.deepEqual([...x.commands.keys()], ["antigravity"]);
 		assert.deepEqual([...x.tools.keys(), ...x.flags.keys()], []);
 		await pi.start();
 		assert.equal(f.read().length, 0, "agy is not started by loading or by session start");
@@ -436,14 +436,14 @@ test("with agy: one provider per account (antigravity for the default), /antigra
 	});
 });
 
-test("/antigravity-login: agy's --login in the default account's own profile (GEMINI_HOME, file storage, SSH_CONNECTION, its TMPDIR), then its models; sign-out by agy's logout", async () => {
+test("/antigravity login (no name: the default account): agy's --login in the default account's own profile (GEMINI_HOME, file storage, SSH_CONNECTION, its TMPDIR), then its models; sign-out by agy's logout", async () => {
 	const f = fake();
 	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
 	await withEnv(a.env, async () => {
 		const pi = await loadExtension();
 		await pi.start();
 		const { ctx, notes } = cmdCtx(pi, { input: ["good-code"] });
-		await run(pi, "antigravity-login", "", ctx);
+		await run(pi, "antigravity", "login", ctx);
 		assert.match(notes[0], /Open this link and sign in with Google:\nhttps:\/\/accounts\.google\.com\/.*\nThen paste the code/s);
 		assert.deepEqual(notes.slice(1), ['Signed in to Antigravity (account "default")', '2 models of the Antigravity account "default" in /model (provider antigravity)']);
 		const prof = path.join(a.root, "profiles", "default");
@@ -468,7 +468,7 @@ test("/antigravity-login: agy's --login in the default account's own profile (GE
 		assert.equal(st.notes.at(-1), 'Signed out of Antigravity (account "default"); its history is kept');
 		assert.ok(f.read().some((m) => m.method === "logout"));
 		await run(pi, "antigravity", "status", st.ctx);
-		assert.match(st.notes.at(-1)!, /default → antigravity · Google account · not signed in: run \/antigravity-login/);
+		assert.match(st.notes.at(-1)!, /default → antigravity · Google account · not signed in: run \/antigravity login/);
 	});
 });
 
@@ -479,7 +479,7 @@ test("GEMINI_API_KEY, GOOGLE_* and BROWSER in pi's environment never reach agy: 
 		const pi = await loadExtension();
 		await pi.start();
 		const { ctx } = cmdCtx(pi, { input: ["good-code"] });
-		await run(pi, "antigravity-login", "", ctx);
+		await run(pi, "antigravity", "login", ctx);
 		const r = await drive(prov(pi, "antigravity").streamSimple({ id: "default", provider: "antigravity", api: "antigravity-acp" }, { messages: [user("hi")] }, { sessionId: "s1" }));
 		assert.equal(r.msg.stopReason, "stop");
 		const starts = f.read().filter((m) => m.argv);
@@ -561,7 +561,7 @@ test("an API-key account without a key, a signed-out account, SUBSCRIPTION_REQUI
 		const { ctx, notes } = cmdCtx(pi);
 		await run(pi, "antigravity", "add biz oauth-personal", ctx);
 		const turn = (id: string, key?: string) => drive(prov(pi, id).streamSimple({ id: "default", provider: id, api: "antigravity-acp" }, { messages: [user("hi")] }, { sessionId: "s", ...(key ? { apiKey: key } : {}) }));
-		assert.equal((await turn("antigravity")).msg.errorMessage, 'Antigravity account "default" is not signed in: run /antigravity-login');
+		assert.equal((await turn("antigravity")).msg.errorMessage, 'Antigravity account "default" is not signed in: run /antigravity login');
 		assert.equal((await turn("antigravity-biz")).msg.errorMessage, 'Antigravity account "biz" is not signed in: run /antigravity login biz');
 		await run(pi, "antigravity", "add k gemini-api-key", ctx);
 		await run(pi, "antigravity", "models k", ctx);
@@ -1497,7 +1497,7 @@ test("not signed in, or agy too old: the turn fails at once with what to do", as
 	const out = rig({ FAKE_AGY_SIGNED_OUT: "1" });
 	const a = await out.turn("hi");
 	assert.equal(a.msg.stopReason, "error");
-	assert.equal(a.msg.errorMessage, "Antigravity is not signed in: run /antigravity-login");
+	assert.equal(a.msg.errorMessage, "Antigravity is not signed in: run /antigravity login");
 	await out.ag.closeAll();
 	const old = rig({ FAKE_AGY_VERSION: "agy_acp_server_1.4.9" });
 	const b = await old.turn("hi");

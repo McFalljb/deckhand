@@ -353,7 +353,7 @@ export function explainError(message: string, a: Account): string {
 /** The command that signs an account in. */
 export function signInCommand(a: Account): string {
 	if (usesKey(a)) return `/login ${providerIdOf(a.name)}`;
-	return a.name === "default" ? "/antigravity-login" : `/antigravity login ${a.name}`;
+	return a.name === "default" ? "/antigravity login" : `/antigravity login ${a.name}`;
 }
 export const notSignedIn = (a: Account) =>
 	`Antigravity account "${a.name}" is not signed in: run ${signInCommand(a)}`;

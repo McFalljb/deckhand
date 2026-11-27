@@ -221,7 +221,7 @@ sign-in; agy keeps it.
 **Setting up.** Type **`/antigravity`**: it shows whether agy was found and its version, and each
 account with its sign-in method, whether it is signed in and how many models it has, then a menu to
 add an account, sign in, sign out or remove one. For one Google account with an Antigravity plan,
-**`/antigravity-login`** is all you need: it shows a Google link, you sign in there and paste the
+**`/antigravity login`** is all you need: it shows a Google link, you sign in there and paste the
 code the Antigravity page shows. Then **`/model`** lists your models.
 
 **Accounts.** Each account is its own provider in `/model`: `antigravity` for the default account,

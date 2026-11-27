@@ -12,8 +12,10 @@
  *   itself. Loading reads accounts.json only; profiles are made when agy first runs for an account.
  * - `/antigravity`: the status (agy and its version, each account, its method, whether it is signed
  *   in, its models) and a menu; `/antigravity add|login|logout|remove|models [name]` directly;
- *   `/antigravity path [/abs/agy]` sets (or clears) agy's path.
- *   `/antigravity-login`: the default account's sign-in.
+ *   `/antigravity path [/abs/agy]` sets (or clears) agy's path; `/antigravity login` (no name)
+ *   signs in the default account. It is the only command: pi 1.5.2 builds its autocomplete list
+ *   at start, reload and session switch only, so a command registered later (by /antigravity path)
+ *   would not be offered until then.
  * - Honest: Deckhand's own client name (deckhand-pi), no spoofed headers; agy keeps its sign-in,
  *   Deckhand never reads it and never calls Google. An API key lives in pi's credential store
  *   (`/login antigravity-<name>`) and reaches agy only in its environment.
@@ -102,7 +104,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		pi.registerProvider(ag.provider as any);
 	};
 	/**
-	 * Registers the accounts' providers, the hooks and /antigravity-login, once agy is found: at load,
+	 * Registers the accounts' providers and the hooks, once agy is found: at load,
 	 * or later in the session from /antigravity path (`ctx` then stands in for session_start).
 	 */
 	const activate = (ctx?: ExtensionContext) => {
@@ -135,10 +137,6 @@ export default function antigravity(pi: ExtensionAPI) {
 			return { compaction: { summary: SUMMARY_TEXT, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore } };
 		});
 
-		pi.registerCommand("antigravity-login", {
-			description: "Sign in to Google Antigravity (the default account; /antigravity for the others)",
-			handler: async (_args: string, c: ExtensionContext) => login(c, "default"),
-		});
 		if (ctx) {
 			cwd = ctx.cwd || cwd;
 			registry = (ctx as any).modelRegistry;

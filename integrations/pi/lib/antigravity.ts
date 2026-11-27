@@ -5,10 +5,10 @@
 //
 // - Auth: agy keeps its own sign-in, so the provider is "configured" whenever agy was found (an
 //   ambient api-key auth with no login and no key: pi-ai auth/types.d.ts ApiKeyAuth "Ambient-only
-//   providers omit login"). /antigravity-login signs agy in.
+//   providers omit login"). /antigravity login signs agy in.
 // - Models: `default` (agy's own choice) always, so a session or `--model antigravity/default`
 //   resolves before anything was asked of agy; the account's models once a session has listed them
-//   (its `model` config option): after /antigravity-login, on /antigravity models, and from every
+//   (its `model` config option): after /antigravity login, on /antigravity models, and from every
 //   session the provider opens. Kept in memory only: nothing is written to pi's model store.
 //
 // A passthrough: agy runs the whole turn (its model, its tools, its system prompt) and keeps the

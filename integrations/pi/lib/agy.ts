@@ -11,7 +11,7 @@ import { AcpConnection, type AcpConnectionOptions, AcpError, AGY_MIN_VERSION, AG
 /** agy's default mode could not be confirmed (setMode): nothing is sent to that session. */
 export class ModeUnconfirmed extends AcpError {}
 
-export const SIGN_IN_HINT = "Antigravity is not signed in: run /antigravity-login";
+export const SIGN_IN_HINT = "Antigravity is not signed in: run /antigravity login";
 const STARTUP_TIMEOUT_MS = 60_000;
 
 export interface AgyModel {

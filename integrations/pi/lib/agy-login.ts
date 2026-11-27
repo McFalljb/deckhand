@@ -1,4 +1,4 @@
-// /antigravity-login: Google sign-in through agy's own `agy acp --login` (t3code's code login,
+// /antigravity login: Google sign-in through agy's own `agy acp --login` (t3code's code login,
 // Drivers/AntigravityDriver.ts codeLogin). agy prints an accounts.google.com link; the user opens
 // it, signs in, and pastes back the code the Antigravity page shows; agy exchanges it and stores the
 // credential itself. Deckhand only passes the link and the code along: it never sees, reads or
@@ -132,11 +132,11 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 	const line = loginAnswer(link, answer);
 	if (!line) {
 		await stop();
-		return { ok: false, error: "That is not a code from the Antigravity sign-in page: sign in again (/antigravity-login, or /antigravity login <name>)" };
+		return { ok: false, error: "That is not a code from the Antigravity sign-in page: sign in again (/antigravity login [name])" };
 	}
 	child.stdin!.write(`${line}\n`);
 	const timer = setTimeout(() => child.kill("SIGTERM"), o.finishTimeoutMs ?? 120_000);
 	const code = await exited;
 	clearTimeout(timer);
-	return code === 0 ? { ok: true } : { ok: false, error: "Antigravity could not finish the Google sign-in: sign in again (/antigravity-login, or /antigravity login <name>)" };
+	return code === 0 ? { ok: true } : { ok: false, error: "Antigravity could not finish the Google sign-in: sign in again (/antigravity login [name])" };
 }

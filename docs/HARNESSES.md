@@ -139,10 +139,12 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   only the variables `scripts/check-env-reads.py` lists). Not found: the extension registers
   only `/antigravity`, which says where to get agy (1.5.12 or newer) and offers `/antigravity path`;
   no provider, hook, status line or output. Found (at load, or when `/antigravity path` sets a path
-  later in the session): the accounts' providers, `/antigravity-login`, and hooks for
-  `session_start`, `session_shutdown` and `session_before_compact` (pi takes providers, hooks and
-  commands after load; the command's context stands in for the `session_start` already past). No
-  tools or flags.
+  later in the session): the accounts' providers and hooks for
+  `session_start`, `session_shutdown` and `session_before_compact` (pi takes providers and hooks
+  after load; the command's context stands in for the `session_start` already past). No new
+  command then: pi 1.5.2 builds its autocomplete list only at start, `/reload` and a session
+  switch, so a command registered later would not be offered (an earlier `/antigravity-login` was
+  folded into `/antigravity login` for that reason). No flags.
 - **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
   `clientInfo`/`clientCapabilities`: agy answers `protocolVersion: 2` in the v1 shape), no fs and
   no terminal capability; agy older than 1.5.1 (`agentInfo.version`) is refused; `session/new`
@@ -203,8 +205,8 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `add <name> [method]`, `login`, `logout` (agy's ACP `logout`, when advertised; the history
   stays), `remove` (confirmed; its provider unregistered and its profile deleted; `default` stays)
   `models [name]` and `path [/abs/agy]` (sets agy's path after the same check, or with no
-  argument clears it; every account's provider then runs the new binary). `/antigravity-login` is
-  the default account's sign-in. Gemini Enterprise
+  argument clears it; every account's provider then runs the new binary). `/antigravity login`
+  with no name signs in the default account. Gemini Enterprise
   signs in by agy's own browser flow (`authenticate`, its link shown, up to 5 minutes).
   `SUBSCRIPTION_REQUIRED` from agy becomes a message that links https://antigravity.google/docs/plans.
 - **Approvals: none yet.** Every `session/request_permission` is answered `reject_once` (else

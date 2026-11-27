@@ -298,6 +298,10 @@ agy_install_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 			seen := agy_root()
 			when ODIN_TEST do seen = agy_test_seen_root // never the developer's own data dir
 			if why := agy_seen_write(seen, target, c.version); why != "" do log_ln("Deckhand: agy: could not write agy-seen.json:", why)
+			// not on the tabs' PATH: pi's extension is told where it is (accounts.json's agyPath)
+			when !ODIN_TEST {
+				if !agy_install_dir_on_path() do if why := agy_accounts_set_path(target); why != "" do log_ln("Deckhand: agy: could not set agyPath:", why)
+			}
 			window_toast(fmt.tprintf("agy %s is at %s", c.version, fs_display(target)))
 		}
 		agy_set(&agy_inst.step, "")

@@ -746,6 +746,21 @@ agy_accounts_sync :: proc() -> string {
 	}, &plan)
 }
 
+// After Install agy… (agy_install.odin): agy's path in the file when the folder it went to is not on
+// the PATH tabs get (pi's extension then finds it as /antigravity path would set it). An agyPath
+// the user set to another executable stays. "" = done or nothing to do.
+agy_accounts_set_path :: proc(bin: string) -> string {
+	if bin == "" || !filepath.is_abs(bin) do return ""
+	return agy_accounts_change(proc(o: ^json.Object, data: rawptr) -> bool {
+		bin := (^string)(data)^
+		cur := str_of(o^, "agyPath")
+		if cur == bin do return false
+		if cur != "" && filepath.is_abs(cur) && exe_in(filepath.dir(cur), filepath.base(cur)) do return false // the user's own choice
+		o^["agyPath"] = json.String(bin)
+		return true
+	}, &bin)
+}
+
 // ---- the guard ----
 
 // Every folder Deckhand guards as agy's (agy_credential): each account's profile, every folder

@@ -166,8 +166,13 @@ test("sign-in: the method is always passed to authenticate; a sign-in link, auth
 	const s = await AgySession.open({ agyPath: FAKE, cwd: key.cwd, env: key.env, authMethod: "gemini-api-key" });
 	await s.close();
 	assert.deepEqual(key.read().find((m) => m.method === "authenticate").params, { methodId: "gemini-api-key" });
+	// agy 1.5.18's own texts: each becomes the account's sign-in command, never agy's advice (`agy acp --login`)
 	const nokey = fake();
-	await assert.rejects(AgySession.open({ agyPath: FAKE, cwd: nokey.cwd, env: nokey.env, authMethod: "gemini-api-key" }), /No GEMINI_API_KEY \(authenticate\)/);
+	await assert.rejects(
+		AgySession.open({ agyPath: FAKE, cwd: nokey.cwd, env: nokey.env, authMethod: "gemini-api-key", signInHint: 'Antigravity account "k" is not signed in: run /login antigravity-k' }),
+		(e: any) => e instanceof SignInRequired && e.message === 'Antigravity account "k" is not signed in: run /login antigravity-k',
+	);
+	assert.deepEqual(methods(nokey.read()), ["initialize", "authenticate"]);
 });
 
 test("prompt and streaming: thoughts, tool calls, plan and text arrive as session/update before the turn's response; model and thinking by config option", async () => {

@@ -132,7 +132,12 @@ export class AgySession {
 		if (agyTooOld(this.agentVersion))
 			throw new AcpError(`Antigravity CLI ${this.agentVersion} is older than ${AGY_MIN_VERSION}, the first that serves other clients: update agy (${AGY_RECOMMENDED_VERSION} or newer)`);
 		const signedOut = (e: unknown) =>
-			e instanceof SignInRequired || (e instanceof AcpError && e.code === -32603 && /No browser is available here/.test(String(e.data ?? e.message)));
+			e instanceof SignInRequired ||
+			(e instanceof AcpError &&
+				// agy 1.5.18: oauth-personal over SSH with no sign-in (-32603 "No browser is available here (…)
+				// Run `agy acp --login` …"), and gemini-api-key with no key (-32602 "GEMINI_API_KEY is not
+				// set; …"). Each means the account's own sign-in command (this.hint), not agy's advice.
+				((e.code === -32603 && /No browser is available here/.test(String(e.data ?? e.message))) || (e.code === -32602 && /GEMINI_API_KEY is not set/.test(String(e.message)))));
 		const method = o.authMethod ?? "oauth-personal";
 		try {
 			await this.untilSignIn(this.conn.request("authenticate", { methodId: method }, o.signIn?.timeoutMs ?? STARTUP_TIMEOUT_MS));

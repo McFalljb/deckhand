@@ -263,7 +263,7 @@ function serve() {
 				const ok = () => ((authed = true), send({ id, result: {} }));
 				const bad = (message) => send({ id, error: { code: -32602, message } });
 				if (env.FAKE_AGY_SIGNED_OUT === "1" || ((m === "oauth-personal" || m === "oauth-business") && !signedIn())) {
-					if (env.SSH_CONNECTION && m === "oauth-personal") return send({ id, error: { code: -32603, message: "No browser is available here. Use --login." } });
+					if (env.SSH_CONNECTION && m === "oauth-personal") return send({ id, error: { code: -32603, message: "No browser is available here (this is a remote (SSH) session, so the browser's sign-in redirect can't reach this machine). Run `agy acp --login` in a terminal on this machine, then retry; or use a Gemini API key." } });
 					process.stdout.write(`Open the following link to authenticate the ACP server: ${LINK}\n`);
 					if (env.FAKE_AGY_BROWSER_SIGNIN === "1" && tokenFile)
 						setTimeout(() => (fs.writeFileSync(tokenFile, "{}"), ok()), 50); // the browser came back to agy's loopback
@@ -271,7 +271,7 @@ function serve() {
 				}
 				if (m === "oauth-personal") return ok();
 				if (m === "oauth-business") return settings?.gcp?.project && settings?.gcp?.location ? ok() : bad("Gemini Enterprise needs a GCP project and location");
-				if (m === "gemini-api-key") return env.GEMINI_API_KEY ? ok() : bad("No GEMINI_API_KEY");
+				if (m === "gemini-api-key") return env.GEMINI_API_KEY ? ok() : bad("GEMINI_API_KEY is not set; pass an API key in _meta.apiKey or set the GEMINI_API_KEY environment variable.");
 				if (m === "agent-platform") return env.GOOGLE_API_KEY || (settings?.gcp?.project && settings?.gcp?.location) ? ok() : bad("Agent Platform needs a key or a project");
 				return bad(`unknown method ${m}`);
 			}

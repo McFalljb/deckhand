@@ -889,6 +889,27 @@ test("agy crashing mid-turn: an error that is not one pi retries; the next turn 
 	}
 });
 
+test("finding 2: when agy cannot resume, the new session gets pi's transcript as text first, not only the new message", async () => {
+	const r = rig({ FAKE_AGY_NO_RESUME: "1" });
+	try {
+		await r.turn("hi");
+		await r.turn("crash");
+		const next = await r.turn("still there?");
+		assert.equal(next.msg.stopReason, "stop");
+		assert.ok(!r.f.read().some((m) => m.method === "session/resume"), "agy does not offer it");
+		const sent = r.prompts().at(-1)!;
+		assert.equal(sent.length, 2);
+		assert.match(sent[0].text, /^\[The conversation so far, from pi's transcript[\s\S]*User: hi\n\nAssistant: You said: hi[\s\S]*User: crash/);
+		assert.deepEqual(sent[1], { type: "text", text: "still there?" });
+		assert.notEqual(next.msg.responseId, r.messages[2].responseId, "a new agy session");
+		const after = await r.turn("and now?");
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "and now?" }], "then it continues as usual");
+		assert.equal(after.msg.responseId, next.msg.responseId);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
 test("pi restarted: a new provider resumes the agy session named on the transcript's last answer", async () => {
 	const r = rig();
 	const first = await r.turn("hi");
@@ -935,7 +956,9 @@ test("planTurn: continue, resume, new; a retry after a failed answer continues",
 	assert.equal((planTurn([u("x"), a(5)], undefined) as any).error, "Antigravity: there is no new message to send");
 	const st = { acpSessionId: "S", produced: [{ ts: 5, ok: true }] };
 	assert.equal((planTurn([u("x"), a(5), u("y")], st) as any).mode, "continue");
-	assert.deepEqual(planTurn([u("x"), a(5), u("y")], { acpSessionId: "T", produced: [] }), { blocks: [{ type: "text", text: "y" }], mode: "resume", resumeId: "S" });
+	const { prior, ...resume } = planTurn([u("x"), a(5), u("y")], { acpSessionId: "T", produced: [] }) as any;
+	assert.deepEqual(resume, { blocks: [{ type: "text", text: "y" }], mode: "resume", resumeId: "S" });
+	assert.deepEqual(prior, [u("x"), a(5)], "the transcript to catch agy up with, if it cannot resume");
 	const retried = { acpSessionId: "S", produced: [{ ts: 5, ok: true }, { ts: 6, ok: false }] };
 	assert.equal((planTurn([u("x"), a(5), u("y")], retried) as any).mode, "continue", "pi dropped the failed attempt and retries");
 	const ahead = { acpSessionId: "S", produced: [{ ts: 5, ok: true }, { ts: 7, ok: true }] };

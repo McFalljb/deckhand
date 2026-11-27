@@ -119,7 +119,8 @@ export interface Produced {
 	ok: boolean;
 }
 
-export type TurnPlan = { error: string } | { blocks: any[]; mode: "continue" | "resume" | "new"; resumeId?: string };
+/** `prior`: the transcript up to the last answer, for catch-up text if agy cannot pick its session up. */
+export type TurnPlan = { error: string } | { blocks: any[]; mode: "continue" | "resume" | "new"; resumeId?: string; prior?: any[] };
 
 /**
  * How a turn reaches agy. `continue`: agy's session is pi's transcript (its last answer is the
@@ -140,9 +141,10 @@ export function planTurn(messages: any[], state: { acpSessionId?: string; produc
 	if (last < 0) return { blocks, mode: "new" };
 	const answer = convo[last];
 	if (answer.provider === provider && typeof answer.responseId === "string" && answer.responseId) {
-		if (state?.acpSessionId !== answer.responseId) return { blocks, mode: "resume", resumeId: answer.responseId };
+		const prior = convo.slice(0, last + 1);
+		if (state?.acpSessionId !== answer.responseId) return { blocks, mode: "resume", resumeId: answer.responseId, prior };
 		const i = state.produced.findIndex((p) => p.ts === answer.timestamp);
-		if (i >= 0 && state.produced.slice(i + 1).every((p) => !p.ok)) return { blocks, mode: "continue" };
+		if (i >= 0 && state.produced.slice(i + 1).every((p) => !p.ok)) return { blocks, mode: "continue", prior };
 	}
 	return { blocks: [{ type: "text", text: catchUpText(convo.slice(0, last + 1)) }, ...blocks], mode: "new" };
 }
@@ -331,8 +333,9 @@ export function createAntigravity(o: AntigravityOptions) {
 		if (a) void a.close().catch(() => {});
 	};
 
-	async function ensureSession(st: SessionState, plan: Exclude<TurnPlan, { error: string }>, apiKey: string | undefined): Promise<AgySession> {
-		if (plan.mode === "continue" && st.agy?.conn.alive) return st.agy;
+	/** The turn's agy session; `lost`: it was to resume a session and agy started a new one instead (no session/resume). */
+	async function ensureSession(st: SessionState, plan: Exclude<TurnPlan, { error: string }>, apiKey: string | undefined): Promise<{ agy: AgySession; lost: boolean }> {
+		if (plan.mode === "continue" && st.agy?.conn.alive) return { agy: st.agy, lost: false };
 		drop(st);
 		const resumeId = plan.mode === "resume" ? plan.resumeId : plan.mode === "continue" ? st.acpSessionId : undefined;
 		let agy: AgySession | undefined;
@@ -360,7 +363,7 @@ export function createAntigravity(o: AntigravityOptions) {
 		st.agy = agy;
 		st.acpSessionId = agy.sessionId;
 		void setModels(agy.models, agy.thinkingLevels);
-		return agy;
+		return { agy, lost: !!resumeId && agy.sessionId !== resumeId };
 	}
 
 	function streamSimple(model: any, context: any, options?: any) {
@@ -398,7 +401,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			if (dispatched) st!.failedSent = ok ? undefined : sentKey;
 		};
 		if (st.acpSessionId) answer.msg.responseId = st.acpSessionId;
-		const plan = planTurn(messages, st, pid);
+		let plan = planTurn(messages, st, pid);
 		if ("error" in plan) {
 			record(false);
 			return answer.finish("error", plan.error);
@@ -413,7 +416,10 @@ export function createAntigravity(o: AntigravityOptions) {
 		try {
 			let agy: AgySession;
 			try {
-				agy = await ensureSession(st, plan, typeof options.apiKey === "string" ? options.apiKey : undefined);
+				const got = await ensureSession(st, plan, typeof options.apiKey === "string" ? options.apiKey : undefined);
+				agy = got.agy;
+				// agy could not resume (it does not offer session/resume): its new session gets pi's transcript first
+				if (got.lost) plan = { mode: "new", blocks: [{ type: "text", text: catchUpText(plan.prior ?? []) }, ...plan.blocks] };
 				await agy.selectModel(model.id);
 				await agy.selectThinking(options.reasoning);
 			} catch (e) {

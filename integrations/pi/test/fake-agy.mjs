@@ -113,22 +113,24 @@ function serve() {
 		const s = sessions.get(p.sessionId);
 		if (!s) return send({ id, error: { code: -32602, message: "unknown session" } });
 		const text = (p.prompt ?? []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+		// what the prompt does depends on its last text block (the user's message; catch-up text comes first)
+		const said = (p.prompt ?? []).filter((b) => b.type === "text").at(-1)?.text ?? "";
 		const images = (p.prompt ?? []).filter((b) => b.type === "image").length;
 		s.turns++;
-		const turn = { sessionId: s.id, id, cancelled: false, stubborn: /stubborn/.test(text) };
+		const turn = { sessionId: s.id, id, cancelled: false, stubborn: /stubborn/.test(said) };
 		active = turn;
 		const end = (stopReason, usage) => {
 			if (active === turn) active = undefined;
 			send({ id, result: { stopReason, ...(usage ? { usage } : {}) } });
 		};
 		const sid = s.id;
-		if (/crash/.test(text)) {
+		if (/crash/.test(said)) {
 			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "about to" } });
 			setTimeout(() => process.exit(3), 20);
 			return;
 		}
-		if (/refuse/.test(text)) return end("refusal");
-		if (/permission/.test(text)) {
+		if (/refuse/.test(said)) return end("refusal");
+		if (/permission/.test(said)) {
 			const tc = { toolCallId: "call_perm", title: "Run rm -rf build", kind: "execute", status: "pending", rawInput: { CommandLine: "rm -rf build" } };
 			update(sid, { sessionUpdate: "tool_call", ...tc });
 			const r = await ask("session/request_permission", {
@@ -144,7 +146,7 @@ function serve() {
 			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `permission:${JSON.stringify(r)}` } });
 			return end("end_turn");
 		}
-		if (/question/.test(text)) {
+		if (/question/.test(said)) {
 			const r = await ask("session/request_permission", {
 				sessionId: sid,
 				toolCall: { toolCallId: "interaction_q1", title: "Which file?", status: "pending" },
@@ -153,17 +155,17 @@ function serve() {
 			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `question:${JSON.stringify(r)}` } });
 			return end("end_turn");
 		}
-		if (/elicit/.test(text)) {
+		if (/elicit/.test(said)) {
 			const r = await ask("session/elicitation", { sessionId: sid, mode: "form", message: "1 question", requestedSchema: { type: "object", properties: { q: { title: "Name?" } } } });
 			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `elicit:${JSON.stringify(r)}` } });
 			return end("end_turn");
 		}
-		if (/fsread/.test(text)) {
+		if (/fsread/.test(said)) {
 			const r = await ask("fs/read_text_file", { sessionId: sid, path: "/etc/hosts" });
 			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `fsread:${JSON.stringify(r)}` } });
 			return end("end_turn");
 		}
-		if (/slow|stubborn/.test(text)) {
+		if (/slow|stubborn/.test(said)) {
 			let n = 0;
 			turn.timer = setInterval(() => update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `tick${n++} ` } }), 20);
 			turn.end = end;
@@ -177,7 +179,7 @@ function serve() {
 		update(sid, { sessionUpdate: "available_commands_update", availableCommands: [{ name: "compact", description: "Compact" }] });
 		update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "You said: " } });
 		update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `${text}${images ? ` [+${images} image]` : ""} (model ${s.model}, mode ${s.mode}, thinking ${s.thinking}, turn ${s.turns})` } });
-		if (/late/.test(text)) setTimeout(() => update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "LATE" } }), 30);
+		if (/late/.test(said)) setTimeout(() => update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "LATE" } }), 30);
 		end("end_turn", { inputTokens: 1200, outputTokens: 80, totalTokens: 1580, cachedReadTokens: 300, thoughtTokens: 20 });
 	}
 

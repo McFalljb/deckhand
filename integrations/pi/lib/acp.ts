@@ -66,7 +66,7 @@ export const usableAgyPath = (p: string | undefined): p is string => !!p && path
  * launcher, so any other name is left to `/antigravity path`). A few stats, no process started. The user's own path setting (`/antigravity path`) comes first: the extension
  * passes it as `configured` when it is usable.
  */
-export function findAgy(env: NodeJS.ProcessEnv = process.env, configured?: string): string | undefined {
+export function findAgy(env: NodeJS.ProcessEnv = process.env, configured?: string): string | undefined { // env-read-ok: findAgy reads PATH only
 	if (usableAgyPath(configured)) return configured;
 	const dirs = (env.PATH ?? "").split(path.delimiter).filter((d) => d && path.isAbsolute(d));
 	for (const d of dirs) if (executable(path.join(d, "agy"))) return path.join(d, "agy");
@@ -74,7 +74,7 @@ export function findAgy(env: NodeJS.ProcessEnv = process.env, configured?: strin
 }
 
 /** The environment agy runs with: pi's, without Deckhand's own variables. */
-export function agyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function agyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv { // env-read-ok: agy's environment is pi's, DECKHAND_* taken out
 	return Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("DECKHAND_")));
 }
 

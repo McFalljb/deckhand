@@ -72,7 +72,7 @@ export interface Decision {
 	allowed: boolean;
 }
 
-export const readonlySession = (env: NodeJS.ProcessEnv = process.env) => env.PI_KIT_READONLY === "1";
+export const readonlySession = () => process.env.PI_KIT_READONLY === "1";
 
 const ELICITATION = new Set(["session/elicitation", "_session/elicitation", "elicitation/create"]);
 const READ_KINDS = new Set(["read", "search", "think", "fetch"]);
@@ -214,7 +214,7 @@ const expandHome = (d: string, home: string) => (d === "~" ? home : d.startsWith
  * hard links; this is the subset an ACP request can be checked against cheaply. Names compare
  * case-insensitively, as on APFS (profile folders as written and as real paths).
  */
-export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env): boolean {
+export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env): boolean { // env-read-ok: HOME, PI_CODING_AGENT_DIR, CODEX_HOME, GEMINI_HOME by name
 	const home = env.HOME || os.homedir();
 	const candidates = new Set([path.resolve(p)]);
 	const real = canonical(path.resolve(p));
@@ -247,7 +247,7 @@ export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env):
 }
 
 /** The credential files a command names (its words read as paths, against `cwd`). Best effort: a script or a variable hides them. */
-export function credentialsInCommand(cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): string[] {
+export function credentialsInCommand(cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): string[] { // env-read-ok: HOME and credentialPath's names
 	const home = env.HOME || os.homedir();
 	const words = cmd
 		.replace(/\$\{?HOME\}?/g, home)
@@ -376,7 +376,7 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 	const reject = (why: string, what = title): Decision => ({ answer: c.signal?.aborted ? CANCELLED : rejectOnce(params), note: `✗ ${why}: ${what}`, allowed: false });
 	const once = allowOnce(params);
 	const allow = (what: string): Decision => (once ? { answer: once, note: `✓ ${what}`, allowed: true } : reject("refused (agy offered no one-time approval)"));
-	const env = c.env ?? process.env;
+	const env = c.env ?? process.env; // env-read-ok: credentialPath's names only
 	const cmd = commandOf(tc);
 	const kind = typeof tc.kind === "string" && tc.kind ? tc.kind : cmd ? "execute" : "other";
 	const paths = pathsOf(tc);

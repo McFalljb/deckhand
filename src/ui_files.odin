@@ -1568,10 +1568,12 @@ settings_row_op :: proc(path: string, op: Settings_Row_Op) {
 	case .Remove:
 		if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = path[len(core.CLAUDE_ACCOUNT_ROW):], harness = .Claude})
 		else if strings.has_prefix(path, core.CODEX_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = path[len(core.CODEX_ACCOUNT_ROW):], harness = .Codex})
+		else if strings.has_prefix(path, core.AGY_ACCOUNT_ROW) do ui_do(core.Remove_Antigravity_Account{account = path[len(core.AGY_ACCOUNT_ROW):]})
 		else if no, ok := core.machine_row_no(path); ok do ui_do_menu(core.Machine_Remove{no = no}, "Remove") // asks first
 	case .Default:
 		if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = path[len(core.CLAUDE_ACCOUNT_ROW):], harness = .Claude})
 		else if strings.has_prefix(path, core.CODEX_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = path[len(core.CODEX_ACCOUNT_ROW):], harness = .Codex})
+		else if strings.has_prefix(path, core.AGY_ACCOUNT_ROW) do ui_do(core.Set_Antigravity_Account_Default{account = path[len(core.AGY_ACCOUNT_ROW):]})
 	case .Reveal:
 		if path == core.FOLDER_MAIN_ROW do ui_do(core.Reveal_In_Finder{path = state.settings.home_dir})
 		else if k, ok := core.folder_row_kind(path); ok do ui_do(core.Reveal_In_Finder{path = core.folder_of(k)})
@@ -1603,6 +1605,23 @@ settings_folder_button :: proc(path: string) -> bool {
 	if strings.has_prefix(path, core.CODEX_ACCOUNT_ROW) {
 		settings_page_open(.Agents)
 		sp_edit_begin(.Rename_Account, path, core.claude_account_label_now(path[len(core.CODEX_ACCOUNT_ROW):], harness = .Codex))
+		return true
+	}
+	// an Antigravity account's (agy_accounts.odin): Add account… (a folder picker), Scan again, Rename…
+	if path == core.AGY_ACCOUNT_ADD_ROW || path == core.AGY_ACCOUNT_MORE_ROW {
+		action_run("agy_account_add")
+		return true
+	}
+	if path == core.AGY_ACCOUNT_SCAN_ROW {
+		ui_do(core.Rescan{}) // looks for agy profiles again, with Claude's config folders
+		return true
+	}
+	if strings.has_prefix(path, core.AGY_ACCOUNT_ROW) {
+		settings_page_open(.Agents)
+		name := path[len(core.AGY_ACCOUNT_ROW):]
+		label := ""
+		for a in core.agy_accounts() do if a.name == name do label = a.label
+		sp_edit_begin(.Rename_Account, path, label)
 		return true
 	}
 	// Machines (machines.odin): Add a machine… opens the add field; a machine's button does what

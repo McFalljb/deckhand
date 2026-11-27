@@ -12,7 +12,8 @@ Setup_Account :: struct {
 	was_kept:   bool, // configured now (not removed)
 	fixed:      bool, // the environment's default: always kept
 	hand:       bool, // added on the sheet
-	marked:     bool, // has Claude Code's account file or sign-in
+	marked:     bool, // has Claude Code's account file or sign-in (Antigravity's step: agy's marks)
+	name:       string, // Antigravity's step: the account's name ("" for one added here)
 }
 
 Setup_Step :: enum u8 {
@@ -20,5 +21,6 @@ Setup_Step :: enum u8 {
 	Main,
 	Chats,
 	Accounts,
+	Agy_Accounts, // Antigravity accounts (agy_accounts.odin), when two or more are found
 	Folders,
 }

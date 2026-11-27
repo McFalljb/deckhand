@@ -5,7 +5,7 @@ wait 1500
 assert_state focus.id setup
 assert_state focus.step agents
 assert_state focus.steps 4
-assert_state focus.agents.# 10
+assert_state focus.agents.# 11
 assert_state focus.agents.0.id pi
 assert_state focus.agents.0.state ok
 assert_state focus.agents.0.version 1.5.0

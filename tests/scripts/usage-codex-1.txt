@@ -1,0 +1,64 @@
+# The USAGE section, run 1 (tests/scripts/usage-codex.sh; docs/GUIDE.md "Usage"): a fake Codex
+# app-server per home. The accounts are read one at a time while the section is unfolded and the
+# window shown; Twin is the default's account (one row, both homes); Key has an API key; Out is
+# signed out. Then the hover, a narrow column, Refresh usage (from the palette), folded.
+wait 1500
+window_active on
+command {"type":"add_project","cwd":"$homedir/proj"}
+assert_state codex_installed true
+ui_command {"type":"add_claude_account","dir":"$homedir/codex-work","label":"Work","harness":"codex"}
+ui_command {"type":"add_claude_account","dir":"$homedir/codex-twin","label":"Twin","harness":"codex"}
+ui_command {"type":"add_claude_account","dir":"$homedir/codex-out","label":"Out","harness":"codex"}
+ui_command {"type":"add_claude_account","dir":"$homedir/codex-key","label":"Key","harness":"codex"}
+assert_state codex_accounts.# 5
+assert_state sidebar.folded.usage false
+# every account read (Key last); the twin merged into the default's row
+waitstate 60000 usage.# 4
+waitstate 60000 usage.3.status no_limits
+assert_state usage.0.label Codex
+assert_state usage.0.source codex
+assert_state usage.0.status ok
+assert_state usage.0.plan plus
+assert_state usage.0.credits none
+assert_state usage.0.also.# 1
+assert_state usage.0.bars.# 2
+assert_state usage.0.bars.0.label 5h
+assert_state usage.0.bars.0.percent 42
+assert_state usage.0.bars.0.level normal
+assert_state usage.0.bars.1.label wk
+assert_state usage.0.stale false
+assert_state usage.1.label Work
+assert_state usage.1.bars.0.percent 85
+assert_state usage.1.bars.0.level warn
+assert_state usage.1.bars.1.percent 97
+assert_state usage.1.bars.1.level full
+assert_state usage.2.label Out
+assert_state usage.2.status signed_out
+assert_state usage.2.note signed out
+assert_state usage.2.bars.# 0
+assert_state usage.3.label Key
+assert_state usage.3.note no plan limits (API key)
+shot usage-codex/section
+# the hover: plan, every window, credits, the source, both homes
+hover usagerow 0
+wait 700
+shot usage-codex/hover
+# a narrow column: every percent still shows
+ui_command {"type":"set_layout","left_width":200}
+wait 300
+shot usage-codex/narrow
+ui_command {"type":"set_layout","left_width":300}
+wait 200
+# Refresh usage from the palette: every home read again (Key's now fails: its last good read stays)
+replace_in_file $homedir/codex-key/fake-usage.json apikey|error
+key k cmd
+type refresh usage
+assert_palette 0 action:refresh_usage
+key enter
+waitstate 60000 usage.3.error failed to fetch codex rate limits: 503
+assert_state usage.3.status no_limits
+# folded: one line per account, its fullest window
+clickid navhead 4
+waitstate 5000 sidebar.folded.usage true
+shot usage-codex/folded
+quit

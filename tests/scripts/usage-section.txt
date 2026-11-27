@@ -1,0 +1,50 @@
+# The USAGE section's rows (tests/scripts/usage-section.sh; @RESET@: when Work's 5h window reset).
+# Folded at the start (saved so): one line per account, nothing read while folded.
+wait 1500
+window_active on
+assert_state codex_installed true
+assert_state sidebar.folded.usage true
+assert_state usage.# 3
+assert_state usage.0.line 5h 42% · 4m ago
+assert_state usage.0.stale false
+assert_state usage.1.stale true
+assert_state usage.1.bars.0.passed true
+assert_state usage.1.bars.0.note reset at @RESET@, no new data
+assert_state usage.1.line wk 30% · 2h ago
+assert_state usage.2.line signed out · 3h ago
+shot usage-section/folded
+wait 2000
+assert_state usage.0.tried_at 0
+assert_state usage.1.tried_at 0
+# unfolded while the app is hidden: still nothing read
+hide
+wait 600
+clickid navhead 4
+waitstate 5000 sidebar.folded.usage false
+wait 2500
+assert_state usage.0.tried_at 0
+assert_state usage.0.reading false
+# shown again: the accounts due are read (Work and Out; Codex's read is 4 minutes old: due at 5);
+# each read fails, so the numbers stay and say why
+unhide
+waitstate 60000 usage.1.error failed to fetch codex rate limits: 503
+waitstate 60000 usage.2.line signed out · now
+assert_state usage.0.status ok
+assert_state usage.0.bars.0.percent 42
+assert_state usage.0.tried_at 0
+assert_state usage.1.status ok
+assert_state usage.1.bars.1.percent 30
+assert_state usage.1.stale true
+shot usage-section/rows-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot usage-section/rows-light
+ui_command {"type":"set_appearance","mode":"dark"}
+# a narrow column: names cut, percents kept
+ui_command {"type":"set_layout","left_width":200}
+wait 300
+shot usage-section/narrow
+clickid navhead 4
+waitstate 5000 sidebar.folded.usage true
+shot usage-section/narrow-folded
+quit

@@ -778,6 +778,23 @@ test("finding 3: an abort while pi's onPayload hook runs ends the turn aborted, 
 		await r.ag.closeAll();
 	}
 });
+
+test("finding 8: an answer that fails before its prompt keeps the agy session: the next message continues it", async () => {
+	const r = rig();
+	try {
+		const first = await r.turn("hi");
+		const bad = await r.turn("with a model agy lacks", {}, { ...MODEL, id: "no-such-model" });
+		assert.equal(bad.msg.stopReason, "error");
+		assert.equal(bad.msg.responseId, first.msg.responseId, "the failed answer names the live session");
+		const next = await r.turn("next");
+		assert.equal(next.msg.stopReason, "stop");
+		assert.equal(next.msg.responseId, first.msg.responseId, "same agy session");
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "next" }], "no catch-up text: agy has the conversation");
+		assert.equal(r.f.read().filter((m) => m.method === "session/new").length, 1);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
 test("abort: session/cancel, the turn ends aborted, and the session goes on", async () => {
 	const r = rig();
 	try {

@@ -384,8 +384,20 @@ export function createAntigravity(o: AntigravityOptions) {
 		// an answer is known by its timestamp (planTurn): two in one millisecond get distinct ones
 		const newest = st.produced.at(-1)?.ts ?? 0;
 		if (answer.msg.timestamp <= newest) answer.msg.timestamp = newest + 1;
+		// every answer from here is on the record (planTurn knows it), and names the agy session it
+		// belongs to, even one that ends before its prompt: the next turn then continues that session
+		let recorded = false;
+		const record = (ok: boolean) => {
+			if (recorded) return;
+			recorded = true;
+			st!.produced.push({ ts: answer.msg.timestamp, ok });
+		};
+		if (st.acpSessionId) answer.msg.responseId = st.acpSessionId;
 		const plan = planTurn(messages, st, pid);
-		if ("error" in plan) return answer.finish("error", plan.error);
+		if ("error" in plan) {
+			record(false);
+			return answer.finish("error", plan.error);
+		}
 		st.busy = true;
 		const titles = new Map<string, string>();
 		let aborted = false;
@@ -400,6 +412,8 @@ export function createAntigravity(o: AntigravityOptions) {
 				await agy.selectModel(model.id);
 				await agy.selectThinking(options.reasoning);
 			} catch (e) {
+				if (st.acpSessionId) answer.msg.responseId = st.acpSessionId;
+				record(false);
 				return answer.finish("error", explain((e as Error).message)); // SignInRequired names the account's command
 			}
 			answer.msg.responseId = agy.sessionId;
@@ -459,25 +473,26 @@ export function createAntigravity(o: AntigravityOptions) {
 					clearTimeout(timer);
 				}
 			} catch (e) {
-				st.produced.push({ ts: answer.msg.timestamp, ok: false });
+				record(false);
 				if (aborted) return answer.finish("aborted", "Request was aborted");
 				return answer.finish("error", explain((e as Error).message));
 			}
 			if (aborted) {
 				if (response === GONE) drop(st); // agy did not end the turn: its process goes
-				st.produced.push({ ts: answer.msg.timestamp, ok: false });
+				record(false);
 				return answer.finish("aborted", "Request was aborted");
 			}
 			answer.msg.usage = usageOf(response?.usage);
 			const reason = response?.stopReason;
 			const ok = reason === "end_turn" || reason === "max_tokens" || reason === "max_turn_requests";
-			st.produced.push({ ts: answer.msg.timestamp, ok });
+			record(ok);
 			if (reason === "end_turn" || reason === "max_turn_requests") return answer.finish("stop");
 			if (reason === "max_tokens") return answer.finish("length");
 			if (reason === "refusal") return answer.finish("error", "Antigravity refused to answer this");
 			if (reason === "cancelled") return answer.finish("error", "Antigravity cancelled the turn");
 			return answer.finish("error", `Antigravity ended the turn (${clip1(reason ?? "no stop reason", 40)})`);
 		} finally {
+			record(false);
 			signal?.removeEventListener("abort", onAbort);
 			st.sink = undefined;
 			st.busy = false;

@@ -682,3 +682,18 @@ test("session_before_compact: an Antigravity session's compaction is a note, wit
 		await pi.fire("session_shutdown");
 	});
 });
+
+test("answers in one millisecond still get distinct timestamps (planTurn tells them apart by it)", async () => {
+	const r = rig();
+	try {
+		const first = await r.turn("one");
+		const st = r.ag.sessions.get("pi-1")!;
+		st.produced.at(-1)!.ts = first.msg.timestamp = Date.now() + 60_000; // as if the next answer came in the same millisecond
+		const second = await r.turn("two");
+		assert.equal(second.msg.timestamp, first.msg.timestamp + 1);
+		const third = await r.turn("three");
+		assert.match(textOfMsg(third.msg), /turn 3\)/, "still in sync with agy's session");
+	} finally {
+		await r.ag.closeAll();
+	}
+});

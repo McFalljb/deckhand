@@ -362,6 +362,9 @@ export function createAntigravity(o: AntigravityOptions) {
 		let st = sessions.get(key);
 		if (!st) sessions.set(key, (st = { produced: [], busy: false }));
 		if (st.busy) return answer.finish("error", "Antigravity is still answering the previous message");
+		// an answer is known by its timestamp (planTurn): two in one millisecond get distinct ones
+		const newest = st.produced.at(-1)?.ts ?? 0;
+		if (answer.msg.timestamp <= newest) answer.msg.timestamp = newest + 1;
 		const plan = planTurn(messages, st);
 		if ("error" in plan) return answer.finish("error", plan.error);
 		st.busy = true;

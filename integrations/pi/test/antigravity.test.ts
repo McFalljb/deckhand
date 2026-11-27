@@ -759,6 +759,18 @@ test("polish: changing accounts.json waits for another process's change and keep
 		assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).accounts.map((x: any) => x.name).sort(), ["mine", "theirs"]);
 	});
 });
+
+test("round 2, finding 5: clearing agy's path with no agy on PATH names only agy", async () => {
+	const a = accountsEnv();
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi);
+		await run(pi, "antigravity", `path ${FAKE}`, ctx);
+		await withEnv({ PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) }, () => run(pi, "antigravity", "path", ctx));
+		assert.equal(notes.at(-1), "Cleared agy's path. There is no agy on your PATH, so Antigravity is off from pi's next start (/antigravity path sets it again)");
+	});
+});
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));

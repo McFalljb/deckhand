@@ -323,7 +323,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		}
 		const next = p || findAgy(process.env);
 		await updateAccounts(root, () => ({ agyPath: p || null }));
-		if (!next) return ctx.ui.notify("Cleared agy's path. There is no agy or antigravity on your PATH, so Antigravity is off from pi's next start", "warning");
+		if (!next) return ctx.ui.notify("Cleared agy's path. There is no agy on your PATH, so Antigravity is off from pi's next start (/antigravity path sets it again)", "warning");
 		await Promise.all([...live.values()].map(({ ag }) => ag.closeAll()));
 		agyPath = next;
 		version = "";

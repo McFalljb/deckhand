@@ -61,7 +61,7 @@ export const usesBrowser = (a: Account) => a.method === "oauth-personal" || a.me
 export function dataRoot(env: NodeJS.ProcessEnv = process.env, platform = process.platform): string {
 	const o = env[ROOT_ENV]?.trim();
 	if (o && path.isAbsolute(o)) return o;
-	const home = env.HOME || os.homedir();
+	const home = env.HOME || os.homedir(); // dataRoot(env) for tests; os.homedir() reads HOME too
 	if (platform === "darwin") {
 		const support = path.join(home, "Library", "Application Support");
 		const dh = path.join(support, "Deckhand"), old = path.join(support, "pi-desk");
@@ -129,7 +129,7 @@ export const hasSavedLogin = (p: Profile) => fs.existsSync(path.join(p.acpDir, "
  * Makes the profile: its folders (0700), the method in settings.json (no credential), and links to
  * the user's ~/.gemini skills and rules (t3code linkAntigravityUserConfig). Returns it.
  */
-export function prepareProfile(root: string, a: Account, home = process.env.HOME || os.homedir()): Profile {
+export function prepareProfile(root: string, a: Account, home = os.homedir()): Profile {
 	const p = profileOf(root, a.name);
 	for (const d of [root, path.dirname(p.geminiHome), p.geminiHome, p.acpDir, p.tmpDir]) {
 		fs.mkdirSync(d, { recursive: true, mode: 0o700 });

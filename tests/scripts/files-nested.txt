@@ -8,6 +8,9 @@ waitfor ARGS: --session 15000
 # golf and handmade are projects of their own too (the user's case: nothing opened)
 command {"type":"add_project","cwd":"@PROJ@/golf"}
 command {"type":"add_project","cwd":"@PROJ@/handmade"}
+# adding a project selects it, and the tree follows the project selected last (#175): the
+# session shown again brings the tree back to its folder, gamedev
+command {"type":"focus_session","session":$session}
 wait 300
 clickid lefttab 1
 wait 400

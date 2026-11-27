@@ -404,6 +404,7 @@ Sidebar_Fold :: enum {
 	Projects,
 	Chats,
 	This_Mac, // this Mac's header over the three, while Machines over SSH is on (waiting open sessions still show)
+	Usage, // the USAGE section at the foot of the Sessions tab (folded: one line per account; usage.odin)
 }
 
 SIDEBAR_LIST_MAX :: 500 // pinned or hidden items per list
@@ -446,6 +447,7 @@ State :: struct {
 	claude_disk_chats:    [dynamic]Claude_Disk, // the chats folder's
 	live:                  Core_Live, // the core's runtime a window in another process shows (core_live.odin; not saved)
 	machines:              []Machine_View, // Settings › Machines: each machine and its link's status (machines.odin; not saved)
+	usage:                 []Usage_Account, // quota and usage per coding-agent account (usage.odin; saved there)
 }
 
 // A session holder whose code is not ours answered (holder_client.odin Refused_Code): the window

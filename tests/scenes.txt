@@ -112,6 +112,8 @@ setup               | required |                       |   42 | src/ui_setup.odi
 sidebar             | full     |                       |   35 | src/core/sidebar.odin src/ui_sidebar.odin src/core/titles.odin tests/scripts/sidebar* src/core/ui_sidebar_core.odin
 term-links          | required | smoke                 |    8 | src/term_links.odin tests/scripts/term-links.* src/core/term_links_core.odin src/core/tabhost_route.odin src/tabhost_link.odin src/core/term.odin src/term_view.odin src/core/term_palette.odin src/core/term_stream.odin src/term_view_stream.odin
 update              | full     |                       |   45 | src/update*.odin src/core/update*.odin src/core/holder_successor.odin src/holder/relaunch.odin src/core/holder_adopt.odin src/core/holder_client.odin src/ui_update.odin src/updatesig/* tools/update-sign/* tests/update/* tests/scripts/update*
+usage-codex         | full     |                       |   15 | src/core/usage*.odin src/ui_usage.odin src/core/codex.odin src/core/claude_accounts.odin tests/scripts/usage-codex* tests/scripts/fake-codex.py
+usage-section       | full     |                       |   12 | src/core/usage*.odin src/ui_usage.odin src/ui_sidebar.odin tests/scripts/usage-section* tests/scripts/fake-codex.py src/core/ui_sidebar_core.odin
 worktrees           | full     |                       |   37 | src/core/worktrees.odin src/ui_worktrees.odin src/editor_git.odin tests/scripts/worktrees* src/core/editor_git_core.odin
 
 # Tools, not tests: run them by name when you want their screenshots or numbers

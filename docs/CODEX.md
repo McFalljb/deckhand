@@ -47,6 +47,8 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   `CODEX_HOME=<home>`, set again after the login profile.
 - **Settings bar** (§9): a Codex file a running Codex reads only at start changed: "Codex settings
   changed — Restart N idle Codex tabs", over the centre and in a browser's strip.
+- **Usage** (§6b): each account's plan limits (5h and weekly windows, plan, credits) in the
+  Sessions tab's USAGE section, read from Codex's own app-server.
 
 ## What does not yet
 
@@ -444,6 +446,64 @@ Claude's accounts code with harness `.Codex` (`src/core/claude_accounts.odin`; d
   is opened or listed, and a symlink at any level is skipped.
 - Not checked without a real sign-in: that `codex login status` under an added home answers for
   that home, and that Codex's own sign-in screen in such a tab writes that home's `auth.json`.
+
+## 6b. Usage
+
+`src/core/usage.odin` (the entries, rows, schedule and saving) and `src/core/usage_codex.odin` (this
+source); the user's view is GUIDE.md "Usage", the wire PROTOCOL.md (`refresh_usage`, `get_state`'s
+`usage`). **Codex does the fetch; Deckhand never reads `auth.json` and never calls a ChatGPT
+endpoint.**
+
+- **How**: for each Codex account (§6a), while Codex is installed, Deckhand runs `codex app-server`
+  (stdio, JSON lines, no `jsonrpc` field) through the login shell as a tab's codex is found
+  (`codex_tab_cmd`), with the account's `CODEX_HOME` set after the login profile
+  (`CODEX_ACCOUNT_SH`; nothing for the default home, as its tabs), in `/`, stderr to `/dev/null`,
+  in a process group of its own. It sends `initialize` (`clientInfo: {name: "deckhand", title:
+  "Deckhand", version}`), the `initialized` notification and `account/rateLimits/read` with
+  `excludeResetCreditDetails: true` (no reset-credit detail lookup: a background poll), reads
+  lines until the reply to that request (skipping notifications and anything not JSON, such as a
+  login profile's output), then closes stdin and stops the group (SIGTERM after 0.5 s, SIGKILL after
+  the grace). At most 30 s, and 256 KB of output for the whole run (past that it is stopped). Its
+  group is killed only if it did not end by itself with its output closed (then the group is gone
+  and its id may be reused).
+- **The answer** (`GetAccountRateLimitsResponse`, marked experimental in Codex's generated schema,
+  `codex app-server generate-json-schema`) is read loosely: unknown fields are ignored and a
+  missing or wrongly typed one is "not said". From `rateLimits`: `primary` and `secondary`
+  (`usedPercent` clamped to 0–100, `windowDurationMins`, `resetsAt`), `planType`, `credits`
+  (`unlimited`, else `balance`, else `hasCredits: false` = "none") and `rateLimitReachedType` (a
+  limit hit); from `rateLimitsByLimitId`, every other bucket's windows under its `limitName` (the
+  hover only); at most 8 windows. `accountId` is kept only as a salted SHA-256 prefix: two homes
+  with the same one share a row (an HMAC under this install's own key, `usage-salt`; it stays in
+  the core). `initialize` must answer with a result (an error or a line that is not JSON fails
+  the read), and for any home but Codex's default its `codexHome` must be the home asked for: a
+  login profile that moved `CODEX_HOME` would read another account, so a different one or none
+  at all fails the read ("can't confirm which account Codex read"). A percent below 0 or missing
+  is "not known" (-1). Email addresses in Codex's error text are taken out before it is kept.
+- **Errors**: only Codex's own words, matched whole (its app-server's account processor,
+  `get_account_rate_limits_response`, checked at 0.169.0): "chatgpt authentication required to read
+  rate limits" is an API-key account (no plan limits), "codex account authentication required to
+  read rate limits" is signed out; any other error, a timeout, an exit without an answer or a
+  missing codex is "can't read", with the reason (a read that worked before keeps its numbers).
+- **When**: while a window (not a hub nor a browser) is attached, not hidden, minimised or occluded,
+  and says it drew the USAGE section unfolded and in view (`window.facts` `usage_visible`): an account is read once it is due, 5 minutes after its last try,
+  and 30 seconds after a turn of one of its tabs ended (the Stop hook's `claude.turn`; never
+  closer than a minute after the last try); one account at a time. `refresh_usage` reads every
+  account now (the user's only). A restart starts from the saved reads (PERSISTENCE.md `usage`).
+- **What each read costs** (Codex 0.169.0's source, not measured): `initialize` and
+  `account/rateLimits/read` start no MCP server, connector or app (those start with a thread,
+  `thread/start`, or an MCP request). But each `codex app-server` start does its own start-up work:
+  it opens its SQLite state and logs, may fetch the model list, runs its plugin start-up tasks
+  (with a ChatGPT sign-in, a refresh of installed remote plugins; `git` only for Git
+  marketplaces you configured, or the curated catalog when the remote one is off), and, after
+  `initialize`, an account check with the backend. It writes its own files in that home.
+- **Tests** never start a real codex: unit tests (`src/core/usage_test.odin`) parse fixtures from
+  the schema and run the exchange against a shell stand-in; the scenes `usage-codex` and
+  `usage-section` run `tests/scripts/fake-codex.py app-server`, which answers as Codex's app-server
+  would, refuses any other method, and checks that no reader holds a home's `auth.json` (a FIFO
+  there) open.
+- Not done: Claude Code, pi and Antigravity as sources, another machine's accounts, a full Usage
+  page; the `account/rateLimits/updated` notification a long-lived app-server would push (each read
+  is its own short run).
 
 ## 7. Deckhand's tools: a per-run MCP server
 

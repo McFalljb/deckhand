@@ -119,6 +119,19 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   at load). `transcript` may be under any account's `projects/`. `codex: true` marks a Codex
   conversation (its `account` a Codex home). Restored with
   `claude_restore_history` (internal).
+- `usage`: the USAGE section's last reads (`src/core/usage.odin`; docs/GUIDE.md "Usage"):
+  `[{key, source, home, label, plan, status, credits, limit_hit, read_at, account_hash,
+  windows: [{name, used_percent, window_mins, resets_at}]}]`, at most 32, only accounts read at
+  least once: numbers, labels and times (Unix seconds), so a restart shows them with their age.
+  `account_hash` is an HMAC-SHA256 prefix of Codex's account id under this install's own random
+  key (two homes on one account share a row), never the id; the key is `usage-salt` in the data
+  dir (32 random bytes, 0600, made on first use, never in `workspace.json`). A hash saved before
+  the key existed (a fixed one) matches no new one: those homes stop sharing a row until both
+  are read again. Only accounts still configured are saved. Restored as it is: Codex entries with
+  an absolute home whose `key` is `codex:<home>` and a status of `ok`, `no_limits` or
+  `signed_out`; percents at most 100, -1 (not known) for one below 0 or missing; at most 8
+  windows; a `read_at` in the future comes back as now. The next automatic read is due 5 minutes
+  after `read_at`.
 - `current_session` and `active_tab` are positions in the saved lists (left out if none). While
   the Deck view shows no session (`show_no_session`), `current_session` is the session that was
   current before it (`shown_before`), so a relaunch shows that one.
@@ -201,7 +214,8 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
   identity (project cwd with symlinks resolved, pi session id or a Claude row's Claude session id), so they survive rescans; project
   entries whose folder no longer exists are dropped at save;
   the sort per section (`projects`, `sessions`, `chats`; default `recent`), folded sections
-  (`open`, `projects`, `chats`, and `this_mac`: this Mac's header while Machines over SSH is on),
+  (`open`, `projects`, `chats`, `this_mac`: this Mac's header while Machines over SSH is on, and
+  `usage`: the USAGE section, folded to one line per account),
   `view` (`attention`: the Sessions column's Attention view; default `projects`, not written) and
   `show_hidden`. The filter text and quick filters are not saved. Restored with the internal
   `restore_sidebar`, then `set_sort`, `set_sidebar_folded`, `set_sidebar_view`, `set_filter`.

@@ -972,6 +972,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return changes_tip(x)
 	case Hit_Group, Hit_Kids:
 		return tree_tip(h), ""
+	case Hit_Usage_Row:
+		return usage_row_tip(int(x)), ""
 	// a status dot's source and age (agent_status.odin); none without a dot
 	case Hit_Session:
 		if id := core.open_session_any(string(x)); id != 0 do return core.session_explain(core.find_session(id)), ""

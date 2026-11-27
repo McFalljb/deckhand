@@ -634,6 +634,8 @@ Command :: union {
 	Program_Status, // internal: a tab's OSC 7501 status (agent_status.odin)
 	Set_Unread, // "Mark as unread" (agent_status.odin)
 	Mark_All_Read, // ⌥⇧⌘U (mark_read.odin)
+	Refresh_Usage, // the USAGE section's accounts read now (usage.odin)
+	Usage_Done,
 	Rescan_Done,
 	Refresh_Shell_Env_Done,
 	Bridge_Done,
@@ -2034,6 +2036,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return notify_apply(cmd, caller)
 	case Program_Status, Set_Unread:
 		return status_apply(cmd, caller)
+	case Refresh_Usage, Usage_Done:
+		return usage_apply(cmd, caller)
 	case Mark_All_Read:
 		return mark_all_read_apply(caller, request_id)
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:

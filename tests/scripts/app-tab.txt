@@ -242,7 +242,7 @@ assert_app_surfaces 3
 command {"type":"close_tab","tab_id":$last}
 wait 300
 # ---- a crash: the last frame stays, dimmed; the bar has Restart and Log
-app_open build/fake-app --crash-after 20 --once $datadir/crash.once
+app_open build/fake-app --crash-after 40 --once $datadir/crash.once
 app_waitframe 10 20000
 app_waitstatus exited 20000
 assert_app_dimmed yes
@@ -260,7 +260,7 @@ assert_app_surfaces 3
 command {"type":"close_tab","tab_id":$last}
 wait 300
 # a crashed app's tab closed without a restart: everything goes, Deckhand stays up
-app_open build/fake-app --crash-after 20
+app_open build/fake-app --crash-after 40
 app_waitframe 10 20000
 app_waitstatus exited 20000
 assert_app_surfaces 1

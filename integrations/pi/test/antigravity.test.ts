@@ -937,6 +937,30 @@ test("gap A4: ending pi's session closes its agy processes in parallel within ab
 	assert.ok(took >= 2500 && took < 3800, `closed in ${took} ms`);
 	assert.equal(r.f.read().filter((m) => m.event === "sigterm").length, 2, "both got SIGTERM after their stdin closed");
 });
+
+test("gap A5: an agy run folder is made only when agy starts, and removed when it ends or fails to start", async () => {
+	const tmp = mkdtempSync(path.join(TMP_ROOT, "runs-"));
+	const made: string[] = [];
+	const makeRunDir = () => {
+		const d = mkdtempSync(path.join(tmp, `${process.pid}-`));
+		made.push(d);
+		return d;
+	};
+	const f = fake();
+	const c = new AcpConnection(FAKE, ["acp"], { cwd: f.cwd, env: f.env, makeRunDir });
+	assert.equal(made.length, 0, "not before agy starts");
+	c.start();
+	await c.request("initialize", initializeParams());
+	assert.equal(made.length, 1);
+	assert.equal(f.read().find((m) => m.argv).env.TMPDIR, made[0], "agy's TMPDIR");
+	await c.close();
+	assert.ok(!existsSync(made[0]), "gone once agy ended");
+	const broken = new AcpConnection(FAKE, ["acp"], { cwd: f.cwd, env: f.env, makeRunDir, spawnImpl: (() => { throw new Error("no spawn"); }) as any });
+	assert.throws(() => broken.start(), /no spawn/);
+	assert.equal(made.length, 2);
+	assert.ok(!existsSync(made[1]), "a start that throws leaves no folder");
+	assert.deepEqual(readdirSync(tmp), []);
+});
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));

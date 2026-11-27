@@ -61,8 +61,8 @@ export interface LoginOptions {
 	env?: NodeJS.ProcessEnv;
 	/** agy's arguments, `--login` included (the account's profile: agyArgs(p, true)). */
 	args?: string[];
-	/** The process's own TMPDIR folder (agy-accounts runDir), removed when it ends. */
-	runDir?: string;
+	/** Makes the process's own TMPDIR folder right before agy starts (agy-accounts runDir); removed when it ends. */
+	makeRunDir?: () => string;
 	/** Shows the link to the user. */
 	showLink: (url: string) => void;
 	/** Asks for the code; undefined or empty cancels. */
@@ -77,18 +77,19 @@ export type LoginResult = { ok: true } | { ok: false; error: string };
 /** Runs `agy acp --login` to the end. Never throws. */
 export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 	let child: ChildProcess;
+	const runDir = o.makeRunDir?.();
 	try {
-		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: o.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
+		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: runDir ? { ...(o.env ?? agyEnv()), TMPDIR: runDir } : o.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
 	} catch (e) {
-		endRun(o.runDir);
+		endRun(runDir);
 		return { ok: false, error: `Antigravity (agy) could not start: ${(e as Error).message}` };
 	}
-	markRun(o.runDir, child.pid);
+	markRun(runDir, child.pid);
 	const exited = new Promise<number | null>((resolve) => {
 		child.on("close", (code) => resolve(code)); // after stdout is read to its end
 		child.on("error", () => resolve(-1));
 	});
-	const reaped = exited.then(() => reapGroup(child.pid)).then(() => endRun(o.runDir));
+	const reaped = exited.then(() => reapGroup(child.pid)).then(() => endRun(runDir));
 	child.stdin!.on("error", () => {});
 	child.stderr!.resume(); // agy's log stays out of pi
 	const link = await new Promise<SignInLink | undefined>((resolve) => {

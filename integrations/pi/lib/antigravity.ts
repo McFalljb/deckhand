@@ -300,7 +300,7 @@ export interface AntigravityOptions {
 	 * How agy starts for this account, given the key pi resolved (API-key accounts): its arguments
 	 * (the profile), environment, sign-in method and what a missing sign-in says.
 	 */
-	launch?: (apiKey: string | undefined) => { args?: string[]; env?: NodeJS.ProcessEnv; authMethod?: string; signInHint?: string; runDir?: string };
+	launch?: (apiKey: string | undefined) => { args?: string[]; env?: NodeJS.ProcessEnv; authMethod?: string; signInHint?: string; makeRunDir?: () => string };
 	/** agy's error made actionable (SUBSCRIPTION_REQUIRED and the like). */
 	explain?: (message: string) => string;
 	/** The credential is an API key in pi's credential store (`/login <provider>`), not agy's own sign-in. */
@@ -367,7 +367,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			cwd: o.cwd(),
 			env: how.env ?? o.env,
 			args: how.args,
-			runDir: how.runDir,
+			makeRunDir: how.makeRunDir,
 			authMethod: how.authMethod,
 			signInHint: how.signInHint,
 			resumeId: rid,

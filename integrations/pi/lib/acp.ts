@@ -199,8 +199,8 @@ export function endRun(dir: string | undefined) {
 
 export interface AcpConnectionOptions {
 	cwd: string;
-	/** This process's own TMPDIR folder: marked with its pid, removed when it ends. */
-	runDir?: string;
+	/** Makes this process's own TMPDIR folder, right before agy starts (never on a path that does not start it): its TMPDIR, marked with its pid, removed when it ends. */
+	makeRunDir?: () => string;
 	env?: NodeJS.ProcessEnv;
 	/** Each session/update notification's params. */
 	onUpdate?: (params: any) => void;
@@ -242,9 +242,17 @@ export class AcpConnection {
 	}
 
 	start(): void {
-		const child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: this.opts.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
+		const runDir = this.opts.makeRunDir?.();
+		const env = this.opts.env ?? agyEnv();
+		let child: ChildProcess;
+		try {
+			child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: runDir ? { ...env, TMPDIR: runDir } : env, stdio: ["pipe", "pipe", "pipe"], detached: true });
+		} catch (e) {
+			endRun(runDir);
+			throw e;
+		}
 		this.child = child;
-		markRun(this.opts.runDir, child.pid);
+		markRun(runDir, child.pid);
 		child.stdout!.setEncoding("utf8");
 		child.stdout!.on("data", (s: string) => this.onData(s));
 		let errBuf = "";
@@ -258,11 +266,11 @@ export class AcpConnection {
 		child.stdin!.on("error", () => {}); // EPIPE after a crash: reported by "exit"
 		child.on("error", (e) => {
 			this.fail(new AcpError(`Antigravity (agy) could not start: ${e.message}`));
-			if (child.pid === undefined) endRun(this.opts.runDir);
+			if (child.pid === undefined) endRun(runDir);
 		});
 		child.on("exit", (code, signal) => {
 			// what agy left running in its group ends too; its run folder goes once the group is empty
-			this.reaped = reapGroup(child.pid).then(() => endRun(this.opts.runDir));
+			this.reaped = reapGroup(child.pid).then(() => endRun(runDir));
 			this.fail(new AcpError(`Antigravity (agy) ended${code !== null ? ` with exit code ${code}` : signal ? ` (${signal})` : ""}`));
 			this.markExited({ code, signal });
 			this.opts.onExit?.(code, signal);

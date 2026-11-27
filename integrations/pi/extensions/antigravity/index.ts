@@ -79,8 +79,8 @@ export default function antigravity(pi: ExtensionAPI) {
 	/** How agy runs for an account: its profile, environment and method. */
 	const launchOf = (a: Account, key: string | undefined, login = false) => {
 		const p = prepareProfile(root, a);
-		const run = runDir(p); // this process's own TMPDIR, removed when it ends
-		return { args: agyArgs(p, login), env: agyEnvFor(a, p, key, process.env, run), runDir: run, authMethod: a.method, signInHint: notSignedIn(a) };
+		// the process's own TMPDIR is made only when agy starts (and removed when it ends)
+		return { args: agyArgs(p, login), env: agyEnvFor(a, p, key), makeRunDir: () => runDir(p), authMethod: a.method, signInHint: notSignedIn(a) };
 	};
 
 	const register = (a: Account) => {
@@ -224,7 +224,7 @@ export default function antigravity(pi: ExtensionAPI) {
 			cwd,
 			args: how.args,
 			env: how.env,
-			runDir: how.runDir,
+			makeRunDir: how.makeRunDir,
 			showLink: (url) => show(`${url}\nThen paste the code the Antigravity page shows.`),
 			askCode: () => ctx.ui.input("Antigravity sign-in code", "paste the code from the page"),
 		});

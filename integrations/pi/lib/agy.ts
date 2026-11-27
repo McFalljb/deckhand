@@ -49,8 +49,8 @@ export interface AgySessionOptions {
 	resumeId?: string;
 	/** agy's arguments (the account's profile: agyArgs); `acp` alone by default. */
 	args?: string[];
-	/** The process's own TMPDIR folder (agy-accounts runDir), removed when it ends. */
-	runDir?: string;
+	/** Makes the process's own TMPDIR folder right before agy starts (agy-accounts runDir); removed when it ends. */
+	makeRunDir?: () => string;
 	env?: NodeJS.ProcessEnv;
 	/** The sign-in method passed to `authenticate` (the account's). */
 	authMethod?: string;
@@ -85,7 +85,7 @@ export class AgySession {
 		let self!: AgySession;
 		const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], {
 			cwd: o.cwd,
-			runDir: o.runDir,
+			makeRunDir: o.makeRunDir,
 			env: o.env ?? agyEnv(),
 			spawnImpl: o.spawnImpl,
 			// agy's own changes to its session (mode, options) are tracked whether or not a turn runs
@@ -254,11 +254,11 @@ export async function probeModels(o: Omit<AgySessionOptions, "resumeId">): Promi
 	}
 }
 
-type BareOptions = Pick<AgySessionOptions, "agyPath" | "cwd" | "args" | "env" | "spawnImpl" | "runDir">;
+type BareOptions = Pick<AgySessionOptions, "agyPath" | "cwd" | "args" | "env" | "spawnImpl" | "makeRunDir">;
 
 /** `initialize` only (no session, no sign-in): agy's reported version. */
 export async function agyVersion(o: BareOptions): Promise<string> {
-	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl, runDir: o.runDir });
+	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl, makeRunDir: o.makeRunDir });
 	conn.start();
 	try {
 		const init = await conn.request("initialize", initializeParams(), 30_000);
@@ -270,7 +270,7 @@ export async function agyVersion(o: BareOptions): Promise<string> {
 
 /** Sign-out by agy's own ACP `logout` (t3code AntigravityAuth.logout): its saved login goes, its history stays. */
 export async function agyLogout(o: BareOptions): Promise<void> {
-	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl, runDir: o.runDir });
+	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl, makeRunDir: o.makeRunDir });
 	conn.start();
 	try {
 		const init = await conn.request("initialize", initializeParams(), 30_000);

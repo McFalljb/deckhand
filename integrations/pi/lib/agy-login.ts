@@ -5,7 +5,7 @@
 // stores a token. The link and the code are checked as t3code checks them
 // (antigravityAuthSupport.ts parseAntigravityAuthorizationUrl, antigravityLoginResponse).
 import { type ChildProcess, spawn } from "node:child_process";
-import { agyEnv, endChild, endRun, markRun, SIGN_IN_PREFIX } from "./acp.ts";
+import { agyEnv, endChild, endRun, markRun, reapGroup, SIGN_IN_PREFIX } from "./acp.ts";
 
 const MAX_URL = 16_384;
 /** Where `agy acp --login` sends Google; the page there shows the code. */
@@ -78,7 +78,7 @@ export type LoginResult = { ok: true } | { ok: false; error: string };
 export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 	let child: ChildProcess;
 	try {
-		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: o.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"] });
+		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: o.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
 	} catch (e) {
 		endRun(o.runDir);
 		return { ok: false, error: `Antigravity (agy) could not start: ${(e as Error).message}` };
@@ -88,7 +88,7 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 		child.on("close", (code) => resolve(code)); // after stdout is read to its end
 		child.on("error", () => resolve(-1));
 	});
-	void exited.then(() => endRun(o.runDir));
+	const reaped = exited.then(() => reapGroup(child.pid)).then(() => endRun(o.runDir));
 	child.stdin!.on("error", () => {});
 	child.stderr!.resume(); // agy's log stays out of pi
 	const link = await new Promise<SignInLink | undefined>((resolve) => {
@@ -112,7 +112,7 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 			resolve(undefined);
 		});
 	});
-	const stop = () => endChild(child, exited);
+	const stop = () => endChild(child, exited).then(() => reaped);
 	if (!link) {
 		await stop();
 		return { ok: false, error: "Antigravity (agy) gave no Google sign-in link" };

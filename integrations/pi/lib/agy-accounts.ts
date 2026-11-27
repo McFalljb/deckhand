@@ -22,6 +22,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { groupAlive, reapGroup, signalGroup } from "./acp.ts";
 import { alive } from "./agy-ledger.ts";
 
 export type Method = "oauth-personal" | "oauth-business" | "gemini-api-key" | "agent-platform";
@@ -174,17 +176,27 @@ export const profileOf = (root: string, name: string): Profile => {
 /** A run folder: `<pi's pid>-<6 random>`, under the profile's tmp. */
 const RUN_DIR = /^(\d+)-[A-Za-z0-9]{6}$/;
 
+/** Whether `pid` is an agy run for this profile (its command line names the profile): a pid of its own, not a reused one. */
+function agyOfProfile(pid: number, geminiHome: string): boolean {
+	const r = spawnSync("ps", ["-o", "command=", "-p", String(pid)], { encoding: "utf8", timeout: 2000 });
+	return r.status === 0 && r.stdout.includes("acp") && r.stdout.includes(geminiHome);
+}
+
 /**
- * Removes the run folders of processes that are gone: pi's (the name) and agy's (its agy.pid) both
- * dead. A folder either process still has is never touched; nor is anything else in tmp.
+ * Cleans the run folders whose pi is gone (the name's pid): agy's process group is ended first
+ * (its leader, an agy no client talks to any more, checked by its command line; or what a dead agy
+ * left in its group), then the folder is removed. A folder whose pi is alive is never touched,
+ * nor is anything else in tmp. Resolves once done; launches do not wait for it.
  */
-export function sweepRunDirs(tmpDir: string) {
+export async function sweepRunDirs(tmpDir: string): Promise<void> {
 	let entries: string[] = [];
 	try {
 		entries = fs.readdirSync(tmpDir);
 	} catch {
 		return;
 	}
+	const geminiHome = path.dirname(path.dirname(tmpDir));
+	const jobs: Promise<void>[] = [];
 	for (const e of entries) {
 		const m = RUN_DIR.exec(e);
 		if (!m || alive(Number(m[1]))) continue;
@@ -193,11 +205,25 @@ export function sweepRunDirs(tmpDir: string) {
 		try {
 			agyPid = Number(fs.readFileSync(path.join(dir, "agy.pid"), "utf8").trim());
 		} catch {}
-		if (agyPid && alive(agyPid)) continue;
-		try {
-			fs.rmSync(dir, { recursive: true, force: true });
-		} catch {}
+		if (agyPid && alive(agyPid)) {
+			if (!agyOfProfile(agyPid, geminiHome)) continue; // a reused pid: not ours to end
+			signalGroup(agyPid, "SIGTERM"); // an orphaned agy: its pi is gone
+		}
+		jobs.push(
+			(async () => {
+				if (agyPid) {
+					for (const end = Date.now() + 3000; alive(agyPid) && Date.now() < end; ) await new Promise((r) => setTimeout(r, 25));
+					if (alive(agyPid) && agyOfProfile(agyPid, geminiHome)) signalGroup(agyPid, "SIGKILL");
+					// a group can only be agy's while it has members (its id is not reused before)
+					if (groupAlive(agyPid)) await reapGroup(agyPid);
+				}
+				try {
+					fs.rmSync(dir, { recursive: true, force: true });
+				} catch {}
+			})(),
+		);
 	}
+	await Promise.all(jobs);
 }
 
 /**
@@ -207,7 +233,7 @@ export function sweepRunDirs(tmpDir: string) {
  */
 export function runDir(p: Profile): string {
 	fs.mkdirSync(p.tmpDir, { recursive: true, mode: 0o700 });
-	sweepRunDirs(p.tmpDir);
+	void sweepRunDirs(p.tmpDir);
 	return fs.mkdtempSync(path.join(p.tmpDir, `${process.pid}-`));
 }
 

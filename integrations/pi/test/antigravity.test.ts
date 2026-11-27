@@ -10,7 +10,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
-import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf } from "../lib/agy-accounts.ts";
+import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf, sweepRunDirs } from "../lib/agy-accounts.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
 import { createAntigravity, planTurn, RETRY_NOTE, SUMMARY_TEXT } from "../lib/antigravity.ts";
 import { NOT_FOUND } from "../extensions/antigravity/index.ts";
@@ -770,6 +770,69 @@ test("round 2, finding 5: clearing agy's path with no agy on PATH names only agy
 		await withEnv({ PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) }, () => run(pi, "antigravity", "path", ctx));
 		assert.equal(notes.at(-1), "Cleared agy's path. There is no agy on your PATH, so Antigravity is off from pi's next start (/antigravity path sets it again)");
 	});
+});
+
+/** Whether process `pid` exists. */
+const pidAlive = (pid: number) => {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (e: any) {
+		return e?.code === "EPERM";
+	}
+};
+const until = async (f: () => boolean, ms = 3000) => {
+	const end = Date.now() + ms;
+	while (!f() && Date.now() < end) await new Promise((r) => setTimeout(r, 25));
+	return f();
+};
+const childOf = async (f: any) => {
+	await until(() => f.read().some((m: any) => m.event === "child"), 2000);
+	return f.read().find((m: any) => m.event === "child")!.pid as number;
+};
+
+test("gap A1: agy runs in its own process group; closing it, or pi exiting, ends agy's own children too", async () => {
+	const kids: number[] = [];
+	try {
+		const f = fake({ FAKE_AGY_CHILD: "1" });
+		const c = new AcpConnection(FAKE, ["acp"], { cwd: f.cwd, env: f.env });
+		c.start();
+		await c.request("initialize", initializeParams());
+		const kid = await childOf(f);
+		kids.push(kid);
+		await c.close();
+		assert.ok(await until(() => !pidAlive(kid)), "agy's child ended with it");
+		const g = fake({ FAKE_AGY_CHILD: "1" });
+		const d = new AcpConnection(FAKE, ["acp"], { cwd: g.cwd, env: g.env });
+		d.start();
+		await d.request("initialize", initializeParams());
+		const kid2 = await childOf(g);
+		kids.push(kid2);
+		d.killNow(); // pi's exit: synchronous
+		assert.ok(await until(() => !pidAlive(kid2)), "killNow ends the whole group");
+	} finally {
+		for (const k of kids) if (pidAlive(k)) process.kill(k, "SIGKILL");
+	}
+});
+
+test("gap A1: the sweep ends what is left of a dead agy's group before it removes its run folder", async () => {
+	const tmp = mkdtempSync(path.join(TMP_ROOT, "runs-"));
+	const dead = spawnSync("true").pid!;
+	// a group whose leader (the agy) has ended and one member still runs
+	const leader = spawn("sh", ["-c", "sleep 60 & echo $!; exit 0"], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+	const member = Number(await new Promise<string>((r) => leader.stdout!.once("data", (d) => r(String(d).trim()))));
+	await new Promise((r) => leader.once("exit", r));
+	try {
+		const dir = path.join(tmp, `${dead}-zzzzzz`);
+		mkdirSync(dir);
+		writeFileSync(path.join(dir, "agy.pid"), String(leader.pid));
+		assert.ok(pidAlive(member));
+		await sweepRunDirs(tmp);
+		assert.ok(await until(() => !pidAlive(member)), "the leftover member is ended");
+		assert.ok(await until(() => !existsSync(dir)), "then the folder goes");
+	} finally {
+		if (pidAlive(member)) process.kill(member, "SIGKILL");
+	}
 });
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));

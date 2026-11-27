@@ -117,6 +117,41 @@ export interface CloseTimes {
 export const CLOSE_STDIN_WAIT_MS = 1000;
 export const CLOSE_TERM_GRACE_MS = 5000;
 
+// agy runs as the leader of its own process group (spawned detached), so what it starts (its
+// tools, its language servers) is ended with it: every signal below goes to the whole group.
+
+/** Signals agy's process group (`pid` leads it). Never a bare pid: that one may be reused. */
+export function signalGroup(pid: number | undefined, sig: NodeJS.Signals): void {
+	if (!pid) return;
+	try {
+		process.kill(-pid, sig);
+	} catch {}
+}
+
+/** Whether process group `pid` still has members (its leader, or what it left behind). */
+export function groupAlive(pid: number | undefined): boolean {
+	if (!pid) return false;
+	try {
+		process.kill(-pid, 0);
+		return true;
+	} catch (e: any) {
+		return e?.code === "EPERM";
+	}
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const GROUP_GRACE_MS = 500;
+
+/** Ends what is left of a group whose leader has ended: SIGTERM, then SIGKILL after graceMs. Resolves once it is empty (or given up on). */
+export async function reapGroup(pid: number | undefined, graceMs = GROUP_GRACE_MS): Promise<void> {
+	if (!groupAlive(pid)) return;
+	signalGroup(pid, "SIGTERM");
+	for (const end = Date.now() + graceMs; groupAlive(pid) && Date.now() < end; ) await pause(25);
+	if (!groupAlive(pid)) return;
+	signalGroup(pid, "SIGKILL");
+	for (const end = Date.now() + 1000; groupAlive(pid) && Date.now() < end; ) await pause(25);
+}
+
 /**
  * Ends a child gently: its stdin first (agy ends its session and cleans up its unpacked files),
  * SIGTERM if it is still there after stdinWaitMs, SIGKILL only after a further termGraceMs.
@@ -139,14 +174,10 @@ export async function endChild(child: ChildProcess, exited: Promise<unknown>, t:
 	} catch {}
 	await wait(t.stdinWaitMs ?? CLOSE_STDIN_WAIT_MS);
 	if (gone || !running()) return;
-	try {
-		child.kill("SIGTERM");
-	} catch {}
+	signalGroup(child.pid, "SIGTERM");
 	await wait(t.termGraceMs ?? CLOSE_TERM_GRACE_MS);
 	if (gone || !running()) return;
-	try {
-		child.kill("SIGKILL");
-	} catch {}
+	signalGroup(child.pid, "SIGKILL");
 	await exited;
 }
 
@@ -193,6 +224,8 @@ export class AcpConnection {
 	private ended?: Error;
 	private opts: AcpConnectionOptions;
 	readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+	/** Resolves once agy's group is empty and its run folder removed (after exit). */
+	private reaped: Promise<void> = Promise.resolve();
 	private markExited!: (x: { code: number | null; signal: NodeJS.Signals | null }) => void;
 
 	constructor(command: string, args: string[], opts: AcpConnectionOptions) {
@@ -207,7 +240,7 @@ export class AcpConnection {
 	}
 
 	start(): void {
-		const child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: this.opts.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"] });
+		const child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: this.opts.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"], detached: true });
 		this.child = child;
 		markRun(this.opts.runDir, child.pid);
 		child.stdout!.setEncoding("utf8");
@@ -226,7 +259,8 @@ export class AcpConnection {
 			if (child.pid === undefined) endRun(this.opts.runDir);
 		});
 		child.on("exit", (code, signal) => {
-			endRun(this.opts.runDir);
+			// what agy left running in its group ends too; its run folder goes once the group is empty
+			this.reaped = reapGroup(child.pid).then(() => endRun(this.opts.runDir));
 			this.fail(new AcpError(`Antigravity (agy) ended${code !== null ? ` with exit code ${code}` : signal ? ` (${signal})` : ""}`));
 			this.markExited({ code, signal });
 			this.opts.onExit?.(code, signal);
@@ -323,9 +357,7 @@ export class AcpConnection {
 	/** SIGTERM now, synchronously (pi is exiting). */
 	killNow(): void {
 		this.fail(new AcpError("Antigravity (agy) was stopped"));
-		try {
-			if (this.child && this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGTERM");
-		} catch {}
+		signalGroup(this.child?.pid, "SIGTERM"); // the whole group, at once; its run folder is left to the next sweep
 	}
 
 	/** Ends the process gently (endChild): stdin, then SIGTERM, then SIGKILL. */
@@ -333,7 +365,7 @@ export class AcpConnection {
 		const child = this.child;
 		this.fail(new AcpError("Antigravity (agy) was stopped"));
 		if (!child) return Promise.resolve();
-		return endChild(child, this.exited, t);
+		return endChild(child, this.exited, t).then(() => this.reaped);
 	}
 }
 

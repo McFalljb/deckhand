@@ -18,6 +18,7 @@
 // session/set_mode, not a config option), FAKE_AGY_LOGIN_CODE (the code --login accepts).
 import fs from "node:fs";
 import readline from "node:readline";
+import { spawn as spawnChild } from "node:child_process";
 
 const env = process.env;
 const log = (x) => env.FAKE_AGY_LOG && fs.appendFileSync(env.FAKE_AGY_LOG, `${JSON.stringify(x)}\n`);
@@ -31,6 +32,12 @@ const send = (x) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...
 const LINK = "https://accounts.google.com/o/oauth2/auth?client_id=fake&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=s123";
 const args = process.argv.slice(2);
 const SEEN_ENV = ["GEMINI_HOME", "TMPDIR", "SSH_CONNECTION", "AGY_ACP_FORCE_FILE_STORAGE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "BROWSER", "ELECTRON_RUN_AS_NODE"];
+// FAKE_AGY_CHILD=1: a child of its own (agy's tools run that way), which outlives it unless its group is ended
+if (env.FAKE_AGY_CHILD === "1") {
+	const c = spawnChild("sleep", ["60"], { stdio: "ignore" });
+	log({ event: "child", pid: c.pid, pgid: process.pid });
+	c.unref();
+}
 log({ argv: args, cwd: process.cwd(), deckhandEnv: Object.keys(env).filter((k) => k.startsWith("DECKHAND_")), env: Object.fromEntries(SEEN_ENV.filter((k) => env[k] !== undefined).map((k) => [k, env[k]])) });
 // the profile: --gemini-dir and --app-data-dir (joined beneath it), as agy takes them
 const argOf = (name) => (args.indexOf(name) >= 0 ? args[args.indexOf(name) + 1] : undefined);

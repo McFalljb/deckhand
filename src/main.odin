@@ -270,6 +270,7 @@ init_separate :: proc(note := "") -> bool {
 	core.platform.core_timer(50 * time.Millisecond, proc() {
 		if time.tick_since(app.last_frame_at) < 50 * time.Millisecond do return
 		client_core_tick() // the core's connection ended: dial again (client_core.odin)
+		client_facts() // hidden or minimised now (frames stopped): the core hears it (client.odin)
 		client_drain()
 		autotest_step()
 	})
@@ -974,7 +975,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
 		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
 		case Hit_Close_Session: ui_do(core.Close_Session{session = u64(hit)})
-		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine, Hit_Machine_Head, Hit_Machine_More, Hit_Machine_Add, Hit_Machine_Add_Folder, Hit_Attention:
+		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine, Hit_Machine_Head, Hit_Machine_More, Hit_Machine_Add, Hit_Machine_Add_Folder, Hit_Attention, Hit_Usage_Row:
 			sidebar_click(hit, app.pointer)
 		case Hit_Agent:     drawer_click(hit)
 		case Hit_Files: // files_event took it

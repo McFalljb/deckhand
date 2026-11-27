@@ -960,3 +960,53 @@ disk_banner_keeps_its_buttons :: proc(t: ^testing.T) {
 	if cs := core.cur(); cs != nil do core.run_command(core.Close_Session{session = cs.id}, ui)
 	for p in state.pending_confirmations do core.run_command(core.Cancel_Confirmation{token = p.token}, ui)
 }
+
+// The USAGE section (ui_usage.odin): every kind of row (bars near and at their limits, a reset
+// passed, faded, no plan limits, signed out, a long error, a long name), unfolded and folded, in
+// the narrowest left column and the default one, every look: no text or icon overlaps another or
+// leaves the column, and every bar's percent is drawn.
+@(test)
+usage_section_layout :: proc(t: ^testing.T) {
+	context.allocator = au_reset("")
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	now := core.usage_now()
+	main_ws := []core.Usage_Window{{used_percent = 42, window_mins = 300, resets_at = now + 3 * 3600}, {used_percent = 18, window_mins = 10080, resets_at = now + 4 * 86400}}
+	hot_ws := []core.Usage_Window{{used_percent = 100, window_mins = 300, resets_at = now + 600}, {used_percent = 85, window_mins = 10080, resets_at = now + 6 * 86400}}
+	old_ws := []core.Usage_Window{{used_percent = 64, window_mins = 300, resets_at = now - 1800}, {used_percent = 30, window_mins = 10080, resets_at = now + 86400}}
+	entries := []core.Usage_Account {
+		{key = "codex:/a", home = "/a", label = "Codex", status = .Ok, plan = "plus", windows = main_ws, read_at = now - 240},
+		{key = "codex:/b", home = "/b", label = "A rather long account name that keeps going", status = .Ok, plan = "pro", windows = hot_ws, limit_hit = true, read_at = now - 30},
+		{key = "codex:/c", home = "/c", label = "Old", status = .Ok, windows = old_ws, read_at = now - 2 * 3600},
+		{key = "codex:/d", home = "/d", label = "Key", status = .No_Limits, read_at = now - 60},
+		{key = "codex:/e", home = "/e", label = "Out", status = .Signed_Out},
+		{key = "codex:/f", home = "/f", label = "Broken", status = .Error, error = "codex app-server ended without an answer (is Codex installed and new enough?)"},
+	}
+	saved := state.usage
+	defer {
+		state.usage = saved
+		state.sidebar.folded[.Usage] = false
+		state.layout.left_width = core.LEFT_WIDTH_DEFAULT
+	}
+	state.usage = entries
+	state.layout.left_open, state.layout.left_tab = true, .Sessions
+	for folded in ([]bool{false, true}) {
+		state.sidebar.folded[.Usage] = folded
+		for lw in ([]f32{200, core.LEFT_WIDTH_DEFAULT}) {
+			state.layout.left_width = lw
+			for look in core.Theme_Id {
+				state.settings.theme = look
+				where_ := fmt.tprintf("usage folded=%v left=%v %v", folded, lw, look)
+				cmds := ui_layout(1280, AUDIT_H)
+				for b in audit(cmds, where_, 1280) do testing.expectf(t, false, "%s", b)
+				// every row drawn, and each bar's percent (a narrow column drops the reset time first)
+				for _, i in entries do testing.expectf(t, clay.GetElementData(clay.ID("usagerow", u32(i))).found, "%s: row %d", where_, i)
+				if !folded {
+					texts := make(map[string]bool, context.temp_allocator)
+					for p in pieces(cmds) do texts[p.text] = true
+					for want in ([]string{"42%", "18%", "100%", "85%", "30%"}) do testing.expectf(t, texts[want], "%s: %s not drawn", where_, want)
+				}
+			}
+		}
+	}
+	state.settings.theme = .Graphite
+}

@@ -371,6 +371,7 @@ client_facts :: proc() {
 	heap := runtime.heap_allocator()
 	sent := false
 	f := core.Window_Facts{active = app.window_active, dpi = app.dpi, job_sheet_open = job_sheet_open(), unsaved = tab_views_unsaved_paths()}
+	f.hidden = app_is_hidden() || window_minimised() // nobody sees it: usage is not read (core usage.odin)
 	f.fps, f.scale = platform_display()
 	f.frames_service, f.frames_device = frames_service()
 	if s, ok := setup_state_now(); ok do f.setup = s // ui_setup.odin

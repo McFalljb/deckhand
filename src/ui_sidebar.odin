@@ -685,6 +685,7 @@ tree_list :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 		chats_section(cs, text_w_max, row_w)
 	}
 	machines_sections(cs, text_w_max) // other machines, each under its name (Machines over SSH)
+	usage_section(text_w_max) // each coding-agent account's plan limits (ui_usage.odin)
 }
 
 // The filter field: text and placeholder, ⇧⌘F, a clear button while it holds text.
@@ -1136,6 +1137,8 @@ row_state :: proc(path: string) -> (open, forced: bool) {
 // A row toggle that does nothing now (kept open): no pointing hand, no hover.
 hit_inert :: proc(h: Hit) -> bool {
 	#partial switch x in h {
+	case Hit_Usage_Row:
+		return true // a hover only (ui_usage.odin)
 	case Hit_Group:
 		_, forced := row_state(string(x))
 		return forced
@@ -1502,6 +1505,7 @@ sidebar_hit :: proc() -> Hit {
 	}
 	for m in state.machines do if clay.PointerOver(clay.ID("machfolder", u32(m.no))) do return Hit_Machine_Add_Folder(m.no)
 	if clay.PointerOver(clay.ID("machadd")) do return Hit_Machine_Add{}
+	if h := usage_hit(); h != nil do return h // ui_usage.odin
 	for id, i in drawn.proj {
 		if clay.PointerOver(clay.ID("projkids", u32(i))) do return Hit_Kids(id)
 		if clay.PointerOver(clay.ID("projpin", u32(i))) do return Hit_Pin_Project(id)

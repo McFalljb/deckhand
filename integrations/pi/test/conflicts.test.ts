@@ -5,6 +5,7 @@
 // /guardrails to another copy; the required desk and browser register at session_start and win by
 // load order (`-e` first).
 // node --test test/conflicts.test.ts (Node 22.18+ strips the types; never runs pi).
+import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOME in a temp folder (antigravity's data dir)
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
@@ -74,6 +75,7 @@ test("no bundled extension registers a tool or flag while loading (pi would refu
 	// antigravity active: a stand-in agy on PATH, never started while loading
 	const bin = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-bin-"));
 	symlinkSync(path.join(ROOT, "test/fake-agy.mjs"), path.join(bin, "agy"));
+	assertTempData();
 	for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}, { PATH: bin }])
 		for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"])
 			await withEnv(env, async () => {

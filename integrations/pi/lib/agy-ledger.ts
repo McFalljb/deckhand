@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import type { Produced } from "./antigravity.ts";
+import { EMPTY_LOCK_GRACE_MS, readLock, tryLock, unlock as unlockFile } from "./agy-lock.ts";
 
 const KEEP = 200;
 
@@ -47,28 +48,20 @@ export function fileLedger(dir: string): Ledger {
 	const key = (id: string) => createHash("sha256").update(id).digest("hex").slice(0, 32);
 	const file = (id: string) => path.join(dir, `${key(id)}.json`);
 	const lock = (id: string) => path.join(path.resolve(dir), `${key(id)}.lock`);
-	const holderPid = (p: string): number | undefined => {
-		try {
-			return Number(JSON.parse(fs.readFileSync(p, "utf8"))?.pid);
-		} catch {
-			return undefined;
-		}
-	};
-	/** Someone else holds it: another owner in this process, or another live process. */
+	/** Someone else holds it: another owner in this process, or another live process (or one still writing its lock). */
 	const taken = (id: string, owner: object) => {
 		const p = lock(id);
 		const held = HELD.get(p);
 		if (held) return held !== owner;
-		if (!fs.existsSync(p)) return false;
-		const pid = holderPid(p);
-		return pid !== undefined && pid !== process.pid && alive(pid);
+		const seen = readLock(p);
+		if (!seen) return false;
+		if (seen.pid === undefined) return Date.now() - seen.mtimeMs <= EMPTY_LOCK_GRACE_MS;
+		return seen.pid !== process.pid && alive(seen.pid);
 	};
 	const unlock = (p: string, owner: object) => {
 		if (HELD.get(p) !== owner) return;
 		HELD.delete(p);
-		try {
-			if (holderPid(p) === process.pid) fs.rmSync(p, { force: true });
-		} catch {}
+		unlockFile(p);
 	};
 	return {
 		read(id) {
@@ -91,17 +84,12 @@ export function fileLedger(dir: string): Ledger {
 		free: (id, owner) => !taken(id, owner),
 		claim(id, owner) {
 			const p = lock(id);
-			if (HELD.get(p) === owner) return true;
-			if (taken(id, owner)) return false;
-			try {
-				fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-				fs.rmSync(p, { force: true }); // stale: its process is gone (or it is this process's own, unheld)
-				fs.writeFileSync(p, JSON.stringify({ pid: process.pid }), { flag: "wx", mode: 0o600 });
-			} catch {
-				return false; // another process took it in between
-			}
-			HELD.set(p, owner);
-			return true;
+			const held = HELD.get(p);
+			if (held) return held === owner;
+			// stale: a dead process's, or this process's own that no owner holds any more
+			const ok = tryLock(p, (seen) => (seen.pid === process.pid ? !HELD.has(p) : !alive(seen.pid!)));
+			if (ok) HELD.set(p, owner);
+			return ok;
 		},
 		release(id, owner) {
 			unlock(lock(id), owner);

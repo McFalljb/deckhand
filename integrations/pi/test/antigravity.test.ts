@@ -10,7 +10,8 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
-import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf, sweepRunDirs } from "../lib/agy-accounts.ts";
+import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
+import { fileLedger } from "../lib/agy-ledger.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
 import { createAntigravity, planTurn, RETRY_NOTE, SUMMARY_TEXT } from "../lib/antigravity.ts";
 import { NOT_FOUND } from "../extensions/antigravity/index.ts";
@@ -832,6 +833,62 @@ test("gap A1: the sweep ends what is left of a dead agy's group before it remove
 		assert.ok(await until(() => !existsSync(dir)), "then the folder goes");
 	} finally {
 		if (pidAlive(member)) process.kill(member, "SIGKILL");
+	}
+});
+
+/**
+ * Runs f while fs.rmSync and fs.renameSync, the first time they touch `lock`, first put another
+ * live process's lock in its place: the moment between seeing a stale lock and taking it over.
+ */
+async function racing<T>(lock: string, livePid: number, f: () => T | Promise<T>): Promise<T> {
+	const fsm = (await import("node:fs")).default as any;
+	const { rmSync, renameSync, writeFileSync: write } = fsm;
+	let planted = false;
+	const plant = (p: unknown) => {
+		if (planted || p !== lock) return;
+		planted = true;
+		const t = `${lock}.planted`;
+		write(t, JSON.stringify({ pid: livePid }));
+		renameSync(t, lock); // a new file in its place
+	};
+	fsm.rmSync = (p: any, ...a: any[]) => (plant(p), rmSync(p, ...a));
+	fsm.renameSync = (p: any, ...a: any[]) => (plant(p), renameSync(p, ...a));
+	try {
+		return await f();
+	} finally {
+		fsm.rmSync = rmSync;
+		fsm.renameSync = renameSync;
+	}
+}
+
+test("gap A2: taking over a stale lock never takes one another process took in the meantime (ledger and accounts.json)", async () => {
+	const other = spawn("sleep", ["30"]);
+	try {
+		const dead = spawnSync("true").pid!;
+		const dir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
+		const ledger = fileLedger(dir);
+		const lock = path.join(dir, `${createHash("sha256").update("S").digest("hex").slice(0, 32)}.lock`);
+		writeFileSync(lock, JSON.stringify({ pid: dead })); // stale
+		const me = {};
+		const got = await racing(lock, other.pid!, () => ledger.claim("S", me));
+		assert.equal(got, false, "the live lock is not taken");
+		assert.equal(JSON.parse(readFileSync(lock, "utf8")).pid, other.pid, "and is still there");
+		const root = mkdtempSync(path.join(TMP_ROOT, "acct-"));
+		const alock = path.join(root, "accounts.json.lock");
+		writeFileSync(alock, JSON.stringify({ pid: dead }));
+		await assert.rejects(
+			racing(alock, other.pid!, () => updateAccounts(root, (accounts) => ({ accounts }), 200)),
+			/Another pi .* is changing the Antigravity accounts/,
+		);
+		assert.equal(JSON.parse(readFileSync(alock, "utf8")).pid, other.pid);
+		// a stale lock no one races for is taken over as before
+		writeFileSync(lock, JSON.stringify({ pid: dead }));
+		assert.equal(ledger.claim("S", me), true);
+		writeFileSync(alock, JSON.stringify({ pid: dead }));
+		await updateAccounts(root, (accounts) => ({ accounts }), 200);
+		assert.ok(!existsSync(alock));
+	} finally {
+		other.kill();
 	}
 });
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {

@@ -25,6 +25,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { groupAlive, reapGroup, signalGroup } from "./acp.ts";
 import { alive } from "./agy-ledger.ts";
+import { readLock, tryLock, unlock } from "./agy-lock.ts";
 
 export type Method = "oauth-personal" | "oauth-business" | "gemini-api-key" | "agent-platform";
 
@@ -121,9 +122,9 @@ export function saveAccounts(root: string, accounts: Account[], agyPath: string 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Changes accounts.json under a lock (`accounts.json.lock`, O_EXCL, with this pid), reading it
- * again inside, so two pi processes changing accounts never lose each other's change. A lock whose
- * process is gone is taken over; one held longer than `waitMs` by a live process is an error.
+ * Changes accounts.json under a lock (`accounts.json.lock`, agy-lock.ts: created atomically, with
+ * this pid), reading it again inside, so two pi processes changing accounts never lose each other's
+ * change. A lock whose process is gone is taken over; one held longer than `waitMs` is an error.
  */
 export async function updateAccounts(
 	root: string,
@@ -133,31 +134,15 @@ export async function updateAccounts(
 	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 	const lock = `${accountsFile(root)}.lock`;
 	const until = Date.now() + waitMs;
-	for (;;) {
-		try {
-			fs.writeFileSync(lock, JSON.stringify({ pid: process.pid }), { flag: "wx", mode: 0o600 });
-			break;
-		} catch (e: any) {
-			if (e?.code !== "EEXIST") throw e;
-		}
-		let pid: number | undefined, age = 0;
-		try {
-			age = Date.now() - fs.statSync(lock).mtimeMs;
-			pid = Number(JSON.parse(fs.readFileSync(lock, "utf8"))?.pid);
-		} catch {}
-		const stale = pid ? !alive(pid) : age > 2000; // no pid yet: being written, unless old
-		if (stale) {
-			fs.rmSync(lock, { force: true });
-			continue;
-		}
-		if (Date.now() > until) throw new Error(`Another pi (process ${pid}) is changing the Antigravity accounts: try again`);
+	while (!tryLock(lock, (seen) => !alive(seen.pid!))) {
+		if (Date.now() > until) throw new Error(`Another pi (process ${readLock(lock)?.pid ?? "unknown"}) is changing the Antigravity accounts: try again`);
 		await sleep(50);
 	}
 	try {
 		const next = change(storedAccounts(root), storedAgyPath(root));
 		saveAccounts(root, next.accounts ?? storedAccounts(root), next.agyPath === undefined ? storedAgyPath(root) : next.agyPath);
 	} finally {
-		fs.rmSync(lock, { force: true });
+		unlock(lock);
 	}
 }
 

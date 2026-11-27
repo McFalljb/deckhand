@@ -49,7 +49,14 @@ home "$FAKE_HOME/codex-twin" 1 "$(lim 42 18 acct-main)" # the same account: the 
 home "$FAKE_HOME/codex-key" 1 '{"mode":"apikey"}'
 home "$FAKE_HOME/codex-out" 0
 LOG="$W/usage.log"
-PY=$(python3 -c 'import sys; print(sys.executable)')
+# the fake needs tomllib (Python 3.11+): the first python3 that has it, else Homebrew's (a PATH
+# with /usr/bin first, as the build wants, finds macOS's 3.9); as tests/scripts/codex.sh
+PY=
+for c in python3 python3.14 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  PY=$("$c" -I -c 'import sys, tomllib; print(sys.executable)' 2>/dev/null) && break
+  PY=
+done
+[ -n "$PY" ] || { echo "$(basename "$0" .sh) scene: no python3 with tomllib (Python 3.11+ needed)"; exit 1; }
 fail=0
 for n in 1 2; do
   RUN=$(mktemp -d "${TMPDIR:-/tmp}/pdu.XXXXXX")

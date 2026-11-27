@@ -24,9 +24,15 @@ waitstate 5000 sidebar.folded.usage false
 wait 2500
 assert_state usage.0.tried_at 0
 assert_state usage.0.reading false
-# shown again: the accounts due are read (Work and Out; Codex's read is 4 minutes old: due at 5);
-# each read fails, so the numbers stay and say why
+# shown, but on the Files tab (the section not drawn): still nothing read
+ui_command {"type":"set_left_tab","tab":"files"}
 unhide
+wait 2500
+assert_state usage.1.tried_at 0
+assert_state usage.2.tried_at 0
+# the Sessions tab again: the accounts due are read (Work and Out; Codex's read is 4 minutes old:
+# due at 5); each read fails, so the numbers stay and say why
+ui_command {"type":"set_left_tab","tab":"sessions"}
 waitstate 60000 usage.1.error failed to fetch codex rate limits: 503
 waitstate 60000 usage.2.line signed out · now
 assert_state usage.0.status ok

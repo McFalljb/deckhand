@@ -2,7 +2,8 @@
 # The USAGE section's rows from a saved workspace (docs/GUIDE.md "Usage"; src/ui_usage.odin):
 # a fresh read, one two hours old (faded) whose 5h window reset since, and a signed-out account.
 # It starts folded (one line per account, no read while folded); unfolded while the app is hidden
-# (still no read); shown again: the accounts due are read, not the fresh one (each read fails
+# (still no read); shown on the Files tab (no read); the Sessions tab again: the accounts due are
+# read, not the fresh one (each read fails
 # here: the fake app-server answers an error, so the last good numbers stay and say why). A narrow column, light and dark.
 # Never a real codex: tests/scripts/fake-codex.py's app-server mode. Writes build/usage-section/
 # and build/shots/usage-section/. Usage: tests/scripts/usage-section.sh
@@ -48,7 +49,14 @@ PY
 CLOCK=$(date -r "$RESET" '+%-H:%M')
 sed "s/@RESET@/$CLOCK/g" tests/scripts/usage-section.txt > "$W/script.txt"
 LOG="$W/usage.log"
-PY=$(python3 -c 'import sys; print(sys.executable)')
+# the fake needs tomllib (Python 3.11+): the first python3 that has it, else Homebrew's (a PATH
+# with /usr/bin first, as the build wants, finds macOS's 3.9); as tests/scripts/codex.sh
+PY=
+for c in python3 python3.14 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  PY=$("$c" -I -c 'import sys, tomllib; print(sys.executable)' 2>/dev/null) && break
+  PY=
+done
+[ -n "$PY" ] || { echo "$(basename "$0" .sh) scene: no python3 with tomllib (Python 3.11+ needed)"; exit 1; }
 RUN=$(mktemp -d "${TMPDIR:-/tmp}/pdv.XXXXXX")
 env HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$W/script.txt" \
   DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" DECKHAND_CMD='exec sleep 600' \

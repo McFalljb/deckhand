@@ -136,7 +136,7 @@ launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, answered: 
 	answered^ = true
 	if d := trust.peer_still(at_accept, trust.peer_read(cfd)); d != .Allow do return 0, fmt.tprintf("the peer changed before the environment (%v)", d)
 	sent := env
-	if sent == nil do sent, _ = os.environ(context.temp_allocator) // nil: ours
+	if sent == nil do sent, _ = os.environ(context.temp_allocator) // nil: ours; env-read-ok: passed on whole to the launched child
 	b := strings.builder_make(context.temp_allocator)
 	for e in sent {
 		if e == "" || strings.contains_rune(e, 0) || strings.has_prefix(e, READY_SECRET_KEY + "=") do continue
@@ -332,7 +332,7 @@ core_label_prefix := "dev.deckhand.core."
 // secret: a handover's successor secret (core_handover.odin), over the ready socket or, spawned
 // directly, a pipe on its stdin (never argv, the environment or a file).
 core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> (pid: i32, ok: bool, why: string) {
-	ours, _ := os.environ(context.temp_allocator)
+	ours, _ := os.environ(context.temp_allocator) // env-read-ok: the core's launch environment, passed on whole (core_launch_env)
 	env := core_launch_env(ours, from_tab)
 	// a window that asked the login shell at its launch: its core's refresh asks it too (login_env_adopt)
 	if login_env.gui && !from_tab {

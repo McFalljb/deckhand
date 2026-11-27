@@ -40,6 +40,7 @@ import {
 	METHODS,
 	type Method,
 	methodLabel,
+	noteAgySeen,
 	notSignedIn,
 	prepareProfile,
 	profileOf,
@@ -166,6 +167,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		try {
 			const r = await probeModels({ agyPath, cwd, ...launchOf(a, key), ...(signIn ? { signIn } : {}) });
 			version = r.version || version;
+			noteAgySeen(root, agyPath!, version);
 			await live.get(a.name)!.ag.setModels(r.models, r.thinking);
 			return `${r.models.length} model${r.models.length === 1 ? "" : "s"} of the Antigravity account "${a.name}" in /model (provider ${providerIdOf(a.name)})`;
 		} catch (e) {
@@ -175,7 +177,10 @@ export default function antigravity(pi: ExtensionAPI) {
 
 	/** One line per account: provider, method, signed in or what to run, models. */
 	const statusLines = async (ctx: ExtensionContext) => {
-		if (!version) version = await agyVersion({ agyPath, cwd, ...launchOf(accountOf("default")!, undefined) }).catch(() => "");
+		if (!version) {
+			version = await agyVersion({ agyPath, cwd, ...launchOf(accountOf("default")!, undefined) }).catch(() => "");
+			noteAgySeen(root, agyPath!, version);
+		}
 		const set = storedAgyPath(root);
 		const lines = [`Antigravity CLI: ${agyPath} (${version || "version unknown"})${set === agyPath ? ", set by /antigravity path" : ""}`];
 		if (set && set !== agyPath) lines.push(`  The path set by /antigravity path is not an executable file, so agy is taken from PATH: ${set}`);

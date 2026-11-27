@@ -119,6 +119,28 @@ export function saveAccounts(root: string, accounts: Account[], agyPath: string 
 	fs.renameSync(tmp, accountsFile(root));
 }
 
+/**
+ * Records the version agy reported (initialize's agentInfo.version) beside accounts.json, as
+ * `agy-seen.json` {path, size, mtime (s), version}: Deckhand's coding-agents checklist reads it to
+ * show agy's version without ever running agy, and trusts it only while the binary at `path` still
+ * has that size and mtime. Nothing secret; 0600 like the rest. Written only when it changes.
+ */
+export function noteAgySeen(root: string, agyPath: string, version: string) {
+	if (!version || !path.isAbsolute(agyPath)) return;
+	try {
+		const st = fs.statSync(agyPath);
+		const body = JSON.stringify({ path: agyPath, size: st.size, mtime: Math.floor(st.mtimeMs / 1000), version });
+		const file = path.join(root, "agy-seen.json");
+		try {
+			if (fs.readFileSync(file, "utf8").trim() === body) return;
+		} catch {}
+		fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+		const tmp = `${file}.tmp-${process.pid}`;
+		fs.writeFileSync(tmp, `${body}\n`, { mode: 0o600 });
+		fs.renameSync(tmp, file);
+	} catch {}
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**

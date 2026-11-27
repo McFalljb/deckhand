@@ -1070,6 +1070,24 @@ test("agy 1.5.18's logs: each launch's sweep keeps the newest 20 log/acp-server-
 	}
 });
 
+test("agy-seen.json: the version agy reported, with the binary's size and mtime, for Deckhand's checklist to read without running agy; never at load", async () => {
+	const a = accountsEnv();
+	const acp = path.join(a.root, "profiles", "default", "antigravity-acp");
+	mkdirSync(acp, { recursive: true });
+	writeFileSync(path.join(acp, "acp_token.json"), "{}"); // as if signed in
+	const seen = path.join(a.root, "agy-seen.json");
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		assert.ok(!existsSync(seen), "nothing at load");
+		const { ctx } = cmdCtx(pi);
+		await run(pi, "antigravity", "models", ctx);
+	});
+	const st = statSync(realpathSync(AGY));
+	assert.deepEqual(JSON.parse(readFileSync(seen, "utf8")), { path: AGY, size: st.size, mtime: Math.floor(st.mtimeMs / 1000), version: "1.5.18" });
+	assert.equal(statSync(seen).mode & 0o777, 0o600);
+});
+
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));

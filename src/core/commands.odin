@@ -828,6 +828,10 @@ Command :: union {
 	Claude_Reload_Watch,
 	Claude_Reload_Kick,
 	Claude_Restart_Anyway,
+	// Install agy… (agy_install.odin)
+	Install_Agy,
+	Agy_Install_Step,
+	Agy_Install_Done,
 }
 
 // Widgets that can take keyboard focus (editor_*: the editor's find,
@@ -2046,6 +2050,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return mark_all_read_apply(caller, request_id)
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
 		return update_apply(cmd, caller)
+	case Install_Agy, Agy_Install_Step, Agy_Install_Done:
+		return agy_install_apply(cmd, caller) // agy_install.odin
 	case Set_Home_Dir, Set_Folder, Setup_Sheet:
 		return folders_apply(cmd, caller)
 	case Job_List, Job_Runs, Job_Run_Now, Job_Stop, Jobs_Pause, Jobs_Resume, Job_Create, Job_Save, Job_Mark_Read, Job_Set_Enabled, Job_Delete, Job_Open, Set_Pi_Path, Set_Job_Limits, Jobs_Sync, Jobs_Tick, Job_Run_Done, Jobs_Env:
@@ -2348,6 +2354,9 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok && x.skip_permissions == y.skip_permissions && x.harness == y.harness
 	case Update_Install:
 		_, ok := b.(Update_Install)
+		return ok
+	case Install_Agy:
+		_, ok := b.(Install_Agy)
 		return ok
 	case Reload_File:
 		y, ok := b.(Reload_File)

@@ -77,6 +77,9 @@ Hook :: enum u8 {
 	Core_Release, // file:///dir/: the Linux core's release (release.json, the tarball, its .sig) instead of GitHub's (machine_install.odin)
 	Core_Version, // X.Y.Z: the version this core says (core_version); a handover's successor no longer has it (core_handover.odin)
 	Test_Asid, // N: this process's login (audit session) as the other-login checks see it (login_session.odin)
+	Agy_Release, // file:///dir/: Install agy's manifest (dir/manifests/<platform>.json) and download (dir/antigravity-cli/…) instead of Google's (agy_install.odin)
+	Agy_Bin_Dir, // the folder Install agy puts agy in instead of ~/.local/bin (agy_install.odin)
+	Agy_Signed, // 1: Install agy's signature and notarization verdict says yes (a fixture is not Google's: agy_install.odin)
 }
 
 when TEST_HOOKS {
@@ -124,6 +127,9 @@ when TEST_HOOKS {
 		.Core_Release     = "DECKHAND_TEST_CORE_RELEASE",
 		.Core_Version     = "DECKHAND_TEST_CORE_VERSION",
 		.Test_Asid        = "DECKHAND_TEST_ASID",
+		.Agy_Release      = "DECKHAND_TEST_AGY_RELEASE",
+		.Agy_Bin_Dir      = "DECKHAND_TEST_AGY_BIN_DIR",
+		.Agy_Signed       = "DECKHAND_TEST_AGY_SIGNED",
 	}
 }
 

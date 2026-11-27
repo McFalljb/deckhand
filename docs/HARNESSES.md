@@ -137,7 +137,8 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   (only that name, as t3code: `antigravity` may be the Antigravity IDE's launcher; another name
   needs `/antigravity path`); a few stats at load. No environment variable picks the binary (what Deckhand ships reads
   only the variables `scripts/check-env-reads.py` lists). Not found: the extension registers
-  only `/antigravity`, which says where to get agy (1.5.18 or newer) and offers `/antigravity path`;
+  only `/antigravity`, which says where to get agy (1.5.18 or newer) and offers `/antigravity path`
+(on a Mac, Settings › Coding agents can install it: **Install agy…**, §6);
   no provider, hook, status line or output. Found (at load, or when `/antigravity path` sets a path
   later in the session): the accounts' providers and hooks for
   `session_start`, `session_shutdown` and `session_before_compact` (pi takes providers and hooks
@@ -434,8 +435,8 @@ wire form of its own there too.
 runner); `name`; `kind` (`Harness`, `Built_In`: Deckhand's own, ships in the app, never installed,
 or `Third_Party`); `need` (`Required` or `Recommended`); `min_version`; `detect` (`Binary`,
 `Integration`, `Pi_Package` with `detect_arg` the npm name, `Agy`), always by looking, never by running;
-`install` (the command when it is missing; "" for built-ins and for `antigravity`, which is shown
-only); `update` per install layout (§7) or
+`install` (the command when it is missing; "" for built-ins and for `antigravity`, whose
+Install agy… is its own code, below); `update` per install layout (§7) or
 `update_any` for a third-party item; `why` (one line); `source` (where the command comes from).
 
 | id | Harness | Kind | Need | Min | Detected by | Install | Source |
@@ -447,7 +448,7 @@ only); `update` per install layout (§7) or
 | `pi-ask-user` | pi | third-party | recommended | — | `npm:pi-ask-user…` in `packages` | `pi install npm:pi-ask-user@0.17.0` | npmjs.com/package/pi-ask-user; pin: a version in daily use; no advisories (edlsh/pi-ask-user) |
 | `pi-web-access` | pi | third-party | recommended | 0.24.1 (GHSA-8phw-6qw6-xhq6) | `npm:pi-web-access…` in `packages` | `pi install npm:pi-web-access@0.47.0` | npmjs.com/package/pi-web-access; pin: npm's latest on 2026-11-09; minimum: the GHSA-8phw-6qw6-xhq6 fix (nicobailon/pi-web-access advisory, ≤ 0.24.0) |
 | `rpiv-btw` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-btw…` in `packages` | `pi install npm:@juicesharp/rpiv-btw@2.15.0` | npmjs.com/package/@juicesharp/rpiv-btw; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
-| `antigravity` | pi | third-party | recommended | 1.5.1 (`AGY_MIN_VERSION`) | the path `/antigravity path` saved in `<data dir>/antigravity/accounts.json` when it is an executable file, else `agy` on the tabs' PATH (`agy_detect`, as `lib/acp.ts` `findAgy`); version from `agy-seen.json`, which the extension writes when agy reports it, trusted only while the binary's size and mtime match. Never run | — (shown only: "install agy 1.5.18+" and Google's link; Deckhand never installs agy) | antigravity.google/docs/getting-started |
+| `antigravity` | pi | third-party | recommended | 1.5.1 (`AGY_MIN_VERSION`) | the path `/antigravity path` saved in `<data dir>/antigravity/accounts.json` when it is an executable file, else `agy` on the tabs' PATH (`agy_detect`, as `lib/acp.ts` `findAgy`); version from `agy-seen.json`, which the extension writes when agy reports it, trusted only while the binary's size and mtime match. Never run | macOS, in Settings only: **Install agy…** when missing (nothing at `~/.local/bin/agy`), **Update agy…** when the agy found is `~/.local/bin/agy` and below `AGY_RECOMMENDED_VERSION`; `install_agy` (below the table); else "install agy 1.5.18+" and Google's link | antigravity.google/docs/getting-started, antigravity.google/cli/install.sh |
 | `claude` | Claude Code | harness | required | 2.1.295 (`CLAUDE_MIN_VERSION`) | `claude` on the tabs' PATH or in `~/.local/bin`, `~/.claude/local`, else the login shell's `command -v claude`; version from where it links (`claude_version_of`) | `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh \| bash` | code.claude.com/docs/en/setup, "Native Install (Recommended)" |
 | `claude-plugin` | Claude Code | built in | required | (Claude 2.1.295) | `integrations/claude-code` in the build | — | §5 |
 | `codex` | Codex | harness | required | 0.163.0 (`CODEX_MIN_VERSION`) | `codex` on the tabs' PATH, else the login shell's `command -v codex`; version from where it links (the npm package's `package.json`, Homebrew's `Caskroom/codex/<v>/`, Codex's installer's `releases/<v>-<target>/`), else `codex --version` under a throwaway `CODEX_HOME` (`codex_version_of`); signed in: `codex login status` per Codex home (exit 1 = signed out, a note), run on a worker | `npm install -g @openai/codex@latest` | github.com/openai/codex README |
@@ -460,6 +461,39 @@ database and each package's repository) when the pin was set. Claude Code needs 
 third-party: its plugin is sh and Deckhand's own CLI and loads with every Claude tab, so its
 Recommended list is empty and the sheet says "Nothing else to install". Codex needs nothing
 either: its hooks are Deckhand's own CLI, passed per run (§5a).
+
+**Install agy…** ([`src/core/agy_install.odin`](../src/core/agy_install.odin); its header has the
+detail). Google's installer (antigravity.google/cli/install.sh) reads a manifest, downloads a
+tarball, checks its SHA-512, copies the one member `antigravity` to `~/.local/bin/agy`, removes
+the quarantine flag and runs `agy install` (which edits shell profiles). Deckhand does the first
+four with more checks and never the last, nor runs agy at all: on macOS only, on the user's click
+on the Settings row and the bar's confirmation (`install_agy`, `User_Here`, `force_ask`), a worker
+fetches `https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/<platform>.json`
+(curl, https only, no redirects, 16 KiB at most), reads `{version, url, sha512}` strictly (version
+`N.N.N` and at least `AGY_MIN_VERSION`; an update's newer than the installed one; sha512 128 hex;
+the URL exactly `https://storage.googleapis.com/antigravity-public/antigravity-cli/<version>-<digits>/<darwin-arm|darwin-x64>/cli_mac_<arm64|x64>.tar.gz`,
+t3code's check), downloads it (512 MB at most) into a private folder (mkdtemp, 0700) inside
+`~/.local/bin` (the same volume, so the last step is one link or rename), checks the SHA-512,
+lists the tarball (exactly one regular-file member, `antigravity`), extracts that member alone
+(`--no-same-owner --no-xattrs --no-acls --no-fflags --no-mac-metadata`, a file size limit) and
+checks it by lstat, then `codesign --verify --strict` with Google's Developer ID requirement
+(leaf OU `EQHXZ8M8AV`), `codesign -dvv` (first Authority `Developer ID Application: Google LLC
+(EQHXZ8M8AV)`, TeamIdentifier `EQHXZ8M8AV`) and `spctl -a -vv -t install` (accepted, `source=Notarized
+Developer ID`), and only then removes the quarantine flag, sets 0755 and puts it in place: an
+install by link(2) (never over a file that appeared meanwhile), an update by rename(2) over the
+regular file it found, unchanged since the click (size, mtime). The private folder is removed on
+every path; any failure leaves `~/.local/bin/agy` as it was and puts the reason on the row and in
+a toast. Afterwards the core writes `<data dir>/antigravity/agy-seen.json` as the extension's
+`noteAgySeen` does (path, size, mtime in seconds, version; 0600, temp + rename), so the row shows
+the version without running agy, and never `accounts.json`. When `~/.local/bin` is not on the
+tabs' PATH (`agy_install_dir_on_path`) the row says to set agy's path with `/antigravity path`.
+Update agy… is offered only for `~/.local/bin/agy` itself (a regular file, not a link) older
+than `AGY_RECOMMENDED_VERSION`. Test mode never downloads from Google:
+`DECKHAND_TEST_AGY_RELEASE` (a `file:` release folder) and `DECKHAND_TEST_AGY_BIN_DIR` (the folder
+in place of `~/.local/bin`) must both be set or nothing is offered, and `DECKHAND_TEST_AGY_SIGNED=1`
+stands in for the signature verdict (scene `harness-setup`, run 5); the unit tests
+(`src/core/agy_install_test.odin`) check every refusal against fixtures, the real codesign
+refusing unsigned, ad-hoc and Apple-signed binaries.
 
 **States** (`Harness_Item_State`) and what each shows:
 

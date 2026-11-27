@@ -663,6 +663,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/agy_accounts.odin", "lock_read", "jg.parse", "", ""}, // accounts.json.lock's {"pid":N} (4 KB at most, checked first)
 		{"src/core/agy_accounts.odin", "file_read", "jg.parse", "", ""}, // accounts.json (AGY_FILE_MAX, 256 KB, checked first)
 		{"src/core/agy_accounts.odin", "models_of", "jg.parse", "", ""}, // agy-models.json (64 KB at most, checked first)
+		{"src/core/agy_install.odin", "agy_manifest_parse", "jg.parse_string", "custom", ""}, // Google's agy manifest: 16 KiB at most (curl's cap, then checked), depth 4
 		{"src/core/reload.odin", "pkg_name", "jg.parse", "", ""},
 		{"src/core/reload.odin", "add_settings_paths", "jg.parse", "", ""},
 		{"src/core/reload.odin", "add_local", "jg.parse", "", ""},

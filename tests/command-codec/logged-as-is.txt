@@ -14,6 +14,9 @@ Add_Antigravity_Account.name
 Add_Claude_Account.dir
 Add_Claude_Account.label
 Add_Project.cwd
+Agy_Install_Done.err
+Agy_Install_Done.version
+Agy_Install_Step.step
 App_Call.method
 App_Events.topic
 Bridge_Done.error

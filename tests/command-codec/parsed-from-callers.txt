@@ -262,6 +262,7 @@ Goto_Line.line
 Goto_Line.tab_id
 Holder_Recover.stop
 Holder_Replace.stop
+Install_Agy.confirm
 Job_Create.folder
 Job_Create.for_project
 Job_Create.name

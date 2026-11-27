@@ -5,7 +5,7 @@ package core
 // <data dir>/antigravity/accounts.json when it is an executable file, else `agy` on the PATH new
 // tabs get. Its version is the one agy last reported to the extension (agy-seen.json), trusted only
 // while the binary has the size and mtime recorded with it. Stat and two small JSON reads: agy is
-// never run, and Deckhand never installs it (docs/HARNESSES.md §3a, §6).
+// never run. The Settings row's Install agy… / Update agy… is agy_install.odin (docs/HARNESSES.md §3a, §6).
 
 import "core:encoding/json"
 import jg "../jsonguard"

@@ -220,7 +220,8 @@ sidebar hands its sections to Deckhand's right column.
 With Google's Antigravity CLI installed (`agy` on your `PATH`, or another path set with
 `/antigravity path`; version 1.5.1 or newer, 1.5.18 recommended), a pi tab can use your Antigravity models. Without it, only
 **`/antigravity`** is there: it links to Google's download page for agy and offers to set agy's
-path; once it is set, the rest turns on in the same tab. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
+path (Settings › Coding agents can also install it for you: **Install agy…**, see
+[Coding agents](#coding-agents)); once it is set, the rest turns on in the same tab. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
 turn: its model, its tools, its own instructions. Deckhand never reads or stores your Google
 sign-in; agy keeps it.
 
@@ -1837,8 +1838,24 @@ installed; Claude Code's files once it has been used.
 pi's card also has **Antigravity (through pi)**: whether Google's Antigravity CLI (agy) is there
 for pi's Antigravity models (see [Google Antigravity in pi tabs](#google-antigravity-in-pi-tabs-preview)).
 Deckhand finds it the way pi does: the path set with `/antigravity path`, else `agy` on your
-`PATH`, and shows the version agy last reported in a pi tab. It never runs agy to look, and
-never installs it: when it is missing the row says to install agy 1.5.18 or newer from
+`PATH`, and shows the version agy last reported in a pi tab. It never runs agy to look.
+
+On a Mac the row offers **Install agy…** when agy is missing, and **Update agy…** when the agy
+it found is `~/.local/bin/agy` (where Google's installer puts it) and older than 1.5.18; an agy
+installed anywhere else is yours to update the way you installed it. Nothing happens until you
+confirm: the bar says what Deckhand fetches and from where (Google's release list at
+`antigravity-cli-auto-updater-974169037036.us-central1.run.app`, then the `.tar.gz` it names under
+`storage.googleapis.com/antigravity-public/antigravity-cli/`), what it checks and where agy goes.
+Then, while the row shows each step, Deckhand downloads into a private folder in `~/.local/bin`,
+checks the download's SHA-512 against Google's list, that it holds exactly one program, that the
+program is signed with Google LLC's Developer ID (team EQHXZ8M8AV) and that macOS accepts it as
+notarized by Apple, and only then puts it at `~/.local/bin/agy` (an install never replaces a
+file that is already there; an update replaces only the file it found, unchanged since you
+clicked). Any failed check stops it with the reason on the row and nothing installed. Deckhand
+never runs agy, nor Google's `agy install` (which edits your shell profiles), and never uses
+`sudo`. Afterwards the row shows the new version. When `~/.local/bin` is not on your tabs'
+`PATH`, the row says so: set agy's path with `/antigravity path` in a pi tab. (The command is
+`install_agy`; only you, at this Mac.) Without the button, install agy 1.5.18 or newer from
 Google's getting-started page.
 
 **pi.** Its files: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),

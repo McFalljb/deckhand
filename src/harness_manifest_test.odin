@@ -88,7 +88,7 @@ harness_manifest_rows_are_whole :: proc(t: ^testing.T) {
 		case .Built_In:    testing.expectf(t, r.install == "" && r.need == .Required, "%s ships in Deckhand: nothing to install", r.id)
 		case .Harness:     testing.expectf(t, r.install != "", "%s has an install command", r.id)
 		case .Third_Party:
-			// agy: Google's installer, shown only (Deckhand never installs or runs it)
+			// agy: no checklist command (Install agy… is the Settings row's own: agy_install.odin; agy is never run)
 			if r.detect == .Agy do testing.expectf(t, r.install == "" && r.update_any == "", "%s is never installed by Deckhand", r.id)
 			else do testing.expectf(t, r.install != "" && r.detect == .Pi_Package, "%s is installed by its package manager", r.id)
 		}

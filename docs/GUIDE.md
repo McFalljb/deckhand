@@ -296,8 +296,10 @@ permission. The exceptions:
 - **A read-only session** (a read-only job) refuses every edit, every command that changes
   something, and agy's other tools (MCP tools, subagents); reads and searches still run.
 - **A change outside the tab's folder** is asked first (a link that leads outside counts).
-- **Credential files** are never read or changed: pi's sign-ins, Claude Code's and Codex's, agy's
-  and Gemini's tokens. A command that names one is refused too.
+- **Credential files** are never read or changed: pi's sign-ins, Claude Code's and Codex's, and
+  everything in an Antigravity account's profile (Deckhand's profiles, a folder you use in place,
+  agy's own `~/.gemini`) except its `GEMINI.md`, `AGENTS.md` and skills. A command that names one
+  is refused too.
 - **agy asking to leave its default mode** is refused.
 - With **`/antigravity approvals ask`**, every action is asked first.
 

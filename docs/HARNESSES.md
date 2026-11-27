@@ -285,9 +285,13 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
     credential file, or a command whose words name one: rejected. `credentialPath` mirrors the
     core's `credential_path` (`src/core/settings_files.odin`) by its name rules (pi's sign-ins and
     private files in its agent dir; Claude's `.credentials.json`/`.claude.json*`; Codex's
-    `auth.json` in `.codex` or `CODEX_HOME`) and adds agy's and Gemini's tokens (`acp_token.json`,
-    `oauth_creds.json`, `google_accounts.json`); the core's account-folder and hard-link rules are
-    not repeated;
+    `auth.json` in `.codex` or `CODEX_HOME`), everything in an agy profile but `GEMINI.md`,
+    `AGENTS.md` and skills as the core's `agy_credential` (`profileDirs` in `lib/agy-accounts.ts`:
+    Deckhand's `profiles/` whole, each account's profile including a `dir` used in place, removed
+    folders and agy's default profile while marked, any marked folder above the path), and
+    Gemini CLI's `oauth_creds.json`/`google_accounts.json` by name; the core's Claude/Codex
+    account-folder and hard-link rules are not repeated. The approvals mode is pi-only
+    (`/antigravity approvals`), not a Settings row;
   - `switch_mode`: rejected;
   - a command (kind `execute`, or rawInput `CommandLine`/`command_line`/`commandLine`/`command`, as
     t3code normalizes): guardrails' `checkCommand` with the tab's folder and PI_KIT_READONLY (the

@@ -231,7 +231,9 @@ ignored silently, so recheck them against the framework's strings at each bump.
 - `tests/scripts/browser-netpolicy.sh` idles a page with the real-use switches and fails on any
   host in the net-log other than Safe Browsing's.
 - Test mode is fully offline on top: every host maps to nothing, a dead proxy, no QUIC.
-  `browser.sh` fails on any non-loopback socket of Deckhand or a helper.
+  `browser.sh` fails on any non-loopback socket of Deckhand or a helper. Its camera and
+  microphone are Chromium's stand-ins (`--use-fake-device-for-media-stream`): a page still asks
+  (the permission bar), never opens the Mac's devices, and asks on a machine with none (CI).
 
 ### 2.4 Saved across relaunch
 

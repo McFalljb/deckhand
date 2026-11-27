@@ -10,7 +10,7 @@ import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, find
 import { AgySession, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
 import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf } from "../lib/agy-accounts.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
-import { createAntigravity, planTurn, SUMMARY_TEXT } from "../lib/antigravity.ts";
+import { createAntigravity, planTurn, RETRY_NOTE, SUMMARY_TEXT } from "../lib/antigravity.ts";
 import { NOT_FOUND } from "../extensions/antigravity/index.ts";
 import { piRules } from "./pi-rules.ts";
 
@@ -791,6 +791,32 @@ test("finding 8: an answer that fails before its prompt keeps the agy session: t
 		assert.equal(next.msg.responseId, first.msg.responseId, "same agy session");
 		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "next" }], "no catch-up text: agy has the conversation");
 		assert.equal(r.f.read().filter((m) => m.method === "session/new").length, 1);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("finding 7: pi retrying a message agy already got says so; a new message, or one that never reached agy, does not", async () => {
+	const r = rig();
+	// pi's retry: the same transcript again; its answer then joins the transcript
+	const retry = async (model = MODEL) => {
+		const res = await drive(r.ag.provider.streamSimple(model, { messages: [...r.messages] }, { sessionId: "pi-1" }));
+		r.messages.push(res.msg);
+		return res;
+	};
+	try {
+		await r.turn("hi");
+		const failed = await r.turn("refuse this", { keep: false }); // pi drops a failed answer before retrying
+		assert.equal(failed.msg.stopReason, "error");
+		await retry();
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: RETRY_NOTE }, { type: "text", text: "refuse this" }]);
+		await r.turn("something else");
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "something else" }], "a different message: no note");
+		const before = r.prompts().length;
+		await r.turn("never sent", { keep: false }, { ...MODEL, id: "no-such-model" });
+		assert.equal(r.prompts().length, before, "failed before its prompt");
+		await retry();
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "never sent" }], "agy never got it: no note");
 	} finally {
 		await r.ag.closeAll();
 	}

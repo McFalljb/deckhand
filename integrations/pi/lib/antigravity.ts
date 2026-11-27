@@ -46,6 +46,8 @@ const CANCEL_WAIT_MS = 10_000;
 const CATCH_UP_MAX = 40_000;
 /** pi's summarization prompt (core/compaction/utils.js SUMMARIZATION_SYSTEM_PROMPT) starts so. */
 const PI_SUMMARY_PROMPT = "You are a context summarization assistant";
+/** Put before a message pi sends again after a failed turn that had reached agy (its auto-retry). */
+export const RETRY_NOTE = "[pi retried the previous message; Antigravity may already have received it]";
 export const SUMMARY_TEXT =
 	"This conversation is held by Google Antigravity: its agy session keeps the whole context, so pi did not summarize it. Ask the agent to recall anything from earlier.";
 
@@ -301,6 +303,8 @@ interface SessionState {
 	/** The running turn's handler for agy's session updates and refused requests. */
 	sink?: { update: (u: any) => void; refused: (method: string, params: any) => void };
 	busy: boolean;
+	/** The blocks of the last turn that reached agy (session/prompt went out) and failed. */
+	failedSent?: string;
 }
 
 /** The provider, its live model list and the agy sessions it holds. */
@@ -386,11 +390,12 @@ export function createAntigravity(o: AntigravityOptions) {
 		if (answer.msg.timestamp <= newest) answer.msg.timestamp = newest + 1;
 		// every answer from here is on the record (planTurn knows it), and names the agy session it
 		// belongs to, even one that ends before its prompt: the next turn then continues that session
-		let recorded = false;
+		let recorded = false, dispatched = false, sentKey = "";
 		const record = (ok: boolean) => {
 			if (recorded) return;
 			recorded = true;
 			st!.produced.push({ ts: answer.msg.timestamp, ok });
+			if (dispatched) st!.failedSent = ok ? undefined : sentKey;
 		};
 		if (st.acpSessionId) answer.msg.responseId = st.acpSessionId;
 		const plan = planTurn(messages, st, pid);
@@ -422,7 +427,10 @@ export function createAntigravity(o: AntigravityOptions) {
 			const ABORT = Symbol("abort"), GONE = Symbol("no answer");
 			const abortSeen = new Promise<typeof ABORT>((resolve) => signal?.addEventListener("abort", () => resolve(ABORT), { once: true }));
 			signal?.addEventListener("abort", onAbort, { once: true });
-			let payload: any = { sessionId: agy.sessionId, prompt: plan.blocks };
+			// pi's auto-retry sends a failed turn's message again; agy may have it already
+			sentKey = JSON.stringify(plan.blocks);
+			const retried = plan.mode !== "new" && st.failedSent === sentKey;
+			let payload: any = { sessionId: agy.sessionId, prompt: retried ? [{ type: "text", text: RETRY_NOTE }, ...plan.blocks] : plan.blocks };
 			const replaced = await options.onPayload?.(payload, model);
 			if (replaced !== undefined) payload = replaced;
 			// aborted before the prompt went out: nothing reached agy, so there is no turn to cancel
@@ -464,6 +472,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			};
 			let response: any;
 			try {
+				dispatched = true;
 				const turn = agy.prompt(payload.prompt ?? plan.blocks);
 				response = await Promise.race([turn, abortSeen]);
 				if (response === ABORT) {

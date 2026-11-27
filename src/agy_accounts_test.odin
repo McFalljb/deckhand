@@ -99,7 +99,8 @@ ag_find :: proc(name: string) -> (core.Agy_Account, bool) {
 	return {}, false
 }
 
-// Found by stat: agy's default profile (~/.gemini, the keyring account without a file sign-in),
+// Found by stat: agy's default profile (~/.gemini; the default account holds the keychain, so it is a
+// file account like the rest),
 // ~/.gemini-* and ~/.config/gemini*, holding agy's marks; written into accounts.json as found;
 // a folder without them, or Gemini CLI's own, is not one. The sign-in is told by stat only.
 @(test)
@@ -119,17 +120,18 @@ agy_accounts_found_by_stat :: proc(t: ^testing.T) {
 	testing.expect_value(t, accts[0].name, "default")
 	testing.expect(t, accts[0].chosen, "default chosen")
 	g, gok := ag_find("gemini")
-	testing.expect(t, gok && g.keyring && g.sign_in == .Keychain && g.source == .Found && g.label == "Gemini", "~/.gemini: the keyring account")
+	testing.expect(t, gok && !g.keyring && g.sign_in == .No && g.source == .Found && g.label == "Gemini", "~/.gemini: a file account (the default holds the keychain)")
+	testing.expect(t, accts[0].keyring && accts[0].sign_in == .Keychain, "the default account: the keychain account")
 	w, wok := ag_find("work")
 	testing.expect(t, wok && !w.keyring && w.sign_in == .Yes && w.label == "Work", "~/.gemini-work: signed in by file")
 	l, lok := ag_find("lab")
-	testing.expect(t, lok && l.sign_in == .No, "~/.config/gemini-lab: not signed in")
+	testing.expect(t, lok && l.sign_in == .No, "~/.config/gemini-lab: unknown (no file)")
 	_, cok := ag_find("cli-only")
 	testing.expect(t, !cok, "a folder without agy's marks is not an account")
 	e := ag_entry(env, "work")
 	testing.expect_value(t, e["source"].(json.String) or_else "", "found")
 	testing.expect_value(t, e["storage"].(json.String) or_else "", "file")
-	testing.expect_value(t, ag_entry(env, "gemini")["storage"].(json.String) or_else "", "keyring")
+	testing.expect_value(t, ag_entry(env, "gemini")["storage"].(json.String) or_else "", "file")
 	// the file is 0600 in a 0700 folder
 	k, st := core.path_stat(fmt.tprintf("%s/accounts.json", env.root))
 	testing.expect(t, k == .File && st.mode == 0o600, "accounts.json 0600")
@@ -144,8 +146,9 @@ agy_accounts_found_by_stat :: proc(t: ^testing.T) {
 	testing.expect(t, core.agy_default_home() == fmt.tprintf("%s/.gemini", h))
 }
 
-// At most one keyring account: a file sign-in in agy's default wins (file mode), and a second
-// keyring entry in the file is a file account.
+// At most one keyring account: the default holds it until an entry has storage "keyring" (then only
+// the first such entry: a second is a file account); a default marked "file" gives it up, and agy's
+// own default profile found without a file sign-in then takes it.
 @(test)
 agy_accounts_one_keyring :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -159,6 +162,16 @@ agy_accounts_one_keyring :: proc(t: ^testing.T) {
 	a, _ := ag_find("a")
 	b, _ := ag_find("b")
 	testing.expect(t, a.keyring && !b.keyring, "the first keyring entry only")
+	d, _ := ag_find("default")
+	testing.expect(t, !d.keyring && d.sign_in == .No, "an entry holds it: the default does not")
+	os.remove(fmt.tprintf("%s/accounts.json", env.root))
+	ag_write(fmt.tprintf("%s/accounts.json", env.root), `{"accounts":[{"name":"default","method":"oauth-personal","storage":"file"}]}`)
+	os.remove(fmt.tprintf("%s/.gemini/antigravity-acp/acp_token.json", env.home)) // agy's default profile, no file sign-in now
+	core.agy_accounts_refresh()
+	d2, _ := ag_find("default")
+	g2, gok := ag_find("gemini")
+	testing.expect(t, !d2.keyring, "a default marked file")
+	testing.expect(t, gok && g2.keyring && g2.sign_in == .Keychain, "agy's own default profile with no file sign-in takes the keychain")
 }
 
 // A removed folder is never listed again by a scan; adding it again brings it back. The folder
@@ -396,8 +409,8 @@ agy_accounts_settings_rows :: proc(t: ^testing.T) {
 	for r in got do fmt.sbprintf(&b, "%s|%s|%s|%v%v\n", r.label, r.detail, r.button, r.remove, r.make_default)
 	s := strings.to_string(b)
 	testing.expectf(t, len(got) == 5, "three accounts, Add, Scan:\n%s", s)
-	testing.expectf(t, strings.contains(s, "Default|Google account · not signed in: /antigravity login default in a pi tab ·"), "%s", s)
-	testing.expectf(t, strings.contains(s, "Gemini|Google account · signed in through the system keychain (not checked) · ~/.gemini|Rename…|truetrue"), "%s", s)
+	testing.expectf(t, strings.contains(s, "Default|Google account · signed in through the system keychain (not checked) ·"), "%s", s)
+	testing.expectf(t, strings.contains(s, "Gemini|Google account · sign-in unknown until agy is used (/antigravity login gemini in a pi tab to sign in) · ~/.gemini|Rename…|truetrue"), "%s", s)
 	testing.expectf(t, strings.contains(s, "Work|Google account · signed in · 7 models · ~/.gemini-work|Rename…|truetrue"), "%s", s)
 	testing.expectf(t, strings.contains(s, "Add account…|") && strings.contains(s, "Scan again|"), "%s", s)
 	for r in got do if r.label == "Default" do testing.expect(t, !r.remove && !r.make_default, "the default: not removed, chosen")

@@ -154,8 +154,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   requests answered by the approvals below with the calling tab's UI, folder and the account's
   mode, `default` mode confirmed before the prompt or nothing is sent), closed at the end; abort sends `session/cancel`. Tool calls, the plan and the answer
   so far stream as tool updates. Registered at `session_start` (never while loading), after a
-  sign-in in the session too, only when agy is found, an account is signed in (a saved sign-in by
-  stat, or a key in pi's store) and no other extension has the name.
+  sign-in in the session too, only when agy is found, an account can be used (any Google or Agent
+  Platform account, since only agy can tell a keychain sign-in; an API-key account with its key in
+  pi's store) and no other extension has the name.
 - **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
   `clientInfo`/`clientCapabilities`: agy 1.5.18 answers `protocolVersion: 1` in the v1 shape,
   `agentInfo.version` a bare `1.5.18`), no fs and no terminal capability; agy older than 1.5.1
@@ -200,14 +201,23 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `antigravity-acp/acp_token.json` (agy's file sign-in) or an `installation_id` under
   `antigravity-acp/` or `antigravity/` (agy writes one on its first run), at most 32; new ones are
   written in as `source: "found"` unless in `removedDirs`; a found one whose folder is gone is
-  dropped. Unlisted folders under `profiles/` are listed too. Signed in by stat: the file sign-in;
-  `Keychain` for the keyring account; `Key` for API-key methods (pi's store). **Keyring or
-  file** (verified with agy 1.5.18 and a throwaway profile, no sign-in: with `SSH_CONNECTION` its
-  log says "Using file-based token storage because SSH session detected"; without it nothing, the
-  keyring; `AGY_ACP_FORCE_FILE_STORAGE=1` or `true` without SSH: still the keyring): a keyring
-  sign-in cannot be seen by stat, nor told from another profile's, so at most one account uses
-  it, agy's own default profile when found without a file sign-in; every other profile is file
-  mode. **The guard** (`agy_credential`, in `settings_credential`): any `acp_token.json`; all of
+  dropped. Unlisted folders under `profiles/` are listed too. Signed in by stat, a display hint
+  only (nothing is gated on it: agy is always asked, `authenticate`, and only its own answer means
+  "sign in"): the file sign-in; `Keychain` for the keyring account; `Key` for API-key methods (pi's
+  store); else `no`, shown as "sign-in unknown until agy is used". **Keyring or file** (tried
+  against the real agy 1.5.18 on macOS with throwaway profiles, `authenticate` and the start of
+  `--login`, no sign-in completed): agy signs in to one OS keychain entry shared by every profile
+  unless `AGY_CLI_FORCE_FILE_TOKEN_STORAGE` is set ("Using file-based token storage because
+  AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set"; then the profile's `antigravity-acp/acp_token.json`).
+  `SSH_CONNECTION` and `AGY_ACP_FORCE_FILE_STORAGE` change nothing there. It reads a sign-in from
+  the profile's file, else from the keychain, in either mode: a fresh profile in forced file mode
+  "authenticated via keyring". So at most one account uses the keychain, signing in and running
+  in keychain mode: the first `storage: "keyring"` entry, else the default account (a Google
+  account not marked `storage: "file"`), else agy's own default profile found without a file
+  sign-in. Every other account runs and signs in in file mode. A Google account in file mode with
+  no file of its own that agy authenticates (so from the keychain) is recorded as
+  `storage: "keyring"` when no account holds the keychain (`noteKeychainSignIn`). Unverified: whether
+  a second account's own file sign-in takes precedence over the keychain's once both exist. **The guard** (`agy_credential`, in `settings_credential`): any `acp_token.json`; all of
   `profiles/`; in every listed, found or removed-but-marked profile and any folder holding agy's
   marks, everything but `GEMINI.md`, `AGENTS.md`, `config/skills/`, `config/skills.json` and
   `antigravity-cli/skills/`; the sign-in files' hard links; the profiles are credential places for
@@ -217,17 +227,15 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `GOOGLE_API_KEY`, `GOOGLE_CLOUD_*`, `GOOGLE_GENAI_USE_VERTEXAI`,
   `GCLOUD_PROJECT`, `CLOUDSDK_CORE_PROJECT`, `AGY_ACP_*`, `GEMINI_HOME`, `BROWSER`, …, matched
   case-insensitively), any other `GOOGLE_*` and `DECKHAND_*`; then `GEMINI_HOME` (the profile),
-  `AGY_ACP_FORCE_FILE_STORAGE=1`, `AGY_CLI_DISABLE_AUTO_UPDATE=true`, `TMPDIR` (the process's
-  own folder, below), and the account's key as `GEMINI_API_KEY` (`gemini-api-key`) or
-  `GOOGLE_API_KEY` (`agent-platform`). A Google-account (`oauth-personal`) agy also gets
-  `SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0`, as in t3code: agy 1.5 ignores file storage and keeps
-  Google sign-ins in one OS keyring entry for every profile unless it believes it runs over SSH, so
-  without it two accounts would share one sign-in; over "SSH" it signs in by the pasted code
-  (`--login`). The one keyring account (the first `storage: "keyring"`, a Google account) gets
-  neither `SSH_CONNECTION` (an inherited one is passed on as it is) nor
-  `AGY_ACP_FORCE_FILE_STORAGE`: agy uses its keyring entry; its sign-in is not checked ("signed in
-  through the system keychain (not checked)"), and `/antigravity login` on it signs in by the code
-  in file mode and sets its `storage` to file. `BROWSER` is not set (t3code points it at a helper; here agy's link is shown in pi).
+  `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1` (file mode), `AGY_CLI_DISABLE_AUTO_UPDATE=true`, `TMPDIR`
+  (the process's own folder, below), and the account's key as `GEMINI_API_KEY` (`gemini-api-key`)
+  or `GOOGLE_API_KEY` (`agent-platform`). A Google account (`oauth-personal`) in file mode also gets
+  `SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0`, so agy never opens a browser by itself when it has no
+  sign-in (it answers "No browser is available here"). The keyring account gets neither (an
+  inherited `SSH_CONNECTION` is passed on as it is): agy uses the keychain entry; its sign-in is not
+  checked ("signed in through the system keychain (not checked)"). `/antigravity login` runs with
+  the account's own session environment, so it stores where the sessions read (the keyring account
+  in the keychain, by agy's pasted code, which works without SSH too). `BROWSER` is not set (t3code points it at a helper; here agy's link is shown in pi).
   `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG` and `CLOUDSDK_AUTH_*` reach only an
   `agent-platform` account with a project and no key (Application Default Credentials are its
   sign-in); t3code drops the first for every method and keeps `CLOUDSDK_*`.
@@ -685,7 +693,8 @@ open checks are in [CODEX.md](CODEX.md), "How it was tested"):
   the branch before `turn_start`) and pi's conflict reports for the shell tools;
 - Atlas with `--skill`: `deckhand-desk` listed (pi's `loadSkills` is tested, the CLI path is not).
 - Antigravity against a real agy (none was available): the sign-in, accounts, profiles, models,
-  streaming, cancel and resume are tested against a stand-in only (the SSH_CONNECTION keyring
-  behaviour is t3code's finding, not checked here); one offline pi 1.5.2 print run with no
+  streaming, cancel and resume are tested against a stand-in only (where agy 1.5.18 stores and
+  reads a sign-in was checked against the real agy with throwaway profiles, §3a; a completed
+  second-account sign-in was not); one offline pi 1.5.2 print run with no
   credentials used the provider against the stand-in (two turns, one agy session). `/model`
   listing the models published after start, and the TUI's status line, are unchecked in a real pi.

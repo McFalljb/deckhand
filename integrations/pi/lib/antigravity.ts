@@ -324,6 +324,8 @@ export interface AntigravityOptions {
 	approvals?: () => Omit<ApprovalContext, "signal">;
 	/** Told the account's model count (agy's models, without `default`) whenever a list with models arrives. */
 	onModels?: (count: number) => void;
+	/** agy opened a session for this account (it authenticated): the account's sign-in is known to work. */
+	onOpened?: () => void;
 }
 
 interface SessionState {
@@ -474,6 +476,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			try {
 				const got = await ensureSession(st, plan, typeof options.apiKey === "string" ? options.apiKey : undefined);
 				agy = got.agy;
+				o.onOpened?.();
 				// agy could not resume (it does not offer session/resume): its new session gets pi's transcript first
 				if (got.lost) plan = { mode: "new", blocks: [{ type: "text", text: catchUpText(plan.prior ?? []) }, ...plan.blocks] };
 				// before every prompt (agy may have changed them since): its default mode, refused if

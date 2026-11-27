@@ -23,8 +23,13 @@
 //   writes it too (same lock, agy-lock.ts): each writer keeps what it does not understand.
 // - An account with `dir` is the user's own folder (e.g. ~/.gemini), used in place: nothing is
 //   written in it but its antigravity-acp/ folder, it is never chmod'ed, linked into or deleted.
-// - At most one Google account keeps its sign-in in agy's OS keyring (`storage: "keyring"`, the
-//   first such entry): agy shares that one entry between every profile it runs without SSH.
+// - At most one Google account keeps its sign-in in agy's OS keyring: the first `storage: "keyring"`
+//   entry, else the default account (a Google account not marked `storage: "file"`). agy 1.5.18 has
+//   one keychain entry for every profile: it signs in there unless AGY_CLI_FORCE_FILE_TOKEN_STORAGE
+//   is set (then into the profile's antigravity-acp/acp_token.json), and it reads a sign-in from the
+//   profile's file, else from the keychain, whichever mode (as the real agy showed: neither
+//   SSH_CONNECTION nor AGY_ACP_FORCE_FILE_STORAGE changes where it stores). So the keychain account
+//   signs in and runs in keychain mode, every other one in file mode, login and sessions alike.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -84,7 +89,7 @@ export function usesKey(a: Account): boolean {
 export const usesBrowser = (a: Account) => a.method === "oauth-personal" || a.method === "oauth-business";
 
 /** Where the accounts and profiles live. */
-export function dataRoot(env: NodeJS.ProcessEnv = process.env, platform = process.platform): string {
+export function dataRoot(env: NodeJS.ProcessEnv = process.env, platform = process.platform): string { // env-read-ok: dataRoot reads HOME only
 	const home = env.HOME || os.homedir(); // dataRoot(env) for tests; os.homedir() reads HOME too
 	if (platform === "darwin") {
 		const support = path.join(home, "Library", "Application Support");
@@ -148,7 +153,9 @@ export const storedAccounts = (root: string): Account[] => accountsOfRaw(readRaw
 /** The accounts, `default` first (implicit: a Google account, until configured). */
 export function loadAccounts(root: string): Account[] {
 	const list = storedAccounts(root);
-	const def = list.find((a) => a.name === "default") ?? DEFAULT_ACCOUNT;
+	let def = list.find((a) => a.name === "default") ?? DEFAULT_ACCOUNT;
+	// no entry holds the keychain: the default Google account does (what agy does on this Mac), unless marked file
+	if (!list.some((a) => a.storage === "keyring") && def.method === "oauth-personal" && def.storage !== "file") def = { ...def, keyring: true };
 	return [def, ...list.filter((a) => a.name !== "default")];
 }
 
@@ -335,7 +342,7 @@ export const profileMarked = (d: string) => PROFILE_MARKS.some((m) => fs.statSyn
  * agy's default profile (GEMINI_HOME, else ~/.gemini) while they hold agy's marks. HOME or above is
  * never one. Absolute, as written (callers compare real paths too).
  */
-export function profileDirs(root: string, env: NodeJS.ProcessEnv = process.env): string[] {
+export function profileDirs(root: string, env: NodeJS.ProcessEnv = process.env): string[] { // env-read-ok: profileDirs reads HOME and GEMINI_HOME
 	const home = path.resolve(env.HOME || os.homedir());
 	const out = new Set<string>();
 	const add = (d: string | undefined) => {
@@ -459,14 +466,37 @@ export function runDir(p: Profile): string {
 /** agy's arguments for a profile (t3code buildAntigravityAcpSpawnInput); `--login` for the code sign-in. */
 export const agyArgs = (p: Profile, login = false) => ["acp", "--gemini-dir", p.geminiHome, "--app-data-dir", "antigravity-acp", ...(login ? ["--login"] : [])];
 
-/** Whether agy keeps a saved Google sign-in in the profile (its file storage: the file is only stat'ed, never read). */
+/** Whether agy keeps a saved Google sign-in in the profile (its file storage: the file is only stat'ed, never read). A display hint only: agy also reads the keychain. */
 export const hasSavedLogin = (p: Profile) => fs.existsSync(path.join(p.acpDir, "acp_token.json"));
 
 /**
- * Whether a Google account counts as signed in: its saved sign-in by stat, or, for the keyring
- * account, always (the keyring is never read; agy's own error says so when it is not).
+ * Whether a Google account is known to be signed in: its saved sign-in by stat, or, for the keyring
+ * account, always (the keyring is never read; agy's own error says so when it is not). A display
+ * hint only: nothing is refused on it, since agy may find the keychain's sign-in for any profile.
  */
 export const savedSignIn = (root: string, a: Account) => !!a.keyring || hasSavedLogin(profileOf(root, a));
+
+/** What a stat tells of a Google account's sign-in, for the status: its file, the keychain (the keychain account), or unknown. */
+export const signInHint = (root: string, a: Account): "file" | "keychain" | "unknown" => (hasSavedLogin(profileOf(root, a)) ? "file" : a.keyring ? "keychain" : "unknown");
+
+/**
+ * After agy authenticated an account: a Google account in file mode with no file of its own was
+ * signed in from the keychain, so it is recorded as the keychain account (`storage: "keyring"`),
+ * unless another account holds the keychain. Returns whether it changed accounts.json.
+ */
+export async function noteKeychainSignIn(root: string, name: string): Promise<boolean> {
+	const a = loadAccounts(root).find((x) => x.name === name);
+	if (!a || a.method !== "oauth-personal" || a.keyring || hasSavedLogin(profileOf(root, a))) return false;
+	if (loadAccounts(root).some((x) => x.keyring)) return false;
+	let changed = false;
+	await updateAccounts(root, (accounts) => {
+		if (accounts.some((x) => x.storage === "keyring")) return {};
+		changed = true;
+		const mine = accounts.find((x) => x.name === name) ?? { ...a, keyring: undefined };
+		return { accounts: accounts.some((x) => x.name === name) ? accounts.map((x) => (x.name === name ? { ...x, storage: "keyring" as const } : x)) : [...accounts, { ...mine, storage: "keyring" as const }] };
+	});
+	return changed;
+}
 
 /**
  * Makes the profile: its folders (0700), the method in settings.json (no credential), and links to
@@ -550,6 +580,7 @@ export const REMOVED_ENV = new Set([
 	"AGY_ACP_ENABLE_OAUTH",
 	"GEMINI_HOME",
 	"AGY_ACP_FORCE_FILE_STORAGE",
+	"AGY_CLI_FORCE_FILE_TOKEN_STORAGE",
 	"AGY_CLI_DISABLE_AUTO_UPDATE",
 	"BROWSER",
 	"PYTHONUNBUFFERED",
@@ -560,14 +591,14 @@ export const REMOVED_ENV = new Set([
 /**
  * agy's environment for an account (t3code antigravityEnvironment): pi's, without REMOVED_ENV
  * (case-insensitively), any GOOGLE_* and Deckhand's own variables; then the profile, file storage,
- * no self-update, its own TMPDIR, and the account's key when it has one. A Google-account sign-in
- * also gets SSH_CONNECTION: agy 1.5 keeps Google sign-ins in one OS keyring entry for every
- * profile (it ignores AGY_ACP_FORCE_FILE_STORAGE) unless it believes it runs over SSH, so without it
- * two accounts would share, and overwrite, one sign-in. The one keyring account (`a.keyring`) is
- * the exception: it gets neither (an SSH_CONNECTION pi has is passed on as it is), so agy uses that
- * keyring entry, the user's own agy sign-in.
+ * no self-update, its own TMPDIR, and the account's key when it has one. Every account but the
+ * keychain one (`a.keyring`) runs in file mode, AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 (the variable agy
+ * 1.5.18 reads), so its sign-in goes into its own profile and never overwrites the shared keychain
+ * entry; a Google account in file mode also gets SSH_CONNECTION, so agy never opens a browser by
+ * itself when it has no sign-in. The keychain account gets neither (an SSH_CONNECTION pi has is
+ * passed on as it is). Login and sessions get the same environment.
  */
-export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, base: NodeJS.ProcessEnv = process.env, tmpDir = p.tmpDir): NodeJS.ProcessEnv {
+export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, base: NodeJS.ProcessEnv = process.env, tmpDir = p.tmpDir): NodeJS.ProcessEnv { // env-read-ok: agy's environment is pi's, filtered (REMOVED_ENV)
 	const env: NodeJS.ProcessEnv = {};
 	// Application Default Credentials (gcloud's) are an Agent Platform account's own sign-in when it
 	// has a project and no key; every other account gets none of them. (t3code drops
@@ -589,7 +620,7 @@ export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, ba
 		...(key && a.method === "agent-platform" ? { GOOGLE_API_KEY: key } : {}),
 		...(a.method === "oauth-personal" && !a.keyring ? { SSH_CONNECTION: base.SSH_CONNECTION || "127.0.0.1 0 127.0.0.1 0" } : {}),
 		GEMINI_HOME: p.geminiHome,
-		...(a.keyring ? {} : { AGY_ACP_FORCE_FILE_STORAGE: "1" }),
+		...(a.keyring ? {} : { AGY_CLI_FORCE_FILE_TOKEN_STORAGE: "1" }),
 		AGY_CLI_DISABLE_AUTO_UPDATE: "true",
 		PYTHONUNBUFFERED: "1",
 		ELECTRON_RUN_AS_NODE: "1",

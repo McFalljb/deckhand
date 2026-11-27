@@ -64,7 +64,8 @@ eventually
 assert_state focus.kind terminal
 assert_state antigravity_accounts.# 4
 assert_state antigravity_accounts.0.name default
-assert_state antigravity_accounts.1.signed_in keychain
+assert_state antigravity_accounts.0.signed_in keychain
+assert_state antigravity_accounts.1.signed_in no
 assert_state antigravity_accounts.2.label Job
 assert_state antigravity_accounts.2.chosen true
 assert_state antigravity_accounts.2.signed_in yes

@@ -30,15 +30,17 @@ package core
 // $XDG_CONFIG_HOME/gemini*) holding agy's marks (AGY_PROFILE_MARKS), at most 32, written into the
 // file (source "found") unless the user removed them.
 //
-// Keyring or file. agy 1.5.18 keeps a Google sign-in in a file of the profile
-// (antigravity-acp/acp_token.json) only when it believes it runs over SSH (SSH_CONNECTION set:
-// "Using file-based token storage because SSH session detected"); else in one OS keyring entry
-// shared by every profile (AGY_ACP_FORCE_FILE_STORAGE is ignored). Deckhand never reads the
-// keyring, so a keyring sign-in cannot be told from none, nor one profile's from another's. Hence:
-// at most one account uses the keyring (no SSH_CONNECTION for it): agy's own default profile when
-// it is found without a file sign-in (what plain `agy` on this Mac uses); every other one gets
-// file mode. Signing in again through Deckhand (`/antigravity login <name>` in a pi tab, agy's
-// code sign-in with SSH_CONNECTION) moves that account to file mode.
+// Keyring or file. agy 1.5.18 signs a Google account in to one OS keychain entry shared by every
+// profile, unless AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set ("Using file-based token storage because
+// AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set"): then into the profile's antigravity-acp/acp_token.json.
+// It reads a sign-in from the profile's file, else from the keychain, in either mode (neither
+// SSH_CONNECTION nor AGY_ACP_FORCE_FILE_STORAGE changes where it stores: tried against the real
+// agy). Deckhand never reads the keychain, so a keychain sign-in cannot be told from none, nor
+// one profile's from another's. Hence at most one account uses the keychain, signing in and
+// running in keychain mode: the first entry with storage "keyring", else the default account (a
+// Google account not marked "file"; lib/agy-accounts.ts loadAccounts), else agy's own default
+// profile when it is found without a file sign-in. Every other account runs and signs in in file
+// mode. A sign-in a stat does not see is "unknown", never "not signed in": agy says so when used.
 //
 // The guard (agy_credential, settings_credential): every profile Deckhand knows or found, removed
 // ones while they hold agy's files, everything under <root>/profiles, any folder holding agy's
@@ -75,7 +77,7 @@ AGY_SOURCE_NAMES := [Agy_Source]string {
 
 // How an account signs in, as far as a stat tells.
 Agy_Sign_In :: enum u8 {
-	No, // a Google account with no saved sign-in in the profile
+	No, // a Google account with no saved sign-in in the profile: unknown (agy may use the keychain's)
 	Yes, // a saved sign-in in the profile (its file stat'ed, never read)
 	Keychain, // the keyring account: cannot be checked without reading the keyring
 	Key, // an API key in pi's credential store (the extension's; not checked here)
@@ -584,6 +586,7 @@ accounts_make :: proc() -> []Agy_Account {
 	def := Entry{name = "default", method = "oauth-personal"}
 	for e in c.entries do if e.name == "default" do def = e
 	def.dir = "" // the default is always Deckhand's own profile
+	if default_holds_keyring(c.entries[:]) do def.storage = "keyring" // in memory only
 	add(&out, def, .Default, profiles, &keyring_taken)
 	for e in c.entries {
 		if e.name == "default" do continue
@@ -674,7 +677,7 @@ agy_accounts_sync :: proc() -> string {
 	listed := make([dynamic]string, context.temp_allocator)
 	names := make([dynamic]string, context.temp_allocator)
 	append(&names, "default")
-	keyring := false
+	keyring := default_holds_keyring(c.entries[:])
 	for e in c.entries {
 		d := e.dir != "" ? e.dir : strings.concatenate({profiles, "/", e.name}, context.temp_allocator)
 		append(&listed, d, fs_real(d))
@@ -722,7 +725,7 @@ agy_accounts_sync :: proc() -> string {
 			}
 		}
 		next: for a in plan.add {
-			keyring := false
+			keyring := default_holds_keyring_raw(list)
 			for v in list {
 				e, ok := v.(json.Object)
 				if !ok do continue
@@ -1077,12 +1080,37 @@ agy_account_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 
 // ---- what the lists show ----
 
+// Whether the default account holds the keychain: no entry has storage "keyring", and the default
+// (implicit until written) is a Google account not marked "file" (lib/agy-accounts.ts loadAccounts).
+@(private = "file")
+default_holds_keyring :: proc(entries: []Entry) -> bool {
+	method, storage := "oauth-personal", ""
+	for e in entries {
+		if e.storage == "keyring" do return false
+		if e.name == "default" do method, storage = e.method, e.storage
+	}
+	return method == "oauth-personal" && storage != "file"
+}
+
+// default_holds_keyring over accounts.json's raw list (inside the lock).
+@(private = "file")
+default_holds_keyring_raw :: proc(list: json.Array) -> bool {
+	method, storage := "oauth-personal", ""
+	for v in list {
+		e, ok := v.(json.Object)
+		if !ok do continue
+		if str_of(e, "storage") == "keyring" do return false
+		if str_of(e, "name") == "default" do method, storage = str_of(e, "method"), str_of(e, "storage")
+	}
+	return method == "oauth-personal" && storage != "file"
+}
+
 // An account's state in plain words (its Settings row; the setup step).
 agy_account_detail :: proc(a: Agy_Account) -> string {
 	how := ""
 	switch a.sign_in {
 	case .Yes:      how = "signed in"
-	case .No:       how = fmt.tprintf("not signed in: /antigravity login %s in a pi tab", a.name)
+	case .No:       how = fmt.tprintf("sign-in unknown until agy is used (/antigravity login %s in a pi tab to sign in)", a.name)
 	case .Keychain: how = "signed in through the system keychain (not checked)"
 	case .Key:      how = fmt.tprintf("API key in pi (/login %s)", a.name == "default" ? "antigravity" : strings.concatenate({"antigravity-", a.name}, context.temp_allocator))
 	case .Adc:      how = "Application Default Credentials"

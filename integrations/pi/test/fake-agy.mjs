@@ -37,7 +37,7 @@ process.on("SIGTERM", () => {
 const send = (x) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...x })}\n`);
 const LINK = "https://accounts.google.com/o/oauth2/auth?client_id=fake&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=s123";
 const args = process.argv.slice(2);
-const SEEN_ENV = ["GEMINI_HOME", "TMPDIR", "SSH_CONNECTION", "AGY_ACP_FORCE_FILE_STORAGE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "BROWSER", "ELECTRON_RUN_AS_NODE"];
+const SEEN_ENV = ["GEMINI_HOME", "TMPDIR", "SSH_CONNECTION", "AGY_ACP_FORCE_FILE_STORAGE", "AGY_CLI_FORCE_FILE_TOKEN_STORAGE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "BROWSER", "ELECTRON_RUN_AS_NODE"];
 // FAKE_AGY_CHILD=1: a child of its own (agy's tools run that way), which outlives it unless its group is ended
 if (env.FAKE_AGY_CHILD === "1") {
 	const c = spawnChild("sleep", ["60"], { stdio: "ignore" });
@@ -57,7 +57,15 @@ const settings = (() => {
 		return {};
 	}
 })();
-const signedIn = () => (tokenFile ? fs.existsSync(tokenFile) : env.FAKE_AGY_SIGNED_OUT !== "1");
+// agy 1.5.18's storage, as the real one showed: one OS keychain entry for every profile (here a
+// file, FAKE_AGY_KEYCHAIN, else $HOME/.fake-agy-keychain), written by --login unless
+// AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 (then the profile's acp_token.json; AGY_ACP_FORCE_FILE_STORAGE
+// and SSH_CONNECTION change nothing); a sign-in is read from the profile's file, else the keychain,
+// in either mode.
+const keychain = env.FAKE_AGY_KEYCHAIN || `${env.HOME}/.fake-agy-keychain`;
+const fileMode = env.AGY_CLI_FORCE_FILE_TOKEN_STORAGE === "1";
+const storedIn = () => (tokenFile && fs.existsSync(tokenFile) ? "file" : fs.existsSync(keychain) ? "keyring" : undefined);
+const signedIn = () => (tokenFile ? !!storedIn() : env.FAKE_AGY_SIGNED_OUT !== "1");
 
 if (args[0] !== "acp") {
 	process.stderr.write("usage: agy acp [--login]\n");
@@ -80,7 +88,9 @@ if (args.includes("--login")) {
 			pageCode = new URL(code.trim()).searchParams.get("code");
 		} catch {}
 		if (code.trim() === good || pageCode === good) {
-			if (tokenFile) fs.writeFileSync(tokenFile, JSON.stringify({ fake: "not a real token" }));
+			if (fileMode && tokenFile) fs.writeFileSync(tokenFile, JSON.stringify({ fake: "not a real token" }));
+			else if (!fileMode) fs.writeFileSync(keychain, JSON.stringify({ fake: "not a real token" }));
+			log({ loginStored: fileMode ? "file" : "keyring" });
 			process.stdout.write("\nSigned in.\n");
 			process.exit(0);
 		}
@@ -325,7 +335,7 @@ function serve() {
 						setTimeout(() => (fs.writeFileSync(tokenFile, "{}"), ok()), 50); // the browser came back to agy's loopback
 					return; // else waits for a browser that never comes
 				}
-				if (m === "oauth-personal") return ok();
+				if (m === "oauth-personal") return (log({ authenticatedVia: storedIn() ?? "none" }), ok());
 				if (m === "oauth-business") return settings?.gcp?.project && settings?.gcp?.location ? ok() : bad("Gemini Enterprise needs a GCP project and location");
 				if (m === "gemini-api-key") return env.GEMINI_API_KEY ? ok() : bad("GEMINI_API_KEY is not set; pass an API key in _meta.apiKey or set the GEMINI_API_KEY environment variable.");
 				if (m === "agent-platform") return env.GOOGLE_API_KEY || (settings?.gcp?.project && settings?.gcp?.location) ? ok() : bad("Agent Platform needs a key or a project");
@@ -333,6 +343,7 @@ function serve() {
 			}
 			case "logout":
 				if (tokenFile) fs.rmSync(tokenFile, { force: true });
+				if (!fileMode) fs.rmSync(keychain, { force: true }); // keychain mode signs the shared entry out
 				return send({ id, result: {} });
 			case "session/new":
 				if (!authed) return send({ id, error: { code: -32000, message: "Authentication required" } });

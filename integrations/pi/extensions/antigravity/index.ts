@@ -60,7 +60,8 @@ import {
 	profileOf,
 	providerIdOf,
 	runDir,
-	savedSignIn,
+	noteKeychainSignIn,
+	signInHint,
 	updateAccounts,
 	signInCommand,
 	storedAgyPath,
@@ -83,7 +84,7 @@ const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "ap
 
 export default function antigravity(pi: ExtensionAPI) {
 	const root = dataRoot();
-	let agyPath = findAgy(process.env, storedAgyPath(root));
+	let agyPath = findAgy(process.env, storedAgyPath(root)); // env-read-ok: PATH only (findAgy)
 	let active = false;
 	let cwd = process.cwd();
 	let setStatus: ((text: string | undefined) => void) | undefined;
@@ -98,15 +99,17 @@ export default function antigravity(pi: ExtensionAPI) {
 	const accountNow = (name: string) => accountsNow().find((a) => a.name === name);
 
 	/**
-	 * How agy runs for an account: its profile, environment and method. A sign-in through Deckhand
-	 * (`login`) always runs in file mode, the keyring account's too: it then becomes a file account.
+	 * How agy runs for an account: its profile, environment and method. A sign-in (`login`) gets the
+	 * same environment as the account's sessions, so it stores where they read: the keychain account
+	 * in the keychain, every other one in its profile (lib/agy-accounts.ts agyEnvFor).
 	 */
 	const launchOf = (a: Account, key: string | undefined, login = false) => {
-		const run = login && a.keyring ? { ...a, keyring: false } : a;
-		const p = prepareProfile(root, run);
+		const p = prepareProfile(root, a);
 		// the process's own TMPDIR is made only when agy starts (and removed when it ends)
-		return { args: agyArgs(p, login), env: agyEnvFor(run, p, key), makeRunDir: () => runDir(p), authMethod: a.method, signInHint: notSignedIn(a) };
+		return { args: agyArgs(p, login), env: agyEnvFor(a, p, key), makeRunDir: () => runDir(p), authMethod: a.method, signInHint: notSignedIn(a) };
 	};
+	/** agy authenticated the account: a file-mode account with no file of its own used the keychain, recorded (noteKeychainSignIn). */
+	const authenticated = (name: string) => void noteKeychainSignIn(root, name).catch(() => {});
 
 	const register = (a: Account) => {
 		const ag = createAntigravity({
@@ -120,6 +123,7 @@ export default function antigravity(pi: ExtensionAPI) {
 			launch: (key) => launchOf(accountNow(a.name) ?? a, key),
 			ledgerDir: path.join(profileOf(root, a).acpDir, "deckhand-sessions"),
 			onModels: (n) => noteModelCount(root, a.name, n),
+			onOpened: () => authenticated(a.name),
 			approvals: () => ({ cwd, hasUI: !!uiCtx?.hasUI, ui: uiCtx?.hasUI ? (uiCtx.ui as any) : undefined, readonly: readonlySession(), mode: approvalsOf(root, a.name) }),
 		});
 		ag.bind(registry);
@@ -174,10 +178,13 @@ export default function antigravity(pi: ExtensionAPI) {
 		}
 	};
 
-	/** The accounts signed in now: a saved Google sign-in (stat only; the keyring account counts), or a key in pi's store. */
+	/**
+	 * The accounts the tool may use now: every Google or Agent Platform account (whether agy has a
+	 * sign-in is agy's to say: a stat cannot see the keychain), and an API-key account with its key.
+	 */
 	const signedIn = async (ctx: ExtensionContext) => {
 		const out: Account[] = [];
-		for (const a of accountsNow()) if (usesKey(a) ? !!(await keyOf(ctx, a)) : savedSignIn(root, a)) out.push(a);
+		for (const a of accountsNow()) if (!usesKey(a) || !!(await keyOf(ctx, a))) out.push(a);
 		return out;
 	};
 
@@ -210,7 +217,11 @@ export default function antigravity(pi: ExtensionAPI) {
 					signal,
 					progress: (t) => onUpdate?.({ content: [{ type: "text", text: t }], details: undefined }),
 					approvals: () => ({ cwd: c.cwd || cwd, hasUI: !!c.hasUI, ui: c.hasUI ? (c.ui as any) : undefined, readonly: readonlySession(), mode: approvalsOf(root, a.name) }),
-					open: (onU, answer) => AgySession.open({ agyPath: agyPath!, cwd: c.cwd || cwd, ...launchOf(a, key), onUpdate: onU, answer }),
+					open: async (onU, answer) => {
+						const s = await AgySession.open({ agyPath: agyPath!, cwd: c.cwd || cwd, ...launchOf(a, key), onUpdate: onU, answer });
+						authenticated(a.name);
+						return s;
+					},
 				});
 				return { content: [{ type: "text" as const, text }], details: undefined };
 			},
@@ -242,6 +253,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		if (usesKey(a) && !key) throw new Error(notSignedIn(a));
 		try {
 			const r = await probeModels({ agyPath, cwd, ...launchOf(a, key), ...(signIn ? { signIn } : {}) });
+			authenticated(a.name);
 			version = r.version || version;
 			noteAgySeen(root, agyPath!, version);
 			noteModelCount(root, a.name, modelList(r.models, r.thinking).length - 1);
@@ -270,8 +282,11 @@ export default function antigravity(pi: ExtensionAPI) {
 			let state: string;
 			if (usesKey(a)) state = (await keyOf(ctx, a)) ? "API key saved in pi" : `no API key: run ${signInCommand(a)}`;
 			else if (a.method === "agent-platform") state = `Application Default Credentials (${a.gcpProject}, ${a.gcpLocation})`;
-			else if (a.keyring) state = "signed in through the system keychain (not checked)";
-			else state = savedSignIn(root, a) ? "signed in" : `not signed in: run ${signInCommand(a)}`;
+			else {
+				// a hint only: agy is asked whenever the account is used, and says when it has no sign-in
+				const hint = signInHint(root, a);
+				state = hint === "file" ? "signed in (in its profile)" : hint === "keychain" ? "signed in (system keychain, not checked)" : `sign-in unknown until agy is used (${signInCommand(a)} to sign in)`;
+			}
 			const n = (ag?.models.length ?? 1) - 1;
 			const label = a.label && a.label !== a.name ? ` (${a.label})` : "";
 			const where = a.dir ? ` · folder ${a.dir}` : "";
@@ -323,14 +338,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		});
 		if (!r.ok) return ctx.ui.notify(r.error, r.error === "Sign-in cancelled" ? "info" : "error");
 		ctx.ui.notify(`Signed in to Antigravity (account "${a.name}")`, "info");
-		// signed in by the code flow (file storage): the keyring account keeps its sign-in in its profile from now on
-		if (a.keyring) {
-			try {
-				await updateAccounts(root, (accounts) => ({ accounts: accounts.map((x) => (x.name === a.name ? { ...x, storage: "file" as const } : x)) }));
-			} catch (e) {
-				ctx.ui.notify(`Signed in, but the account could not be switched off the system keychain (${(e as Error).message}): run ${signInCommand(a)} again`, "warning");
-			}
-		}
+		// stored where its sessions read: the keychain account in the keychain, any other in its profile (launchOf)
 		await offerTool(ctx);
 		try {
 			ctx.ui.notify(await listModels(ctx, accountNow(a.name) ?? a), "info");
@@ -437,7 +445,7 @@ export default function antigravity(pi: ExtensionAPI) {
 			activate(ctx);
 			return ctx.ui.notify(`Antigravity now runs ${p}: its models are in /model; /antigravity shows the accounts and signs them in`, "info");
 		}
-		const next = p || findAgy(process.env);
+		const next = p || findAgy(process.env); // env-read-ok: PATH only (findAgy)
 		await updateAccounts(root, () => ({ agyPath: p || null }));
 		if (!next) return ctx.ui.notify("Cleared agy's path. There is no agy on your PATH, so Antigravity is off from pi's next start (/antigravity path sets it again)", "warning");
 		await Promise.all([...live.values()].map(({ ag }) => ag.closeAll()));

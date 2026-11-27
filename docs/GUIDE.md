@@ -231,7 +231,7 @@ add an account, sign in, sign out or remove one. For one Google account with an 
 **`/antigravity login`** is all you need: it shows a Google link, you sign in there and paste the
 code the Antigravity page shows. Then **`/model`** lists your models.
 
-**Handing a task to Antigravity.** Once an account is signed in, every pi tab's model (any
+**Handing a task to Antigravity.** With agy installed, every pi tab's model (any
 provider) also has an **`antigravity`** tool: it hands a self-contained task to a fresh
 Antigravity session in the tab's folder, on the account it names (else `default`), and gets
 Antigravity's final answer back; you see its progress while it works. Antigravity sees nothing
@@ -1308,12 +1308,16 @@ secret.
   account there is only a quiet **More accounts…** row.
 - **Signing in** is in a pi tab: `/antigravity login <name>` (the row says which). New accounts
   appear in pi's `/model` after the tab's next start or `/reload`.
-- **The keychain.** agy keeps a Google sign-in in the profile only when it thinks it runs over
-  SSH; otherwise it uses one entry in the macOS keychain that every profile shares. Deckhand
-  never reads the keychain, so one account at most uses it: agy's own default profile when it has
-  no sign-in file (what plain `agy` on this Mac uses). Its row says **signed in through the
-  system keychain (not checked)**. Every other account signs in to its own profile; signing that
-  account in again from a pi tab moves it to its own profile too.
+- **The keychain.** agy signs a Google account in to one entry in the macOS keychain that every
+  profile shares, unless it is told to keep the sign-in in the profile. One account uses the
+  keychain: the default account (unless another one already does), as plain `agy` on this Mac
+  does. It signs in and runs there, so a sign-in you already have keeps working after pi or
+  Deckhand restarts. Its row says **signed in through the system keychain (not checked)**. Every
+  other account signs in to its own profile. Deckhand never reads the keychain and never decides
+  from a file whether you are signed in: agy is asked each time, and only when agy says there is
+  no sign-in are you asked to sign in. A row with no sign-in file says **sign-in unknown until
+  agy is used**. agy 1.5.18 also falls back to the keychain's sign-in for an account with none of
+  its own, so a second Google account uses your keychain account until you sign it in.
 
 Every Antigravity profile, found, added or Deckhand's own, is kept out of the editor, Files,
 Settings' file lists and every agent: an agent cannot open, show, copy or list its sign-in or

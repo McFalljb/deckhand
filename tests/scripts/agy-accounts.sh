@@ -2,7 +2,7 @@
 # Antigravity accounts (src/core/agy_accounts.odin; GUIDE "Antigravity accounts") in quiet test
 # mode, against a fake HOME and a temp data dir: never the user's ~/.gemini*, never agy, pi or
 # Google. Three fake agy profiles found by stat (~/.gemini, agy's own default without a file
-# sign-in: the keyring account; ~/.gemini-work with a fake file sign-in, mode 000: stat only;
+# sign-in: a file account, since the default account holds the keychain; ~/.gemini-work with a fake file sign-in, mode 000: stat only;
 # ~/.config/gemini-lab), and one outside HOME picked on the first-run sheet's Antigravity step:
 # one renamed, one unticked, the default chosen; Done writes accounts.json under its lock. Then
 # Settings › Coding agents › Antigravity: the rows, Rename… and Scan again.
@@ -38,7 +38,7 @@ o=json.load(open(sys.argv[1]))
 a={x[\"name\"]:x for x in o[\"accounts\"]}
 assert o[\"defaultAccount\"]==\"work\", o
 assert a[\"work\"][\"label\"]==\"Research\", a
-assert a[\"gemini\"][\"storage\"]==\"keyring\" and a[\"work\"][\"storage\"]==\"file\", a
+assert a[\"gemini\"][\"storage\"]==\"file\" and a[\"work\"][\"storage\"]==\"file\", a
 assert \"lab\" not in a and sys.argv[2] in o[\"removedDirs\"], o
 assert any(x.get(\"source\")==\"added\" and x[\"dir\"]==sys.argv[3] for x in o[\"accounts\"]), a
 " "$A" "$H/.config/gemini-lab" "$W/outside/Team agy"'

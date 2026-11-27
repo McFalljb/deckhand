@@ -41,6 +41,7 @@ Harness_Detect :: enum u8 {
 	Binary, // the harness's binary: on the PATH new tabs get and its install folders
 	Integration, // Deckhand's bundled integration for the harness (pi: integrations/pi; Claude: the plugin)
 	Pi_Package, // a pi package in ~/.pi/agent/settings.json `packages` (detect_arg: the npm name)
+	Agy, // Google's Antigravity CLI for pi's bundled antigravity extension (agy_detect): stat and two small JSON reads, never run
 }
 
 // Where a harness's binary links to decides how it updates.
@@ -140,6 +141,11 @@ HARNESS_MANIFEST := [?]Harness_Row {
 		install = "{pi} install npm:@juicesharp/rpiv-btw@2.15.0",
 		why = "/btw: ask a side question without adding it to the conversation",
 		source = "https://www.npmjs.com/package/@juicesharp/rpiv-btw",
+	},
+	{
+		harness = .Pi, id = "antigravity", name = "Antigravity (through pi)", kind = .Third_Party, need = .Recommended, min_version = AGY_MIN_VERSION, detect = .Agy,
+		why = "Optional: Google Antigravity models in pi tabs, through your own agy CLI (the bundled antigravity extension)",
+		source = "https://antigravity.google/docs/getting-started (Google's own installer; Deckhand never installs or starts agy)",
 	},
 	{
 		harness = .Claude, id = "claude", name = "Claude Code", kind = .Harness, need = .Required, min_version = CLAUDE_MIN_VERSION, detect = .Binary,
@@ -488,6 +494,8 @@ Harness_Facts :: struct {
 	packages:  map[string]Pi_Package_Found, // pi packages by name (temp)
 	codex_signed_out: bool, // `codex login status` said signed out (codex.odin)
 	asking:    [Harness]bool, // counts as installed only because the login shell has not answered yet (harness_installed)
+	agy_bin:     string, // agy as pi's antigravity extension would find it ("" = none: agy_detect)
+	agy_version: string, // the version it last reported to the extension ("" = unknown)
 }
 
 harness_facts_now :: proc() -> Harness_Facts {
@@ -521,6 +529,7 @@ harness_facts_now :: proc() -> Harness_Facts {
 	}
 	project := settings_project_cwd() // the project on screen's .pi/settings.json too
 	for r in HARNESS_MANIFEST do if r.detect == .Pi_Package do f.packages[r.detect_arg] = pi_package_find(f.agent_dir, r.detect_arg, project)
+	f.agy_bin, f.agy_version = agy_detect()
 	return f
 }
 
@@ -574,6 +583,17 @@ harness_checklist :: proc(f: Harness_Facts) -> []Harness_Item {
 		case .Third_Party:
 			if !f.installed[h] || (h == .Pi && harness_old(f, .Pi)) {
 				it.state = .Needs_Harness
+				break
+			}
+			if r.detect == .Agy {
+				// shown only: Google's installer, never run by Deckhand (no action, no command)
+				switch {
+				case f.agy_bin == "":
+					it.state = .Missing
+				case:
+					it.state, it.version, it.where_ = .Ok, f.agy_version, f.agy_bin
+					if it.version != "" && claude_version_below(it.version, r.min_version) do it.state, it.note = .Too_Old, fmt.tprintf("Update agy to %s or newer with Google's installer: %s", AGY_RECOMMENDED_VERSION, AGY_INSTALL_URL)
+				}
 				break
 			}
 			pk := f.packages[r.detect_arg]
@@ -708,7 +728,7 @@ HARNESS_STATE_NAMES := [Harness_Item_State]string {
 harness_item_text :: proc(it: Harness_Item) -> string {
 	r := HARNESS_MANIFEST[it.row]
 	switch it.state {
-	case .Missing:       return "Not installed"
+	case .Missing:       return r.detect == .Agy ? AGY_MISSING_TEXT : "Not installed"
 	case .Needs_Harness: return fmt.tprintf("Needs %s first", HARNESS_MANIFEST[harness_first_row(r.harness)].name)
 	case .Built_In:      return "Built in"
 	case .Unchecked:     return it.note != "" && r.kind == .Harness ? it.note : "Found, version not checked"

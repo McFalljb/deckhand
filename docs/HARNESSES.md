@@ -167,11 +167,21 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   available here" (-32603) mean "not signed in", and the error names the account's command.
 - **Accounts** (`lib/agy-accounts.ts`, after t3code's provider instances): `accounts.json` in
   `<data dir>/antigravity` (macOS `~/Library/Application Support/Deckhand`, or `pi-desk` when only
-  that exists; Linux `$XDG_DATA_HOME/deckhand` or `~/.local/share/deckhand`; tests set `HOME`)
-  holds names, methods (`oauth-personal`, `oauth-business`, `gemini-api-key`, `agent-platform`),
-  GCP project/location and agy's path when set, mode 0600, never a secret. The account `default` is
+  that exists; Linux always `~/.local/share/deckhand`, as the core, never `$XDG_DATA_HOME`; tests
+  set `HOME`) holds names, methods (`oauth-personal`, `oauth-business`, `gemini-api-key`,
+  `agent-platform`), GCP project/location and agy's path when set, mode 0600, never a secret.
+  Deckhand's core writes it too, under the same lock (`accounts.json.lock`, `lib/agy-lock.ts`),
+  and each writer keeps the keys it does not understand. Also there: `defaultAccount` (the account
+  used when none is named: the tool, `/antigravity login|logout|models`), `removedDirs` (found
+  folders the user removed), and per account `label` (shown in the status), `dir` (an absolute
+  folder used in place, e.g. `~/.gemini`), `source` (`found`, `added`) and `storage` (`keyring`,
+  else file). An account with `dir` is the user's own folder: only its `antigravity-acp/` is
+  written (0700), it is never chmod'ed, linked into or deleted (`remove` drops the entry; a found
+  one's folder goes to `removedDirs`). accounts.json is read again whenever the extension acts; an
+  account Deckhand adds gets its provider at pi's next start or `/reload`. `agy-models.json` beside
+  it caches each account's model count for Deckhand's Settings. The account `default` is
   implicit (a Google account). Each account is a provider (`antigravity`, `antigravity-<name>`)
-  and a profile, `profiles/<name>` (0700): agy runs as `agy acp --gemini-dir <profile>
+  and a profile, `profiles/<name>` (0700) or its `dir`: agy runs as `agy acp --gemini-dir <profile>
   --app-data-dir antigravity-acp`, with the method in `antigravity-acp/settings.json`, and the
   user's `~/.gemini` `config/skills`, `antigravity-cli/skills`, `config/skills.json`, `AGENTS.md`
   and `GEMINI.md` linked in. No automatic switching, rotation or fallback between accounts.
@@ -185,7 +195,11 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0`, as in t3code: agy 1.5 ignores file storage and keeps
   Google sign-ins in one OS keyring entry for every profile unless it believes it runs over SSH, so
   without it two accounts would share one sign-in; over "SSH" it signs in by the pasted code
-  (`--login`). `BROWSER` is not set (t3code points it at a helper; here agy's link is shown in pi).
+  (`--login`). The one keyring account (the first `storage: "keyring"`, a Google account) gets
+  neither `SSH_CONNECTION` (an inherited one is passed on as it is) nor
+  `AGY_ACP_FORCE_FILE_STORAGE`: agy uses its keyring entry; its sign-in is not checked ("signed in
+  through the system keychain (not checked)"), and `/antigravity login` on it signs in by the code
+  in file mode and sets its `storage` to file. `BROWSER` is not set (t3code points it at a helper; here agy's link is shown in pi).
   `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG` and `CLOUDSDK_AUTH_*` reach only an
   `agent-platform` account with a project and no key (Application Default Credentials are its
   sign-in); t3code drops the first for every method and keeps `CLOUDSDK_*`.

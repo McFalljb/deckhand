@@ -22,7 +22,9 @@ macOS 14 or later on Apple silicon (arm64), [Odin](https://odin-lang.org/) `dev-
 `clang` from the Xcode command line tools. Intel Macs can build Deckhand, but without browser
 tabs: CEF is wired up for arm64 only. Node 22.18 or later runs the pi integration's tests
 (`./build.sh test` skips them without `node`) and builds the browser client
-([below](#the-browser-client)). To run what you build you need at least one coding
+([below](#the-browser-client)). The test runners need `python3`; macOS's 3.9 will do, except for
+the `codex` scene, whose fake Codex reads TOML (`tomllib`, Python 3.11 or later: the scene takes
+the first `python3` on `PATH` that has it, else Homebrew's). To run what you build you need at least one coding
 agent on your login shell's `PATH`: [pi](https://pi.dev) 1.4.0 or newer (Atlas and jobs need pi),
 Claude Code 2.1.295 or newer, or Codex 0.163.0 or newer. The pi integration and the Claude Code
 plugin ship with Deckhand (`integrations/`); Codex gets its hooks and tools per run

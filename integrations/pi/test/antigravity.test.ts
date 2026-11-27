@@ -11,7 +11,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, NOT_FOUND, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, agyVersion, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
-import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
+import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf, storedAccounts, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
 import { fileLedger } from "../lib/agy-ledger.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
 import { createAntigravity, planTurn, RETRY_NOTE, SUMMARY_TEXT } from "../lib/antigravity.ts";
@@ -497,7 +497,7 @@ test("GEMINI_API_KEY, GOOGLE_* and BROWSER in pi's environment never reach agy: 
 			assert.equal(s.env.BROWSER, undefined);
 			assert.equal(s.env.GEMINI_HOME, path.join(a.root, "profiles", "default"));
 		}
-		const e = agyEnvFor({ name: "default", method: "oauth-personal" }, profileOf(a.root, "default"), undefined, { Gemini_Api_Key: "x", google_cloud_location: "y", PATH: "/bin", DECKHAND_TOKEN: "t" });
+		const e = agyEnvFor({ name: "default", method: "oauth-personal" }, profileOf(a.root, { name: "default" }), undefined, { Gemini_Api_Key: "x", google_cloud_location: "y", PATH: "/bin", DECKHAND_TOKEN: "t" });
 		assert.deepEqual(Object.keys(e).filter((k) => /gemini_api|google|deckhand/i.test(k)), [], "case-insensitively");
 		assert.equal(e.PATH, "/bin");
 	});
@@ -545,7 +545,7 @@ test("two accounts: separate profiles (GEMINI_HOME) and providers; an API key fr
 		assert.ok(d.every((s) => s.env.GEMINI_API_KEY === undefined));
 		assert.deepEqual(f.read().filter((m) => m.method === "authenticate").map((m) => m.params.methodId).sort(), ["gemini-api-key", "gemini-api-key", "oauth-personal"].sort());
 		await run(pi, "antigravity", "status", ctx);
-		assert.match(notes.at(-1)!, /- default → antigravity · Google account · signed in · 2 models\n- work → antigravity-work · Gemini API key · API key saved in pi · 2 models/);
+		assert.match(notes.at(-1)!, /- default → antigravity · Google account · signed in · 2 models · the default account\n- work → antigravity-work · Gemini API key · API key saved in pi · 2 models$/);
 		// remove: its provider, profile and entry go; the default account stays
 		await run(pi, "antigravity", "remove work", ctx);
 		assert.match(notes.at(-1)!, /Removed the Antigravity account "work"; its key is still in pi's store: \/logout and pick antigravity-work/);
@@ -728,7 +728,7 @@ test("polish: /antigravity remove without a UI needs --yes", async () => {
 
 test("polish: ADC variables (GOOGLE_APPLICATION_CREDENTIALS, CLOUDSDK_CONFIG, CLOUDSDK_AUTH_*) reach only an Agent Platform account that signs in with ADC", () => {
 	const base = { PATH: "/bin", GOOGLE_APPLICATION_CREDENTIALS: "/k.json", CLOUDSDK_CONFIG: "/gc", CLOUDSDK_AUTH_ACCESS_TOKEN_FILE: "/t", cloudsdk_auth_x: "y" };
-	const p = profileOf("/r", "x");
+	const p = profileOf("/r", { name: "x" });
 	const adc = (a: any, key?: string) => Object.keys(agyEnvFor(a, p, key, base)).filter((k) => /^(GOOGLE_APPLICATION|CLOUDSDK_(CONFIG|AUTH))/i.test(k)).sort();
 	assert.deepEqual(adc({ name: "x", method: "oauth-personal" }), []);
 	assert.deepEqual(adc({ name: "x", method: "gemini-api-key" }, "k"), []);
@@ -1181,7 +1181,7 @@ test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder
 	assert.throws(() => lstatSync(path.join(prof, "AGENTS.md")), "dangling link removed");
 	assert.equal(dataRoot({ HOME: "/h" }, "darwin"), "/h/Library/Application Support/Deckhand/antigravity");
 	assert.equal(dataRoot({ HOME: "/h" }, "linux"), "/h/.local/share/deckhand/antigravity");
-	assert.equal(dataRoot({ HOME: "/h", XDG_DATA_HOME: "/x" }, "linux"), "/x/deckhand/antigravity");
+	assert.equal(dataRoot({ HOME: "/h", XDG_DATA_HOME: "/x" }, "linux"), "/h/.local/share/deckhand/antigravity", "as the core: never XDG_DATA_HOME");
 	assert.equal(dataRoot({ HOME: "/h", DECKHAND_ANTIGRAVITY_DIR: "/x/ag" }, "darwin"), "/h/Library/Application Support/Deckhand/antigravity", "no environment override");
 });
 
@@ -1760,4 +1760,271 @@ test("answers in one millisecond still get distinct timestamps (planTurn tells t
 	} finally {
 		await r.ag.closeAll();
 	}
+});
+
+// ---- accounts.json shared with Deckhand's core (PR #211) ----
+
+/** accounts.json in the core's shape: unknown keys at the top and in accounts, entries the extension cannot use. */
+const coreFile = (dirs: { work: string; gemini: string }) => ({
+	about: "Deckhand's Antigravity accounts",
+	agyPath: FAKE,
+	defaultAccount: "work",
+	removedDirs: ["/abs/.gemini-old"],
+	coreOnly: { version: 3, flags: ["a"] },
+	accounts: [
+		{ name: "default", method: "oauth-personal" },
+		{ name: "work", method: "oauth-personal", label: "Work", dir: dirs.work, source: "found", storage: "file", seenAt: 17 },
+		{ name: "gemini", method: "oauth-personal", label: "Gemini", dir: dirs.gemini, source: "found", storage: "keyring", extra: { x: 1 } },
+		{ name: "future", method: "some-new-method", note: "a method this extension does not know" },
+		{ name: "rel", method: "oauth-personal", dir: "relative/dir" },
+	],
+});
+const readJson = (f: string) => JSON.parse(readFileSync(f, "utf8"));
+
+test("accounts.json round trip: what the extension does not understand survives its writes; only the intended edit changes", async () => {
+	const root = mkdtempSync(path.join(TMP_ROOT, "acct-"));
+	const file = path.join(root, "accounts.json");
+	const orig = coreFile({ work: "/Users/u/.gemini-work", gemini: "/Users/u/.gemini" });
+	writeFileSync(file, JSON.stringify(orig));
+	assert.deepEqual(storedAccounts(root).map((a) => a.name), ["default", "work", "gemini"], "an unknown method and a relative dir are ignored");
+	await updateAccounts(root, (accounts) => ({ accounts }));
+	assert.deepEqual(readJson(file), orig, "no change: the file as it was");
+	await updateAccounts(root, (accounts) => ({ accounts: [...accounts, { name: "new", method: "gemini-api-key" }] }));
+	assert.deepEqual(readJson(file), { ...orig, accounts: [...orig.accounts, { name: "new", method: "gemini-api-key" }] });
+	await updateAccounts(root, (accounts) => ({ accounts: accounts.filter((a) => a.name !== "new").map((a) => (a.name === "gemini" ? { ...a, storage: "file" as const } : a)) }));
+	const g = { ...orig.accounts[2], storage: "file" };
+	assert.deepEqual(readJson(file), { ...orig, accounts: [orig.accounts[0], orig.accounts[1], g, ...orig.accounts.slice(3)] }, "one key of one entry, its unknown keys kept");
+	await updateAccounts(root, (accounts, rest) => {
+		assert.deepEqual(rest, { agyPath: FAKE, defaultAccount: "work", removedDirs: ["/abs/.gemini-old"] });
+		return { accounts: accounts.filter((a) => a.name !== "work"), defaultAccount: null, removedDirs: [...rest.removedDirs, "/Users/u/.gemini-work"] };
+	});
+	const { defaultAccount: _d, ...noDefault } = orig;
+	assert.deepEqual(readJson(file), { ...noDefault, removedDirs: ["/abs/.gemini-old", "/Users/u/.gemini-work"], accounts: [orig.accounts[0], g, ...orig.accounts.slice(3)] });
+	assert.equal(statSync(file).mode & 0o777, 0o600);
+	assert.deepEqual(readdirSync(root).sort(), ["accounts.json"], "no temp file or lock left");
+});
+
+test("accounts.json lock, as the core takes it: a live holder is waited for, then 'try again'; a dead one's taken over; an empty lock is respected for 2 s; the change applies to the file read inside the lock", async () => {
+	const root = mkdtempSync(path.join(TMP_ROOT, "acct-"));
+	const file = path.join(root, "accounts.json"), lock = `${file}.lock`;
+	writeFileSync(file, JSON.stringify({ accounts: [{ name: "a", method: "oauth-personal" }] }));
+	const add = (name: string) => (accounts: any[]) => ({ accounts: [...accounts, { name, method: "oauth-personal" as const }] });
+	const other = spawn("sleep", ["30"]);
+	try {
+		writeFileSync(lock, JSON.stringify({ pid: other.pid })); // the core's lock: {"pid":N}
+		const t0 = Date.now();
+		await assert.rejects(updateAccounts(root, add("b"), 400), new RegExp(`Another pi \\(process ${other.pid}\\) is changing the Antigravity accounts: try again`));
+		assert.ok(Date.now() - t0 >= 400, "it waited");
+		assert.equal(readJson(lock).pid, other.pid, "the holder's lock untouched");
+		assert.deepEqual(readJson(file).accounts.map((x: any) => x.name), ["a"], "nothing written");
+		// a dead holder's lock is taken over
+		writeFileSync(lock, JSON.stringify({ pid: spawnSync("true").pid }));
+		await updateAccounts(root, add("b"), 400);
+		assert.deepEqual(readJson(file).accounts.map((x: any) => x.name), ["a", "b"]);
+		assert.ok(!existsSync(lock));
+		// an empty lock (its writer between creating and filling it) is respected while young, taken over once older than 2 s
+		writeFileSync(lock, "");
+		await assert.rejects(updateAccounts(root, add("c"), 300), /try again/);
+		const old = (Date.now() - 3000) / 1000;
+		utimesSync(lock, old, old);
+		await updateAccounts(root, add("c"), 300);
+		assert.deepEqual(readJson(file).accounts.map((x: any) => x.name), ["a", "b", "c"]);
+		// a concurrent writer (the core) changes the file after the extension first read it, while it holds the lock
+		const seenFirst = storedAccounts(root).map((x) => x.name);
+		writeFileSync(lock, JSON.stringify({ pid: other.pid }));
+		const mine = updateAccounts(root, add("mine"), 3000);
+		await new Promise((r) => setTimeout(r, 150));
+		writeFileSync(file, JSON.stringify({ coreKey: true, accounts: [{ name: "theirs", method: "oauth-personal", coreField: 1 }] }));
+		rmSync(lock);
+		await mine;
+		assert.deepEqual(seenFirst, ["a", "b", "c"]);
+		assert.deepEqual(readJson(file), { coreKey: true, about: readJson(file).about, accounts: [{ name: "theirs", method: "oauth-personal", coreField: 1 }, { name: "mine", method: "oauth-personal" }] }, "applied to what the core wrote, its keys kept");
+	} finally {
+		other.kill();
+	}
+});
+
+test("a folder used in place (dir): agy runs in it; never chmod'ed, nothing linked in, settings only in antigravity-acp/; remove keeps it and records a found one in removedDirs", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	const own = mkdtempSync(path.join(TMP_ROOT, "users-gemini-work-"));
+	chmodSync(own, 0o755);
+	writeFileSync(path.join(own, "mine.txt"), "the user's own");
+	mkdirSync(a.root, { recursive: true });
+	const file = path.join(a.root, "accounts.json");
+	writeFileSync(file, JSON.stringify({ accounts: [{ name: "work", method: "oauth-personal", label: "Work", dir: own, source: "found" }, { name: "picked", method: "oauth-personal", dir: own, source: "added" }] }));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		assert.deepEqual(pi.extensions[0].providers.map((p: any) => p.id), ["antigravity", "antigravity-work", "antigravity-picked"]);
+		const { ctx, notes } = cmdCtx(pi, { input: ["good-code"] });
+		await run(pi, "antigravity", "login work", ctx);
+		assert.equal(notes[1], 'Signed in to Antigravity (account "work")');
+		const starts = f.read().filter((m) => m.argv);
+		assert.deepEqual(starts[0].argv, ["acp", "--gemini-dir", own, "--app-data-dir", "antigravity-acp", "--login"]);
+		for (const s of starts) {
+			assert.equal(s.env.GEMINI_HOME, own);
+			assert.equal(s.env.SSH_CONNECTION, "127.0.0.1 0 127.0.0.1 0", "a file account");
+			assert.equal(path.dirname(s.env.TMPDIR), path.join(own, "antigravity-acp", "tmp"));
+		}
+		assert.equal(statSync(own).mode & 0o777, 0o755, "never chmod'ed");
+		assert.equal(statSync(path.join(own, "antigravity-acp")).mode & 0o777, 0o700);
+		assert.deepEqual(readJson(path.join(own, "antigravity-acp", "settings.json")), { auth: { type: "oauth-personal" } });
+		assert.deepEqual(readdirSync(own).sort(), ["antigravity-acp", "mine.txt"], "no settings.json, no links, nothing else in the user's folder");
+		assert.ok(!existsSync(path.join(a.root, "profiles", "work")), "no profile under profiles/");
+		const st = cmdCtx(pi);
+		await run(pi, "antigravity", "status", st.ctx);
+		assert.match(st.notes[0], new RegExp(`- work \\(Work\\) → antigravity-work · Google account · folder ${own.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} · signed in · 2 models`));
+		// remove: the entry goes, the folder (and its sign-in) stay; no sign-out
+		const before = f.read().length;
+		await run(pi, "antigravity", "remove work", st.ctx);
+		assert.equal(st.notes.at(-1), `Removed the Antigravity account "work"; its folder ${own} is kept`);
+		assert.ok(existsSync(path.join(own, "mine.txt")) && existsSync(path.join(own, "antigravity-acp", "acp_token.json")));
+		assert.ok(!f.read().slice(before).some((m) => m.method === "logout" || m.argv), "agy not even started");
+		assert.deepEqual(pi.extensions[0].unregistered, ["antigravity-work"]);
+		assert.deepEqual(readJson(file).removedDirs, [own]);
+		assert.deepEqual(readJson(file).accounts.map((x: any) => x.name), ["picked"]);
+		// one the user picked (added): no removedDirs entry
+		await run(pi, "antigravity", "remove picked --yes", { ...st.ctx, hasUI: false });
+		assert.deepEqual(readJson(file).removedDirs, [own]);
+		assert.ok(existsSync(own));
+	});
+});
+
+test("the keyring account: only the first storage:keyring entry signs in by agy's keyring (no SSH_CONNECTION, no file storage); signing in again through Deckhand makes it a file account", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	const gemini = path.join(a.home, ".gemini");
+	mkdirSync(a.root, { recursive: true });
+	const file = path.join(a.root, "accounts.json");
+	writeFileSync(file, JSON.stringify({ accounts: [{ name: "gemini", method: "oauth-personal", dir: gemini, source: "found", storage: "keyring" }, { name: "second", method: "oauth-personal", storage: "keyring" }] }));
+	const [g, second] = storedAccounts(a.root);
+	assert.deepEqual([g.keyring, second.keyring], [true, undefined]);
+	const e1 = agyEnvFor(g, profileOf(a.root, g), undefined, { PATH: "/bin" });
+	assert.equal(e1.SSH_CONNECTION, undefined);
+	assert.equal(e1.AGY_ACP_FORCE_FILE_STORAGE, undefined);
+	assert.equal(agyEnvFor(g, profileOf(a.root, g), undefined, { SSH_CONNECTION: "10.0.0.1 5 10.0.0.2 22" }).SSH_CONNECTION, "10.0.0.1 5 10.0.0.2 22", "a real SSH session's is left as it is");
+	assert.equal(agyEnvFor(second, profileOf(a.root, second), undefined, {}).SSH_CONNECTION, "127.0.0.1 0 127.0.0.1 0", "a second keyring entry is a file account");
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		assert.ok(pi.extensions[0].tools.get("antigravity"), "the keyring account counts as signed in for the tool");
+		const st = cmdCtx(pi);
+		await run(pi, "antigravity", "status", st.ctx);
+		assert.match(st.notes[0], /- gemini → antigravity-gemini · Google account · folder .*\/\.gemini · signed in through the system keychain \(not checked\) · models not listed yet/);
+		// a turn on the keyring account: the keyring env (the fake signs in only when its token file exists: this one is refused, which is fine here)
+		await drive(prov(pi, "antigravity-gemini").streamSimple({ id: "default", provider: "antigravity-gemini", api: "antigravity-acp" }, { messages: [user("k")] }, { sessionId: "k1" }));
+		const turn = f.read().filter((m) => m.argv).at(-1);
+		assert.equal(turn.env.GEMINI_HOME, gemini);
+		assert.equal(turn.env.SSH_CONNECTION, undefined);
+		assert.equal(turn.env.AGY_ACP_FORCE_FILE_STORAGE, undefined);
+		assert.ok(lstatSync(path.join(gemini, "config", "skills")).isDirectory() && !lstatSync(path.join(gemini, "config", "skills")).isSymbolicLink(), "~/.gemini never linked into itself");
+		assert.ok(!existsSync(path.join(gemini, "settings.json")));
+		const { ctx, notes } = cmdCtx(pi, { input: ["good-code"] });
+		await run(pi, "antigravity", "login gemini", ctx);
+		assert.equal(notes[1], 'Signed in to Antigravity (account "gemini")');
+		const login = f.read().find((m) => m.argv?.includes("--login"));
+		assert.equal(login.env.SSH_CONNECTION, "127.0.0.1 0 127.0.0.1 0", "the sign-in runs in file mode");
+		assert.equal(login.env.AGY_ACP_FORCE_FILE_STORAGE, "1");
+		assert.deepEqual(readJson(file).accounts[0], { name: "gemini", method: "oauth-personal", dir: gemini, source: "found", storage: "file" });
+		const after = f.read().filter((m) => m.argv).at(-1);
+		assert.equal(after.env.SSH_CONNECTION, "127.0.0.1 0 127.0.0.1 0", "a file account from then on");
+		await run(pi, "antigravity", "status", st.ctx);
+		assert.match(st.notes.at(-1)!, /- gemini → antigravity-gemini · Google account · folder .*\/\.gemini · signed in · 2 models/);
+	});
+});
+
+test("defaultAccount: the account the tool and /antigravity login|logout|models use when none is named; status marks it; removing it resets it; the provider ids stay", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	mkdirSync(a.root, { recursive: true });
+	const file = path.join(a.root, "accounts.json");
+	writeFileSync(file, JSON.stringify({ defaultAccount: "work", accounts: [{ name: "work", method: "oauth-personal" }] }));
+	signIn(a.root);
+	signIn(a.root, "work");
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		assert.deepEqual(pi.extensions[0].providers.map((p: any) => p.id), ["antigravity", "antigravity-work"]);
+		const t = pi.extensions[0].tools.get("antigravity");
+		await t.execute("d1", { task: "hello" }, undefined, () => {}, { ...pi.ctx, cwd: TMP_ROOT });
+		assert.equal(f.read().filter((m) => m.argv).at(-1).env.GEMINI_HOME, path.join(a.root, "profiles", "work"), "the chosen default");
+		await t.execute("d2", { task: "hello", account: "default" }, undefined, () => {}, { ...pi.ctx, cwd: TMP_ROOT });
+		assert.equal(f.read().filter((m) => m.argv).at(-1).env.GEMINI_HOME, path.join(a.root, "profiles", "default"), "a named account");
+		const { ctx, notes } = cmdCtx(pi);
+		await run(pi, "antigravity", "models", ctx);
+		assert.equal(notes.at(-1), '2 models of the Antigravity account "work" in /model (provider antigravity-work)');
+		await run(pi, "antigravity", "status", ctx);
+		assert.match(notes.at(-1)!, /- default → antigravity · Google account · signed in · models not listed yet\n- work → antigravity-work · Google account · signed in · 2 models · the default account$/);
+		// Deckhand changes the default while pi runs: seen at once
+		writeFileSync(file, JSON.stringify({ defaultAccount: "nope", accounts: [{ name: "work", method: "oauth-personal" }] }));
+		await t.execute("d3", { task: "hello" }, undefined, () => {}, { ...pi.ctx, cwd: TMP_ROOT });
+		assert.equal(f.read().filter((m) => m.argv).at(-1).env.GEMINI_HOME, path.join(a.root, "profiles", "default"), "an unknown default: `default`");
+		writeFileSync(file, JSON.stringify({ defaultAccount: "work", accounts: [{ name: "work", method: "oauth-personal" }] }));
+		await run(pi, "antigravity", "remove work", ctx);
+		assert.equal(readJson(file).defaultAccount, undefined, "reset");
+		await run(pi, "antigravity", "remove default", ctx);
+		assert.match(notes.at(-1)!, /The default account stays/);
+	});
+});
+
+test("an account Deckhand adds while pi runs: in the status (its provider after /reload) and usable by the tool; agy-models.json records model counts for Deckhand's Settings", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	mkdirSync(a.root, { recursive: true });
+	const file = path.join(a.root, "accounts.json");
+	const models = path.join(a.root, "agy-models.json");
+	writeFileSync(models, JSON.stringify({ other: { count: 5, at: 1 } }));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const own = mkdtempSync(path.join(TMP_ROOT, "picked-"));
+		writeFileSync(file, JSON.stringify({ accounts: [{ name: "picked", method: "oauth-personal", dir: own, source: "added", label: "Picked" }] }));
+		const { ctx, notes } = cmdCtx(pi, { input: ["good-code"] });
+		await run(pi, "antigravity", "status", ctx);
+		assert.match(notes.at(-1)!, /- picked \(Picked\) → antigravity-picked · Google account · folder .* · not signed in: run \/antigravity login picked · provider after pi's next start or \/reload/);
+		await run(pi, "antigravity", "login picked", ctx);
+		assert.equal(notes.at(-1), '2 models of the Antigravity account "picked" in /model after pi\'s next start or /reload (provider antigravity-picked)');
+		assert.deepEqual(pi.extensions[0].providers.map((p: any) => p.id), ["antigravity"], "no provider registered mid-session");
+		const counts = readJson(models);
+		assert.deepEqual(Object.keys(counts).sort(), ["other", "picked"], "other names kept");
+		assert.deepEqual(counts.other, { count: 5, at: 1 });
+		assert.equal(counts.picked.count, 2, "agy's models, not the default placeholder");
+		assert.ok(Math.abs(counts.picked.at - Date.now() / 1000) < 60);
+		assert.equal(statSync(models).mode & 0o777, 0o600);
+		// the same count again: not written
+		writeFileSync(models, JSON.stringify({ ...counts, picked: { count: 2, at: 7 } }));
+		await run(pi, "antigravity", "models picked", ctx);
+		assert.equal(readJson(models).picked.at, 7);
+		// a provider's own session reports its models too
+		signIn(a.root);
+		await drive(prov(pi, "antigravity").streamSimple({ id: "default", provider: "antigravity", api: "antigravity-acp" }, { messages: [user("hi")] }, { sessionId: "m1" }));
+		assert.equal(readJson(models).default.count, 2);
+		const t = pi.extensions[0].tools.get("antigravity");
+		assert.ok(t);
+		await t.execute("p1", { task: "hello", account: "picked" }, undefined, () => {}, { ...pi.ctx, cwd: TMP_ROOT });
+		assert.equal(f.read().filter((m) => m.argv).at(-1).env.GEMINI_HOME, own);
+	});
+});
+
+test("a folder used in place that is gone: never made again; login and turns say so; the status still shows", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	const gone = path.join(TMP_ROOT, `gone-${Math.random().toString(36).slice(2)}`);
+	mkdirSync(a.root, { recursive: true });
+	writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ defaultAccount: "old", accounts: [{ name: "default", method: "oauth-personal", dir: gone, source: "found" }, { name: "old", method: "oauth-personal", dir: gone, source: "found" }] }));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi, { input: ["good-code"] });
+		await run(pi, "antigravity", "login", ctx);
+		assert.equal(notes.at(-1), `The folder of the Antigravity account "old" is not there: ${gone}`);
+		await run(pi, "antigravity", "status", ctx);
+		assert.match(notes.at(-1)!, /- old → antigravity-old · .* · not signed in: run \/antigravity login old · models not listed yet · the default account/);
+		const r = await drive(prov(pi, "antigravity-old").streamSimple({ id: "default", provider: "antigravity-old", api: "antigravity-acp" }, { messages: [user("x")] }, { sessionId: "g1" }));
+		assert.equal(r.msg.stopReason, "error");
+		assert.match(r.msg.errorMessage, /is not there/);
+		assert.ok(!existsSync(gone), "never created");
+		assert.equal(f.read().filter((m) => m.argv).length, 0);
+	});
 });

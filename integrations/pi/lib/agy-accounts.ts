@@ -15,10 +15,15 @@
 //   pi's own credential store (`/login antigravity-<name>`, a masked prompt; pi keeps it in
 //   auth.json, 0600, as every pi API key) and reaches agy only in its process environment.
 // - Where: <Deckhand's data dir>/antigravity (macOS `~/Library/Application Support/Deckhand`, or
-//   the older `pi-desk` when only that exists; Linux `$XDG_DATA_HOME/deckhand` or
-//   `~/.local/share/deckhand`). accounts.json there (0600) holds names, methods and GCP
-//   project/location, and agy's path when the user set one (`/antigravity path`), never a secret;
-//   profiles/<name> (0700) the profiles.
+//   the older `pi-desk` when only that exists; Linux `~/.local/share/deckhand`, as the core).
+//   accounts.json there (0600) holds names, methods, GCP project/location, labels, the folders of
+//   accounts used in place, agy's path when the user set one (`/antigravity path`) and the default
+//   account, never a secret; profiles/<name> (0700) the profiles Deckhand made. Deckhand's core
+//   writes it too (same lock, agy-lock.ts): each writer keeps what it does not understand.
+// - An account with `dir` is the user's own folder (e.g. ~/.gemini), used in place: nothing is
+//   written in it but its antigravity-acp/ folder, it is never chmod'ed, linked into or deleted.
+// - At most one Google account keeps its sign-in in agy's OS keyring (`storage: "keyring"`, the
+//   first such entry): agy shares that one entry between every profile it runs without SSH.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -43,7 +48,20 @@ export interface Account {
 	method: Method;
 	gcpProject?: string;
 	gcpLocation?: string;
+	/** A display name (Deckhand's rename edits only this); the name stays the id. */
+	label?: string;
+	/** An absolute profile folder used in place (the user's own: found by Deckhand's scan, or picked there); absent: `<root>/profiles/<name>`. */
+	dir?: string;
+	/** "found" (Deckhand's scan), "added" (picked in Deckhand), or absent (a profile made under profiles/). */
+	source?: string;
+	/** "keyring" or "file" (absent: file), as stored. */
+	storage?: "keyring" | "file";
+	/** Derived, never stored: this is the one account whose Google sign-in is agy's OS keyring entry (the first `storage: "keyring"`). */
+	keyring?: boolean;
 }
+
+/** The account fields accounts.json holds that this extension knows (others are kept as they are). */
+const STORED_KEYS = ["method", "gcpProject", "gcpLocation", "label", "dir", "source", "storage"] as const;
 
 export const DEFAULT_ACCOUNT: Account = { name: "default", method: "oauth-personal" };
 export const PLANS_URL = "https://antigravity.google/docs/plans";
@@ -69,29 +87,58 @@ export function dataRoot(env: NodeJS.ProcessEnv = process.env, platform = proces
 		const dh = path.join(support, "Deckhand"), old = path.join(support, "pi-desk");
 		return path.join(!fs.existsSync(dh) && fs.existsSync(old) ? old : dh, "antigravity");
 	}
-	return path.join(env.XDG_DATA_HOME && path.isAbsolute(env.XDG_DATA_HOME) ? path.join(env.XDG_DATA_HOME, "deckhand") : path.join(home, ".local", "share", "deckhand"), "antigravity");
+	// as the core's data dir (src/core/platform.odin data_dir_under): never XDG_DATA_HOME
+	return path.join(home, ".local", "share", "deckhand", "antigravity");
 }
 
 const accountsFile = (root: string) => path.join(root, "accounts.json");
 
-/** The accounts accounts.json holds (bad and repeated entries skipped). */
-export function storedAccounts(root: string): Account[] {
-	let list: Account[] = [];
+const isObj = (x: unknown): x is Record<string, any> => !!x && typeof x === "object" && !Array.isArray(x);
+
+/** accounts.json as it is (an object; {} when missing or not JSON). */
+function readRaw(root: string): Record<string, any> {
 	try {
 		const raw = JSON.parse(fs.readFileSync(accountsFile(root), "utf8"));
-		if (Array.isArray(raw?.accounts))
-			list = raw.accounts
-				.filter((a: any) => typeof a?.name === "string" && validName(a.name) && isMethod(a.method))
-				.map((a: any) => ({
-					name: a.name,
-					method: a.method,
-					...(typeof a.gcpProject === "string" && a.gcpProject ? { gcpProject: a.gcpProject } : {}),
-					...(typeof a.gcpLocation === "string" && a.gcpLocation ? { gcpLocation: a.gcpLocation } : {}),
-				}));
-	} catch {}
-	const seen = new Set<string>();
-	return list.filter((a) => !seen.has(a.name) && (seen.add(a.name), true));
+		return isObj(raw) ? raw : {};
+	} catch {
+		return {};
+	}
 }
+
+/** One raw entry as an account, or undefined when it is not one this extension can use. */
+function parseAccount(a: any): Account | undefined {
+	if (!isObj(a) || typeof a.name !== "string" || !validName(a.name) || !isMethod(a.method)) return undefined;
+	if (a.dir !== undefined && !(typeof a.dir === "string" && path.isAbsolute(a.dir))) return undefined; // a folder not absolute: ignored
+	const str = (k: string) => (typeof a[k] === "string" && a[k] ? { [k]: a[k] as string } : {});
+	return {
+		name: a.name,
+		method: a.method,
+		...str("gcpProject"),
+		...str("gcpLocation"),
+		...str("label"),
+		...str("dir"),
+		...str("source"),
+		...(a.storage === "keyring" || a.storage === "file" ? { storage: a.storage } : {}),
+	};
+}
+
+/** The accounts of a raw accounts.json (bad and repeated entries skipped; `keyring` on the first keyring entry). */
+function accountsOfRaw(raw: Record<string, any>): Account[] {
+	const seen = new Set<string>();
+	const list: Account[] = [];
+	for (const e of Array.isArray(raw.accounts) ? raw.accounts : []) {
+		const a = parseAccount(e);
+		if (!a || seen.has(a.name)) continue;
+		seen.add(a.name);
+		list.push(a);
+	}
+	const k = list.find((a) => a.storage === "keyring"); // at most one: the first
+	if (k?.method === "oauth-personal") k.keyring = true; // only a Google account signs in to the keyring
+	return list;
+}
+
+/** The accounts accounts.json holds (bad and repeated entries skipped). */
+export const storedAccounts = (root: string): Account[] => accountsOfRaw(readRaw(root));
 
 /** The accounts, `default` first (implicit: a Google account, until configured). */
 export function loadAccounts(root: string): Account[] {
@@ -102,20 +149,81 @@ export function loadAccounts(root: string): Account[] {
 
 /** agy's path as the user set it (`/antigravity path`), unchecked; undefined when not set. */
 export function storedAgyPath(root: string): string | undefined {
-	try {
-		const p = JSON.parse(fs.readFileSync(accountsFile(root), "utf8"))?.agyPath;
-		return typeof p === "string" && p.trim() ? p.trim() : undefined;
-	} catch {
-		return undefined;
-	}
+	const p = readRaw(root).agyPath;
+	return typeof p === "string" && p.trim() ? p.trim() : undefined;
 }
 
-/** Writes accounts.json (0600, in a 0700 folder), keeping or replacing agy's path. It never holds a key. */
-export function saveAccounts(root: string, accounts: Account[], agyPath: string | null | undefined = storedAgyPath(root)) {
+/** The name of the account used when none is named: accounts.json's `defaultAccount` when it is one of `accounts`, else `default`. */
+export function defaultNameOf(root: string, accounts: Account[] = loadAccounts(root)): string {
+	const d = readRaw(root).defaultAccount;
+	return typeof d === "string" && accounts.some((a) => a.name === d) ? d : "default";
+}
+
+/** What a change to accounts.json sees besides the accounts. */
+export interface StoredRest {
+	agyPath?: string;
+	defaultAccount?: string;
+	removedDirs: string[];
+}
+/** A change: what to replace (undefined: keep; null: remove the key). */
+export interface AccountsChange {
+	accounts?: Account[];
+	agyPath?: string | null;
+	defaultAccount?: string | null;
+	removedDirs?: string[];
+}
+
+/**
+ * accounts.json with `change` applied to `raw`, keeping everything this extension does not
+ * understand: unknown top-level keys, unknown keys of each account, and entries it cannot use. An
+ * account's known keys are written only where the change made them differ.
+ */
+function applyChange(raw: Record<string, any>, change: AccountsChange): Record<string, any> {
+	const out: Record<string, any> = { ...raw };
+	out.about ??= "Deckhand's Antigravity accounts (pi tabs and Deckhand). No secrets: API keys are in pi's credential store.";
+	for (const k of ["agyPath", "defaultAccount"] as const) {
+		const v = change[k];
+		if (v === null) delete out[k];
+		else if (v !== undefined) out[k] = v;
+	}
+	if (change.removedDirs) out.removedDirs = change.removedDirs;
+	if (change.accounts) {
+		const before = new Map(accountsOfRaw(raw).map((a) => [a.name, a]));
+		const after = new Map(change.accounts.map((a) => [a.name, a]));
+		const done = new Set<string>();
+		const entries: any[] = [];
+		const merged = (e: Record<string, any>, b: Account | undefined, a: Account) => {
+			const o: Record<string, any> = { ...e, name: a.name };
+			for (const k of STORED_KEYS)
+				if (!b || b[k] !== a[k]) {
+					if (a[k] === undefined) delete o[k];
+					else o[k] = a[k];
+				}
+			return o;
+		};
+		for (const e of Array.isArray(raw.accounts) ? raw.accounts : []) {
+			const name = isObj(e) && typeof e.name === "string" ? e.name : undefined;
+			const b = name !== undefined ? before.get(name) : undefined;
+			if (!b) {
+				// an entry this extension cannot use (or a name it does not know): kept, unless it now names an account
+				if (name === undefined || !after.has(name)) entries.push(e);
+				continue;
+			}
+			if (done.has(b.name)) continue; // a repeat of an account: dropped
+			done.add(b.name);
+			const a = after.get(b.name);
+			if (a) entries.push(merged(e, b, a)); // else: removed
+		}
+		for (const a of change.accounts) if (!done.has(a.name)) (done.add(a.name), entries.push(merged({}, undefined, a)));
+		out.accounts = entries;
+	}
+	return out;
+}
+
+function writeRaw(root: string, raw: Record<string, any>) {
 	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-	const body = JSON.stringify({ about: "Deckhand's Antigravity accounts (pi tabs). No secrets: API keys are in pi's credential store.", ...(agyPath ? { agyPath } : {}), accounts: accounts.map(({ name, method, gcpProject, gcpLocation }) => ({ name, method, gcpProject, gcpLocation })) }, null, 2);
-	const tmp = `${accountsFile(root)}.tmp-${process.pid}`;
-	fs.writeFileSync(tmp, `${body}\n`, { mode: 0o600 });
+	const tmp = `${accountsFile(root)}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+	fs.writeFileSync(tmp, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
 	fs.renameSync(tmp, accountsFile(root));
 }
 
@@ -141,18 +249,39 @@ export function noteAgySeen(root: string, agyPath: string, version: string) {
 	} catch {}
 }
 
+/**
+ * Records an account's model count (agy's models, without the `default` placeholder) in
+ * `agy-models.json` {<name>: {count, at (s)}} beside accounts.json, for Deckhand's Settings, which
+ * only reads it. A cache: no lock, last writer wins, other names kept; written only when the count
+ * changed. 0600, temp file then rename. Nothing secret.
+ */
+export function noteModelCount(root: string, name: string, count: number) {
+	if (!validName(name) || !Number.isInteger(count) || count < 0) return;
+	try {
+		const file = path.join(root, "agy-models.json");
+		let all: Record<string, any> = {};
+		try {
+			const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+			if (isObj(raw)) all = raw;
+		} catch {}
+		if (isObj(all[name]) && all[name].count === count) return;
+		all[name] = { count, at: Math.floor(Date.now() / 1000) };
+		fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+		const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+		fs.writeFileSync(tmp, `${JSON.stringify(all)}\n`, { mode: 0o600 });
+		fs.renameSync(tmp, file);
+	} catch {}
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * Changes accounts.json under a lock (`accounts.json.lock`, agy-lock.ts: created atomically, with
- * this pid), reading it again inside, so two pi processes changing accounts never lose each other's
- * change. A lock whose process is gone is taken over; one held longer than `waitMs` is an error.
+ * this pid; Deckhand's core takes the same lock), reading it again inside, so two writers never
+ * lose each other's change. A lock whose process is gone is taken over; one held longer than
+ * `waitMs` is an error. What the change does not touch is written back as it was read.
  */
-export async function updateAccounts(
-	root: string,
-	change: (accounts: Account[], agyPath: string | undefined) => { accounts?: Account[]; agyPath?: string | null },
-	waitMs = 5000,
-): Promise<void> {
+export async function updateAccounts(root: string, change: (accounts: Account[], rest: StoredRest) => AccountsChange, waitMs = 5000): Promise<void> {
 	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 	const lock = `${accountsFile(root)}.lock`;
 	const until = Date.now() + waitMs;
@@ -161,8 +290,14 @@ export async function updateAccounts(
 		await sleep(50);
 	}
 	try {
-		const next = change(storedAccounts(root), storedAgyPath(root));
-		saveAccounts(root, next.accounts ?? storedAccounts(root), next.agyPath === undefined ? storedAgyPath(root) : next.agyPath);
+		const raw = readRaw(root);
+		const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+		const rest: StoredRest = {
+			agyPath: str(raw.agyPath),
+			defaultAccount: str(raw.defaultAccount),
+			removedDirs: Array.isArray(raw.removedDirs) ? raw.removedDirs.filter((d: unknown) => typeof d === "string") : [],
+		};
+		writeRaw(root, applyChange(raw, change(accountsOfRaw(raw), rest)));
 	} finally {
 		unlock(lock);
 	}
@@ -172,12 +307,16 @@ export interface Profile {
 	geminiHome: string;
 	acpDir: string;
 	tmpDir: string;
+	/** The user's own folder (the account's `dir`), used in place: only its antigravity-acp/ is Deckhand's. */
+	inPlace: boolean;
 }
 
-export const profileOf = (root: string, name: string): Profile => {
-	const geminiHome = path.join(root, "profiles", name);
+/** An account's profile: its `dir` in place, else `<root>/profiles/<name>`. */
+export const profileOf = (root: string, a: Pick<Account, "name" | "dir">): Profile => {
+	const inPlace = !!a.dir && path.isAbsolute(a.dir);
+	const geminiHome = inPlace ? a.dir! : path.join(root, "profiles", a.name);
 	const acpDir = path.join(geminiHome, "antigravity-acp");
-	return { geminiHome, acpDir, tmpDir: path.join(acpDir, "tmp") };
+	return { geminiHome, acpDir, tmpDir: path.join(acpDir, "tmp"), inPlace };
 };
 
 /** A run folder: `<pi's pid>-<6 random>`, under the profile's tmp. */
@@ -240,10 +379,11 @@ const AGY_LOG = /^acp-server-.*-(\d+)\.log$/;
 /**
  * Trims agy's logs in a profile to the newest KEPT_LOGS (by mtime). Only a log whose agy (the pid in
  * its name) is gone is removed: one still running is kept, however old; anything else is left.
- * Both places agy may keep them are looked at: the profile, and its app-data folder.
+ * Both places agy may keep them are looked at: the profile, and its app-data folder; in a folder
+ * used in place (the user's own) only the app-data folder, Deckhand's part of it.
  */
 export function trimAgyLogs(p: Profile) {
-	for (const dir of [path.join(p.geminiHome, "log"), path.join(p.acpDir, "log")]) {
+	for (const dir of [...(p.inPlace ? [] : [path.join(p.geminiHome, "log")]), path.join(p.acpDir, "log")]) {
 		let logs: { p: string; pid: number; t: number }[] = [];
 		try {
 			for (const e of fs.readdirSync(dir)) {
@@ -289,19 +429,38 @@ export const agyArgs = (p: Profile, login = false) => ["acp", "--gemini-dir", p.
 export const hasSavedLogin = (p: Profile) => fs.existsSync(path.join(p.acpDir, "acp_token.json"));
 
 /**
+ * Whether a Google account counts as signed in: its saved sign-in by stat, or, for the keyring
+ * account, always (the keyring is never read; agy's own error says so when it is not).
+ */
+export const savedSignIn = (root: string, a: Account) => !!a.keyring || hasSavedLogin(profileOf(root, a));
+
+/**
  * Makes the profile: its folders (0700), the method in settings.json (no credential), and links to
- * the user's ~/.gemini skills and rules (t3code linkAntigravityUserConfig). Returns it.
+ * the user's ~/.gemini skills and rules (t3code linkAntigravityUserConfig). Returns it. A folder
+ * used in place is the user's own: only its antigravity-acp/ is made (0700; one already there is
+ * left as it is), nothing is linked into it and its mode is never changed; it must exist.
  */
 export function prepareProfile(root: string, a: Account, home = os.homedir()): Profile {
-	const p = profileOf(root, a.name);
+	const p = profileOf(root, a);
+	if (p.inPlace) {
+		if (!fs.statSync(p.geminiHome, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`The folder of the Antigravity account "${a.name}" is not there: ${p.geminiHome}`);
+		for (const d of [p.acpDir, p.tmpDir]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+		writeSettings(p, a);
+		return p;
+	}
 	for (const d of [root, path.dirname(p.geminiHome), p.geminiHome, p.acpDir, p.tmpDir]) {
 		fs.mkdirSync(d, { recursive: true, mode: 0o700 });
 		fs.chmodSync(d, 0o700);
 	}
-	const gcp = { ...(a.gcpProject ? { project: a.gcpProject } : {}), ...(a.gcpLocation ? { location: a.gcpLocation } : {}) };
-	fs.writeFileSync(path.join(p.acpDir, "settings.json"), `${JSON.stringify({ auth: { type: a.method }, ...(Object.keys(gcp).length ? { gcp } : {}) })}\n`, { mode: 0o600 });
+	writeSettings(p, a);
 	linkUserConfig(p.geminiHome, path.join(home, ".gemini"));
 	return p;
+}
+
+/** The sign-in method (and GCP project) in the profile's antigravity-acp/settings.json: no credential. */
+function writeSettings(p: Profile, a: Account) {
+	const gcp = { ...(a.gcpProject ? { project: a.gcpProject } : {}), ...(a.gcpLocation ? { location: a.gcpLocation } : {}) };
+	fs.writeFileSync(path.join(p.acpDir, "settings.json"), `${JSON.stringify({ auth: { type: a.method }, ...(Object.keys(gcp).length ? { gcp } : {}) })}\n`, { mode: 0o600 });
 }
 
 /** The user's ~/.gemini parts linked into a profile. */
@@ -370,7 +529,9 @@ export const REMOVED_ENV = new Set([
  * no self-update, its own TMPDIR, and the account's key when it has one. A Google-account sign-in
  * also gets SSH_CONNECTION: agy 1.5 keeps Google sign-ins in one OS keyring entry for every
  * profile (it ignores AGY_ACP_FORCE_FILE_STORAGE) unless it believes it runs over SSH, so without it
- * two accounts would share, and overwrite, one sign-in.
+ * two accounts would share, and overwrite, one sign-in. The one keyring account (`a.keyring`) is
+ * the exception: it gets neither (an SSH_CONNECTION pi has is passed on as it is), so agy uses that
+ * keyring entry, the user's own agy sign-in.
  */
 export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, base: NodeJS.ProcessEnv = process.env, tmpDir = p.tmpDir): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
@@ -392,9 +553,9 @@ export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, ba
 		...env,
 		...(key && a.method === "gemini-api-key" ? { GEMINI_API_KEY: key } : {}),
 		...(key && a.method === "agent-platform" ? { GOOGLE_API_KEY: key } : {}),
-		...(a.method === "oauth-personal" ? { SSH_CONNECTION: base.SSH_CONNECTION || "127.0.0.1 0 127.0.0.1 0" } : {}),
+		...(a.method === "oauth-personal" && !a.keyring ? { SSH_CONNECTION: base.SSH_CONNECTION || "127.0.0.1 0 127.0.0.1 0" } : {}),
 		GEMINI_HOME: p.geminiHome,
-		AGY_ACP_FORCE_FILE_STORAGE: "1",
+		...(a.keyring ? {} : { AGY_ACP_FORCE_FILE_STORAGE: "1" }),
 		AGY_CLI_DISABLE_AUTO_UPDATE: "true",
 		PYTHONUNBUFFERED: "1",
 		ELECTRON_RUN_AS_NODE: "1",

@@ -311,6 +311,8 @@ export interface AntigravityOptions {
 	cancelWaitMs?: number;
 	/** Where the record of agy's sessions lives (lib/agy-ledger.ts; the account profile's). Without it, no session is ever resumed from a transcript. */
 	ledgerDir?: string;
+	/** Told the account's model count (agy's models, without `default`) whenever a list with models arrives. */
+	onModels?: (count: number) => void;
 }
 
 interface SessionState {
@@ -336,6 +338,7 @@ export function createAntigravity(o: AntigravityOptions) {
 
 	const setModels = async (list: AgyModel[], thinking: string[]) => {
 		const next = modelList(list, thinking, pid, account);
+		if (next.length > 1) o.onModels?.(next.length - 1);
 		if (JSON.stringify(next) === JSON.stringify(models)) return false;
 		models = next;
 		// pi reads getModels() again when it recomposes the provider (ModelRuntime.refresh)
@@ -356,12 +359,12 @@ export function createAntigravity(o: AntigravityOptions) {
 		let resumeId = plan.mode === "resume" ? plan.resumeId : plan.mode === "continue" ? st.acpSessionId : undefined;
 		// a session another pi session took in the meantime is not picked up: a new one, caught up
 		const wanted = resumeId;
+		const how = o.launch?.(apiKey) ?? {}; // before the claim: a launch that throws (a folder gone) holds nothing
 		if (resumeId && ledger && !ledger.claim(resumeId, st)) resumeId = undefined;
 		// claimed for this resume only (not st's own session): given up again if the resume does not happen
 		const claimedNow = !!resumeId && !!ledger && resumeId !== st.acpSessionId;
 		const unclaim = () => claimedNow && ledger!.release(resumeId!, st);
 		let agy: AgySession | undefined;
-		const how = o.launch?.(apiKey) ?? {};
 		const open = (rid: string | undefined) => AgySession.open({
 			agyPath: o.agyPath,
 			cwd: o.cwd(),

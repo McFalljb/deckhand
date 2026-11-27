@@ -116,6 +116,27 @@ test("startup: initialize, authenticate (oauth-personal by default), session/new
 	assert.equal(methods(f.read()).at(-1), "session/close");
 });
 
+
+test("finding 6: a session whose default mode cannot be confirmed is refused, new or resumed; so is a model agy offers no choice of", async () => {
+	for (const knob of ["FAKE_AGY_NO_MODE_AT_ALL", "FAKE_AGY_MODE_STUCK"]) {
+		const f = fake({ [knob]: "1" });
+		await assert.rejects(AgySession.open({ agyPath: FAKE, cwd: f.cwd, env: f.env }), /cannot confirm that Antigravity runs in its default mode/, knob);
+		assert.ok(!methods(f.read()).includes("session/prompt"));
+	}
+	const r = fake({ FAKE_AGY_RESUME_NO_MODES: "1" });
+	const first = await AgySession.open({ agyPath: FAKE, cwd: r.cwd, env: r.env });
+	await first.close();
+	await assert.rejects(AgySession.open({ agyPath: FAKE, cwd: r.cwd, env: r.env, resumeId: first.sessionId }), /cannot confirm that Antigravity runs in its default mode/, "after a resume too");
+	const m = fake({ FAKE_AGY_NO_MODEL_OPTION: "1" });
+	const s = await AgySession.open({ agyPath: FAKE, cwd: m.cwd, env: m.env });
+	try {
+		await s.selectModel("default"); // agy's own pick: fine
+		await assert.rejects(s.selectModel("gemini-3.8-pro"), /offers no model choice.*gemini-3\.8-pro.*default model/);
+	} finally {
+		await s.close();
+	}
+});
+
 test("startup without a mode config option: session/set_mode default", async () => {
 	const f = fake({ FAKE_AGY_NO_MODES: "1" });
 	const s = await AgySession.open({ agyPath: FAKE, cwd: f.cwd, env: f.env });

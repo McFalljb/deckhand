@@ -79,9 +79,13 @@ function serve() {
 			send({ id, method, params });
 		});
 	const update = (sessionId, u) => send({ method: "session/update", params: { sessionId, update: u } });
+	// FAKE_AGY_NO_MODE_AT_ALL=1: neither a mode option nor modes; FAKE_AGY_RESUME_NO_MODES=1: a
+	// resumed session reports none; FAKE_AGY_MODE_STUCK=1: setting the mode leaves it as it was;
+	// FAKE_AGY_NO_MODEL_OPTION=1: no model option; FAKE_AGY_NO_RESUME=1: no session/resume
+	const noModes = (s) => env.FAKE_AGY_NO_MODE_AT_ALL === "1" || (s.resumed && env.FAKE_AGY_RESUME_NO_MODES === "1");
 	const configOptions = (s) => [
-		...(env.FAKE_AGY_NO_MODES === "1" ? [] : [{ id: "mode", name: "Mode", category: "mode", type: "select", currentValue: s.mode, options: [{ value: "default", name: "Default" }, { value: "auto", name: "Auto" }] }]),
-		{
+		...(env.FAKE_AGY_NO_MODES === "1" || noModes(s) ? [] : [{ id: "mode", name: "Mode", category: "mode", type: "select", currentValue: s.mode, options: [{ value: "default", name: "Default" }, { value: "auto", name: "Auto" }] }]),
+		...(env.FAKE_AGY_NO_MODEL_OPTION === "1" ? [] : [{
 			id: "model",
 			name: "Model",
 			category: "model",
@@ -91,7 +95,7 @@ function serve() {
 				{ value: "gemini-3.8-pro", name: "Gemini 3.8 Pro", description: "Most capable" },
 				{ group: "Fast", name: "Fast", options: [{ value: "gemini-3.8-flash", name: "Gemini 3.8 Flash" }] },
 			],
-		},
+		}]),
 		{ id: "thinking_level", name: "Thinking level", category: "thought_level", type: "select", currentValue: s.thinking, options: [{ value: "low", name: "Low" }, { value: "high", name: "High" }] },
 	];
 	const newSession = (id) => {
@@ -102,7 +106,7 @@ function serve() {
 	const setup = (s) => ({
 		sessionId: s.id,
 		configOptions: configOptions(s),
-		...(env.FAKE_AGY_NO_MODES === "1" ? { modes: { currentModeId: s.mode, availableModes: [{ id: "default", name: "Default" }, { id: "auto", name: "Auto" }] } } : {}),
+		...(env.FAKE_AGY_NO_MODES === "1" && !noModes(s) ? { modes: { currentModeId: s.mode, availableModes: [{ id: "default", name: "Default" }, { id: "auto", name: "Auto" }] } } : {}),
 	});
 
 	async function prompt(id, p) {
@@ -203,7 +207,7 @@ function serve() {
 							loadSession: true,
 							promptCapabilities: { image: true, audio: true, embeddedContext: true },
 							mcpCapabilities: { http: true, sse: true },
-							sessionCapabilities: { list: {}, resume: {}, close: {} },
+							sessionCapabilities: { list: {}, ...(env.FAKE_AGY_NO_RESUME === "1" ? {} : { resume: {} }), close: {} },
 							auth: { logout: {} },
 						},
 						authMethods: [
@@ -240,12 +244,14 @@ function serve() {
 			case "session/resume": {
 				if (!authed) return send({ id, error: { code: -32000, message: "Authentication required" } });
 				const s = sessions.get(params.sessionId) ?? newSession(params.sessionId);
-				return send({ id, result: { configOptions: setup(s).configOptions } });
+				s.resumed = true;
+				const { sessionId: _, ...rest } = setup(s);
+				return send({ id, result: rest });
 			}
 			case "session/set_config_option": {
 				const s = sessions.get(params.sessionId);
 				if (!s) return send({ id, error: { code: -32602, message: "unknown session" } });
-				if (params.configId === "mode") s.mode = params.value;
+				if (params.configId === "mode") s.mode = env.FAKE_AGY_MODE_STUCK === "1" ? s.mode : params.value;
 				else if (params.configId === "model") s.model = params.value;
 				else if (params.configId === "thinking_level") s.thinking = params.value;
 				else return send({ id, error: { code: -32602, message: `unknown option ${params.configId}` } });

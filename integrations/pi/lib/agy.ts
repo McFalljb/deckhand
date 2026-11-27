@@ -147,14 +147,24 @@ export class AgySession {
 		await this.setMode("default");
 	}
 
-	/** agy's mode: by its `mode` config option, else session/set_mode when it reports modes. */
+	/**
+	 * agy's mode: by its `mode` config option, else session/set_mode when it reports modes. Fails
+	 * closed: a session that reports neither, or whose option does not take the value, is refused
+	 * (its mode decides what agy does without asking).
+	 */
 	async setMode(modeId: string) {
-		const opt = this.configOptions.find((x: any) => x?.category === "mode" && x?.type === "select");
+		const refuse = () =>
+			new AcpError(`Deckhand cannot confirm that Antigravity runs in its ${modeId} mode (this agy reports no mode it can set): not sending messages to it; update agy`);
+		const modeOpt = () => this.configOptions.find((x: any) => x?.category === "mode" && x?.type === "select");
+		const opt = modeOpt();
 		if (opt) {
 			if (opt.currentValue !== modeId) await this.setConfig(opt.id, modeId);
+			if (modeOpt()?.currentValue !== modeId) throw refuse();
 			return;
 		}
-		if (this.modes && this.modes.currentModeId !== modeId) {
+		if (!this.modes || !Array.isArray(this.modes.availableModes)) throw refuse();
+		if (this.modes.currentModeId !== modeId) {
+			if (!this.modes.availableModes.some((m: any) => m?.id === modeId)) throw refuse();
 			await this.conn.request("session/set_mode", { sessionId: this.sessionId, modeId }, STARTUP_TIMEOUT_MS);
 			this.modes = { ...this.modes, currentModeId: modeId };
 		}
@@ -174,7 +184,7 @@ export class AgySession {
 	async selectModel(modelId: string) {
 		if (!modelId || modelId === "default") return;
 		const opt = configOption(this.configOptions, "model");
-		if (!opt) return;
+		if (!opt) throw new AcpError(`This Antigravity session offers no model choice, so it cannot run '${modelId}': pick Antigravity (agy's default model) in /model`);
 		if (!selectValues(opt).some((v) => v.value === modelId)) throw new AcpError(`Antigravity model '${modelId}' is not available for this account: pick another in /model`);
 		if (opt.currentValue !== modelId) await this.setConfig(opt.id, modelId);
 	}

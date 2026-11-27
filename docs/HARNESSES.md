@@ -131,13 +131,17 @@ Google Antigravity CLI over ACP (`agy acp`: JSON-RPC 2.0, one message per line o
 drives it. agy runs the whole turn (model, tools, system prompt) and keeps the conversation and the
 sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or calls Google.
 
-- **Dormant without agy.** `findAgy` (`lib/acp.ts`): the `agyPath` the user set with
+- **Without agy, only `/antigravity`.** `findAgy` (`lib/acp.ts`): the `agyPath` the user set with
   `/antigravity path` in `accounts.json` (used only when it is an absolute path to an executable
   file, never looked up; else ignored, and the status says so), else `agy` or `antigravity` on
   `PATH`; a few stats at load. No environment variable picks the binary (what Deckhand ships reads
   only the variables `scripts/check-env-reads.py` lists). Not found: the extension registers
-  nothing. Found: the accounts' providers, `/antigravity`, `/antigravity-login`, and hooks for
-  `session_start`, `session_shutdown` and `session_before_compact`. No tools or flags.
+  only `/antigravity`, which says where to get agy (1.5.12 or newer) and offers `/antigravity path`;
+  no provider, hook, status line or output. Found (at load, or when `/antigravity path` sets a path
+  later in the session): the accounts' providers, `/antigravity-login`, and hooks for
+  `session_start`, `session_shutdown` and `session_before_compact` (pi takes providers, hooks and
+  commands after load; the command's context stands in for the `session_start` already past). No
+  tools or flags.
 - **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
   `clientInfo`/`clientCapabilities`: agy answers `protocolVersion: 2` in the v1 shape), no fs and
   no terminal capability; agy older than 1.5.1 (`agentInfo.version`) is refused; `session/new`
@@ -202,7 +206,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   without agy; replays (`disableContinuation`) are refused.
 - **Tests**: `test/antigravity.test.ts` against `test/fake-agy.mjs`, a stand-in agy (t3code's
   fixtures' shapes; it checks the method against the profile's settings and its environment, and
-  logs the variables it got), with a temporary HOME and accounts folder; never a real agy.
+  logs the variables it got), with a temporary HOME and accounts folder; never a real agy. `test/temp-home.ts`, imported first
+  by every test that loads the extension, points `HOME` and `XDG_DATA_HOME` into a temporary folder,
+  and loading refuses to go on when they or Deckhand's data dir are not in it.
 
 ## 4. Overlap: how Deckhand steps back
 

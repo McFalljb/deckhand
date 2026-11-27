@@ -212,8 +212,9 @@ sidebar hands its sections to Deckhand's right column.
 #### Google Antigravity in pi tabs (preview)
 
 With Google's Antigravity CLI installed (`agy`, or `antigravity` from the macOS download; version
-1.5.1 or newer, 1.5.12 recommended), a pi tab can use your Antigravity models. Without it, nothing
-of this shows up. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
+1.5.1 or newer, 1.5.12 recommended), a pi tab can use your Antigravity models. Without it, only
+**`/antigravity`** is there: it says where to get agy (https://antigravity.google/docs/getting-started)
+and offers to set agy's path; once it is set, the rest turns on in the same tab. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
 turn: its model, its tools, its own instructions. Deckhand never reads or stores your Google
 sign-in; agy keeps it.
 
@@ -242,9 +243,8 @@ out of quota. Each account has its own agy profile, so its sign-in and history s
   account stays.
 - **`/antigravity models <name>`** lists an account's models again.
 - **`/antigravity path /full/path/to/agy`** runs that agy instead of the one on your `PATH` (it must
-  be an executable file); **`/antigravity path`** alone goes back to your `PATH`. If no agy is on
-  your `PATH` at all, Antigravity's commands are not there either: add agy's folder to your `PATH`
-  first.
+  be an executable file); **`/antigravity path`** alone goes back to your `PATH`. It works before
+  Deckhand has found any agy, and the accounts and models appear without restarting the tab.
 
 An API key or Google variable in pi's environment (`GEMINI_API_KEY`, `GOOGLE_API_KEY`,
 `GOOGLE_CLOUD_PROJECT` and the like) never reaches agy, so it cannot bill a key instead of your

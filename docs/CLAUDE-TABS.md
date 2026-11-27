@@ -20,7 +20,7 @@ running when the window closes (⌘Q), when the core restarts, and through an up
 
 - **The command.** A Claude tab is a terminal tab (`Tab_Kind` `Claude_Tab`) inside an open
   session, never in Home. It starts `$SHELL -l -c '<check>; exec claude "$@"' claude --plugin-dir
-  <plugin> [--resume <id>] [flags]` in the session's folder (or one inside it), so `claude` gets
+  <plugin> [--settings <Deckhand's status line>] [--resume <id>] [flags]` (the status line: §6c) in the session's folder (or one inside it), so `claude` gets
   the user's login PATH and environment. When `claude` is not on that PATH, the check tries
   `~/.local/bin` and `~/.claude/local`, else prints why and how to fix it (exit 127). Deckhand
   does not set `CLAUDE_CODE_DISABLE_TERMINAL_TITLE`, respects an inherited `CLAUDE_CONFIG_DIR` and
@@ -295,7 +295,7 @@ core that adopts the tab after a restart or handover still knows them (PROTOCOL.
 | Page text typed into Claude's prompt by Send now (`@path` could attach a file) | Send now types only a fixed line; the comments go as hook context, fenced and labelled data | — |
 | Claude's todo and subagent text (untrusted: a page can put words in Claude's mouth) shown in Deckhand | Deckhand builds the rows itself (no tones, ids or rows from the token); text one line, control, bidi and invisible characters dropped, ≤ 140 bytes; at most 50 todos, 16 subagents, 8 launches per tab; only on the token's own tab, never on pi's tab or panels (`panel.set` is pi tabs' only); refused once the tab is not running; never saved or logged | a todo can still *say* something misleading, as Claude's own output can |
 | Text from an agent becoming a command, a file attachment or a dialog answer | `claude_prompt` refuses text starting with `!`, `/`, `#` or `&` (shell, slash command, memory; `&` in case a newer Claude Code uses it), text with an `@file` mention (`@/`, `@~`, `@.` at a word's start) and text with control characters other than tab and newline; held text goes only as a bracketed paste; **Send now** only at an idle turn | a dialog that opens without any hook while the turn is idle |
-| An agent's resume replaying the user's flags (a permission bypass, `--settings`, `--allowedTools`, `--mcp-config`, …) | only the user's own resume or restart (caller `ui`) replays a session's saved flags; anyone else's `claude_resume` or `claude_restart` (Atlas, control, scripts) starts claude with only `--plugin-dir` and `--resume <id>` (the history and the tab keep the flags for the user); an agent that opens or focuses a restored session, or brings it to the front any other way (a new tab in it, a file opened in it, closing the one before it), never starts its Claude tabs (they keep the user's flags and wait, `not_started`, for the user to show them) | by design, a restored tab (§4) starts with its own saved flags whoever shows its session first |
+| An agent's resume replaying the user's flags (a permission bypass, `--settings`, `--allowedTools`, `--mcp-config`, …) | only the user's own resume or restart (caller `ui`) replays a session's saved flags; anyone else's `claude_resume` or `claude_restart` (Atlas, control, scripts) starts claude with only `--plugin-dir`, Deckhand's own status line `--settings` (§6c: no permission, hook or tool setting in it) and `--resume <id>` (the history and the tab keep the flags for the user); an agent that opens or focuses a restored session, or brings it to the front any other way (a new tab in it, a file opened in it, closing the one before it), never starts its Claude tabs (they keep the user's flags and wait, `not_started`, for the user to show them) | by design, a restored tab (§4) starts with its own saved flags whoever shows its session first |
 | A Claude tab claiming another session's id (a prompt-injected Claude reporting its pi session's id, so that the pi row resumes Claude with the user's flags; or a `/resume` to a conversation open elsewhere) | `claude.session` refuses an id that is a pi session's (listed, its file in the project, or an open session's) or that another tab runs (`"that id is another session's"`); `open_session` looks for the pi session's file before the Claude history; a history entry with a pi session's id (older data) is not a second row | — |
 | pid reuse: the tab's process exits and its pid is reused by another program | the token is revoked when the process exits, before the pid is recorded again | the window between exit and Deckhand reaping it (milliseconds) |
 | A user's own `deckhand` or `pi-desk` executable earlier on PATH shadows the plugin's `bin/deckhand` or `bin/pi-desk` | none (Claude Code appends plugin `bin/` to PATH) | it would get the token from the environment like any child; document, do not ship such a tool |
@@ -319,7 +319,7 @@ is valid; it learns nothing it can use from outside the tab.
   new Claude-only session with `--resume <id>`, in the folder it ran in while that is still
   inside the project.
 - **Flags on resume.** Only the user's own resume or restart (caller `ui`) replays the saved
-  flags; anyone else's starts claude with only `--plugin-dir` and `--resume <id>` (§3).
+  flags; anyone else's starts claude with only `--plugin-dir`, Deckhand's status line (§6c) and `--resume <id>` (§3).
 - **Restore.** A Claude tab is saved with its id, folder and flags (PERSISTENCE.md) and comes back
   `not_started`. It starts with `--resume <id>` and its own saved flags when the user (or
   Deckhand at launch, or a test script) shows its session. An agent that brings the session to
@@ -709,6 +709,70 @@ snapshot` before the turn's idle, and a background Bash's launch at once (`bash-
   shell panel shows its commands. The command log has ids and counts only.
 - An older Claude Code sends no arrays: nothing is shown or counted.
 
+## 6c. Usage: the status line and the background check
+
+The USAGE section (GUIDE "Usage"; `src/core/usage.odin`, `src/core/usage_claude.odin`) has a row
+per Claude Code config folder (`claude:<dir>`, never merged by identity). Its numbers come two
+ways, each with its own switch (`set_claude_usage`, both on by default).
+
+**The status line.** Claude Code gives a status line command (settings `statusLine`, `type:
+"command"`) a JSON on stdin at each footer update, with `rate_limits.five_hour` and `seven_day`
+(`used_percentage`, `resets_at` in Unix seconds) for a subscriber after the first answer, and a
+gateway's `spend_limit`; it runs the command through `/bin/sh -c`, trims its output and drops blank
+lines (Claude Code 2.1.332). There is no status line text without a command.
+
+- **Injection.** With the switch on, `claude_start` puts `--settings '{"statusLine":{"type":
+  "command","command":"'<deckhand-cli>' statusline",…}}'` right after `--plugin-dir` at every
+  start (new tab, resume, restore, Restart, an agent's resume), copying the user's own status
+  line's `padding`, `refreshInterval` and `hideVimModeIndicator` (Claude Code applies those, not
+  the command). It is never saved into the tab's flags or the history. The user's flags: an
+  inline `--settings JSON` (or `--settings=JSON`), the last one, gets our `statusLine` member
+  added to its text instead (one `--settings`, theirs merged); a `--settings` file, JSON that is
+  not an object, or one that sets `statusLine` leaves the tab unwrapped (*a tab's own
+  --settings*). Not added either when managed settings (`/Library/Application
+  Support/ClaudeCode/managed-settings.json` and `managed-settings.d/*.json`) set `statusLine` or
+  `allowManagedHooksOnly` (*managed status line*: Claude Code's merge puts policy first), or when
+  `disableAllHooks` is on in the flag, the project's local or shared settings, the account's or
+  managed settings, the last that says (*status line off (disableAllHooks)*). MDM profiles and
+  server-managed settings are not seen: a status line set there wins silently, and the row gets
+  no live numbers. A change of those settings after the tab started is not seen until it
+  restarts.
+- **`deckhand statusline`** (`tools/deckhand-cli/statusline.odin`) reads stdin, sends
+  `claude.usage` with the numbers only (never the transcript path, cwd, session name, model or
+  cost), and the core answers with the user's own status line command, found for the tab's
+  account and folder: the project's `.claude/settings.local.json`, then `.claude/settings.json`,
+  then the account's `settings.json` (regular files of at most 1 MB; Deckhand's own command is
+  skipped). The CLI runs it with `/bin/sh -c` and the same stdin and copies its stdout byte for
+  byte, with its exit status (`DECKHAND_STATUSLINE_DEPTH` set, so a copy of ours in the user's
+  settings prints nothing rather than run itself). Outside a Deckhand tab, or when Deckhand does
+  not answer within 1.5 s, it prints nothing and exits 0.
+- **The core** (`usage_claude_report_apply`): only the tab's own token (`claude_command_tab`),
+  only a Claude Code tab with a configured account; percents clamped, unknown -1, reset times
+  checked. The numbers replace the account's main windows (`via: status_line`); a background
+  read's model windows stay. `claude.usage` is never an event and is logged as numbers.
+
+**The background check.** With its switch on, while the section is seen, every 5 minutes for an
+account whose live numbers are older than that (Refresh usage: now), one account at a time, the
+core runs `claude --print --input-format stream-json --output-format stream-json --verbose
+--no-session-persistence --settings '{"disableAllHooks":true}' --strict-mcp-config --mcp-config
+'{"mcpServers":{}}'` (the last two left out when `managed-mcp.json` exists: Claude Code refuses
+them then) through the user's login shell as a tab finds claude, with the account's
+`CLAUDE_CONFIG_DIR`, `ENABLE_CLAUDEAI_MCP_SERVERS=false` and the IDE link off; from `/`, its
+stderr to /dev/null, its own process group, 30 s, 256 KB of output at most, then SIGTERM and
+SIGKILL to the group (the exchange is Codex's, `usage_exchange`). It writes the Agent SDK's
+control requests, never a user message: `{"type":"control_request","request_id":"deckhand-usage-1",
+"request":{"subtype":"initialize"}}`, then `get_usage` with `skip_behaviors: true` (no local
+transcript scan); each answer is a `control_response` with that `request_id`. `initialize`'s
+`account` tells an API key, Bedrock, Vertex or another provider (*no plan limits*) and a missing
+sign-in; `get_usage` (`rate_limits_available`, `rate_limits.five_hour`, `seven_day`,
+`seven_day_opus`, `seven_day_sonnet`, `seven_day_oauth_apps`, `model_scoped[]`, `extra_usage`:
+`utilization` 0–100 and ISO 8601 `resets_at`) gives the windows. In Claude Code 2.1.332 it is
+described as "plan rate-limit utilization windows from the claude.ai usage endpoint" (OAuth
+`/api/oauth/usage`), not a model call; with no prompt sent, no Messages request is made. Not
+measured on the wire: Claude Code's own start-up requests (feature flags, its profile) still
+happen, as when a tab starts. A background read that began before the last live numbers keeps
+their main windows.
+
 ## 7. Tests
 
 - **Unit:** `src/claude_test.odin` (flags, ids, who may send what, held prompts, comments, save
@@ -720,11 +784,13 @@ snapshot` before the turn's idle, and a background Bash's launch at once (`bash-
   `src/reload_test.odin` `claude_*` (§4a), `src/settings_files_test.odin`
   `settings_files_claude_*`, `src/dead_tab_test.odin` `claude_restart_with_model`,
   `src/socket_test.odin` `socket_claude_token_scope` (the process check, scope, revocation), and
-  `tools/deckhand-cli/cli_test.odin` (the CLI and its hooks).
+  `tools/deckhand-cli/cli_test.odin` (the CLI and its hooks, `statusline_*`),
+  `src/core/usage_claude_test.odin` (§6c).
 - **Scenes** (with the fake claude, `tests/scripts/fake-claude.py`, and a stand-in `claude` in the
   fake HOME's `~/.local/bin`, never run): `claude.sh` (tab, hooks, CLI, held prompts, comments,
   panels, resume, Restart, restore), `claude-runtime.sh` (§4a bars), `claude-sessions.sh`,
-  `claude-feeds.sh`.
+  `claude-feeds.sh`, `usage-claude.sh` (§6c: the status line through the fake, and its print
+  mode's `initialize` and `get_usage`).
 - Never a real `claude`, and never the user's `~/.claude`: the test binary drops an inherited
   `CLAUDE_CONFIG_DIR` before any test, and the scene scripts unset it.
 

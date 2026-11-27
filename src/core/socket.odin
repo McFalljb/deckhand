@@ -953,6 +953,7 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 		case Claude_Subagent:       if x.tab_id == 0 do x.tab_id = c.caller.tab_id
 		case Claude_Background:     if x.tab_id == 0 do x.tab_id = c.caller.tab_id
 		case Claude_Model_Report:   if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Usage_Report:   if x.tab_id == 0 do x.tab_id = c.caller.tab_id
 		}
 		r := Conn_Reply{conn = c, id = m.id}
 		r.deliver = deliver_reply

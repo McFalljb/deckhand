@@ -325,7 +325,7 @@ The Sessions tab has three sections, and a fourth at its foot:
   and **+ New session**. Its Claude sessions are listed with its pi sessions, marked **Claude**.
 - **Chats**: your chats, with **+ New chat**.
 - **Usage**: after Chats and the other machines, how much of each coding-agent account's plan
-  limits you have used (Codex for now; see [Usage](#usage)). Click its header to fold it to one
+  limits you have used (Codex and Claude Code; see [Usage](#usage)). Click its header to fold it to one
   line per account.
 
 **Other machines** (with **Machines over SSH** on, as it is by default). **+ Add a machine…** at
@@ -769,9 +769,10 @@ do is up to the chats folder's own instructions, which you write: its `AGENTS.md
 
 The **USAGE** section at the foot of the Sessions tab (after Chats and the other machines) shows
 how much of each coding-agent account's plan limits you have used, as the agent itself reports
-it. For now that is Codex: one row per Codex account (Settings › Coding agents › Codex), once
-Codex is installed. Claude Code, pi and Antigravity rows, other machines' accounts and a full
-Usage page come later.
+it: one row per Codex account (Settings › Coding agents › Codex), once Codex is installed, and
+one per Claude Code account (Settings › Coding agents › Claude Code: each config folder its own
+row, even two folders signed in to one account), once Claude Code is installed. pi and
+Antigravity rows, other machines' accounts and a full Usage page come later.
 
 - **A row**: the account's name and how old its numbers are (*4m ago*), then one bar per limit
   window: **5h** (the five-hour window) and **wk** (the weekly one), each with the percent used
@@ -781,12 +782,14 @@ Usage page come later.
   percent Codex did not say. A reset time already gone when Codex answered reads *reset passed*.
   A narrow column drops the reset time first.
 - **Instead of bars**: *not read yet*; *no plan limits (API key)* (an account signed in with an
-  API key has no plan windows); *signed out* (sign in on Codex's own screen in a Codex tab of
-  that account, or run `CODEX_HOME=<its folder> codex login`); *can't read: …* (Codex could not
-  answer, and why).
-- **Point at a row** for the plan, every window (a model's own limits too), credits, where the
-  numbers come from (*Codex app-server*), the account's folder and when it was read, and why the
-  last read failed, if it did.
+  API key has no plan windows; a Claude Code account on *Bedrock*, *Vertex* or another provider
+  says which); *signed out* (sign in on Codex's own screen in a Codex tab of that account, or run
+  `CODEX_HOME=<its folder> codex login`; for Claude Code, `/login` in a Claude tab of that
+  account); *can't read: …* (the agent could not answer, and why).
+- **Point at a row** for the plan, every window (a model's own limits too: Claude Code's weekly
+  Opus and Sonnet windows), credits or Claude Code's extra usage and spend, where the numbers come
+  from (*Codex app-server*, *Claude status line* or *background check*), the account's folder and
+  when it was read, and why the last read failed, if it did.
 - **Folded** (click **USAGE**): one line per account, its fullest window (*5h 82% · 4m ago*).
 - **Old numbers**: a row read more than an hour ago fades. Once a window's reset time has passed
   since the read, it says *reset at 15:40, no new data* instead of an old percent. A read that
@@ -796,7 +799,8 @@ Usage page come later.
   tab (By project, not the Attention view), the section unfolded and scrolled into view, and the
   window shown (not hidden, minimised, on another Space or behind a locked screen). Then every 5
   minutes, and 30 seconds after a turn in a Codex tab of that account ends (at most once a minute
-  per account), one account at a time. **Refresh usage** (the palette) reads every account now,
+  per account), one account at a time. A Claude Code account's background check waits while one
+  of its tabs gave newer numbers (below). **Refresh usage** (the palette) reads every account now,
   folded or not; it is yours only (agents and scripts can't run it).
 - **Two folders, one account**: when two Codex homes are signed in to the same ChatGPT account
   they share one row (the first one's), and the hover names both folders.
@@ -811,6 +815,35 @@ Usage page come later.
   start-up work (it may refresh its model list and plugins and write its own files in that home);
   it doesn't start your MCP servers. Codex marks this request as experimental: after a Codex
   update a row may say *can't read* until Deckhand follows.
+
+**Claude Code's rows** get their numbers two ways, each with its own switch in Settings › Coding
+agents › Claude Code (both on by default; only you can change them):
+
+- **Show Claude usage (wraps your status line)**: a Claude tab reports its account's 5-hour and
+  weekly percent, their reset times and any spend limit each time Claude Code redraws its status
+  line, so the row stays current while you work. Deckhand starts the tab with its own status line
+  (`deckhand statusline`, through `--settings`); that command sends Deckhand only those numbers,
+  never the conversation, its folder, its session name or anything else Claude Code gives it,
+  then runs **your own status line** (from the project's `.claude/settings.local.json`, then
+  `.claude/settings.json`, then the account's `settings.json`) with the same input and prints its
+  output unchanged, with its padding and refresh interval; with none of yours the status line
+  stays empty. If your own `--settings` flags are inline JSON, Deckhand's status line is added to
+  them; a `--settings` file, or flags that set a status line, leave the tab unwrapped. The row
+  says when a running tab can't send numbers: *managed status line* (your organisation's managed
+  settings set the status line, or allow only managed hooks: theirs wins), *status line off
+  (disableAllHooks)*, or *a tab's own --settings*. Turning it off applies to tabs started or
+  restarted after.
+- **Check Claude usage in the background (starts claude briefly)**: while the section is shown,
+  every 5 minutes (and with **Refresh usage**), for an account none of whose tabs gave numbers in
+  the last 5 minutes, Deckhand starts `claude` headless with that account's `CLAUDE_CONFIG_DIR`
+  (as its tabs get it), asks it for its usage (`get_usage`, the same numbers as Claude Code's
+  `/usage`, with the weekly model windows) and stops it, one account at a time, after at most 30
+  seconds. It never sends a prompt, so no model is called; Claude Code fetches the numbers with
+  its own sign-in. It runs without your hooks or MCP servers and saves no session.
+
+**Deckhand never reads Claude Code's credentials (`.credentials.json`, the Keychain) or
+`.claude.json`, and never calls an Anthropic endpoint itself.** It keeps only the numbers and times,
+as for Codex.
 
 ## Tabs
 
@@ -1826,7 +1859,9 @@ then shows pi-kit's shell. Your pi tab starts either way.
 `output-styles`, `rules`. With that folder there, also **Skip permissions in new tabs** (for
 `--dangerously-skip-permissions`) with a warning line (see [Claude Code tabs](#claude-code-tabs)),
 and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
-own files.
+own files. Two switches for the USAGE section: **Show Claude usage (wraps your status line)** and
+**Check Claude usage in the background (starts claude briefly)** ([Usage](#usage)). The hooks
+bar's **Show settings** opens this card, scrolled into view and outlined a moment.
 
 **Plugins** and **MCP servers (user)** list what Claude Code has, by name only (with several
 accounts, each row names its account). Plugins come from `enabledPlugins` in `settings.json`,
@@ -3168,7 +3203,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
 | Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts, Codex's rollouts) |
-| Refresh usage |  | read every coding-agent account's plan limits now, for the USAGE section (Codex's own app-server, one account at a time), folded or not; yours only ([Usage](#usage)) |
+| Refresh usage |  | read every coding-agent account's plan limits now, for the USAGE section (Codex's own app-server, Claude Code's background check, one account at a time), folded or not; yours only ([Usage](#usage)) |
+| Show Claude usage (wraps your status line) |  | on or off: new Claude tabs report their plan numbers to the USAGE section through Deckhand's status line, which runs yours ([Usage](#usage)) |
+| Check Claude usage in the background (starts claude briefly) |  | on or off: the USAGE section's Claude Code rows are also read by a headless `claude` every 5 minutes while shown ([Usage](#usage)) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |

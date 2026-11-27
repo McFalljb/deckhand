@@ -897,6 +897,8 @@ sp_switch_on :: proc(s: ^core.Setting) -> bool {
 	case "agent_notify":            return !st.notify_off
 	case "claude_skip_permissions": return st.claude_skip_permissions
 	case "codex_full_access":       return st.codex_full_access
+	case "claude_usage_statusline": return !st.claude_usage_statusline_off
+	case "claude_usage_background": return !st.claude_usage_background_off
 	case "remote_machines":         return st.remote_machines
 	case "machines_reachable":      return st.machines_reachable
 	case "web_access":              return st.web_access

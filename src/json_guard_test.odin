@@ -619,6 +619,9 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/usage_codex.odin", "usage_reply_id", "jg.parse_string", "", ""}, // a Codex app-server line (256 KB cap for the whole run)
 		{"src/core/usage_codex.odin", "usage_codex_parse", "jg.parse_string", "", ""}, // its initialize reply
 		{"src/core/usage_codex.odin", "usage_codex_parse", "jg.parse_string", "", ""}, // its account/rateLimits/read reply
+		{"src/core/usage_claude.odin", "usage_settings_parse", "jg.parse_string", "", ""}, // a Claude settings file (a regular file of at most 1 MB) or a --settings flag's inline JSON (at most 1024 bytes: claude_args_check)
+		{"src/core/usage_claude.odin", "usage_claude_response_id", "jg.parse_string", "", ""}, // a headless claude's stdout line (256 KB cap for the whole run)
+		{"src/core/usage_claude.odin", "usage_claude_parse", "jg.parse_string", "", ""}, // its initialize and get_usage answers (one line each, of that run)
 		{"src/core/claude_status.odin", "hints_load", "jg.parse", "", ""},
 		{"src/core/claude_reload.odin", "restart_keys_digest", "jg.parse", "", ""},
 		{"src/core/claude_lists.odin", "read_plugins", "jg.parse", "", ""}, // a Claude settings.json's enabledPlugins (at most 4 MB, on a worker) // a Claude settings file's enabledPlugins (at most 4 MB; only once its stamp changed)

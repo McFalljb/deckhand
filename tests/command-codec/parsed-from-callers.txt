@@ -195,6 +195,15 @@ Claude_Turn_Report.question
 Claude_Turn_Report.state
 Claude_Turn_Report.tab_id
 Claude_Turn_Report.title
+Claude_Usage_Report.five_hour
+Claude_Usage_Report.five_hour_resets
+Claude_Usage_Report.seven_day
+Claude_Usage_Report.seven_day_resets
+Claude_Usage_Report.spend
+Claude_Usage_Report.spend_limit_usd
+Claude_Usage_Report.spend_resets
+Claude_Usage_Report.spend_used_usd
+Claude_Usage_Report.tab_id
 Claude_Wait_Idle.prompt_id
 Claude_Wait_Idle.tab_id
 Claude_Wait_Idle.timeout_ms
@@ -461,6 +470,8 @@ Set_Claude_Account_Default.harness
 Set_Claude_Default_Flags.confirm
 Set_Claude_Default_Flags.harness
 Set_Claude_Default_Flags.skip_permissions
+Set_Claude_Usage.background
+Set_Claude_Usage.statusline
 Set_Close_Confirm.rule
 Set_Close_Confirm.tab_kind
 Set_Confirm_Policy.caller

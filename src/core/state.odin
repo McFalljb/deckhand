@@ -314,6 +314,8 @@ Settings :: struct {
 	chats_readonly: bool, // the removed Start chats read-only: kept on the grow-only wire, always false (a saved value is ignored)
 	claude_skip_permissions: bool, // the user's default flag for Claude tabs THEY start (claude_with_defaults); user-only, off by default
 	codex_full_access: bool, // the same for Codex tabs: --dangerously-bypass-approvals-and-sandbox (codex_with_defaults)
+	claude_usage_statusline_off: bool, // Claude tabs start without Deckhand's status line wrapper (usage_claude.odin; default: on); user-only
+	claude_usage_background_off: bool, // no background get_usage reads of Claude Code accounts (usage_claude.odin; default: on); user-only
 	agent_name:    string, // the built-in agent's name ("" = AGENT_NAME_DEFAULT)
 	agent_model:   string, // the agent's model, "provider/id[:thinking]" ("" = pi's default); user-only
 	notify_off:    bool, // no OS notifications from the agent while the window is in the background

@@ -87,6 +87,13 @@ ACTIONS := [?]Action {
 	{id = "claude_skip_permissions", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions, harness = .Claude}, true
 	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "Claude Code · on: --dangerously-skip-permissions in the tabs you start" : "Claude Code · off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
+	// Claude Code's usage (Settings › Coding agents; core/usage_claude.odin)
+	{id = "claude_usage_statusline", make = proc() -> (core.Command, bool) {
+		return core.Set_Claude_Usage{statusline = state.settings.claude_usage_statusline_off}, true
+	}, detail = proc() -> string {return state.settings.claude_usage_statusline_off ? "Claude Code · off" : "Claude Code · on: new and restarted tabs send their plan limits"}, done = proc() -> string {return turns("Show Claude usage", !state.settings.claude_usage_statusline_off)}},
+	{id = "claude_usage_background", make = proc() -> (core.Command, bool) {
+		return core.Set_Claude_Usage{background = state.settings.claude_usage_background_off}, true
+	}, detail = proc() -> string {return state.settings.claude_usage_background_off ? "Claude Code · off" : "Claude Code · on: a headless claude's get_usage while USAGE shows"}, done = proc() -> string {return turns("Background Claude usage checks", !state.settings.claude_usage_background_off)}},
 	// Default flags… per harness (Settings › Coding agents; ui_flags.odin): the page's field
 	{id = "claude_default_flags", title = proc() -> string {return "Default Claude Code flags…"}, make = proc() -> (core.Command, bool) {
 		return core.Set_Harness_Flags{harness = .Claude, flags = state.settings.harness_flags[.Claude]}, true

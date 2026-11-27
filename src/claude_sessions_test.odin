@@ -254,7 +254,7 @@ claude_session_resume_from_row :: proc(t: ^testing.T) {
 	core.run_command(core.Close_Session{session = r.created_id}, CS_UI)
 	argf := fmt.tprintf("%s/argv", dir)
 	plugin := os.get_env("DECKHAND_CLAUDE_PLUGIN", context.temp_allocator)
-	bare := fmt.tprintf("--plugin-dir\n%s\n--resume\n%s\n", plugin, sid)
+	bare := fmt.tprintf("--plugin-dir\n%s\n%s--resume\n%s\n", plugin, core.usage_claude_settings_argv_for_test(), sid) // Deckhand's status line (usage_claude.odin), then the resume
 	for caller in ([]core.Caller{CS_CONTROL, CS_SCRIPT, CS_UI}) {
 		os.remove(argf)
 		os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))

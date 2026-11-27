@@ -68,15 +68,66 @@ usage_codex_read :: proc(script, home: string, default_home := false) -> ^Usage_
 // The app-server conversation: the replies to requests 1 and 2 (their JSON lines), or why not.
 @(private = "file")
 usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string, why: string) {
-	argv := shell_script_argv(login_shell(), script, "codex")
+	Talk :: struct {
+		init_reply, read_reply: string,
+		sent_read:              bool,
+	}
+	talk: Talk
+	init, _, _ := usage_codex_requests()
+	why = usage_exchange(script, {prog = "codex", what = "codex app-server", none = "codex app-server ended without an answer (is Codex installed and new enough?)"}, init, &talk, proc(data: rawptr, line: string) -> (st: Usage_Step) {
+		t := (^Talk)(data)
+		// a reply by its id; anything else (a notification, a profile's output) is skipped
+		id, has := usage_reply_id(line)
+		if !has do return
+		if id == 1 && t.init_reply == "" {
+			t.init_reply = line
+			_, initialized, read := usage_codex_requests()
+			st.send = make([]string, 2, context.temp_allocator) // outlives this step: never a literal's stack
+			st.send[0], st.send[1] = initialized, read
+			st.answered = true
+			t.sent_read = true
+		} else if id == 2 && t.sent_read {
+			t.read_reply = line
+			st.done = true
+		}
+		return
+	})
+	return talk.init_reply, talk.read_reply, why
+}
+
+// What a usage exchange's process is called in its errors.
+Usage_Prog :: struct {
+	prog: string, // what could not start: "codex"
+	what: string, // what did not answer: "codex app-server"
+	none: string, // it ended before any answer
+}
+
+// One step of an exchange: the lines to send now, whether the answer is complete, or why it
+// failed; answered: a first answer came (an end after it "ended before it answered").
+Usage_Step :: struct {
+	send:     []string,
+	done:     bool,
+	fail:     string,
+	answered: bool,
+}
+
+// A usage read's process (both sources): the script through the login shell, in `/`, stderr to
+// /dev/null, in a process group of its own; first sent, then each whole line of its output goes
+// to step until it says done (or fails). Then stdin is closed and it ends on its own (its output
+// read to the end, so none of its group still holds it), else its group is stopped (SIGTERM after
+// 0.5 s, SIGKILL after the grace). At most USAGE_READ_TIMEOUT and USAGE_REPLY_MAX of output for
+// the whole run. "" = done; else why not.
+usage_exchange :: proc(script: string, names: Usage_Prog, first: string, data: rawptr, step: proc(data: rawptr, line: string) -> Usage_Step) -> (why: string) {
+	argv := shell_script_argv(login_shell(), script, names.prog)
 	cargv := make([]cstring, len(argv) + 1, context.temp_allocator)
 	for a, i in argv do cargv[i] = strings.clone_to_cstring(a, context.temp_allocator)
+	no_start := fmt.tprintf("could not start %s", names.prog)
 	pin, pout: [2]posix.FD
-	if posix.pipe(&pin) != .OK do return "", "", "could not start codex"
+	if posix.pipe(&pin) != .OK do return no_start
 	if posix.pipe(&pout) != .OK {
 		posix.close(pin[0])
 		posix.close(pin[1])
-		return "", "", "could not start codex"
+		return no_start
 	}
 	for fd in ([4]posix.FD{pin[0], pin[1], pout[0], pout[1]}) do posix.fcntl(fd, .SETFD, i32(posix.FD_CLOEXEC))
 	null_fd := posix.open("/dev/null", {.RDWR, .CLOEXEC})
@@ -91,7 +142,7 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 	posix_spawn_file_actions_adddup2(&fa, i32(pin[0]), 0)
 	posix_spawn_file_actions_adddup2(&fa, i32(pout[1]), 1)
 	posix_spawn_file_actions_adddup2(&fa, i32(null_fd), 2)
-	posix_spawn_file_actions_addchdir_np(&fa, "/") // no project's folder: codex reads none
+	posix_spawn_file_actions_addchdir_np(&fa, "/") // no project's folder: it reads none
 	pid: posix.pid_t
 	sync.rw_mutex_shared_lock(&fork_lock)
 	err := posix.posix_spawnp(&pid, cargv[0], &fa, &attr, raw_data(cargv), posix.environ)
@@ -101,10 +152,10 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 	if err != .NONE {
 		posix.close(pin[1])
 		posix.close(pout[0])
-		return "", "", "could not start codex"
+		return no_start
 	}
-	// a codex gone mid-write: an error, not SIGPIPE (the serve process ignores it anyway; a window's
-	// in-process core may not)
+	// a process gone mid-write: an error, not SIGPIPE (the serve process ignores it anyway; a
+	// window's in-process core may not)
 	when ODIN_OS == .Darwin {
 		F_SETNOSIGPIPE :: 73
 		posix.fcntl(pin[1], posix.FCNTL_Cmd(F_SETNOSIGPIPE), i32(1))
@@ -113,17 +164,17 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 		msg := strings.concatenate({line, "\n"}, context.temp_allocator)
 		return posix.write(fd, raw_data(msg), uint(len(msg))) == len(msg)
 	}
-	init, initialized, read := usage_codex_requests()
-	if !send(pin[1], init) do why = "codex app-server did not start"
+	if !send(pin[1], first) do why = fmt.tprintf("%s did not start", names.what)
 	deadline := time.tick_now()._nsec + i64(USAGE_READ_TIMEOUT)
 	buf := make([dynamic]u8, 0, 4096, context.temp_allocator)
 	chunk: [16 << 10]u8
-	sent_read := false
 	open := why == ""
+	done := false
+	answered := false
 	total := 0 // bytes read, the whole run
 	eof := false // its stdout ended (every writer closed it)
 	for open {
-		// each whole line: a reply by its id; anything else (a notification, a profile's output) is skipped
+		// each whole line to step
 		for {
 			nl := -1
 			for c, i in buf do if c == '\n' {
@@ -133,18 +184,21 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 			if nl < 0 do break
 			line := strings.clone(strings.trim_space(string(buf[:nl])), context.temp_allocator)
 			remove_range(&buf, 0, nl + 1)
-			id, has := usage_reply_id(line)
-			if !has do continue
-			if id == 1 && init_reply == "" {
-				init_reply = line
-				if !send(pin[1], initialized) || !send(pin[1], read) {
-					why = "codex app-server stopped"
-					open = false
-					break
-				}
-				sent_read = true
-			} else if id == 2 && sent_read {
-				read_reply = line
+			st := step(data, line)
+			answered ||= st.answered
+			if st.fail != "" {
+				why = st.fail
+				open = false
+				break
+			}
+			for l in st.send do if !send(pin[1], l) {
+				why = fmt.tprintf("%s stopped", names.what)
+				open = false
+				break
+			}
+			if !open do break
+			if st.done {
+				done = true
 				open = false
 				break
 			}
@@ -152,7 +206,7 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 		if !open do break
 		left := deadline - time.tick_now()._nsec
 		if left <= 0 {
-			why = "codex app-server did not answer in time"
+			why = fmt.tprintf("%s did not answer in time", names.what)
 			break
 		}
 		pfd := [1]posix.pollfd{{fd = pout[0], events = {.IN}}}
@@ -160,17 +214,17 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 		n := posix.read(pout[0], &chunk[0], len(chunk))
 		if n <= 0 {
 			eof = n == 0
-			why = init_reply == "" ? "codex app-server ended without an answer (is Codex installed and new enough?)" : "codex app-server ended before it answered"
+			why = answered ? fmt.tprintf("%s ended before it answered", names.what) : names.none
 			break
 		}
 		total += int(n)
 		if total > USAGE_REPLY_MAX {
-			why = "codex app-server's output was too long"
+			why = fmt.tprintf("%s's output was too long", names.what)
 			break
 		}
 		append(&buf, ..chunk[:n])
 	}
-	// done: stdin closed (the server's end); it ends on its own (its output read to the end, so
+	// done: stdin closed (the process's end); it ends on its own (its output read to the end, so
 	// none of its group still holds it), else its group is stopped
 	posix.close(pin[1])
 	wstatus: i32
@@ -200,7 +254,7 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 	// group is gone and its id may be another's by now
 	if !(exited && eof) do posix.killpg(pid, .SIGKILL)
 	if !exited do posix.waitpid(pid, &wstatus, {})
-	if read_reply == "" && why == "" do why = "codex app-server gave no answer"
+	if !done && why == "" do why = fmt.tprintf("%s gave no answer", names.what)
 	return
 }
 

@@ -553,14 +553,16 @@ claude_resume_flags_user_only :: proc(t: ^testing.T) {
 	}
 	argf := fmt.tprintf("%s/claude-argv", dir)
 	plugin := os.get_env("DECKHAND_CLAUDE_PLUGIN", context.temp_allocator)
-	bare := fmt.tprintf("--plugin-dir\n%s\n--resume\n%s\n", plugin, sid)
+	bare := fmt.tprintf("--plugin-dir\n%s\n%s--resume\n%s\n", plugin, core.usage_claude_settings_argv_for_test(), sid) // Deckhand's status line (usage_claude.odin), then the resume
 	for caller in ([]core.Caller{{kind = .Control}, {kind = .Script}}) {
 		testing.expect_value(t, argv_of(t, sid, argf, caller), bare)
 	}
 	// the history keeps them for the user's own resume
 	rec, _ := core.claude_record(sid)
 	testing.expect_value(t, len(rec.args), len(saved))
-	testing.expect_value(t, argv_of(t, sid, argf, CL_UI), fmt.tprintf("%s%s\n", bare, strings.join(saved, "\n", context.temp_allocator)))
+	// their own --settings (a file): Deckhand's status line is not added (usage_claude_inject)
+	theirs := fmt.tprintf("--plugin-dir\n%s\n--resume\n%s\n", plugin, sid)
+	testing.expect_value(t, argv_of(t, sid, argf, CL_UI), fmt.tprintf("%s%s\n", theirs, strings.join(saved, "\n", context.temp_allocator)))
 }
 
 // Comment crops for Claude: numbered as the text names them, 0600, and only what fits with its

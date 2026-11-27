@@ -39,6 +39,7 @@ ut_reset :: proc(homes: ..string) -> (default_home: string) {
 	os.unset_env("CODEX_HOME")
 	os.make_directory_all(fmt.tprintf("%s/.codex", home))
 	harness_found[.Codex] = .Yes
+	harness_found[.Claude] = .No // Claude Code's rows: usage_claude_test.odin
 	clear(&state.settings.codex_accounts)
 	for h in homes {
 		os.make_directory_all(h)
@@ -53,6 +54,7 @@ ut_reset :: proc(homes: ..string) -> (default_home: string) {
 @(private = "file")
 ut_done :: proc() {
 	harness_found[.Codex] = .Unknown
+	harness_found[.Claude] = .Unknown
 	clear(&state.settings.codex_accounts)
 	claude_accounts_gen += 1
 	usage_reset_for_test()
@@ -362,7 +364,7 @@ usage_due_times :: proc(t: ^testing.T) {
 	harness_found[.Codex] = .No
 	r = run_command(Refresh_Usage{}, {kind = .Internal})
 	testing.expect(t, !r.ok)
-	testing.expect(t, strings.contains(r.error, "Codex is not installed"), r.error)
+	testing.expect(t, strings.contains(r.error, "not installed"), r.error)
 }
 
 @(test)

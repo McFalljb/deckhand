@@ -636,6 +636,8 @@ Command :: union {
 	Mark_All_Read, // ⌥⇧⌘U (mark_read.odin)
 	Refresh_Usage, // the USAGE section's accounts read now (usage.odin)
 	Usage_Done,
+	Claude_Usage_Report, // a Claude tab's status line numbers (usage_claude.odin)
+	Set_Claude_Usage, // Settings' two Claude usage switches (usage_claude.odin)
 	Rescan_Done,
 	Refresh_Shell_Env_Done,
 	Bridge_Done,
@@ -946,6 +948,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	case File_Read:            q3 = true // a file's text: its caller's only, never in an event (web_files.odin)
 	case Job_Draft:            q3 = true // a job note's text: its caller's only, never in an event or the log (web_jobs.odin)
 	case Web_Pair, Web_Devices: q3 = true // a pairing code: its caller's only, never in an event or the log (web.odin)
+	case Claude_Usage_Report:  q3 = true // the tab's own status line command: its caller's only (usage_claude.odin); and it comes at every footer redraw
 	case Focus_Release:        q3 = !changed // nothing had the keyboard (test mode's barrier: client_barrier)
 	}
 	// app tabs: answers and queries (App_Call_Done finishes its request itself)
@@ -2038,6 +2041,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return status_apply(cmd, caller)
 	case Refresh_Usage, Usage_Done:
 		return usage_apply(cmd, caller)
+	case Claude_Usage_Report:
+		return usage_claude_report_apply(c)
+	case Set_Claude_Usage:
+		return usage_claude_set(c)
 	case Mark_All_Read:
 		return mark_all_read_apply(caller, request_id)
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:

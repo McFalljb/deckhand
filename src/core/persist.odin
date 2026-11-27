@@ -617,6 +617,8 @@ workspace_json :: proc() -> string {
 
 	if st.claude_skip_permissions do kb(&w, "claude_skip_permissions", true)
 	if st.codex_full_access do kb(&w, "codex_full_access", true)
+	if st.claude_usage_statusline_off do kb(&w, "claude_usage_statusline", false) // usage_claude.odin: on by default
+	if st.claude_usage_background_off do kb(&w, "claude_usage_background", false)
 	for h in Harness do if st.harness_flags[h] != "" do ks(&w, strings.concatenate({HARNESS_KEYS[h], "_flags"}, context.temp_allocator), st.harness_flags[h]) // harness_flags.odin
 	if len(st.pi_extensions) > 0 {
 		k(&w, "pi_extensions")
@@ -791,6 +793,8 @@ workspace_restore :: proc(text: string) -> string {
 		// chats_readonly (the removed Start chats read-only) in an older file: ignored
 		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp), harness = .Claude})
 		if fa, fok := st["codex_full_access"].(json.Boolean); fok do run(Set_Claude_Default_Flags{skip_permissions = bool(fa), harness = .Codex})
+		if us, uok := st["claude_usage_statusline"].(json.Boolean); uok do run(Set_Claude_Usage{statusline = bool(us)})
+		if ub, uok := st["claude_usage_background"].(json.Boolean); uok do run(Set_Claude_Usage{background = bool(ub)})
 		for h in Harness do if hf, hok := st[strings.concatenate({HARNESS_KEYS[h], "_flags"}, context.temp_allocator)].(json.String); hok do run(Set_Harness_Flags{harness = h, flags = hf}) // checked as the user's would be
 		if pe, pok := st["pi_extensions"].(json.Object); pok {
 			names := make([dynamic]string, context.temp_allocator)

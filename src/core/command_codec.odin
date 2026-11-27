@@ -95,6 +95,7 @@ COMMAND_NAMES := [?]struct {
 	{Claude_Subagent, "claude.subagent"},
 	{Claude_Background, "claude.background"},
 	{Claude_Model_Report, "claude.model"},
+	{Claude_Usage_Report, "claude.usage"},
 }
 
 Cmd_Tx :: enum u8 {

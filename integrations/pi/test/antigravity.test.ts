@@ -47,7 +47,7 @@ test("agy versions: parse agy's forms; below 1.5.1 is too old; unparseable is no
 	assert.equal(agyTooOld(undefined), false);
 });
 
-test("findAgy: the path setting when it is an absolute executable, else agy then antigravity on PATH; never relative", () => {
+test("findAgy: the path setting when it is an absolute executable, else agy on PATH (finding 5: never `antigravity`, which may be the IDE's launcher); never relative", () => {
 	const dir = mkdtempSync(path.join(TMP_ROOT, "bin-"));
 	const other = mkdtempSync(path.join(TMP_ROOT, "bin-"));
 	const mk = (d: string, name: string, mode = 0o755) => {
@@ -58,13 +58,14 @@ test("findAgy: the path setting when it is an absolute executable, else agy then
 	};
 	assert.equal(findAgy({ PATH: dir }), undefined, "nothing installed");
 	const anti = mk(other, "antigravity");
-	assert.equal(findAgy({ PATH: [dir, other].join(path.delimiter) }), anti, "macOS download name");
+	assert.equal(findAgy({ PATH: [dir, other].join(path.delimiter) }), undefined, "`antigravity` alone is not agy");
 	const agy = mk(other, "agy");
-	assert.equal(findAgy({ PATH: [dir, other].join(path.delimiter) }), agy, "agy before antigravity");
+	assert.equal(findAgy({ PATH: [dir, other].join(path.delimiter) }), agy, "agy");
 	mk(dir, "agy", 0o644);
 	assert.equal(findAgy({ PATH: [dir, other].join(path.delimiter) }), agy, "not executable: skipped");
 	assert.equal(findAgy({ PATH: "relative/bin" }), undefined);
 	assert.equal(findAgy({ PATH: other }, FAKE), FAKE, "the setting");
+	assert.equal(findAgy({ PATH: dir }, anti), anti, "`antigravity` only when set by /antigravity path");
 	assert.equal(findAgy({ PATH: dir }, "fake-agy.mjs"), undefined, "a relative setting is not looked up");
 	assert.equal(findAgy({ PATH: other }, path.join(dir, "missing")), agy, "an unusable setting: PATH's");
 	assert.equal(findAgy({ PATH: other, DECKHAND_AGY_PATH: FAKE }), agy, "no environment variable picks the binary");

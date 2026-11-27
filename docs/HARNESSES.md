@@ -133,8 +133,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
 
 - **Without agy, only `/antigravity`.** `findAgy` (`lib/acp.ts`): the `agyPath` the user set with
   `/antigravity path` in `accounts.json` (used only when it is an absolute path to an executable
-  file, never looked up; else ignored, and the status says so), else `agy` or `antigravity` on
-  `PATH`; a few stats at load. No environment variable picks the binary (what Deckhand ships reads
+  file, never looked up; else ignored, and the status says so), else `agy` on `PATH`
+  (only that name, as t3code: `antigravity` may be the Antigravity IDE's launcher; another name
+  needs `/antigravity path`); a few stats at load. No environment variable picks the binary (what Deckhand ships reads
   only the variables `scripts/check-env-reads.py` lists). Not found: the extension registers
   only `/antigravity`, which says where to get agy (1.5.12 or newer) and offers `/antigravity path`;
   no provider, hook, status line or output. Found (at load, or when `/antigravity path` sets a path

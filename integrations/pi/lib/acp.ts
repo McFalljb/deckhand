@@ -59,14 +59,14 @@ function executable(p: string): boolean {
 export const usableAgyPath = (p: string | undefined): p is string => !!p && path.isAbsolute(p) && executable(p);
 
 /**
- * The agy binary: `agy` or `antigravity` (the name of macOS downloads) on PATH. A few stats, no
- * process started. The user's own path setting (`/antigravity path`) comes first: the extension
+ * The agy binary: `agy` on PATH, as t3code looks it up (`antigravity` may be the Antigravity IDE's
+ * launcher, so any other name is left to `/antigravity path`). A few stats, no process started. The user's own path setting (`/antigravity path`) comes first: the extension
  * passes it as `configured` when it is usable.
  */
 export function findAgy(env: NodeJS.ProcessEnv = process.env, configured?: string): string | undefined {
 	if (usableAgyPath(configured)) return configured;
 	const dirs = (env.PATH ?? "").split(path.delimiter).filter((d) => d && path.isAbsolute(d));
-	for (const name of ["agy", "antigravity"]) for (const d of dirs) if (executable(path.join(d, name))) return path.join(d, name);
+	for (const d of dirs) if (executable(path.join(d, "agy"))) return path.join(d, "agy");
 	return undefined;
 }
 

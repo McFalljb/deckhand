@@ -2,8 +2,8 @@
  * Deckhand's Antigravity extension: Google Antigravity in pi tabs, through the user's own
  * Antigravity CLI (`agy acp`, ACP over stdio: lib/acp.ts, lib/agy.ts), as t3code drives it.
  *
- * - Without agy (the path set by `/antigravity path` in accounts.json, else `agy` or
- *   `antigravity` on PATH: a few stats, no process) only `/antigravity` is registered: it says
+ * - Without agy (the path set by `/antigravity path` in accounts.json, else `agy` on
+ *   PATH: a few stats, no process) only `/antigravity` is registered: it says
  *   where to get agy and sets its path. No provider, hook, status line or output. Once a path is
  *   set, the rest is registered in the same pi session. No environment variable picks the binary.
  * - With agy: one pi provider per account (lib/agy-accounts.ts): `antigravity` for the account

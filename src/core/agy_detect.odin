@@ -39,7 +39,12 @@ agy_json :: proc(path: string) -> json.Object {
 }
 
 // agy and its version as the extension would find it ("" = none, or unknown). Temp.
+// Unit tests look only where they say (an agy the developer installed must not change what they
+// see); scenes search the scene's own PATH and data dir (detect_path is "" in test mode).
 agy_detect :: proc(root := "", path := "") -> (bin, version: string) {
+	when TEST_HOOKS {
+		if ODIN_TEST && root == "" && path == "" do return
+	}
 	root := root != "" ? root : agy_root()
 	path := path != "" ? path : detect_path()
 	if root != "" {

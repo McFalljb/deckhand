@@ -614,6 +614,9 @@ class Runner:
 
 
 def main():
+    # the fixtures' file modes as on CI (a umask of 077 makes every file 0600, and Deckhand takes a
+    # private file in pi's agent folder for a sign-in: settings_credential); fresh-build.sh too
+    os.umask(0o022)
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("names", nargs="*")
     ap.add_argument("--all", action="store_true")

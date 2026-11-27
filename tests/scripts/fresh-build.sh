@@ -11,3 +11,7 @@ _stale=$(find src tools/deckhand-cli integrations/claude-code integrations/pi/ex
 # a scene stops at its first failed check or wait (src/autotest.odin; DECKHAND_SCRIPT_FAIL_FAST=0
 # to run every line anyway, e.g. to see all the failures of a script being written)
 export DECKHAND_SCRIPT_FAIL_FAST="${DECKHAND_SCRIPT_FAIL_FAST:-1}"
+# the fixtures' file modes as on CI, whatever the user's umask: with 077 every file a scene writes
+# is 0600, and Deckhand takes a private file in pi's agent folder for a sign-in (settings_credential:
+# not listed, watched or opened), so settings and reload saw none of theirs. tests/scenes.py too.
+umask 022

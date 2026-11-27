@@ -1178,7 +1178,9 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 				if r.title == "" && c.title != "" do r.title = strings.clone(cut_utf8(strings.trim_space(one_line(c.title, context.temp_allocator)), CLAUDE_TITLE_MAX))
 				return {ok = true}, true
 			}
-		case "idle", "error": ct.turn = .Idle // StopFailure ends the turn too
+		case "idle", "error":
+			ct.turn = .Idle // StopFailure ends the turn too
+			if harness_is_codex(ct.harness) do usage_codex_turn_ended(ct.account) // its usage read soon after (usage.odin)
 		case "waiting":       ct.turn = .Waiting
 		case:                 return fail("state must be submitted, idle, error or waiting"), false
 		}

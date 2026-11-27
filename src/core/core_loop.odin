@@ -55,6 +55,7 @@ core_tick_body :: proc() {
 	jobs_tick() // Atlas's jobs: notes, the clock, running runs (jobs.odin)
 	agent_pending_tick() // Send to Atlas text that waited too long for pi (session_info.odin)
 	claude_tick() // Claude tabs: held texts that can go now, their Enter (claude.odin)
+	usage_tick() // quota and usage: the view follows the accounts; a read when one is due (usage.odin)
 	claude_wait_tick() // claude_wait_idle: waits whose Claude tab is idle, gone or past its deadline (claude_wait.odin)
 	dead_tab_tick() // Restart with model…: pi's selector once the new pi is up (dead_tab.odin)
 	control_token_clip_tick() // Copy a control token: off the clipboard after a minute (commands.odin)

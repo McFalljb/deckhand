@@ -98,6 +98,7 @@ STATE_SECTIONS := [?]State_Section {
 	{"claude", {"claude_history", "claude_readonly_ids", "claude_disk", "claude_disk_chats"}},
 	{"live", {"live"}}, // a separate core's runtime the window shows (core_live.odin)
 	{"machines", {"machines"}}, // other machines over SSH and their links (machines.odin)
+	{"usage", {"usage"}}, // quota and usage per account (usage.odin)
 }
 
 // Sections named in §5.8 that are not State (nothing sends them yet).

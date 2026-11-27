@@ -138,6 +138,7 @@ Window_Facts :: struct {
 	centre:               [3]f32,
 	panes:                []Pane_Fact,
 	exe:                  string, // a separate core's window: its own executable (the app bundle Deckhand's updates replace)
+	hidden:               bool, // hidden (⌘H) or minimised: nobody sees it (usage.odin reads only while shown)
 }
 
 Pane_Fact :: struct {

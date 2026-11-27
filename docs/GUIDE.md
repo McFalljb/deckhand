@@ -209,6 +209,29 @@ If you already have pi-kit installed, it works next to Deckhand's integration: i
 Deckhand parts (`desk-bridge`, `desk`, `desk-browser`) stay inactive in Deckhand's tabs, and its
 sidebar hands its sections to Deckhand's right column.
 
+#### Google Antigravity in pi tabs (preview)
+
+With Google's Antigravity CLI installed (`agy`, or `antigravity` from the macOS download; version
+1.5.1 or newer, 1.5.12 recommended), a pi tab can use your Antigravity models. Without it, nothing
+of this shows up. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
+turn: its model, its tools, its own instructions. Deckhand never sees or stores your Google sign-in.
+
+- **`/antigravity-login`** signs agy in: it shows a Google link, you sign in there and paste the
+  code the Antigravity page shows. (`agy acp --login` in a terminal does the same.)
+- **`/model`** lists **Antigravity (agy's default model)**, and your account's models once agy has
+  listed them (after `/antigravity-login`, after **`/antigravity-models`**, or after a first
+  message).
+- The answer streams as text; agy's thinking, the tools it runs and its plan show as thinking, and
+  what it is doing shows in the status line. pi's own tools are not used, and pi's guardrails do not
+  apply to what agy runs.
+- **No approvals yet:** agy runs in its `default` mode and every time it asks for permission (to
+  edit a file, run a command) or asks you a question, Deckhand declines, and the thinking says so.
+  So for now agy reads and answers; whatever it would ask your approval for is not done.
+- agy keeps the conversation itself. When pi compacts, it keeps a short note instead of a summary.
+  If another model answered earlier in the session, or you went back in `/tree`, Deckhand starts a
+  new agy session and gives it the conversation so far as text.
+- For a different agy than the one on your `PATH`, set `DECKHAND_AGY_PATH` to its full path.
+
 ## How Deckhand runs
 
 Deckhand is three programs:

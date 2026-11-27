@@ -21,6 +21,7 @@ installs the harnesses. The Claude and Codex tabs themselves: [CLAUDE-TABS.md](C
 Contents: 1. [Origin](#1-origin-pi-kit) ·
 2. [pi: loading from a path](#2-pi-loading-from-a-path) ·
 3. [The pi integration](#3-the-pi-integration) ·
+3a. [Antigravity in pi tabs](#3a-antigravity-in-pi-tabs-preview) ·
 4. [Overlap: how Deckhand steps back](#4-overlap-how-deckhand-steps-back) ·
 5. [Claude Code](#5-claude-code---plugin-dir) ·
 5a. [Codex](#5a-codex-hooks-per-run) ·
@@ -89,6 +90,7 @@ does, in load order.
 | `desk` | `extensions/desk` (+ `state.ts`, `commands.ts`, `app.ts` → `lib/`) | also `DECKHAND_CONTROL_TOKEN` (Atlas) |
 | `browser` | `extensions/desk-browser` (+ `browser.ts` → `lib/`) | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
 | `panels` | `extensions/sidebar` (its data side; `rows.ts` → `lib/`) | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
+| `antigravity` | Deckhand's own (ACP client after t3code's; `acp.ts`, `agy.ts`, `agy-login.ts`, `antigravity.ts` in `lib/`) | an agy binary found (§3a); every mode |
 | `guardrails` (optional, on) | `extensions/guardrails` (`core.ts` → `lib/guardrails.ts`) | always (every mode); read-only with `PI_KIT_READONLY=1` |
 | `shell` (optional, on) | `extensions/shell` (`lines.ts` → `lib/shell.ts`) | always but read-only sessions |
 | `notes` (optional, off) | `extensions/notes` | interactive and print runs, not pi-subagents children |
@@ -121,6 +123,45 @@ mcp__* --no-mcp`, which keeps every extension tool from the model. `PI_KIT_READO
 `write` and mutating `bash`, plus secret redaction of what `read` returns). Chats are full pi (the
 former **Start chats read-only** is gone): what a chat's agent may do is the chats folder's
 `AGENTS.md`'s to say.
+
+## 3a. Antigravity in pi tabs (preview)
+
+`extensions/antigravity` gives pi a provider, `antigravity`, backed by the user's own Google
+Antigravity CLI over ACP (`agy acp`: JSON-RPC 2.0, one message per line on stdio), as t3code drives
+it. agy runs the whole turn (model, tools, system prompt) and keeps the conversation and the
+sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or calls Google.
+
+- **Dormant without agy.** `findAgy` (`lib/acp.ts`): `DECKHAND_AGY_PATH` (absolute, executable),
+  else `agy` or `antigravity` on `PATH`; a few stats at load. Not found: the extension registers
+  nothing. Found: the provider, `/antigravity-login`, `/antigravity-models`, and hooks for
+  `session_start`, `session_shutdown` and `session_before_compact`. No tools or flags.
+- **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
+  `clientInfo`/`clientCapabilities`: agy answers `protocolVersion: 2` in the v1 shape), no fs and
+  no terminal capability; agy older than 1.5.1 (`agentInfo.version`) is refused; `session/new`
+  (or `session/resume`), agy's `default` mode, then the model and thinking by config option
+  (`session/set_config_option`, `model` and the `thought_level` category). No eager
+  `authenticate`: on auth_required it is called once with agy's first method; a sign-in link on
+  agy's output means "run `/antigravity-login`".
+- **Approvals: none yet.** Every `session/request_permission` is answered `reject_once` (else
+  `cancelled`), every ask_question (`interaction_…`) and elicitation declined, `fs/*` and
+  `terminal/*` "method not found". Granting approvals is a later, separately reviewed change.
+- **Sign-in** (`lib/agy-login.ts`): `agy acp --login`; the accounts.google.com link is checked
+  and shown, the pasted code (or the callback page's URL for this sign-in) is checked and written
+  to agy's stdin as one line; agy stores the credential.
+- **Models**: `antigravity/default` (agy's own choice) always; the account's from a session's
+  `model` option (a throwaway session on `/antigravity-models` and after sign-in; every real
+  session too), in memory only.
+- **Turns** (`lib/antigravity.ts`): one agy process and session per pi session
+  (`options.sessionId`); its id is each answer's `responseId`. Only the user messages after the last
+  answer are sent; when the transcript is not agy's (another provider answered, `/tree`), a new
+  agy session gets the transcript as text first; after a restart or crash the session named on
+  the last answer is resumed. Text streams as text, thoughts as thinking, tool calls, plan and
+  declined requests as lines of thinking and the status line, never as pi tool calls. Abort sends
+  `session/cancel` and waits 10 s, then stops the process. Usage is agy's per-turn
+  `PromptResponse.usage`; cost 0. pi's summaries (compaction, branch summaries) are answered
+  without agy; replays (`disableContinuation`) are refused.
+- **Tests**: `test/antigravity.test.ts` against `test/fake-agy.mjs`, a stand-in agy (t3code's
+  fixtures' shapes); never a real agy.
 
 ## 4. Overlap: how Deckhand steps back
 
@@ -421,3 +462,7 @@ open checks are in [CODEX.md](CODEX.md), "How it was tested"):
   installed pi-kit, the step-backs (`getCommands` names for `/guardrails`, pi-kit's reminder on
   the branch before `turn_start`) and pi's conflict reports for the shell tools;
 - Atlas with `--skill`: `deckhand-desk` listed (pi's `loadSkills` is tested, the CLI path is not).
+- Antigravity against a real agy (none was available): the sign-in, models, streaming, cancel
+  and resume are tested against a stand-in only; one offline pi 1.5.2 print run with no
+  credentials used the provider against the stand-in (two turns, one agy session). `/model`
+  listing the models published after start, and the TUI's status line, are unchecked in a real pi.

@@ -25,16 +25,20 @@ assert_state focus.agents.5.state ok
 assert_state focus.agents.5.version 0.47.0
 assert_state focus.agents.6.id rpiv-btw
 assert_state focus.agents.6.state ok
-assert_state focus.agents.7.id claude
-assert_state focus.agents.7.state ok
-assert_state focus.agents.7.version 2.1.300
-assert_state focus.agents.7.layout official installer
-assert_state focus.agents.8.id claude-plugin
-assert_state focus.agents.8.state built_in
+# Antigravity (through pi): no agy in the scene (never run, never installed): shown only
+assert_state focus.agents.7.id antigravity
+assert_state focus.agents.7.state missing
+assert_state focus.agents.7.action none
+assert_state focus.agents.8.id claude
+assert_state focus.agents.8.state ok
+assert_state focus.agents.8.version 2.1.300
+assert_state focus.agents.8.layout official installer
+assert_state focus.agents.9.id claude-plugin
+assert_state focus.agents.9.state built_in
 # Codex (not installed here): one collapsed row offering its install (docs/CODEX.md)
-assert_state focus.agents.9.id codex
-assert_state focus.agents.9.state missing
-assert_state focus.agents.9.command npm install -g @openai/codex@latest
+assert_state focus.agents.10.id codex
+assert_state focus.agents.10.state missing
+assert_state focus.agents.10.command npm install -g @openai/codex@latest
 shot harness-setup/installed-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 200

@@ -330,7 +330,7 @@ spawn_failures_and_bad_sizes :: proc(t: ^testing.T) {
 	fails(t, h, f, 5, "too many rows")
 	sh_spawn(f, 6, "exit 0", cols = 70000)
 	fails(t, h, f, 6, "cols past u16")
-	spawn_ok(t, h, f, 8, "sleep 5")
+	spawn_ok(t, h, f, 8, "sleep 30") // outlives the wait below (a holder_free ends it)
 	sh_spawn(f, 8, "exit 0")
 	fails(t, h, f, 8, "id in use")
 	// a RESIZE out of range is ignored

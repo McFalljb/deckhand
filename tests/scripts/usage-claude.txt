@@ -1,0 +1,71 @@
+# The USAGE section's Claude Code rows (tests/scripts/usage-claude.sh; docs/CLAUDE-TABS.md §6c):
+# the fake claude in print mode for the background reads, and in a tab for the status line.
+wait 1500
+window_active on
+command {"type":"add_project","cwd":"$homedir/proj"}
+assert_state claude_installed true
+ui_command {"type":"add_claude_account","dir":"$homedir/claude-work","label":"Work"}
+ui_command {"type":"add_claude_account","dir":"$homedir/claude-key","label":"Key"}
+assert_state sidebar.folded.usage false
+assert_state settings.claude_usage_statusline true
+assert_state settings.claude_usage_background true
+# 1. the background reads: each folder its own row (Key last: no plan limits)
+waitstate 60000 usage.# 3
+waitstate 60000 usage.2.status no_limits
+assert_state usage.0.source claude
+assert_state usage.0.status ok
+assert_state usage.0.via background
+assert_state usage.0.plan pro
+assert_state usage.0.bars.# 2
+assert_state usage.0.bars.0.label 5h
+assert_state usage.0.bars.0.percent 30
+assert_state usage.0.windows.# 3
+assert_state usage.0.windows.2.name Opus
+assert_state usage.1.label Work
+assert_state usage.1.bars.0.percent 85
+assert_state usage.1.bars.0.level warn
+assert_state usage.1.bars.1.level full
+assert_state usage.2.label Key
+assert_state usage.2.note no plan limits (API key)
+shot usage-claude/background
+# 2. a Claude tab of the default folder: its status line goes through deckhand statusline
+command {"type":"open_session","project_id":$project,"pi_session_id":"uuuu-1"}
+assert_result ok true
+command {"type":"new_claude_tab","session":$session}
+assert_result ok true
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+waitstate 10000 open_sessions.0.tabs.1.turn idle
+type !status
+key enter
+waitfor STATUS: 10000
+waitstate 10000 usage.0.via status_line
+assert_state usage.0.bars.0.percent 42
+assert_state usage.0.bars.1.percent 18
+assert_state usage.0.windows.# 3
+assert_state usage.0.windows.2.name Opus
+assert_state usage.0.live_note
+# the hover names the source (its words: usage_claude_test.odin); seen in the shot
+hover usagerow 0
+wait 700
+shot usage-claude/live
+# 3. Refresh usage: the background read again, even for the live row
+key k cmd
+type refresh usage
+assert_palette 0 action:refresh_usage
+key enter
+waitstate 60000 usage.0.via background
+assert_state usage.0.bars.0.percent 30
+# 4. the switches: background off (Refresh says why), then both off (no Claude rows)
+ui_command {"type":"set_claude_usage","background":false}
+assert_result ok true
+assert_state settings.claude_usage_background false
+ui_command {"type":"refresh_usage"}
+assert_result ok false
+ui_command {"type":"set_claude_usage","statusline":false}
+waitstate 5000 usage.# 0
+ui_command {"type":"set_claude_usage","statusline":true,"background":true}
+waitstate 5000 usage.# 3
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

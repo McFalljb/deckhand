@@ -228,8 +228,8 @@ code the Antigravity page shows. Then **`/model`** lists your models.
 provider) also has an **`antigravity`** tool: it hands a self-contained task to a fresh
 Antigravity session in the tab's folder, on the account it names (else `default`), and gets
 Antigravity's final answer back; you see its progress while it works. Antigravity sees nothing
-of the conversation but the task, gets no approvals (it is told what was declined), and Esc
-cancels it.
+of the conversation but the task, its actions are approved as in a tab (see **Approvals** below;
+the answer lists what was refused), and Esc cancels it.
 
 **Accounts.** Each account is its own provider in `/model`: `antigravity` for the default account,
 `antigravity-<name>` for the others (for example **Gemini 3.8 Pro (Antigravity: work)**). You pick
@@ -249,6 +249,9 @@ out of quota. Each account has its own agy profile, so its sign-in and history s
 - **`/antigravity remove <name>`** removes an account, its profile and its history, after asking
   (without a window to ask in, add `--yes`). The default account stays.
 - **`/antigravity models <name>`** lists an account's models again.
+- **`/antigravity approvals ask [name]`** makes Deckhand ask you before every action of that
+  account's agy; **`/antigravity approvals allow [name]`** goes back to the default.
+  **`/antigravity approvals`** alone shows each account's setting.
 - **`/antigravity path /full/path/to/agy`** runs that agy instead of the one on your `PATH` (it must
   be an executable file); **`/antigravity path`** alone goes back to your `PATH`. It works before
   Deckhand has found any agy, and the accounts and models appear without restarting the tab.
@@ -263,17 +266,39 @@ names the command to run.
 **Using it.**
 
 - The answer streams as text; agy's thinking, the tools it runs and its plan show as thinking, and
-  what it is doing shows in the status line. pi's own tools are not used, and pi's guardrails do not
-  apply to what agy runs.
-- **No approvals yet:** agy runs in its `default` mode and every time it asks for permission (to
-  edit a file, run a command) or asks you a question, Deckhand declines, and the thinking says so.
-  So for now agy reads and answers; whatever it would ask your approval for is not done.
+  what it is doing shows in the status line. pi's own tools are not used: agy uses its own.
 - agy keeps the conversation itself. When pi compacts, it keeps a short note instead of a summary.
   Deckhand goes on in agy's session only when it holds exactly the conversation you see. If another
   model answered earlier, you went back in `/tree`, `/fork`ed or `/resume`d an older branch, or
   another pi session is using that agy session, Deckhand starts a new agy session and gives it the
   conversation so far as text. If pi retries a message that had already reached agy, agy is told
   so.
+
+**Approvals.** agy runs in its `default` mode, where it asks before it edits a file or runs a
+command, and Deckhand answers each time, the way a pi tab treats pi's own tools: by default the
+action runs. Deckhand approves it for that one time only, so agy never keeps a standing
+permission. The exceptions:
+
+- **Commands** go through your guardrails rules (the same `ask` and `block` rules as pi's own
+  shell commands, from pi's guardrails config and the project's `.pi/guardrails.json`): a `block`
+  rule refuses the command, an `ask` rule asks you first. Your rules apply even with the optional
+  guardrails extension off.
+- **A read-only session** (a read-only job) refuses every edit, every command that changes
+  something, and agy's other tools (MCP tools, subagents); reads and searches still run.
+- **A change outside the tab's folder** is asked first (a link that leads outside counts).
+- **Credential files** are never read or changed: pi's sign-ins, Claude Code's and Codex's, agy's
+  and Gemini's tokens. A command that names one is refused too.
+- **agy asking to leave its default mode** is refused.
+- With **`/antigravity approvals ask`**, every action is asked first.
+
+Where Deckhand would ask but cannot (pi in print or JSON mode, or the `antigravity` tool used where
+there is no window to ask in), the action is refused. When agy asks you a question, Deckhand shows
+its choices in a menu, or asks for the answer; without a window the question goes unanswered.
+Each approval shows as one line in the thinking, for example `✓ ran: npm test`, `✓ you allowed:
+edit app.ts (outside the tab's folder)` or `✗ blocked by guardrails: rm -rf build`; secrets in a
+command are hidden. Stopping the turn (Esc) while Deckhand is asking dismisses the question and
+refuses the action. This guards what agy asks to do. It is not a sandbox: what agy does without
+asking is not seen.
 
 ## How Deckhand runs
 

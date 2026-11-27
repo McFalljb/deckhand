@@ -90,7 +90,7 @@ does, in load order.
 | `desk` | `extensions/desk` (+ `state.ts`, `commands.ts`, `app.ts` → `lib/`) | also `DECKHAND_CONTROL_TOKEN` (Atlas) |
 | `browser` | `extensions/desk-browser` (+ `browser.ts` → `lib/`) | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
 | `panels` | `extensions/sidebar` (its data side; `rows.ts` → `lib/`) | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
-| `antigravity` | Deckhand's own (ACP client after t3code's; `acp.ts`, `agy.ts`, `agy-accounts.ts`, `agy-login.ts`, `antigravity.ts` in `lib/`) | an agy binary found (§3a); every mode |
+| `antigravity` | Deckhand's own (ACP client after t3code's; `acp.ts`, `agy.ts`, `agy-accounts.ts`, `agy-approvals.ts`, `agy-login.ts`, `antigravity.ts` in `lib/`) | an agy binary found (§3a); every mode |
 | `guardrails` (optional, on) | `extensions/guardrails` (`core.ts` → `lib/guardrails.ts`) | always (every mode); read-only with `PI_KIT_READONLY=1` |
 | `shell` (optional, on) | `extensions/shell` (`lines.ts` → `lib/shell.ts`) | always but read-only sessions |
 | `notes` (optional, off) | `extensions/notes` | interactive and print runs, not pi-subagents children |
@@ -147,11 +147,11 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   folded into `/antigravity login` for that reason). No flags.
 - **The `antigravity` tool** (`lib/agy-delegate.ts`): any pi model can hand a self-contained
   task to agy (`task`, optional `account` and `model`) and gets agy's final answer, with what was
-  declined and whether agy left its default mode. Each call is a fresh agy session in the tab's
+  refused and whether agy left its default mode. Each call is a fresh agy session in the tab's
   folder on the chosen account (else `default`, else the first signed in), started like a tab's
-  (the account's profile and environment, `deckhand-pi`, no fs or terminal capability, every
-  permission request and question declined, `default` mode confirmed before the prompt or nothing
-  is sent), closed at the end; abort sends `session/cancel`. Tool calls, the plan and the answer
+  (the account's profile and environment, `deckhand-pi`, no fs or terminal capability, agy's
+  requests answered by the approvals below with the calling tab's UI, folder and the account's
+  mode, `default` mode confirmed before the prompt or nothing is sent), closed at the end; abort sends `session/cancel`. Tool calls, the plan and the answer
   so far stream as tool updates. Registered at `session_start` (never while loading), after a
   sign-in in the session too, only when agy is found, an account is signed in (a saved sign-in by
   stat, or a key in pi's store) and no other extension has the name.
@@ -227,14 +227,45 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `acp_token.json`, which is never read, or a key in pi's store) and, with a UI, a menu;
   `add <name> [method]`, `login`, `logout` (agy's ACP `logout`, when advertised; the history
   stays), `remove` (confirmed; its provider unregistered and its profile deleted; `default` stays)
-  `models [name]` and `path [/abs/agy]` (sets agy's path after the same check, or with no
+  `models [name]`, `approvals [allow|ask] [name]` (shows or sets the account's approvals mode) and `path [/abs/agy]` (sets agy's path after the same check, or with no
   argument clears it; every account's provider then runs the new binary). `/antigravity login`
   with no name signs in the default account. Gemini Enterprise
   signs in by agy's own browser flow (`authenticate`, its link shown, up to 5 minutes).
   `SUBSCRIPTION_REQUIRED` from agy becomes a message that links https://antigravity.google/docs/plans.
-- **Approvals: none yet.** Every `session/request_permission` is answered `reject_once` (else
-  `cancelled`), every ask_question (`interaction_…`) and elicitation declined, `fs/*` and
-  `terminal/*` "method not found". Granting approvals is a later, separately reviewed change.
+- **Approvals** (`lib/agy-approvals.ts` `decide`, during a turn of a tab or of the tool; outside a
+  turn, and in probes, everything is declined as before: `answerAgentRequest`). agy stays in its
+  `default` mode (fail closed, as above), where it asks, and each request is answered once: agy's
+  `allow_once` option, never `allow_always` (no `allow_once` offered: rejected), a rejection
+  `reject_once` (else `cancelled`); a dialog takes the turn's abort signal and an abort answers
+  `cancelled`. The policy matches a pi tab's for pi's own tools (`lib/guardrails.ts`): allowed,
+  except, in this order:
+  - a path (locations, diffs, rawInput `TargetFile`/`AbsolutePath`/`path`/…) that is a
+    credential file, or a command whose words name one: rejected. `credentialPath` mirrors the
+    core's `credential_path` (`src/core/settings_files.odin`) by its name rules (pi's sign-ins and
+    private files in its agent dir; Claude's `.credentials.json`/`.claude.json*`; Codex's
+    `auth.json` in `.codex` or `CODEX_HOME`) and adds agy's and Gemini's tokens (`acp_token.json`,
+    `oauth_creds.json`, `google_accounts.json`); the core's account-folder and hard-link rules are
+    not repeated;
+  - `switch_mode`: rejected;
+  - a command (kind `execute`, or rawInput `CommandLine`/`command_line`/`commandLine`/`command`, as
+    t3code normalizes): guardrails' `checkCommand` with the tab's folder and PI_KIT_READONLY (the
+    user's rules apply whether or not the optional guardrails extension is on, as for `shell`); a
+    command it cannot read is asked;
+  - an edit, delete or move: rejected in a read-only session; asked when a path is outside the
+    tab's folder (real paths, t3code's containment) or cannot be named;
+  - any other kind in a read-only session but read, search, fetch and think: rejected;
+  - the account's `approvals: "ask"` (`accounts.json`, `/antigravity approvals`): everything left
+    is confirmed.
+  "Asked" is `ctx.ui.confirm`; without a UI (print/json mode, the tool where there is none) it is a
+  rejection. A request naming its tool call by id only takes the call's kind, input and paths from
+  agy's `tool_call` updates (`ToolCallTracker`, as t3code's `withTrackedPermissionToolCall`). A
+  question (`interaction_…`) is a `ctx.ui.select` of agy's options; a form elicitation a select
+  (enum, oneOf, boolean) or an input (string, number) per field; without a UI cancelled or
+  declined. `fs/*` and `terminal/*` stay "method not found". Each answer is one line of thinking
+  (`✓ ran: npm test`, `✗ blocked by guardrails: rm -rf …`; commands redacted and clipped, never
+  file contents). Unlike t3code: no "allow for this thread" (Deckhand never stores a grant), agy's
+  own `auto` mode is not offered, reads of credential files are refused rather than always
+  allowed, and with no sandbox setting the default is to allow (a pi tab's), not to ask.
 - **Sign-in** (`lib/agy-login.ts`): `agy acp --login` in the account's profile; the accounts.google.com link is checked
   and shown, the pasted code (or the callback page's URL for this sign-in) is checked and written
   to agy's stdin as one line; agy stores the credential.
@@ -254,7 +285,7 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   or was aborted stays in agy's session, though pi may drop it from its transcript; a message pi
   sends again after it (its auto-retry) gets a note first that agy may already have it; Deckhand's own error texts do
   not match pi's retry patterns. Text streams as text, thoughts as thinking, tool calls, plan and
-  declined requests as lines of thinking and the status line, never as pi tool calls. Abort sends
+  approvals as lines of thinking and the status line, never as pi tool calls. Abort sends
   `session/cancel` and waits 10 s, then stops the process. Usage is agy's per-turn
   `PromptResponse.usage`; cost 0. pi's summaries (compaction, branch summaries) are answered
   without agy; replays (`disableContinuation`) are refused.
@@ -265,7 +296,7 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   inode); else it is put back. Each launch's sweep prunes a session record not written for 30 days
   (its agy session is then not picked up again: a new one, with catch-up text), locks whose
   process is gone, and lock temp files over an hour old.
-- **Tests**: `test/antigravity.test.ts` against `test/fake-agy.mjs`, a stand-in agy (t3code's
+- **Tests**: `test/antigravity.test.ts` and `test/agy-approvals.test.ts` against `test/fake-agy.mjs`, a stand-in agy (t3code's
   fixtures' shapes; it checks the method against the profile's settings and its environment, and
   logs the variables it got), with a temporary HOME and accounts folder; never a real agy. `test/temp-home.ts`, imported first
   by every test that loads the extension, points `HOME` and `XDG_DATA_HOME` into a temporary folder,

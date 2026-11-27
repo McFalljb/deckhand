@@ -198,7 +198,7 @@ test("prompt and streaming: thoughts, tool calls, plan and text arrive as sessio
 	}
 });
 
-test("every permission request is rejected, questions and elicitations declined, fs reads refused", async () => {
+test("a session without an answerer (probes, sign-in checks): every permission request rejected, questions and elicitations declined, fs reads refused", async () => {
 	const f = fake();
 	const asked: string[] = [];
 	const text: string[] = [];
@@ -1140,10 +1140,12 @@ test("the antigravity tool: a fresh agy session in the tab's folder, default mod
 		assert.ok(ms.indexOf("session/new") >= 0 && !ms.includes("session/resume"), "a fresh session");
 		const before = f.read().filter((m) => m.method === "session/prompt").at(-1);
 		assert.equal(before.params.prompt.at(-1).text, "summarize the repo");
-		// a permission request is declined, as in tabs
+		// a permission request is answered as in tabs (test/agy-approvals.test.ts): allowed once here;
+		// a question with no UI is not answered, and the caller is told
 		const p = await t.execute("c2", { task: "permission please" }, undefined, () => {}, ctx);
-		assert.match(p.content[0].text, /"optionId":"deny"/, "agy saw the refusal (its reject option)");
-		assert.match(p.content[0].text, /Declined: /, "and the caller is told");
+		assert.match(p.content[0].text, /"optionId":"allow"/, "agy's allow_once");
+		const q = await t.execute("c2q", { task: "question" }, undefined, () => {}, { ...ctx, hasUI: false });
+		assert.match(q.content[0].text, /Refused: question not answered \(no UI\): Which file\?/);
 		// abort: session/cancel, and the call fails
 		const ac = new AbortController();
 		const slow = t.execute("c3", { task: "slow" }, ac.signal, () => {}, ctx);
@@ -1658,14 +1660,14 @@ test("planTurn: continue, resume, new; a retry after a failed answer continues",
 	assert.equal((planTurn([u("x"), a(5, "openai"), u("y")], st) as any).mode, "new");
 });
 
-test("approvals inside a turn: agy's request is rejected and shown as declined in the thinking", async () => {
+test("approvals inside a turn (no UI, no guardrails rules: lib/agy-approvals.ts): a command allowed once and shown in the thinking; a question cancelled", async () => {
 	const r = rig();
 	try {
 		const { msg } = await r.turn("permission please");
-		assert.equal(textOfMsg(msg), 'permission:{"outcome":{"outcome":"selected","optionId":"deny"}}');
-		assert.match(thinkingOf(msg), /→ Run rm -rf build\n✗ declined: Run rm -rf build \(Deckhand does not grant Antigravity approvals yet\)\n✗ Run rm -rf build failed/);
+		assert.equal(textOfMsg(msg), 'permission:{"outcome":{"outcome":"selected","optionId":"allow"}}', "allow_once, never allow_always");
+		assert.match(thinkingOf(msg), /→ Run rm -rf build\n✓ ran: rm -rf build\n/);
 		const q = await r.turn("question");
-		assert.match(thinkingOf(q.msg), /✗ declined: Which file\?/);
+		assert.match(thinkingOf(q.msg), /✗ question not answered \(no UI\): Which file\?/);
 		assert.equal(textOfMsg(q.msg), 'question:{"outcome":{"outcome":"cancelled"}}');
 	} finally {
 		await r.ag.closeAll();

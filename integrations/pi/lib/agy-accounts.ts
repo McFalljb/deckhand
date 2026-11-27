@@ -16,8 +16,9 @@
 //   auth.json, 0600, as every pi API key) and reaches agy only in its process environment.
 // - Where: <Deckhand's data dir>/antigravity (macOS `~/Library/Application Support/Deckhand`, or
 //   the older `pi-desk` when only that exists; Linux `$XDG_DATA_HOME/deckhand` or
-//   `~/.local/share/deckhand`). accounts.json there (0600) holds names, methods and GCP
-//   project/location, and agy's path when the user set one (`/antigravity path`), never a secret;
+//   `~/.local/share/deckhand`). accounts.json there (0600) holds names, methods, GCP
+//   project/location and approvals (`/antigravity approvals`: allow, the default, or ask), and
+//   agy's path when the user set one (`/antigravity path`), never a secret;
 //   profiles/<name> (0700) the profiles.
 import fs from "node:fs";
 import os from "node:os";
@@ -26,6 +27,7 @@ import { spawnSync } from "node:child_process";
 import { groupAlive, reapGroup, signalGroup } from "./acp.ts";
 import { alive, pruneLedger } from "./agy-ledger.ts";
 import { readLock, tryLock, unlock } from "./agy-lock.ts";
+import { type ApprovalMode, isApprovalMode } from "./agy-approvals.ts";
 
 export type Method = "oauth-personal" | "oauth-business" | "gemini-api-key" | "agent-platform";
 
@@ -43,6 +45,8 @@ export interface Account {
 	method: Method;
 	gcpProject?: string;
 	gcpLocation?: string;
+	/** How agy's requests are answered (lib/agy-approvals.ts); `allow` when absent. */
+	approvals?: ApprovalMode;
 }
 
 export const DEFAULT_ACCOUNT: Account = { name: "default", method: "oauth-personal" };
@@ -87,6 +91,7 @@ export function storedAccounts(root: string): Account[] {
 					method: a.method,
 					...(typeof a.gcpProject === "string" && a.gcpProject ? { gcpProject: a.gcpProject } : {}),
 					...(typeof a.gcpLocation === "string" && a.gcpLocation ? { gcpLocation: a.gcpLocation } : {}),
+					...(a.approvals === "ask" ? { approvals: "ask" as const } : {}),
 				}));
 	} catch {}
 	const seen = new Set<string>();
@@ -113,7 +118,7 @@ export function storedAgyPath(root: string): string | undefined {
 /** Writes accounts.json (0600, in a 0700 folder), keeping or replacing agy's path. It never holds a key. */
 export function saveAccounts(root: string, accounts: Account[], agyPath: string | null | undefined = storedAgyPath(root)) {
 	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-	const body = JSON.stringify({ about: "Deckhand's Antigravity accounts (pi tabs). No secrets: API keys are in pi's credential store.", ...(agyPath ? { agyPath } : {}), accounts: accounts.map(({ name, method, gcpProject, gcpLocation }) => ({ name, method, gcpProject, gcpLocation })) }, null, 2);
+	const body = JSON.stringify({ about: "Deckhand's Antigravity accounts (pi tabs). No secrets: API keys are in pi's credential store.", ...(agyPath ? { agyPath } : {}), accounts: accounts.map(({ name, method, gcpProject, gcpLocation, approvals }) => ({ name, method, gcpProject, gcpLocation, ...(approvals === "ask" ? { approvals } : {}) })) }, null, 2);
 	const tmp = `${accountsFile(root)}.tmp-${process.pid}`;
 	fs.writeFileSync(tmp, `${body}\n`, { mode: 0o600 });
 	fs.renameSync(tmp, accountsFile(root));
@@ -416,3 +421,9 @@ export function signInCommand(a: Account): string {
 }
 export const notSignedIn = (a: Account) =>
 	`Antigravity account "${a.name}" is not signed in: run ${signInCommand(a)}`;
+
+/** An account's approvals mode as accounts.json has it now (another pi may have changed it): `allow` unless set to `ask`. */
+export function approvalsOf(root: string, name: string): ApprovalMode {
+	const m = storedAccounts(root).find((a) => a.name === name)?.approvals;
+	return isApprovalMode(m) ? m : "allow";
+}

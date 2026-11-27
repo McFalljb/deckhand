@@ -7,9 +7,10 @@
 //   reads agy's stored sign-in or talks to Google: agy runs the whole turn (model, tools, its own
 //   system prompt) and keeps its credential itself.
 // - Capabilities: none. No fs (read or write) and no terminal, so agy uses its own tools, and every
-//   request it makes of the client is answered: session/request_permission and ask_question
-//   (`interaction_…` tool calls) are declined, elicitations declined, anything else "method not
-//   found". Approvals are a later, separately reviewed step (docs/HARNESSES.md §3a).
+//   request it makes of the client is answered, by the connection's `answer` (a session's turn:
+//   lib/agy-approvals.ts, docs/HARNESSES.md §3a) or else declined (answerAgentRequest): permission
+//   requests rejected, ask_question (`interaction_…` tool calls) cancelled, elicitations declined,
+//   anything else "method not found".
 // - The request carries both ACP shapes (v2's `info`/`capabilities` and v1's `clientInfo`/
 //   `clientCapabilities`), as t3code's does; agy 1.5.18 answers `protocolVersion: 1` in the v1
 //   shape (agentInfo, agentCapabilities, some fields twice in snake_case), which is how it is read.
@@ -30,8 +31,6 @@ export const AGY_RECOMMENDED_VERSION = "1.5.18";
 export const NOT_FOUND = `Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (${AGY_RECOMMENDED_VERSION} or newer), or set its path with /antigravity path <abs path>`;
 /** Overrides the PATH lookup with an absolute path to agy (or a stand-in, in tests). */
 export const SIGN_IN_PREFIX = "Open the following link to authenticate the ACP server: ";
-/** What every request of agy's for approval or input gets until approvals are reviewed. */
-export const DECLINED_NOTE = "declined: Deckhand's Antigravity tabs do not grant approvals yet";
 const MAX_LINE = 16 * 1024 * 1024;
 
 /** agy's version as [major, minor, patch] (`agy_acp_server_1.5.12`, `v1.5.12`, `1.5.12`), else undefined. */
@@ -103,10 +102,15 @@ export class SignInRequired extends AcpError {}
 /** ACP's auth_required error code. */
 export const AUTH_REQUIRED = -32000;
 
-/** The answer to a request agy makes of the client: every approval and question declined. */
-export function answerAgentRequest(method: string, params: any): { result?: unknown; error?: { code: number; message: string } } {
+export type AgentAnswer = { result?: unknown; error?: { code: number; message: string } };
+
+/**
+ * The answer to a request agy makes of the client when nothing else answers it (no turn running, a
+ * probe): every approval rejected (reject_once, else cancelled), a question (agy's ask_question:
+ * `interaction_…`, choices rather than approvals) cancelled, elicitations declined.
+ */
+export function answerAgentRequest(method: string, params: any): AgentAnswer {
 	if (method === "session/request_permission") {
-		// A question (agy's ask_question: `interaction_…`) has choices, not approvals: none is picked.
 		const question = String(params?.toolCall?.toolCallId ?? "").startsWith("interaction_");
 		const reject = question ? undefined : (params?.options ?? []).find((o: any) => o?.kind === "reject_once" && typeof o.optionId === "string" && o.optionId.trim());
 		return { result: { outcome: reject ? { outcome: "selected", optionId: reject.optionId } : { outcome: "cancelled" } } };
@@ -217,6 +221,8 @@ export interface AcpConnectionOptions {
 	env?: NodeJS.ProcessEnv;
 	/** Each session/update notification's params. */
 	onUpdate?: (params: any) => void;
+	/** Answers a request agy made of the client (it may wait for the user); answerAgentRequest when absent, or when it throws. */
+	answer?: (method: string, params: any) => AgentAnswer | Promise<AgentAnswer>;
 	/** Each request agy made of the client, after it was answered (method, params, the answer). */
 	onAgentRequest?: (method: string, params: any, answer: unknown) => void;
 	/** agy printed a sign-in link. */
@@ -322,9 +328,21 @@ export class AcpConnection {
 		}
 		if (!msg || typeof msg !== "object" || msg.jsonrpc !== "2.0") return;
 		if (typeof msg.method === "string" && msg.id !== undefined && msg.id !== null) {
-			const answer = answerAgentRequest(msg.method, msg.params);
-			this.write({ jsonrpc: "2.0", id: msg.id, ...answer });
-			this.opts.onAgentRequest?.(msg.method, msg.params, answer.result ?? answer.error);
+			// answered when the answer is ready (a dialog may be open meanwhile; agy goes on sending updates)
+			const { method, params, id } = msg;
+			const fallback = () => answerAgentRequest(method, params);
+			let pending: AgentAnswer | Promise<AgentAnswer>;
+			try {
+				pending = this.opts.answer ? this.opts.answer(method, params) : fallback();
+			} catch {
+				pending = fallback();
+			}
+			void Promise.resolve(pending)
+				.catch(fallback)
+				.then((answer) => {
+					this.write({ jsonrpc: "2.0", id, ...answer });
+					this.opts.onAgentRequest?.(method, params, answer.result ?? answer.error);
+				});
 			return;
 		}
 		if (typeof msg.method === "string") {

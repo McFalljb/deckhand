@@ -6,6 +6,7 @@
 // (session/set_config_option); thinking by the option of category `thought_level`. The profile and
 // environment are the account's (lib/agy-accounts.ts). No sign-in: auth_required, "No browser is
 // available here" (agy 1.5 without a display), or a sign-in link on agy's output.
+import { ToolCallTracker } from "./agy-approvals.ts";
 import { AcpConnection, type AcpConnectionOptions, AcpError, AGY_MIN_VERSION, AGY_RECOMMENDED_VERSION, agyEnv, agyTooOld, initializeParams, SignInRequired } from "./acp.ts";
 
 /** agy's default mode could not be confirmed (setMode): nothing is sent to that session. */
@@ -59,6 +60,12 @@ export interface AgySessionOptions {
 	/** An interactive sign-in (Gemini Enterprise): agy's link is shown here instead of failing, and authenticate may take this long. */
 	signIn?: { showLink: (url: string) => void; timeoutMs: number };
 	onUpdate?: (params: any) => void;
+	/**
+	 * Answers agy's requests of the client (lib/agy-approvals.ts decide); a permission request that
+	 * names its tool call by id only comes with what agy's updates said of that call. Without it,
+	 * every request is declined (answerAgentRequest).
+	 */
+	answer?: AcpConnectionOptions["answer"];
 	onAgentRequest?: AcpConnectionOptions["onAgentRequest"];
 	onExit?: () => void;
 	spawnImpl?: AcpConnectionOptions["spawnImpl"];
@@ -83,6 +90,8 @@ export class AgySession {
 	/** Starts agy and opens (or resumes) a session in `default` mode. Throws SignInRequired, AcpError. */
 	static async open(o: AgySessionOptions): Promise<AgySession> {
 		let self!: AgySession;
+		const calls = new ToolCallTracker();
+		const answer = o.answer;
 		const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], {
 			cwd: o.cwd,
 			makeRunDir: o.makeRunDir,
@@ -91,8 +100,10 @@ export class AgySession {
 			// agy's own changes to its session (mode, options) are tracked whether or not a turn runs
 			onUpdate: (p) => {
 				self?.track(p);
+				calls.track(p);
 				o.onUpdate?.(p);
 			},
+			...(answer ? { answer: (m: string, p: any) => answer(m, calls.withTracked(m, p)) } : {}),
 			onAgentRequest: o.onAgentRequest,
 			onSignIn: (url) => (o.signIn ? o.signIn.showLink(url) : self?.sawSignIn(url)),
 			onExit: () => o.onExit?.(),

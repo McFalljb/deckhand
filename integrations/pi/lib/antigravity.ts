@@ -20,9 +20,12 @@
 // - Each turn sends agy only the user messages after the last answer (planTurn). When pi's
 //   transcript is no longer the one agy has (another provider answered before; the user went back
 //   in /tree), a new agy session starts with pi's transcript as text in front of the message.
-// - agy's text streams as pi text, its thoughts as pi thinking, and its tool calls, plan and the
-//   requests it was refused as short lines of thinking (and the tab's status line), never as pi
+// - agy's text streams as pi text, its thoughts as pi thinking, and its tool calls, plan and what
+//   was approved or refused as short lines of thinking (and the tab's status line), never as pi
 //   tool calls: pi's tools are not offered to agy and pi runs nothing for it.
+// - agy's requests during a turn (approvals, questions) are answered by lib/agy-approvals.ts with
+//   the tab's UI, folder, read-only flag and the account's approvals mode (options.approvals);
+//   outside a turn they are declined.
 // - Abort sends session/cancel and waits for agy to end the turn (10 s, then the process stops).
 // - Usage is agy's per-turn PromptResponse.usage (input without the cached part, as Antigravity
 //   1.5 reports it: t3code geminiPromptUsage); cost 0 (a subscription).
@@ -34,6 +37,8 @@
 import type { AgyModel } from "./agy.ts";
 import { AgySession, ModeUnconfirmed } from "./agy.ts";
 import { fileLedger, type Ledger } from "./agy-ledger.ts";
+import { type ApprovalContext, decide, readonlySession } from "./agy-approvals.ts";
+import { answerAgentRequest } from "./acp.ts";
 
 
 export const PROVIDER_ID = "antigravity";
@@ -311,14 +316,20 @@ export interface AntigravityOptions {
 	cancelWaitMs?: number;
 	/** Where the record of agy's sessions lives (lib/agy-ledger.ts; the account profile's). Without it, no session is ever resumed from a transcript. */
 	ledgerDir?: string;
+	/**
+	 * How agy's requests are judged during a turn (lib/agy-approvals.ts), read for each request: the
+	 * tab's UI, its folder, read-only, the account's approvals mode. Default: no UI, the session's
+	 * folder, PI_KIT_READONLY, `allow`.
+	 */
+	approvals?: () => Omit<ApprovalContext, "signal">;
 }
 
 interface SessionState {
 	agy?: AgySession;
 	acpSessionId?: string;
 	produced: Produced[];
-	/** The running turn's handler for agy's session updates and refused requests. */
-	sink?: { update: (u: any) => void; refused: (method: string, params: any) => void };
+	/** The running turn's handler for agy's session updates and its requests of the client. */
+	sink?: { update: (u: any) => void; answer: (method: string, params: any) => Promise<any> };
 	busy: boolean;
 	/** The blocks of the last turn that reached agy (session/prompt went out) and failed. */
 	failedSent?: string;
@@ -377,7 +388,8 @@ export function createAntigravity(o: AntigravityOptions) {
 			onUpdate: (p) => {
 				if (agy && p?.sessionId === agy.sessionId) st.sink?.update(p?.update);
 			},
-			onAgentRequest: (m, p) => st.sink?.refused(m, p),
+			// a request outside a turn (nobody to ask, nothing to show it in) is declined
+			answer: (m, p) => (st.sink ? st.sink.answer(m, p) : answerAgentRequest(m, p)),
 			onExit: () => {
 				if (agy && st.agy === agy) st.agy = undefined;
 			},
@@ -526,9 +538,11 @@ export function createAntigravity(o: AntigravityOptions) {
 							break;
 					}
 				},
-				refused: (method: string, params: any) => {
-					const what = method === "session/request_permission" ? clip1(params?.toolCall?.title || "an action") : method.includes("elicitation") ? "a question" : method;
-					answer.note(`✗ declined: ${what} (Deckhand does not grant Antigravity approvals yet)`);
+				answer: async (method: string, params: any) => {
+					const c = o.approvals?.() ?? { cwd: o.cwd(), hasUI: false, readonly: readonlySession(), mode: "allow" as const };
+					const d = await decide(method, params, { ...c, signal });
+					if (answer.msg.stopReason === "pending") answer.note(d.note); // the turn may have ended while a dialog was open
+					return d.answer;
 				},
 			};
 			let response: any;

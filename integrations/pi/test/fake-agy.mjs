@@ -8,7 +8,10 @@
 // streamed agent_thought_chunk / agent_message_chunk / tool_call / tool_call_update / plan updates;
 // session/cancel; session/request_permission, ask_question as `interaction_…`, elicitation).
 //
-// What a prompt does depends on its text: "crash", "permission", "question", "elicit", "fsread",
+// What a prompt does depends on its text: lines "run: <cmd>", "edit: <path>", "write: <path>",
+// "read: <path>", "idonly: <cmd>", "mcp:", "switchmode:", "alwaysonly: <cmd>" (one permission
+// request each, in t3code's fixtures' shapes), "elicitpick" (a form with a choice, a yes/no and a
+// number), "crash", "permission", "question", "elicit", "fsread",
 // "slow" (streams until cancelled), "stubborn" (ignores cancel), "late" (an update after the
 // prompt ended), "refuse"; anything else streams a thought, a tool call, a plan and an echo.
 // Environment: FAKE_AGY_LOG (every message received, one JSON per line), FAKE_AGY_VERSION (default
@@ -174,6 +177,47 @@ function serve() {
 			return;
 		}
 		if (/refuse/.test(said)) return end("refusal");
+		// one permission request per line "<shape>: <arg>", each in t3code's fixtures' shape, agy's
+		// answers echoed as `<shape>:<json>`: run (a command: run_command, rawInput CommandLine and
+		// Cwd), edit (edit_file: a diff, locations, TargetFile), write (write_to_file: TargetFile and
+		// CodeContent only), read (view_file: AbsolutePath), idonly (a command described by its
+		// tool_call, the request naming it by id only), mcp (kind other), switchmode, alwaysonly (no
+		// allow_once option)
+		const asks = said.split("\n").map((l) => /^(run|edit|write|read|idonly|mcp|switchmode|alwaysonly): ?(.*)$/.exec(l.trim())).filter(Boolean);
+		if (asks.length) {
+			const opts = [
+				{ optionId: "always", name: "Allow always", kind: "allow_always" },
+				{ optionId: "once", name: "Allow", kind: "allow_once" },
+				{ optionId: "deny", name: "Deny", kind: "reject_once" },
+			];
+			const out = [];
+			for (const [i, [, shape, arg]] of asks.entries()) {
+				const toolCallId = `call_${shape}_${i}`;
+				let tc;
+				if (shape === "run" || shape === "idonly") tc = { toolCallId, title: "run_command", kind: "execute", status: "pending", rawInput: { CommandLine: arg, Cwd: process.cwd() } };
+				else if (shape === "edit") tc = { toolCallId, title: "Run edit_file?", kind: "edit", status: "pending", content: [{ type: "diff", path: arg, oldText: "const target = 10;", newText: "const target = 100;" }], locations: [{ path: arg }], rawInput: { TargetFile: arg, TargetContent: "const target = 10;", ReplacementContent: "const target = 100;" } };
+				else if (shape === "write") tc = { toolCallId, title: "Run write_to_file?", kind: "edit", status: "pending", rawInput: { TargetFile: arg, CodeContent: "hello\n" } };
+				else if (shape === "read") tc = { toolCallId, title: "Run view_file?", kind: "read", status: "pending", locations: [{ path: arg }], rawInput: { AbsolutePath: arg } };
+				else if (shape === "mcp") tc = { toolCallId, title: "MCP Tool deploy?", kind: "other", status: "pending", rawInput: { ServerName: "ops", ToolName: "deploy", Arguments: {} } };
+				else if (shape === "switchmode") tc = { toolCallId, title: "Switch to auto mode?", kind: "switch_mode", status: "pending" };
+				else tc = { toolCallId, title: "run_command", kind: "execute", status: "pending", rawInput: { CommandLine: arg || "ls" } };
+				update(sid, { sessionUpdate: "tool_call", ...tc });
+				const r = await ask("session/request_permission", {
+					sessionId: sid,
+					toolCall: shape === "idonly" ? { toolCallId } : tc,
+					options: shape === "alwaysonly" ? opts.filter((o) => o.kind !== "allow_once") : opts,
+				});
+				out.push(`${shape}:${JSON.stringify(r)}`);
+				update(sid, { sessionUpdate: "tool_call_update", toolCallId, status: r?.outcome?.optionId === "once" ? "completed" : "failed" });
+			}
+			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: out.join("\n") } });
+			return end("end_turn");
+		}
+		if (/elicitpick/.test(said)) {
+			const r = await ask("session/elicitation", { sessionId: sid, mode: "form", message: "2 questions", requestedSchema: { type: "object", properties: { color: { type: "string", title: "Which color?", enum: ["red", "blue"] }, sure: { type: "boolean", title: "Sure?" }, n: { type: "integer", title: "How many?" } }, required: ["color"] } });
+			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `elicit:${JSON.stringify(r)}` } });
+			return end("end_turn");
+		}
 		if (/permission/.test(said)) {
 			const tc = { toolCallId: "call_perm", title: "Run rm -rf build", kind: "execute", status: "pending", rawInput: { CommandLine: "rm -rf build" } };
 			update(sid, { sessionUpdate: "tool_call", ...tc });

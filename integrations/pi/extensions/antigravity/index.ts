@@ -19,8 +19,11 @@
  * - Honest: Deckhand's own client name (deckhand-pi), no spoofed headers; agy keeps its sign-in,
  *   Deckhand never reads it and never calls Google. An API key lives in pi's credential store
  *   (`/login antigravity-<name>`) and reaches agy only in its environment.
- * - Approvals: none yet. agy runs in its `default` mode, every permission request is rejected and
- *   every question declined (lib/acp.ts).
+ * - Approvals (lib/agy-approvals.ts): agy runs in its `default` mode and asks; Deckhand answers as a
+ *   pi tab treats pi's own tools: allowed once (never "always"), except what the user's guardrails
+ *   rules block or ask, what a read-only session forbids, changes outside the tab's folder (asked)
+ *   and protected credential files (refused). `/antigravity approvals ask [name]` confirms every
+ *   action of that account; `allow` (the default) goes back. agy's questions are a select.
  * - One tool, `antigravity` (lib/agy-delegate.ts): any pi model hands a self-contained task to a
  *   fresh agy session on a signed-in account and gets agy's final answer. Registered at
  *   session_start (never while loading: test/conflicts.test.ts), and only when agy is found, an
@@ -32,12 +35,14 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { findAgy, NOT_FOUND, usableAgyPath } from "../../lib/acp.ts";
 import { Type } from "typebox";
 import { AgySession, agyLogout, agyVersion, probeModels } from "../../lib/agy.ts";
+import { APPROVAL_MODES, type ApprovalMode, isApprovalMode, readonlySession } from "../../lib/agy-approvals.ts";
 import { DELEGATE_DESCRIPTION, DELEGATE_TOOL, delegate } from "../../lib/agy-delegate.ts";
 import { loadedTools } from "../../lib/claims.ts";
 import {
 	type Account,
 	agyArgs,
 	agyEnvFor,
+	approvalsOf,
 	dataRoot,
 	explainError,
 	hasSavedLogin,
@@ -71,7 +76,7 @@ const KILLERS: Set<() => void> = ((globalThis as any)[Symbol.for("deckhand.antig
 	return set;
 })());
 
-const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "path"] as const;
+const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "approvals", "path"] as const;
 
 export default function antigravity(pi: ExtensionAPI) {
 	const root = dataRoot();
@@ -80,6 +85,8 @@ export default function antigravity(pi: ExtensionAPI) {
 	let cwd = process.cwd();
 	let setStatus: ((text: string | undefined) => void) | undefined;
 	let registry: Registry | undefined;
+	/** The session's context (session_start): its UI answers agy's approvals in a tab. */
+	let uiCtx: ExtensionContext | undefined;
 	let version = "";
 	const live = new Map<string, { account: Account; ag: ReturnType<typeof createAntigravity> }>();
 
@@ -101,6 +108,7 @@ export default function antigravity(pi: ExtensionAPI) {
 			explain: (m) => explainError(m, a),
 			launch: (key) => launchOf(a, key),
 			ledgerDir: path.join(profileOf(root, a.name).acpDir, "deckhand-sessions"),
+			approvals: () => ({ cwd, hasUI: !!uiCtx?.hasUI, ui: uiCtx?.hasUI ? (uiCtx.ui as any) : undefined, readonly: readonlySession(), mode: approvalsOf(root, a.name) }),
 		});
 		ag.bind(registry);
 		const old = live.get(a.name);
@@ -124,6 +132,7 @@ export default function antigravity(pi: ExtensionAPI) {
 
 		pi.on("session_start", async (_e: unknown, ctx: ExtensionContext) => {
 			cwd = ctx.cwd || cwd;
+			uiCtx = ctx;
 			registry = (ctx as any).modelRegistry;
 			for (const { ag } of live.values()) ag.bind(registry);
 			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
@@ -145,6 +154,7 @@ export default function antigravity(pi: ExtensionAPI) {
 
 		if (ctx) {
 			cwd = ctx.cwd || cwd;
+			uiCtx = ctx;
 			registry = (ctx as any).modelRegistry;
 			for (const { ag } of live.values()) ag.bind(registry);
 			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
@@ -186,7 +196,8 @@ export default function antigravity(pi: ExtensionAPI) {
 					model: p.model,
 					signal,
 					progress: (t) => onUpdate?.({ content: [{ type: "text", text: t }], details: undefined }),
-					open: (onU, onReq) => AgySession.open({ agyPath: agyPath!, cwd: c.cwd || cwd, ...launchOf(a, key), onUpdate: onU, onAgentRequest: (m, params) => onReq(m, params) }),
+					approvals: () => ({ cwd: c.cwd || cwd, hasUI: !!c.hasUI, ui: c.hasUI ? (c.ui as any) : undefined, readonly: readonlySession(), mode: approvalsOf(root, a.name) }),
+					open: (onU, answer) => AgySession.open({ agyPath: agyPath!, cwd: c.cwd || cwd, ...launchOf(a, key), onUpdate: onU, answer }),
 				});
 				return { content: [{ type: "text" as const, text }], details: undefined };
 			},
@@ -382,6 +393,37 @@ export default function antigravity(pi: ExtensionAPI) {
 		ctx.ui.notify(p ? `Antigravity now runs ${p}` : `Cleared agy's path: Antigravity runs ${next} from your PATH`, "info");
 	};
 
+	/** `/antigravity approvals [allow|ask] [name]`: shows each account's mode, or sets one (accounts.json; the next request reads it). */
+	const approvals = async (ctx: ExtensionContext, x?: string, y?: string) => {
+		const mode: ApprovalMode | undefined = isApprovalMode(x) ? x : undefined;
+		const name = mode ? y : x;
+		if (!mode && x && !live.has(x)) return fail(ctx, `/antigravity approvals ${APPROVAL_MODES.join("|")} [account]: "${x}" is neither a mode nor an account`);
+		if (!mode) {
+			const lines = [...live.values()].filter(({ account }) => !name || account.name === name).map(({ account }) => `- ${account.name}: ${approvalsOf(root, account.name)}`);
+			return ctx.ui.notify(
+				`Antigravity approvals (allow: agy's actions run unless your guardrails rules, a read-only session, a change outside the folder or a credential file say otherwise; ask: every action is confirmed first):\n${lines.join("\n")}\nSet with /antigravity approvals ${APPROVAL_MODES.join("|")} [account]`,
+				"info",
+			);
+		}
+		const a = accountOf(name);
+		if (!a) return fail(ctx, `No Antigravity account "${name}"`);
+		try {
+			await updateAccounts(root, (accounts) => {
+				const next = { ...(accounts.find((x) => x.name === a.name) ?? a), approvals: mode };
+				return { accounts: accounts.some((x) => x.name === a.name) ? accounts.map((x) => (x.name === a.name ? next : x)) : [...accounts, next] };
+			});
+		} catch (e) {
+			return fail(ctx, (e as Error).message);
+		}
+		live.get(a.name)!.account.approvals = mode;
+		ctx.ui.notify(
+			mode === "ask"
+				? `Antigravity (account "${a.name}"): every action agy asks to take is confirmed first; without a UI it is refused`
+				: `Antigravity (account "${a.name}"): agy's actions run unless your guardrails rules, a read-only session, a change outside the folder or a credential file say otherwise`,
+			"info",
+		);
+	};
+
 	const menu = async (ctx: ExtensionContext) => {
 		const actions = ["Add an account…", "Sign in…", "Sign out…", "Remove an account…", "List models again…", "Set agy's path…", "Close"];
 		const pick = await ctx.ui.select("Antigravity", actions);
@@ -402,7 +444,7 @@ export default function antigravity(pi: ExtensionAPI) {
 	};
 
 	pi.registerCommand("antigravity", {
-		description: "Google Antigravity: status and accounts (add, login, logout, remove, models), agy's path",
+		description: "Google Antigravity: status and accounts (add, login, logout, remove, models, approvals), agy's path",
 		getArgumentCompletions: (prefix: string) => SUBCOMMANDS.filter((s) => s.startsWith(prefix)).map((s) => ({ value: s, label: s })),
 		handler: async (args: string, ctx: ExtensionContext) => {
 			const [sub, name, method] = (args ?? "").trim().split(/\s+/).filter(Boolean);
@@ -432,6 +474,8 @@ export default function antigravity(pi: ExtensionAPI) {
 					return remove(ctx, name, method === "--yes");
 				case "models":
 					return models(ctx, name);
+				case "approvals":
+					return approvals(ctx, name, method);
 				default:
 					return fail(ctx, `Unknown: /antigravity ${sub}. Try /antigravity ${SUBCOMMANDS.join("|")} [name]`);
 			}

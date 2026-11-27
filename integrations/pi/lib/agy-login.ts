@@ -59,6 +59,8 @@ export interface LoginOptions {
 	agyPath: string;
 	cwd: string;
 	env?: NodeJS.ProcessEnv;
+	/** agy's arguments, `--login` included (the account's profile: agyArgs(p, true)). */
+	args?: string[];
 	/** Shows the link to the user. */
 	showLink: (url: string) => void;
 	/** Asks for the code; undefined or empty cancels. */
@@ -74,7 +76,7 @@ export type LoginResult = { ok: true } | { ok: false; error: string };
 export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 	let child: ChildProcess;
 	try {
-		child = (o.spawnImpl ?? spawn)(o.agyPath, ["acp", "--login"], { cwd: o.cwd, env: o.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"] });
+		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: o.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"] });
 	} catch (e) {
 		return { ok: false, error: `Antigravity (agy) could not start: ${(e as Error).message}` };
 	}

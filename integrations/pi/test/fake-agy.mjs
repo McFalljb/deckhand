@@ -10,7 +10,10 @@
 // "slow" (streams until cancelled), "stubborn" (ignores cancel), "late" (an update after the
 // prompt ended), "refuse"; anything else streams a thought, a tool call, a plan and an echo.
 // Environment: FAKE_AGY_LOG (every message received, one JSON per line), FAKE_AGY_VERSION,
-// FAKE_AGY_SIGNED_OUT=1 (no sign-in: auth_required, and authenticate prints the link),
+// FAKE_AGY_SIGNED_OUT=1 (no sign-in: authenticate prints the link; with --gemini-dir, signed in
+// means the profile's acp_token.json exists, which --login writes and logout removes; agy's
+// stored sign-in is never read by the client), FAKE_AGY_BROWSER_SIGNIN=1 (a browser sign-in
+// completes), FAKE_AGY_SUBSCRIPTION=1,
 // FAKE_AGY_AUTH_ONCE=1 (auth_required until authenticate), FAKE_AGY_NO_MODES=1 (modes by
 // session/set_mode, not a config option), FAKE_AGY_LOGIN_CODE (the code --login accepts).
 import fs from "node:fs";
@@ -21,7 +24,21 @@ const log = (x) => env.FAKE_AGY_LOG && fs.appendFileSync(env.FAKE_AGY_LOG, `${JS
 const send = (x) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...x })}\n`);
 const LINK = "https://accounts.google.com/o/oauth2/auth?client_id=fake&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=s123";
 const args = process.argv.slice(2);
-log({ argv: args, cwd: process.cwd(), deckhandEnv: Object.keys(env).filter((k) => k.startsWith("DECKHAND_") && k !== "DECKHAND_AGY_PATH") });
+const SEEN_ENV = ["GEMINI_HOME", "TMPDIR", "SSH_CONNECTION", "AGY_ACP_FORCE_FILE_STORAGE", "AGY_CLI_DISABLE_AUTO_UPDATE", "GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT", "BROWSER", "ELECTRON_RUN_AS_NODE"];
+log({ argv: args, cwd: process.cwd(), deckhandEnv: Object.keys(env).filter((k) => k.startsWith("DECKHAND_")), env: Object.fromEntries(SEEN_ENV.filter((k) => env[k] !== undefined).map((k) => [k, env[k]])) });
+// the profile: --gemini-dir and --app-data-dir (joined beneath it), as agy takes them
+const argOf = (name) => (args.indexOf(name) >= 0 ? args[args.indexOf(name) + 1] : undefined);
+const profile = argOf("--gemini-dir");
+const acpDir = profile ? `${profile}/${argOf("--app-data-dir") ?? "antigravity-acp"}` : undefined;
+const tokenFile = acpDir ? `${acpDir}/acp_token.json` : undefined;
+const settings = (() => {
+	try {
+		return JSON.parse(fs.readFileSync(`${acpDir}/settings.json`, "utf8"));
+	} catch {
+		return {};
+	}
+})();
+const signedIn = () => (tokenFile ? fs.existsSync(tokenFile) : env.FAKE_AGY_SIGNED_OUT !== "1");
 
 if (args[0] !== "acp") {
 	process.stderr.write("usage: agy acp [--login]\n");
@@ -36,6 +53,7 @@ if (args.includes("--login")) {
 	rl.once("line", (code) => {
 		log({ loginCode: code });
 		if (code.trim() === (env.FAKE_AGY_LOGIN_CODE ?? "good-code")) {
+			if (tokenFile) fs.writeFileSync(tokenFile, JSON.stringify({ fake: "not a real token" }));
 			process.stdout.write("\nSigned in.\n");
 			process.exit(0);
 		}
@@ -195,15 +213,29 @@ function serve() {
 						agentInfo: { name: "antigravity-acp", title: "Google Antigravity", version: env.FAKE_AGY_VERSION ?? "agy_acp_server_1.5.12" },
 					},
 				});
-			case "authenticate":
-				if (env.FAKE_AGY_SIGNED_OUT === "1") {
+			case "authenticate": {
+				const m = params?.methodId;
+				const ok = () => ((authed = true), send({ id, result: {} }));
+				const bad = (message) => send({ id, error: { code: -32602, message } });
+				if (env.FAKE_AGY_SIGNED_OUT === "1" || ((m === "oauth-personal" || m === "oauth-business") && !signedIn())) {
+					if (env.SSH_CONNECTION && m === "oauth-personal") return send({ id, error: { code: -32603, message: "No browser is available here. Use --login." } });
 					process.stdout.write(`Open the following link to authenticate the ACP server: ${LINK}\n`);
-					return; // waits for a browser that never comes
+					if (env.FAKE_AGY_BROWSER_SIGNIN === "1" && tokenFile)
+						setTimeout(() => (fs.writeFileSync(tokenFile, "{}"), ok()), 50); // the browser came back to agy's loopback
+					return; // else waits for a browser that never comes
 				}
-				authed = true;
+				if (m === "oauth-personal") return ok();
+				if (m === "oauth-business") return settings?.gcp?.project && settings?.gcp?.location ? ok() : bad("Gemini Enterprise needs a GCP project and location");
+				if (m === "gemini-api-key") return env.GEMINI_API_KEY ? ok() : bad("No GEMINI_API_KEY");
+				if (m === "agent-platform") return env.GOOGLE_API_KEY || (settings?.gcp?.project && settings?.gcp?.location) ? ok() : bad("Agent Platform needs a key or a project");
+				return bad(`unknown method ${m}`);
+			}
+			case "logout":
+				if (tokenFile) fs.rmSync(tokenFile, { force: true });
 				return send({ id, result: {} });
 			case "session/new":
 				if (!authed) return send({ id, error: { code: -32000, message: "Authentication required" } });
+				if (env.FAKE_AGY_SUBSCRIPTION === "1") return send({ id, error: { code: -32603, message: "Request failed: SUBSCRIPTION_REQUIRED for this account" } });
 				return send({ id, result: setup(newSession(`sess-${process.pid}-${sessions.size + 1}`)) });
 			case "session/resume": {
 				if (!authed) return send({ id, error: { code: -32000, message: "Authentication required" } });

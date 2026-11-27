@@ -50,12 +50,13 @@ export const SUMMARY_TEXT =
 	"This conversation is held by Google Antigravity: its agy session keeps the whole context, so pi did not summarize it. Ask the agent to recall anything from earlier.";
 
 /** One pi model for an agy model. Thinking is on offer when agy has thought levels. */
-export function piModel(m: { id: string; name: string }, reasoning: boolean) {
+export function piModel(m: { id: string; name: string }, reasoning: boolean, provider = PROVIDER_ID, account = "default") {
+	const where = account === "default" ? "Antigravity" : `Antigravity: ${account}`;
 	return {
 		id: m.id,
-		name: m.id === DEFAULT_MODEL_ID ? "Antigravity (agy's default model)" : `${m.name} (Antigravity)`,
+		name: m.id === DEFAULT_MODEL_ID ? `${where} (agy's default model)` : `${m.name} (${where})`,
 		api: API,
-		provider: PROVIDER_ID,
+		provider,
 		baseUrl: "acp:agy",
 		reasoning,
 		input: ["text", "image"] as ("text" | "image")[],
@@ -68,10 +69,10 @@ export function piModel(m: { id: string; name: string }, reasoning: boolean) {
 export type PiModel = ReturnType<typeof piModel>;
 
 /** The model list: `default` first, then the account's, without duplicates. */
-export function modelList(models: AgyModel[], thinking: string[]): PiModel[] {
+export function modelList(models: AgyModel[], thinking: string[], provider = PROVIDER_ID, account = "default"): PiModel[] {
 	const seen = new Set([DEFAULT_MODEL_ID]);
-	const out = [piModel({ id: DEFAULT_MODEL_ID, name: "default" }, false)];
-	for (const m of models) if (!seen.has(m.id)) (seen.add(m.id), out.push(piModel(m, thinking.length > 0)));
+	const out = [piModel({ id: DEFAULT_MODEL_ID, name: "default" }, false, provider, account)];
+	for (const m of models) if (!seen.has(m.id)) (seen.add(m.id), out.push(piModel(m, thinking.length > 0, provider, account)));
 	return out;
 }
 
@@ -124,7 +125,7 @@ export type TurnPlan = { error: string } | { blocks: any[]; mode: "continue" | "
  * retry). `resume`: the last answer came from an agy session not open here (a restart; another
  * branch). `new`: the first turn, or the transcript is not agy's (then with catchUpText first).
  */
-export function planTurn(messages: any[], state: { acpSessionId?: string; produced: Produced[] } | undefined): TurnPlan {
+export function planTurn(messages: any[], state: { acpSessionId?: string; produced: Produced[] } | undefined, provider = PROVIDER_ID): TurnPlan {
 	const convo = messages.filter((m) => m?.role !== "system");
 	let last = -1;
 	for (let i = convo.length - 1; i >= 0; i--)
@@ -136,7 +137,7 @@ export function planTurn(messages: any[], state: { acpSessionId?: string; produc
 	if (blocks.length === 0) return { error: "Antigravity: there is no new message to send" };
 	if (last < 0) return { blocks, mode: "new" };
 	const answer = convo[last];
-	if (answer.provider === PROVIDER_ID && typeof answer.responseId === "string" && answer.responseId) {
+	if (answer.provider === provider && typeof answer.responseId === "string" && answer.responseId) {
 		if (state?.acpSessionId !== answer.responseId) return { blocks, mode: "resume", resumeId: answer.responseId };
 		const i = state.produced.findIndex((p) => p.ts === answer.timestamp);
 		if (i >= 0 && state.produced.slice(i + 1).every((p) => !p.ok)) return { blocks, mode: "continue" };
@@ -275,6 +276,18 @@ export interface AntigravityOptions {
 	/** The folder agy works in (the pi session's cwd). */
 	cwd: () => string;
 	env?: NodeJS.ProcessEnv;
+	/** This provider's id and account (lib/agy-accounts.ts: one provider per account). */
+	providerId?: string;
+	account?: string;
+	/**
+	 * How agy starts for this account, given the key pi resolved (API-key accounts): its arguments
+	 * (the profile), environment, sign-in method and what a missing sign-in says.
+	 */
+	launch?: (apiKey: string | undefined) => { args?: string[]; env?: NodeJS.ProcessEnv; authMethod?: string; signInHint?: string };
+	/** agy's error made actionable (SUBSCRIPTION_REQUIRED and the like). */
+	explain?: (message: string) => string;
+	/** The credential is an API key in pi's credential store (`/login <provider>`), not agy's own sign-in. */
+	keyAuth?: boolean;
 	/** The tab's status line: agy's current activity, undefined to clear. */
 	status?: (text: string | undefined) => void;
 	spawnImpl?: Parameters<typeof AgySession.open>[0]["spawnImpl"];
@@ -292,17 +305,19 @@ interface SessionState {
 
 /** The provider, its live model list and the agy sessions it holds. */
 export function createAntigravity(o: AntigravityOptions) {
-	let models: PiModel[] = modelList([], []);
+	const pid = o.providerId ?? PROVIDER_ID, account = o.account ?? "default";
+	const explain = o.explain ?? ((m: string) => m);
+	let models: PiModel[] = modelList([], [], pid, account);
 	let registry: Registry | undefined;
 	const sessions = new Map<string, SessionState>();
 	const auth = { type: "api_key" as const, source: `agy (${o.agyPath})` };
 
 	const setModels = async (list: AgyModel[], thinking: string[]) => {
-		const next = modelList(list, thinking);
+		const next = modelList(list, thinking, pid, account);
 		if (JSON.stringify(next) === JSON.stringify(models)) return false;
 		models = next;
 		// pi reads getModels() again when it recomposes the provider (ModelRuntime.refresh)
-		await registry?.refresh({ providers: [PROVIDER_ID], allowNetwork: false }).catch(() => {});
+		await registry?.refresh({ providers: [pid], allowNetwork: false }).catch(() => {});
 		return true;
 	};
 
@@ -312,15 +327,19 @@ export function createAntigravity(o: AntigravityOptions) {
 		if (a) void a.close().catch(() => {});
 	};
 
-	async function ensureSession(st: SessionState, plan: Exclude<TurnPlan, { error: string }>): Promise<AgySession> {
+	async function ensureSession(st: SessionState, plan: Exclude<TurnPlan, { error: string }>, apiKey: string | undefined): Promise<AgySession> {
 		if (plan.mode === "continue" && st.agy?.conn.alive) return st.agy;
 		drop(st);
 		const resumeId = plan.mode === "resume" ? plan.resumeId : plan.mode === "continue" ? st.acpSessionId : undefined;
 		let agy: AgySession | undefined;
+		const how = o.launch?.(apiKey) ?? {};
 		agy = await AgySession.open({
 			agyPath: o.agyPath,
 			cwd: o.cwd(),
-			env: o.env,
+			env: how.env ?? o.env,
+			args: how.args,
+			authMethod: how.authMethod,
+			signInHint: how.signInHint,
 			resumeId,
 			spawnImpl: o.spawnImpl,
 			// only while a turn runs (st.sink), and only this session's: an update after the turn
@@ -365,7 +384,7 @@ export function createAntigravity(o: AntigravityOptions) {
 		// an answer is known by its timestamp (planTurn): two in one millisecond get distinct ones
 		const newest = st.produced.at(-1)?.ts ?? 0;
 		if (answer.msg.timestamp <= newest) answer.msg.timestamp = newest + 1;
-		const plan = planTurn(messages, st);
+		const plan = planTurn(messages, st, pid);
 		if ("error" in plan) return answer.finish("error", plan.error);
 		st.busy = true;
 		const titles = new Map<string, string>();
@@ -377,11 +396,11 @@ export function createAntigravity(o: AntigravityOptions) {
 		try {
 			let agy: AgySession;
 			try {
-				agy = await ensureSession(st, plan);
+				agy = await ensureSession(st, plan, typeof options.apiKey === "string" ? options.apiKey : undefined);
 				await agy.selectModel(model.id);
 				await agy.selectThinking(options.reasoning);
 			} catch (e) {
-				return answer.finish("error", (e as Error).message); // SignInRequired's names /antigravity-login
+				return answer.finish("error", explain((e as Error).message)); // SignInRequired names the account's command
 			}
 			answer.msg.responseId = agy.sessionId;
 			if (signal?.aborted) return answer.finish("aborted", "Request was aborted");
@@ -439,7 +458,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			} catch (e) {
 				st.produced.push({ ts: answer.msg.timestamp, ok: false });
 				if (aborted) return answer.finish("aborted", "Request was aborted");
-				return answer.finish("error", (e as Error).message);
+				return answer.finish("error", explain((e as Error).message));
 			}
 			if (aborted) {
 				if (response === GONE) drop(st); // agy did not end the turn: its process goes
@@ -463,17 +482,25 @@ export function createAntigravity(o: AntigravityOptions) {
 		}
 	}
 
-	const provider = {
-		id: PROVIDER_ID,
-		name: "Antigravity",
-		baseUrl: "acp:agy",
-		auth: {
-			apiKey: {
-				name: "Antigravity CLI sign-in (agy; /antigravity-login)",
+	// agy's own sign-in: configured whenever agy is there. An API-key account: pi's /login asks for the
+	// key (masked) and keeps it in its credential store; agy gets it in its environment only.
+	const apiKeyAuth = o.keyAuth
+		? {
+				name: `Antigravity API key (account ${account})`,
+				login: async (interaction: any) => ({ type: "api_key" as const, key: String(await interaction.prompt({ type: "secret", message: `API key for the Antigravity account "${account}"` })).trim() }),
+				check: async (input: any) => (input?.credential?.key ? { type: "api_key" as const, source: "stored credential" } : undefined),
+				resolve: async (input: any) => (input?.credential?.key ? { auth: { apiKey: input.credential.key }, source: "stored credential" } : undefined),
+			}
+		: {
+				name: `Antigravity sign-in (agy; account ${account})`,
 				check: async () => auth,
 				resolve: async () => ({ auth: {}, source: auth.source }),
-			},
-		},
+			};
+	const provider = {
+		id: pid,
+		name: account === "default" ? "Antigravity" : `Antigravity: ${account}`,
+		baseUrl: "acp:agy",
+		auth: { apiKey: apiKeyAuth },
 		getModels: () => models,
 		streamSimple,
 		stream: streamSimple,

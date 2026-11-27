@@ -1,11 +1,11 @@
 // One Antigravity session: an `agy acp` process (lib/acp.ts) with one ACP session in it, in agy's
-// `default` mode. The steps are t3code's (provider-acp AcpSessionRuntime startOnce,
-// AntigravityAcpSupport): initialize, session/new (or session/resume), the mode, then the model by
-// its `model` config option (session/set_config_option); thinking by the option of category
-// `thought_level`. Unlike t3code it runs the user's own agy profile (no --gemini-dir of its own)
-// and does not authenticate eagerly: agy uses the sign-in it has, and on auth_required it is asked
-// once to use it (`authenticate`, its first advertised method); a sign-in link instead means
-// "run /antigravity-login".
+// `default` mode. The steps are t3code's (provider-acp AcpSessionRuntime startOnce with
+// authenticateEagerly, AntigravityAcpSupport): initialize, `authenticate` with the account's method
+// (always: agy picks its credential source from the method, and accepts methods it does not list),
+// session/new (or session/resume), the mode, then the model by its `model` config option
+// (session/set_config_option); thinking by the option of category `thought_level`. The profile and
+// environment are the account's (lib/agy-accounts.ts). No sign-in: auth_required, "No browser is
+// available here" (agy 1.5 without a display), or a sign-in link on agy's output.
 import { AcpConnection, type AcpConnectionOptions, AcpError, AGY_MIN_VERSION, AGY_RECOMMENDED_VERSION, agyEnv, agyTooOld, initializeParams, SignInRequired } from "./acp.ts";
 
 export const SIGN_IN_HINT = "Antigravity is not signed in: run /antigravity-login";
@@ -44,7 +44,15 @@ export interface AgySessionOptions {
 	cwd: string;
 	/** Resume this agy session id instead of starting a new one (session/resume, when advertised). */
 	resumeId?: string;
+	/** agy's arguments (the account's profile: agyArgs); `acp` alone by default. */
+	args?: string[];
 	env?: NodeJS.ProcessEnv;
+	/** The sign-in method passed to `authenticate` (the account's). */
+	authMethod?: string;
+	/** What a missing sign-in says (the account's command). */
+	signInHint?: string;
+	/** An interactive sign-in (Gemini Enterprise): agy's link is shown here instead of failing, and authenticate may take this long. */
+	signIn?: { showLink: (url: string) => void; timeoutMs: number };
 	onUpdate?: (params: any) => void;
 	onAgentRequest?: AcpConnectionOptions["onAgentRequest"];
 	onExit?: () => void;
@@ -70,13 +78,13 @@ export class AgySession {
 	/** Starts agy and opens (or resumes) a session in `default` mode. Throws SignInRequired, AcpError. */
 	static async open(o: AgySessionOptions): Promise<AgySession> {
 		let self!: AgySession;
-		const conn = new AcpConnection(o.agyPath, ["acp"], {
+		const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], {
 			cwd: o.cwd,
 			env: o.env ?? agyEnv(),
 			spawnImpl: o.spawnImpl,
 			onUpdate: (p) => o.onUpdate?.(p),
 			onAgentRequest: o.onAgentRequest,
-			onSignIn: (url) => self?.sawSignIn(url),
+			onSignIn: (url) => (o.signIn ? o.signIn.showLink(url) : self?.sawSignIn(url)),
 			onExit: () => o.onExit?.(),
 		});
 		self = new AgySession(conn);
@@ -90,6 +98,8 @@ export class AgySession {
 		}
 	}
 
+	private hint = SIGN_IN_HINT;
+
 	private sawSignIn(url: string) {
 		this.signInSeen = true;
 		for (const w of this.signInWaiters.splice(0)) w(url);
@@ -97,41 +107,37 @@ export class AgySession {
 
 	/** `p`, failing with SignInRequired as soon as agy prints a sign-in link. */
 	private untilSignIn<T>(p: Promise<T>): Promise<T> {
-		if (this.signInSeen) return Promise.reject(new SignInRequired(SIGN_IN_HINT));
+		if (this.signInSeen) return Promise.reject(new SignInRequired(this.hint));
 		return new Promise<T>((resolve, reject) => {
-			this.signInWaiters.push(() => reject(new SignInRequired(SIGN_IN_HINT)));
+			this.signInWaiters.push(() => reject(new SignInRequired(this.hint)));
 			p.then(resolve, reject);
 		});
 	}
 
 	private async handshake(o: AgySessionOptions) {
+		if (o.signInHint) this.hint = o.signInHint;
 		const init = await this.conn.request("initialize", initializeParams(), STARTUP_TIMEOUT_MS);
 		this.initialize = init ?? {};
 		this.agentVersion = String(this.initialize?.agentInfo?.version ?? this.initialize?.info?.version ?? "");
 		if (agyTooOld(this.agentVersion))
 			throw new AcpError(`Antigravity CLI ${this.agentVersion} is older than ${AGY_MIN_VERSION}, the first that serves other clients: update agy (${AGY_RECOMMENDED_VERSION} or newer)`);
-		const setup = async () => {
+		const signedOut = (e: unknown) =>
+			e instanceof SignInRequired || (e instanceof AcpError && e.code === -32603 && /No browser is available here/.test(String(e.data ?? e.message)));
+		const method = o.authMethod ?? "oauth-personal";
+		try {
+			await this.untilSignIn(this.conn.request("authenticate", { methodId: method }, o.signIn?.timeoutMs ?? STARTUP_TIMEOUT_MS));
+		} catch (e) {
+			throw signedOut(e) ? new SignInRequired(this.hint) : e;
+		}
+		let created: any;
+		try {
 			const caps = this.initialize?.agentCapabilities ?? {};
 			if (o.resumeId && caps?.sessionCapabilities?.resume != null) {
 				const r = await this.untilSignIn(this.conn.request("session/resume", { sessionId: o.resumeId, cwd: o.cwd, mcpServers: [] }, STARTUP_TIMEOUT_MS));
-				return { ...r, sessionId: o.resumeId };
-			}
-			return this.untilSignIn(this.conn.request("session/new", { cwd: o.cwd, mcpServers: [] }, STARTUP_TIMEOUT_MS));
-		};
-		let created: any;
-		try {
-			created = await setup();
+				created = { ...r, sessionId: o.resumeId };
+			} else created = await this.untilSignIn(this.conn.request("session/new", { cwd: o.cwd, mcpServers: [] }, STARTUP_TIMEOUT_MS));
 		} catch (e) {
-			if (!(e instanceof SignInRequired) || this.signInSeen) throw e instanceof SignInRequired ? new SignInRequired(SIGN_IN_HINT) : e;
-			// auth_required: ask agy once to use the sign-in it has (its first method)
-			const method = (this.initialize?.authMethods ?? []).find((m: any) => typeof m?.id === "string")?.id;
-			if (!method) throw new SignInRequired(SIGN_IN_HINT);
-			try {
-				await this.untilSignIn(this.conn.request("authenticate", { methodId: method }, STARTUP_TIMEOUT_MS));
-				created = await setup();
-			} catch (e2) {
-				throw e2 instanceof SignInRequired ? new SignInRequired(SIGN_IN_HINT) : e2;
-			}
+			throw signedOut(e) ? new SignInRequired(this.hint) : e;
 		}
 		if (typeof created?.sessionId !== "string" || !created.sessionId) throw new AcpError("Antigravity: session/new returned no session id");
 		this.sessionId = created.sessionId;
@@ -208,5 +214,32 @@ export async function probeModels(o: Omit<AgySessionOptions, "resumeId">): Promi
 		return { models: s.models, thinking: s.thinkingLevels, version: s.agentVersion };
 	} finally {
 		await s.close();
+	}
+}
+
+type BareOptions = Pick<AgySessionOptions, "agyPath" | "cwd" | "args" | "env" | "spawnImpl">;
+
+/** `initialize` only (no session, no sign-in): agy's reported version. */
+export async function agyVersion(o: BareOptions): Promise<string> {
+	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl });
+	conn.start();
+	try {
+		const init = await conn.request("initialize", initializeParams(), 30_000);
+		return String(init?.agentInfo?.version ?? init?.info?.version ?? "");
+	} finally {
+		await conn.close(200);
+	}
+}
+
+/** Sign-out by agy's own ACP `logout` (t3code AntigravityAuth.logout): its saved login goes, its history stays. */
+export async function agyLogout(o: BareOptions): Promise<void> {
+	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl });
+	conn.start();
+	try {
+		const init = await conn.request("initialize", initializeParams(), 30_000);
+		if (init?.agentCapabilities?.auth?.logout == null) throw new AcpError("This Antigravity version cannot sign out: update agy");
+		await conn.request("logout", {}, 90_000);
+	} finally {
+		await conn.close(200);
 	}
 }

@@ -776,8 +776,10 @@ Usage page come later.
 - **A row**: the account's name and how old its numbers are (*4m ago*), then one bar per limit
   window: **5h** (the five-hour window) and **wk** (the weekly one), each with the percent used
   and when it resets (*resets 15:40*, or *Tue 9:00* further off). A bar turns amber from 80% and
-  red from 95%, or when Codex says a limit is reached; the percent is always written beside it,
-  so the colour is never the only sign. A narrow column drops the reset time first.
+  red from 95%, or when Codex says a limit is reached (the row then also says *limit reached*);
+  the percent is always written beside it, so the colour is never the only sign; *?* is a
+  percent Codex did not say. A reset time already gone when Codex answered reads *reset passed*.
+  A narrow column drops the reset time first.
 - **Instead of bars**: *not read yet*; *no plan limits (API key)* (an account signed in with an
   API key has no plan windows); *signed out* (sign in on Codex's own screen in a Codex tab of
   that account, or run `CODEX_HOME=<its folder> codex login`); *can't read: …* (Codex could not
@@ -790,10 +792,12 @@ Usage page come later.
   since the read, it says *reset at 15:40, no new data* instead of an old percent. A read that
   fails keeps the last numbers (the hover says why). After a restart the last numbers show again,
   with their age.
-- **When it reads**: only while the section is unfolded and the window is shown (not hidden or
-  minimised): every 5 minutes, and 30 seconds after a turn in a Codex tab of that account ends
-  (at most once a minute per account), one account at a time. **Refresh usage** (the palette)
-  reads every account now, folded or not.
+- **When it reads**: only while you can see the section: the left column open on the Sessions
+  tab (By project, not the Attention view), the section unfolded and scrolled into view, and the
+  window shown (not hidden, minimised, on another Space or behind a locked screen). Then every 5
+  minutes, and 30 seconds after a turn in a Codex tab of that account ends (at most once a minute
+  per account), one account at a time. **Refresh usage** (the palette) reads every account now,
+  folded or not; it is yours only (agents and scripts can't run it).
 - **Two folders, one account**: when two Codex homes are signed in to the same ChatGPT account
   they share one row (the first one's), and the hover names both folders.
 - **Where the numbers come from**: Deckhand asks Codex itself. It runs `codex app-server` with the
@@ -801,8 +805,12 @@ Usage page come later.
   Codex makes the request with its own sign-in. **Deckhand never reads `auth.json` or any other
   credential and never calls a ChatGPT endpoint itself.** It keeps only the numbers, labels and
   times (in `workspace.json`, so a restart shows them); the account's id is kept only as a
-  one-way hash, to tell two folders on one account apart, and is never shown. Codex marks this
-  request as experimental: after a Codex update a row may say *can't read* until Deckhand follows.
+  one-way hash under a random key of this Mac's own (`usage-salt` in Deckhand's data dir), to tell
+  two folders on one account apart, and is never shown nor sent anywhere. An email address in
+  Codex's error words is taken out. Each read starts Codex as a tab would, so Codex does its own
+  start-up work (it may refresh its model list and plugins and write its own files in that home);
+  it doesn't start your MCP servers. Codex marks this request as experimental: after a Codex
+  update a row may say *can't read* until Deckhand follows.
 
 ## Tabs
 
@@ -2713,6 +2721,7 @@ to you (`0700`), and its files are `0600`:
 | `jobs/<id>/` | each job's state, its runs (`runs/`) and pi's sessions of them (`sessions/`) |
 | `jobs/scheduler.log` | what the scheduler did: runs started, skipped and why |
 | `update.json` | [updates](#updates): the setting, a skipped version, when it last checked |
+| `usage-salt` | a random key of this Mac's own, for the one-way hash of a Codex account's id ([Usage](#usage)) |
 | `core/`, `run/` | Deckhand Core and the session holder: the installed cores, the sockets and their logs; PERSISTENCE.md has these and the other files |
 | `updates/` | an update being downloaded and checked (removed afterwards) |
 
@@ -3139,7 +3148,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Reduce motion |  | |
 | Dim inactive panes |  | on or off |
 | Rescan sessions |  | look for projects and sessions again (pi's session store, Claude Code's transcripts, Codex's rollouts) |
-| Refresh usage |  | read every coding-agent account's plan limits now, for the USAGE section (Codex's own app-server, one account at a time), folded or not ([Usage](#usage)) |
+| Refresh usage |  | read every coding-agent account's plan limits now, for the USAGE section (Codex's own app-server, one account at a time), folded or not; yours only ([Usage](#usage)) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |

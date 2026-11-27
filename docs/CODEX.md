@@ -463,7 +463,9 @@ endpoint.**
   `excludeResetCreditDetails: true` (no reset-credit detail lookup: a background poll), reads
   lines until the reply to that request (skipping notifications and anything not JSON, such as a
   login profile's output), then closes stdin and stops the group (SIGTERM after 0.5 s, SIGKILL after
-  the grace). At most 30 s, and 256 KB of output.
+  the grace). At most 30 s, and 256 KB of output for the whole run (past that it is stopped). Its
+  group is killed only if it did not end by itself with its output closed (then the group is gone
+  and its id may be reused).
 - **The answer** (`GetAccountRateLimitsResponse`, marked experimental in Codex's generated schema,
   `codex app-server generate-json-schema`) is read loosely: unknown fields are ignored and a
   missing or wrongly typed one is "not said". From `rateLimits`: `primary` and `secondary`
@@ -471,17 +473,29 @@ endpoint.**
   (`unlimited`, else `balance`, else `hasCredits: false` = "none") and `rateLimitReachedType` (a
   limit hit); from `rateLimitsByLimitId`, every other bucket's windows under its `limitName` (the
   hover only); at most 8 windows. `accountId` is kept only as a salted SHA-256 prefix: two homes
-  with the same one share a row. `initialize`'s `codexHome` must be the home asked for (a login
-  profile that moved `CODEX_HOME` would read another account): otherwise the answer is not used.
-- **Errors**: Codex's own words decide (its app-server's account handler): "chatgpt authentication required to read rate
-  limits" is an API-key account (no plan limits), "codex account authentication required…" is
-  signed out; any other error, a timeout, an exit without an answer or a missing codex is "can't
-  read", with the reason (a read that worked before keeps its numbers).
-- **When**: while the left column's USAGE section is unfolded and a window (not a hub nor a
-  browser) is attached and shown: an account is read once it is due, 5 minutes after its last try,
+  with the same one share a row (an HMAC under this install's own key, `usage-salt`; it stays in
+  the core). `initialize` must answer with a result (an error or a line that is not JSON fails
+  the read), and for any home but Codex's default its `codexHome` must be the home asked for: a
+  login profile that moved `CODEX_HOME` would read another account, so a different one or none
+  at all fails the read ("can't confirm which account Codex read"). A percent below 0 or missing
+  is "not known" (-1). Email addresses in Codex's error text are taken out before it is kept.
+- **Errors**: only Codex's own words, matched whole (its app-server's account processor,
+  `get_account_rate_limits_response`, checked at 0.169.0): "chatgpt authentication required to read
+  rate limits" is an API-key account (no plan limits), "codex account authentication required to
+  read rate limits" is signed out; any other error, a timeout, an exit without an answer or a
+  missing codex is "can't read", with the reason (a read that worked before keeps its numbers).
+- **When**: while a window (not a hub nor a browser) is attached, not hidden, minimised or occluded,
+  and says it drew the USAGE section unfolded and in view (`window.facts` `usage_visible`): an account is read once it is due, 5 minutes after its last try,
   and 30 seconds after a turn of one of its tabs ended (the Stop hook's `claude.turn`; never
   closer than a minute after the last try); one account at a time. `refresh_usage` reads every
-  account now. A restart starts from the saved reads (PERSISTENCE.md `usage`).
+  account now (the user's only). A restart starts from the saved reads (PERSISTENCE.md `usage`).
+- **What each read costs** (Codex 0.169.0's source, not measured): `initialize` and
+  `account/rateLimits/read` start no MCP server, connector or app (those start with a thread,
+  `thread/start`, or an MCP request). But each `codex app-server` start does its own start-up work:
+  it opens its SQLite state and logs, may fetch the model list, runs its plugin start-up tasks
+  (with a ChatGPT sign-in, a refresh of installed remote plugins; `git` only for Git
+  marketplaces you configured, or the curated catalog when the remote one is off), and, after
+  `initialize`, an account check with the backend. It writes its own files in that home.
 - **Tests** never start a real codex: unit tests (`src/core/usage_test.odin`) parse fixtures from
   the schema and run the exchange against a shell stand-in; the scenes `usage-codex` and
   `usage-section` run `tests/scripts/fake-codex.py app-server`, which answers as Codex's app-server

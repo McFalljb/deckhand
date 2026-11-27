@@ -90,7 +90,7 @@ does, in load order.
 | `desk` | `extensions/desk` (+ `state.ts`, `commands.ts`, `app.ts` → `lib/`) | also `DECKHAND_CONTROL_TOKEN` (Atlas) |
 | `browser` | `extensions/desk-browser` (+ `browser.ts` → `lib/`) | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
 | `panels` | `extensions/sidebar` (its data side; `rows.ts` → `lib/`) | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
-| `antigravity` | Deckhand's own (ACP client after t3code's; `acp.ts`, `agy.ts`, `agy-login.ts`, `antigravity.ts` in `lib/`) | an agy binary found (§3a); every mode |
+| `antigravity` | Deckhand's own (ACP client after t3code's; `acp.ts`, `agy.ts`, `agy-accounts.ts`, `agy-login.ts`, `antigravity.ts` in `lib/`) | an agy binary found (§3a); every mode |
 | `guardrails` (optional, on) | `extensions/guardrails` (`core.ts` → `lib/guardrails.ts`) | always (every mode); read-only with `PI_KIT_READONLY=1` |
 | `shell` (optional, on) | `extensions/shell` (`lines.ts` → `lib/shell.ts`) | always but read-only sessions |
 | `notes` (optional, off) | `extensions/notes` | interactive and print runs, not pi-subagents children |
@@ -126,32 +126,67 @@ former **Start chats read-only** is gone): what a chat's agent may do is the cha
 
 ## 3a. Antigravity in pi tabs (preview)
 
-`extensions/antigravity` gives pi a provider, `antigravity`, backed by the user's own Google
-Antigravity CLI over ACP (`agy acp`: JSON-RPC 2.0, one message per line on stdio), as t3code drives
-it. agy runs the whole turn (model, tools, system prompt) and keeps the conversation and the
+`extensions/antigravity` gives pi one provider per Antigravity account, backed by the user's own
+Google Antigravity CLI over ACP (`agy acp`: JSON-RPC 2.0, one message per line on stdio), as t3code
+drives it. agy runs the whole turn (model, tools, system prompt) and keeps the conversation and the
 sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or calls Google.
 
 - **Dormant without agy.** `findAgy` (`lib/acp.ts`): `DECKHAND_AGY_PATH` (absolute, executable),
   else `agy` or `antigravity` on `PATH`; a few stats at load. Not found: the extension registers
-  nothing. Found: the provider, `/antigravity-login`, `/antigravity-models`, and hooks for
+  nothing. Found: the accounts' providers, `/antigravity`, `/antigravity-login`, and hooks for
   `session_start`, `session_shutdown` and `session_before_compact`. No tools or flags.
 - **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
   `clientInfo`/`clientCapabilities`: agy answers `protocolVersion: 2` in the v1 shape), no fs and
   no terminal capability; agy older than 1.5.1 (`agentInfo.version`) is refused; `session/new`
   (or `session/resume`), agy's `default` mode, then the model and thinking by config option
-  (`session/set_config_option`, `model` and the `thought_level` category). No eager
-  `authenticate`: on auth_required it is called once with agy's first method; a sign-in link on
-  agy's output means "run `/antigravity-login`".
+  (`session/set_config_option`, `model` and the `thought_level` category). `authenticate` with
+  the account's method always comes before `session/new`, as in t3code (agy picks its credential
+  source from it). A sign-in link on agy's output, auth_required (-32000) or "No browser is
+  available here" (-32603) mean "not signed in", and the error names the account's command.
+- **Accounts** (`lib/agy-accounts.ts`, after t3code's provider instances): `accounts.json` in
+  `<data dir>/antigravity` (macOS `~/Library/Application Support/Deckhand`, or `pi-desk` when only
+  that exists; Linux `$XDG_DATA_HOME/deckhand` or `~/.local/share/deckhand`; `DECKHAND_ANTIGRAVITY_DIR`
+  overrides) holds names, methods (`oauth-personal`, `oauth-business`, `gemini-api-key`,
+  `agent-platform`) and GCP project/location, mode 0600, never a secret. The account `default` is
+  implicit (a Google account). Each account is a provider (`antigravity`, `antigravity-<name>`)
+  and a profile, `profiles/<name>` (0700): agy runs as `agy acp --gemini-dir <profile>
+  --app-data-dir antigravity-acp`, with the method in `antigravity-acp/settings.json`, and the
+  user's `~/.gemini` `config/skills`, `antigravity-cli/skills`, `config/skills.json`, `AGENTS.md`
+  and `GEMINI.md` linked in. No automatic switching, rotation or fallback between accounts.
+- **agy's environment** (`agyEnvFor`): pi's, without t3code's list (`GEMINI_API_KEY`,
+  `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_*`, `GOOGLE_GENAI_USE_VERTEXAI`,
+  `GCLOUD_PROJECT`, `CLOUDSDK_CORE_PROJECT`, `AGY_ACP_*`, `GEMINI_HOME`, `BROWSER`, …, matched
+  case-insensitively), any other `GOOGLE_*` and `DECKHAND_*`; then `GEMINI_HOME` (the profile),
+  `AGY_ACP_FORCE_FILE_STORAGE=1`, `AGY_CLI_DISABLE_AUTO_UPDATE=true`, `TMPDIR`
+  (`antigravity-acp/tmp`), and the account's key as `GEMINI_API_KEY` (`gemini-api-key`) or
+  `GOOGLE_API_KEY` (`agent-platform`). A Google-account (`oauth-personal`) agy also gets
+  `SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0`, as in t3code: agy 1.5 ignores file storage and keeps
+  Google sign-ins in one OS keyring entry for every profile unless it believes it runs over SSH, so
+  without it two accounts would share one sign-in; over "SSH" it signs in by the pasted code
+  (`--login`). `BROWSER` is not set (t3code points it at a helper; here agy's link is shown in pi).
+- **API keys**: `gemini-api-key` and key-based `agent-platform` accounts use pi's own credential
+  store: the provider's `auth.apiKey.login` asks with pi's masked secret prompt (`/login
+  antigravity-<name>`), pi keeps the key in `~/.pi/agent/auth.json` (0600) like every API key, and
+  passes it to the provider per turn; it reaches agy only in its process environment. `/logout`
+  removes it.
+- **`/antigravity`**: the status (agy's path and version from an `initialize`, each account's
+  provider, method, sign-in state and model count; "signed in" is the existence of agy's
+  `acp_token.json`, which is never read, or a key in pi's store) and, with a UI, a menu;
+  `add <name> [method]`, `login`, `logout` (agy's ACP `logout`, when advertised; the history
+  stays), `remove` (confirmed; its provider unregistered and its profile deleted; `default` stays)
+  and `models [name]`. `/antigravity-login` is the default account's sign-in. Gemini Enterprise
+  signs in by agy's own browser flow (`authenticate`, its link shown, up to 5 minutes).
+  `SUBSCRIPTION_REQUIRED` from agy becomes a message that links https://antigravity.google/docs/plans.
 - **Approvals: none yet.** Every `session/request_permission` is answered `reject_once` (else
   `cancelled`), every ask_question (`interaction_…`) and elicitation declined, `fs/*` and
   `terminal/*` "method not found". Granting approvals is a later, separately reviewed change.
-- **Sign-in** (`lib/agy-login.ts`): `agy acp --login`; the accounts.google.com link is checked
+- **Sign-in** (`lib/agy-login.ts`): `agy acp --login` in the account's profile; the accounts.google.com link is checked
   and shown, the pasted code (or the callback page's URL for this sign-in) is checked and written
   to agy's stdin as one line; agy stores the credential.
-- **Models**: `antigravity/default` (agy's own choice) always; the account's from a session's
-  `model` option (a throwaway session on `/antigravity-models` and after sign-in; every real
+- **Models**: `<provider>/default` (agy's own choice) always; the account's from a session's
+  `model` option (a throwaway session on `/antigravity models` and after sign-in; every real
   session too), in memory only.
-- **Turns** (`lib/antigravity.ts`): one agy process and session per pi session
+- **Turns** (`lib/antigravity.ts`): one agy process and session per pi session and account
   (`options.sessionId`); its id is each answer's `responseId`. Only the user messages after the last
   answer are sent; when the transcript is not agy's (another provider answered, `/tree`), a new
   agy session gets the transcript as text first; after a restart or crash the session named on
@@ -161,7 +196,8 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `PromptResponse.usage`; cost 0. pi's summaries (compaction, branch summaries) are answered
   without agy; replays (`disableContinuation`) are refused.
 - **Tests**: `test/antigravity.test.ts` against `test/fake-agy.mjs`, a stand-in agy (t3code's
-  fixtures' shapes); never a real agy.
+  fixtures' shapes; it checks the method against the profile's settings and its environment, and
+  logs the variables it got), with a temporary HOME and accounts folder; never a real agy.
 
 ## 4. Overlap: how Deckhand steps back
 
@@ -462,7 +498,8 @@ open checks are in [CODEX.md](CODEX.md), "How it was tested"):
   installed pi-kit, the step-backs (`getCommands` names for `/guardrails`, pi-kit's reminder on
   the branch before `turn_start`) and pi's conflict reports for the shell tools;
 - Atlas with `--skill`: `deckhand-desk` listed (pi's `loadSkills` is tested, the CLI path is not).
-- Antigravity against a real agy (none was available): the sign-in, models, streaming, cancel
-  and resume are tested against a stand-in only; one offline pi 1.5.2 print run with no
+- Antigravity against a real agy (none was available): the sign-in, accounts, profiles, models,
+  streaming, cancel and resume are tested against a stand-in only (the SSH_CONNECTION keyring
+  behaviour is t3code's finding, not checked here); one offline pi 1.5.2 print run with no
   credentials used the provider against the stand-in (two turns, one agy session). `/model`
   listing the models published after start, and the TUI's status line, are unchecked in a real pi.

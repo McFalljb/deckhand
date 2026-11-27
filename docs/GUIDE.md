@@ -214,13 +214,43 @@ sidebar hands its sections to Deckhand's right column.
 With Google's Antigravity CLI installed (`agy`, or `antigravity` from the macOS download; version
 1.5.1 or newer, 1.5.12 recommended), a pi tab can use your Antigravity models. Without it, nothing
 of this shows up. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
-turn: its model, its tools, its own instructions. Deckhand never sees or stores your Google sign-in.
+turn: its model, its tools, its own instructions. Deckhand never reads or stores your Google
+sign-in; agy keeps it.
 
-- **`/antigravity-login`** signs agy in: it shows a Google link, you sign in there and paste the
-  code the Antigravity page shows. (`agy acp --login` in a terminal does the same.)
-- **`/model`** lists **Antigravity (agy's default model)**, and your account's models once agy has
-  listed them (after `/antigravity-login`, after **`/antigravity-models`**, or after a first
-  message).
+**Setting up.** Type **`/antigravity`**: it shows whether agy was found and its version, and each
+account with its sign-in method, whether it is signed in and how many models it has, then a menu to
+add an account, sign in, sign out or remove one. For one Google account with an Antigravity plan,
+**`/antigravity-login`** is all you need: it shows a Google link, you sign in there and paste the
+code the Antigravity page shows. Then **`/model`** lists your models.
+
+**Accounts.** Each account is its own provider in `/model`: `antigravity` for the default account,
+`antigravity-<name>` for the others (for example **Gemini 3.8 Pro (Antigravity: work)**). You pick
+an account by picking its model; Deckhand never switches accounts by itself, not even when one runs
+out of quota. Each account has its own agy profile, so its sign-in and history stay separate; your
+`~/.gemini` skills, `AGENTS.md` and `GEMINI.md` are linked into every profile.
+
+- **`/antigravity add <name> [method]`** adds an account. The methods: `oauth-personal` (a Google
+  account, the default), `oauth-business` (Gemini Enterprise; asks for the GCP project and
+  location), `gemini-api-key` (a Gemini API key), `agent-platform` (Agent Platform / Vertex AI: an
+  API key, or a project and location with your Application Default Credentials).
+- **`/antigravity login <name>`** signs an account in. For an API key, run **`/login
+  antigravity-<name>`** instead: pi asks for the key without showing it and keeps it in its own
+  credential store, as it does every API key; it is never written to Deckhand's files.
+- **`/antigravity logout <name>`** signs out (agy forgets the saved sign-in; the history stays).
+  For an API key, `/logout` and pick the account's provider.
+- **`/antigravity remove <name>`** removes an account, its profile and its history. The default
+  account stays.
+- **`/antigravity models <name>`** lists an account's models again.
+
+An API key or Google variable in pi's environment (`GEMINI_API_KEY`, `GOOGLE_API_KEY`,
+`GOOGLE_CLOUD_PROJECT` and the like) never reaches agy, so it cannot bill a key instead of your
+plan. Accounts are kept in `~/Library/Application Support/Deckhand/antigravity`
+(`~/.local/share/deckhand/antigravity` on Linux). If Google answers that the account needs a plan,
+the error links to https://antigravity.google/docs/plans; if an account is not signed in, the error
+names the command to run.
+
+**Using it.**
+
 - The answer streams as text; agy's thinking, the tools it runs and its plan show as thinking, and
   what it is doing shows in the status line. pi's own tools are not used, and pi's guardrails do not
   apply to what agy runs.

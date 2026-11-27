@@ -129,11 +129,11 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 	const line = loginAnswer(link, answer);
 	if (!line) {
 		await stop();
-		return { ok: false, error: "That is not a code from the Antigravity sign-in page: run /antigravity-login again" };
+		return { ok: false, error: "That is not a code from the Antigravity sign-in page: sign in again (/antigravity-login, or /antigravity login <name>)" };
 	}
 	child.stdin!.write(`${line}\n`);
 	const timer = setTimeout(() => child.kill("SIGTERM"), o.finishTimeoutMs ?? 120_000);
 	const code = await exited;
 	clearTimeout(timer);
-	return code === 0 ? { ok: true } : { ok: false, error: "Antigravity could not finish the Google sign-in: run /antigravity-login again" };
+	return code === 0 ? { ok: true } : { ok: false, error: "Antigravity could not finish the Google sign-in: sign in again (/antigravity-login, or /antigravity login <name>)" };
 }

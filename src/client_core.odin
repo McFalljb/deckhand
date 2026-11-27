@@ -586,6 +586,12 @@ client_call_wait :: proc(cmd: core.Command, wait: time.Duration, as: core.Caller
 	return client_take_result(id), request_id
 }
 
+// Install agy…'s run as client_live_mirror last saw it (the core's: state.live.agy)
+@(private = "file")
+live_agy_phase: core.Agy_Install_Phase
+@(private = "file")
+live_agy_step: string
+
 // A separate core's runtime the window follows each frame (the replica's live section): its install
 // run, into this process's core.harness_run (what the setup sheet reads), and pi's config folders
 // for the file watcher (watch_sync reads core.reload_watch_dirs). The run's strings are the
@@ -598,6 +604,15 @@ client_live_mirror :: proc() {
 	was := h.status
 	h.term_id, h.item, h.action, h.command, h.status, h.exit = l.term_id, l.item, l.action, l.command, l.status, l.exit
 	if was == .Running && h.status != .Running do core.harness_checklist_refresh(full = true)
+	// Install agy…'s run (agy_install.odin): its row shows each step; once it ends, the checklist looks again
+	if a := state.live.agy; a.phase != live_agy_phase || a.step != live_agy_step {
+		ended := live_agy_phase == .Running && a.phase != .Running
+		live_agy_phase = a.phase
+		delete(live_agy_step)
+		live_agy_step = strings.clone(a.step)
+		if ended do core.harness_checklist_refresh()
+		else do core.settings_gen += 1
+	}
 	watch_sync() // and pi's config folders the core wants watched (live.watch; a no-op when unchanged)
 }
 

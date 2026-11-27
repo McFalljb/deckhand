@@ -32,7 +32,7 @@
 // - Replays (options.disableContinuation: pi's cache warming, which needs a model promptCache this
 //   provider never sets) are refused.
 import type { AgyModel } from "./agy.ts";
-import { AgySession } from "./agy.ts";
+import { AgySession, ModeUnconfirmed } from "./agy.ts";
 import { fileLedger, type Ledger } from "./agy-ledger.ts";
 
 
@@ -362,7 +362,7 @@ export function createAntigravity(o: AntigravityOptions) {
 		const unclaim = () => claimedNow && ledger!.release(resumeId!, st);
 		let agy: AgySession | undefined;
 		const how = o.launch?.(apiKey) ?? {};
-		const opening = AgySession.open({
+		const open = (rid: string | undefined) => AgySession.open({
 			agyPath: o.agyPath,
 			cwd: o.cwd(),
 			env: how.env ?? o.env,
@@ -370,7 +370,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			runDir: how.runDir,
 			authMethod: how.authMethod,
 			signInHint: how.signInHint,
-			resumeId,
+			resumeId: rid,
 			spawnImpl: o.spawnImpl,
 			// only while a turn runs (st.sink), and only this session's: an update after the turn
 			// ended (agy's background work) has nowhere to go in pi and is dropped
@@ -383,10 +383,13 @@ export function createAntigravity(o: AntigravityOptions) {
 			},
 		});
 		try {
-			agy = await opening;
+			agy = await open(resumeId);
 		} catch (e) {
 			unclaim();
-			throw e;
+			// a resumed session whose default mode cannot be confirmed: a new one, caught up (which
+			// is refused in turn if it cannot confirm it either), rather than failing every turn
+			if (!(resumeId && e instanceof ModeUnconfirmed)) throw e;
+			agy = await open(undefined);
 		}
 		if (agy.sessionId !== resumeId) unclaim(); // agy started a new session instead
 		if (agy.sessionId !== st.acpSessionId) {

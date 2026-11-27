@@ -1165,6 +1165,33 @@ test("round 2, finding 3: closeAll gives up an agy session's lock only after agy
 	await closing;
 	assert.ok(!existsSync(lock), "released once agy ended");
 });
+
+test("round 2, finding 4: a resumed session that cannot confirm its default mode gives way to a new one, caught up; a new one that cannot either is refused", async () => {
+	const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
+	const r = rig({}, { ledgerDir });
+	const a1 = (await r.turn("one")).msg;
+	await r.ag.closeAll();
+	const p = createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: { ...r.f.env, FAKE_AGY_RESUME_NO_MODES: "1" }, ledgerDir });
+	try {
+		const t = await drive(p.provider.streamSimple(MODEL, { messages: [...r.messages, user("after")] }, { sessionId: "pi-1" }));
+		assert.equal(t.msg.stopReason, "stop", "not an error every turn");
+		assert.notEqual(t.msg.responseId, a1.responseId);
+		const sent = r.prompts().at(-1)!;
+		assert.match(sent[0].text, /^\[The conversation so far[\s\S]*User: one/);
+		assert.deepEqual(sent.at(-1), { type: "text", text: "after" });
+	} finally {
+		await p.closeAll();
+	}
+	const none = rig({ FAKE_AGY_NO_MODE_AT_ALL: "1" });
+	try {
+		const t = await none.turn("hi");
+		assert.equal(t.msg.stopReason, "error");
+		assert.match(t.msg.errorMessage, /cannot confirm that Antigravity runs in its default mode/);
+		assert.deepEqual(none.prompts(), []);
+	} finally {
+		await none.ag.closeAll();
+	}
+});
 test("pi restarted: a new provider resumes the agy session named on the transcript's last answer (the record says it ends there)", async () => {
 	const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
 	const r = rig({}, { ledgerDir });

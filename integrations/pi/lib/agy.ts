@@ -8,6 +8,9 @@
 // available here" (agy 1.5 without a display), or a sign-in link on agy's output.
 import { AcpConnection, type AcpConnectionOptions, AcpError, AGY_MIN_VERSION, AGY_RECOMMENDED_VERSION, agyEnv, agyTooOld, initializeParams, SignInRequired } from "./acp.ts";
 
+/** agy's default mode could not be confirmed (setMode): nothing is sent to that session. */
+export class ModeUnconfirmed extends AcpError {}
+
 export const SIGN_IN_HINT = "Antigravity is not signed in: run /antigravity-login";
 const STARTUP_TIMEOUT_MS = 60_000;
 
@@ -178,7 +181,7 @@ export class AgySession {
 	 */
 	async setMode(modeId: string) {
 		const refuse = () =>
-			new AcpError(`Deckhand cannot confirm that Antigravity runs in its ${modeId} mode (this agy reports no mode it can set): not sending messages to it; update agy`);
+			new ModeUnconfirmed(`Deckhand cannot confirm that Antigravity runs in its ${modeId} mode (this agy reports no mode it can set): not sending messages to it; update agy`);
 		const modeOpt = () => this.configOptions.find((x: any) => x?.category === "mode" && x?.type === "select");
 		const opt = modeOpt();
 		if (opt) {

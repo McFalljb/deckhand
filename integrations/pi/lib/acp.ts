@@ -256,6 +256,14 @@ export class AcpConnection {
 		this.pending.clear();
 	}
 
+	/** SIGTERM now, synchronously (pi is exiting). */
+	killNow(): void {
+		this.fail(new AcpError("Antigravity (agy) was stopped"));
+		try {
+			if (this.child && this.child.exitCode === null && this.child.signalCode === null) this.child.kill("SIGTERM");
+		} catch {}
+	}
+
 	/** Ends the process: SIGTERM, then SIGKILL after `graceMs`. */
 	close(graceMs = 1000): Promise<void> {
 		const child = this.child;

@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
+import { createAntigravity, planTurn, SUMMARY_TEXT } from "../lib/antigravity.ts";
 import { piRules } from "./pi-rules.ts";
 
 const TMP_ROOT = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-test-"));
@@ -363,5 +364,321 @@ test("/antigravity-login: the link shown, the code asked for, then the models li
 		const headless = { ...ctx, hasUI: false };
 		await pi.extensions[0].commands.get("antigravity-login").handler("", headless);
 		assert.match(notes.at(-1)!, /needs the interactive pi/);
+	});
+});
+
+// ---- step 3: the passthrough provider ----
+
+/** Reads a provider stream as pi's agent loop does (pi-agent-core agent-loop.js streamAssistantResponse). */
+async function drive(stream: any) {
+	const events: any[] = [];
+	for await (const e of stream) events.push(e);
+	const msg = await stream.result();
+	return { events, msg };
+}
+
+/** pi's stream contract (docs/custom-provider.md "A custom stream must"): one start, balanced blocks, one terminal event. */
+function assertContract(events: any[], msg: any) {
+	const types = events.map((e) => e.type);
+	assert.equal(types.filter((t) => t === "done" || t === "error").length, 1, types.join(","));
+	assert.ok(["done", "error"].includes(types.at(-1)), "the terminal event is last");
+	assert.ok(types.filter((t) => t === "start").length <= 1);
+	if (types.includes("start")) assert.equal(types[0], "start");
+	const open = new Map<number, string>();
+	for (const e of events) {
+		const m = /^(text|thinking|toolcall)_(start|delta|end)$/.exec(e.type);
+		if (!m) continue;
+		if (m[2] === "start") open.set(e.contentIndex, m[1]);
+		else assert.equal(open.get(e.contentIndex), m[1], `${e.type} for an open block`);
+		if (m[2] === "end") open.delete(e.contentIndex);
+	}
+	assert.equal(open.size, 0, "every block ended");
+	assert.ok(!types.some((t) => t.startsWith("toolcall")), "never a pi tool call");
+	assert.ok(!msg.content.some((b: any) => b.type === "toolCall"));
+	assert.notEqual(msg.stopReason, "pending");
+	if (msg.stopReason === "error" || msg.stopReason === "aborted") assert.ok(msg.errorMessage);
+}
+
+const SYS = { role: "system", content: "You are pi.", toolsAdded: [{ name: "bash", description: "run", parameters: {} }] };
+let clock = 1_000;
+const user = (text: string, extra: any[] = []) => ({ role: "user", content: [{ type: "text", text }, ...extra], timestamp: clock++ });
+const MODEL = { id: "default", provider: "antigravity", api: "antigravity-acp" };
+
+/** A provider against the stand-in, and a pi session talking to it. */
+function rig(extra: Record<string, string> = {}, opts: any = {}) {
+	const f = fake(extra);
+	const statuses: (string | undefined)[] = [];
+	const ag = createAntigravity({ agyPath: FAKE, cwd: () => f.cwd, env: f.env, status: (t) => statuses.push(t), ...opts });
+	const messages: any[] = [SYS];
+	const turn = async (text: string, o: any = {}, model: any = MODEL) => {
+		messages.push(user(text, o.images ?? []));
+		const r = await drive(ag.provider.streamSimple(model, { messages: [...messages] }, { sessionId: o.sessionId ?? "pi-1", ...o.options }));
+		assertContract(r.events, r.msg);
+		if (o.keep !== false) messages.push(r.msg);
+		return r;
+	};
+	const prompts = () => f.read().filter((m) => m.method === "session/prompt").map((m) => m.params.prompt);
+	return { f, ag, messages, turn, prompts, statuses };
+}
+const textOfMsg = (m: any) => m.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+const thinkingOf = (m: any) => m.content.filter((b: any) => b.type === "thinking").map((b: any) => b.thinking).join("");
+
+test("a turn: agy's text as text, its thoughts and tool calls as thinking, usage, agy's session on the answer; pi's tools and system prompt not sent", async () => {
+	const r = rig();
+	try {
+		const { events, msg } = await r.turn("hello");
+		assert.equal(msg.stopReason, "stop");
+		assert.equal(textOfMsg(msg), "You said: hello (model gemini-3.8-pro, mode default, thinking high, turn 1)");
+		assert.equal(thinkingOf(msg), "Thinking about it.\n→ Read README.md\nPlan: [>] Answer\n");
+		assert.deepEqual(msg.content.map((b: any) => b.type), ["thinking", "text"]);
+		assert.deepEqual(msg.usage, { input: 1200, output: 80, cacheRead: 300, cacheWrite: 0, totalTokens: 1580, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } });
+		assert.match(msg.responseId, /^sess-/);
+		assert.equal(msg.provider, "antigravity");
+		assert.equal(events[0].type, "start");
+		assert.deepEqual(r.prompts(), [[{ type: "text", text: "hello" }]], "the user's message only");
+		assert.ok(!JSON.stringify(r.f.read()).includes("You are pi") && !JSON.stringify(r.f.read()).includes('"bash"'));
+		assert.deepEqual(r.statuses, ["Antigravity: Read README.md", undefined]);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("later turns: only the new user messages go to the same agy session; images pass through", async () => {
+	const r = rig();
+	try {
+		await r.turn("one");
+		r.messages.push(user("steer A"));
+		const { msg } = await r.turn("steer B", { images: [{ type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }] });
+		assert.match(textOfMsg(msg), /steer A\nsteer B \[\+1 image\] .*turn 2\)/);
+		assert.deepEqual(r.prompts()[1], [{ type: "text", text: "steer A" }, { type: "text", text: "steer B" }, { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }]);
+		assert.equal(r.f.read().filter((m) => m.argv).length, 1, "one agy process");
+		assert.equal(r.f.read().filter((m) => m.method === "session/new").length, 1);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("model and thinking: pi's model id and level select agy's; an unknown model is an error naming /model", async () => {
+	const r = rig();
+	try {
+		const { msg } = await r.turn("hi", { options: { reasoning: "low" } }, { ...MODEL, id: "gemini-3.8-flash" });
+		assert.match(textOfMsg(msg), /model gemini-3\.8-flash, mode default, thinking low/);
+		assert.deepEqual(r.ag.models.map((m) => m.id), ["default", "gemini-3.8-pro", "gemini-3.8-flash"], "the session's models are listed for /model");
+		const bad = await r.turn("again", { keep: false }, { ...MODEL, id: "gemini-9" });
+		assert.equal(bad.msg.stopReason, "error");
+		assert.match(bad.msg.errorMessage, /gemini-9' is not available.*\/model/);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("abort: session/cancel, the turn ends aborted, and the session goes on", async () => {
+	const r = rig();
+	try {
+		const ac = new AbortController();
+		r.messages.push(user("slow"));
+		const s = r.ag.provider.streamSimple(MODEL, { messages: [...r.messages] }, { sessionId: "pi-1", signal: ac.signal });
+		const events: any[] = [];
+		for await (const e of s) {
+			events.push(e);
+			if (events.filter((x) => x.type === "text_delta").length === 3) ac.abort();
+		}
+		const msg = await s.result();
+		assertContract(events, msg);
+		assert.equal(msg.stopReason, "aborted");
+		assert.equal(msg.errorMessage, "Request was aborted");
+		assert.equal(r.f.read().filter((m) => m.method === "session/cancel").length, 1);
+		r.messages.push(msg); // pi keeps an aborted answer
+		const next = await r.turn("after");
+		assert.match(textOfMsg(next.msg), /after .*turn 2\)/, "same agy session");
+		const pre = new AbortController();
+		pre.abort();
+		r.messages.push(user("never"));
+		const early = await drive(r.ag.provider.streamSimple(MODEL, { messages: [...r.messages] }, { sessionId: "pi-1", signal: pre.signal }));
+		assert.equal(early.msg.stopReason, "aborted");
+		assert.equal(r.prompts().length, 2, "an aborted request sends nothing");
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("abort when agy does not end the turn: its process is stopped, and the next turn resumes the agy session in a new one", async () => {
+	const r = rig({}, { cancelWaitMs: 150 });
+	try {
+		const first = await r.turn("hi");
+		const ac = new AbortController();
+		r.messages.push(user("stubborn"));
+		const s = r.ag.provider.streamSimple(MODEL, { messages: [...r.messages] }, { sessionId: "pi-1", signal: ac.signal });
+		setTimeout(() => ac.abort(), 80);
+		const { msg } = await drive(s);
+		assert.equal(msg.stopReason, "aborted");
+		r.messages.push(msg);
+		const next = await r.turn("back");
+		assert.equal(next.msg.stopReason, "stop");
+		assert.equal(r.f.read().filter((m) => m.argv).length, 2, "a second agy process");
+		assert.deepEqual(r.f.read().find((m) => m.method === "session/resume")?.params, { sessionId: first.msg.responseId, cwd: r.f.cwd, mcpServers: [] });
+		assert.equal(next.msg.responseId, first.msg.responseId);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("agy crashing mid-turn: an error that is not one pi retries; the next turn resumes agy's session", async () => {
+	const r = rig();
+	try {
+		const first = await r.turn("hi");
+		const crash = await r.turn("crash");
+		assert.equal(crash.msg.stopReason, "error");
+		assert.match(crash.msg.errorMessage, /Antigravity \(agy\) ended with exit code 3/);
+		assert.equal(textOfMsg(crash.msg), "about to", "what streamed before stays");
+		assert.ok(!/overloaded|rate.?limit|server.?error|internal.?error|connection.?(lost|error|refused)|network|socket|fetch failed|\b5\d\d\b/i.test(crash.msg.errorMessage), "pi's retry patterns (pi-ai utils/retry.js) do not match");
+		const next = await r.turn("still there?");
+		assert.equal(next.msg.stopReason, "stop");
+		assert.equal(r.f.read().find((m) => m.method === "session/resume")?.params.sessionId, first.msg.responseId);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("pi restarted: a new provider resumes the agy session named on the transcript's last answer", async () => {
+	const r = rig();
+	const first = await r.turn("hi");
+	await r.ag.closeAll();
+	const again = createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: r.f.env });
+	try {
+		r.messages.push(user("after restart"));
+		const { msg } = await drive(again.provider.streamSimple(MODEL, { messages: r.messages }, { sessionId: "pi-1" }));
+		assert.equal(msg.stopReason, "stop");
+		assert.equal(msg.responseId, first.msg.responseId);
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "after restart" }]);
+		assert.equal(r.f.read().find((m) => m.method === "session/resume")?.params.sessionId, first.msg.responseId);
+	} finally {
+		await again.closeAll();
+	}
+});
+
+test("a transcript agy does not have (another provider answered before; /tree went back): a new agy session, pi's transcript sent as text first", async () => {
+	const r = rig();
+	try {
+		r.messages.push(user("what is 2+2?"), { role: "assistant", provider: "anthropic", api: "anthropic-messages", model: "x", content: [{ type: "text", text: "4" }], timestamp: clock++, stopReason: "stop" });
+		const { msg } = await r.turn("and 3+3?");
+		assert.equal(msg.stopReason, "stop");
+		const [catchUp, newest] = r.prompts()[0];
+		assert.match(catchUp.text, /^\[The conversation so far.*\nUser: what is 2\+2\?\n\nAssistant: 4\n\[End of the earlier conversation/s);
+		assert.deepEqual(newest, { type: "text", text: "and 3+3?" });
+		// back in /tree to the first answer, then a new message
+		const firstAnswer = msg;
+		await r.turn("second");
+		const branch = [SYS, ...r.messages.slice(1, r.messages.indexOf(firstAnswer) + 1), user("a branch")];
+		const b = await drive(r.ag.provider.streamSimple(MODEL, { messages: branch }, { sessionId: "pi-1" }));
+		assert.equal(b.msg.stopReason, "stop");
+		assert.equal(r.f.read().filter((m) => m.method === "session/new").length, 2, "agy's session is ahead of this branch: a new one");
+		assert.match(r.prompts().at(-1)[0].text, /User: and 3\+3\?/);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("planTurn: continue, resume, new; a retry after a failed answer continues", () => {
+	const a = (ts: number, provider = "antigravity", responseId = "S") => ({ role: "assistant", provider, responseId, timestamp: ts, content: [] });
+	const u = (t: string) => ({ role: "user", content: t, timestamp: 0 });
+	assert.deepEqual(planTurn([SYS, u("x")], undefined), { blocks: [{ type: "text", text: "x" }], mode: "new" });
+	assert.equal((planTurn([u("x"), a(5)], undefined) as any).error, "Antigravity: there is no new message to send");
+	const st = { acpSessionId: "S", produced: [{ ts: 5, ok: true }] };
+	assert.equal((planTurn([u("x"), a(5), u("y")], st) as any).mode, "continue");
+	assert.deepEqual(planTurn([u("x"), a(5), u("y")], { acpSessionId: "T", produced: [] }), { blocks: [{ type: "text", text: "y" }], mode: "resume", resumeId: "S" });
+	const retried = { acpSessionId: "S", produced: [{ ts: 5, ok: true }, { ts: 6, ok: false }] };
+	assert.equal((planTurn([u("x"), a(5), u("y")], retried) as any).mode, "continue", "pi dropped the failed attempt and retries");
+	const ahead = { acpSessionId: "S", produced: [{ ts: 5, ok: true }, { ts: 7, ok: true }] };
+	assert.equal((planTurn([u("x"), a(5), u("y")], ahead) as any).mode, "new", "agy is ahead of this branch");
+	assert.equal((planTurn([u("x"), a(5, "openai"), u("y")], st) as any).mode, "new");
+});
+
+test("approvals inside a turn: agy's request is rejected and shown as declined in the thinking", async () => {
+	const r = rig();
+	try {
+		const { msg } = await r.turn("permission please");
+		assert.equal(textOfMsg(msg), 'permission:{"outcome":{"outcome":"selected","optionId":"deny"}}');
+		assert.match(thinkingOf(msg), /→ Run rm -rf build\n✗ declined: Run rm -rf build \(Deckhand does not grant Antigravity approvals yet\)\n✗ Run rm -rf build failed/);
+		const q = await r.turn("question");
+		assert.match(thinkingOf(q.msg), /✗ declined: Which file\?/);
+		assert.equal(textOfMsg(q.msg), 'question:{"outcome":{"outcome":"cancelled"}}');
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("pi's summaries are answered without agy; replays refused; busy refused", async () => {
+	const r = rig();
+	try {
+		const summary = await drive(
+			r.ag.provider.streamSimple(MODEL, { messages: [{ role: "system", content: "You are a context summarization assistant. Your task is..." }, user("<conversation>...</conversation>")] }, { sessionId: "x", cacheRetention: "none" }),
+		);
+		assertContract(summary.events, summary.msg);
+		assert.equal(textOfMsg(summary.msg), SUMMARY_TEXT);
+		assert.equal(r.f.read().length, 0, "agy not started");
+		r.messages.push(user("hi"));
+		const replay = await drive(r.ag.provider.streamSimple(MODEL, { messages: r.messages }, { sessionId: "pi-1", disableContinuation: true }));
+		assert.equal(replay.msg.stopReason, "error");
+		assert.match(replay.msg.errorMessage, /replaying a request is not supported/);
+		const slow = r.ag.provider.streamSimple(MODEL, { messages: [...r.messages, user("slow")] }, { sessionId: "pi-1" });
+		await new Promise((res) => setTimeout(res, 300));
+		const busy = await drive(r.ag.provider.streamSimple(MODEL, { messages: [...r.messages, user("x")] }, { sessionId: "pi-1" }));
+		assert.match(busy.msg.errorMessage, /still answering/);
+		await r.ag.closeAll();
+		const ended = await drive(slow);
+		assert.equal(ended.msg.stopReason, "error", "a closed session ends its turn");
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("not signed in, or agy too old: the turn fails at once with what to do", async () => {
+	const out = rig({ FAKE_AGY_SIGNED_OUT: "1" });
+	const a = await out.turn("hi");
+	assert.equal(a.msg.stopReason, "error");
+	assert.equal(a.msg.errorMessage, "Antigravity is not signed in: run /antigravity-login");
+	await out.ag.closeAll();
+	const old = rig({ FAKE_AGY_VERSION: "agy_acp_server_1.4.9" });
+	const b = await old.turn("hi");
+	assert.match(b.msg.errorMessage, /1\.4\.9 is older than 1\.5\.1/);
+	await old.ag.closeAll();
+});
+
+test("an update agy sends after its turn ended is dropped, not shown in the next answer", async () => {
+	const r = rig();
+	try {
+		await r.turn("late please");
+		await new Promise((res) => setTimeout(res, 120));
+		const { msg } = await r.turn("next");
+		assert.ok(!textOfMsg(msg).includes("LATE"), textOfMsg(msg));
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("pi's request hooks: onPayload sees (and may replace) the prompt; onProviderStreamEvent sees each update", async () => {
+	const r = rig();
+	try {
+		const seen: any[] = [];
+		const events: any[] = [];
+		const { msg } = await r.turn("orig", { options: { onPayload: (p: any) => (seen.push(p), { ...p, prompt: [{ type: "text", text: "replaced" }] }), onProviderStreamEvent: (e: any) => void events.push(e.sessionUpdate) } });
+		assert.deepEqual(seen[0].prompt, [{ type: "text", text: "orig" }]);
+		assert.match(textOfMsg(msg), /You said: replaced/);
+		assert.ok(events.includes("agent_message_chunk") && events.includes("tool_call"));
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("session_before_compact: an Antigravity session's compaction is a note, without asking agy; other models' are left to pi", async () => {
+	await withEnv({ DECKHAND_AGY_PATH: FAKE }, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const [h] = pi.extensions[0].handlers.get("session_before_compact");
+		const event = { preparation: { firstKeptEntryId: "e7", tokensBefore: 123456 } };
+		assert.deepEqual(await h(event, { ...pi.ctx, model: { provider: "antigravity", id: "default" } }), { compaction: { summary: SUMMARY_TEXT, firstKeptEntryId: "e7", tokensBefore: 123456 } });
+		assert.equal(await h(event, { ...pi.ctx, model: { provider: "anthropic", id: "x" } }), undefined);
+		await pi.fire("session_shutdown");
 	});
 });

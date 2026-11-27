@@ -18,19 +18,28 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { findAgy } from "../../lib/acp.ts";
 import { probeModels } from "../../lib/agy.ts";
 import { agyLogin } from "../../lib/agy-login.ts";
-import { createAntigravity, PROVIDER_ID } from "../../lib/antigravity.ts";
+import { createAntigravity, PROVIDER_ID, SUMMARY_TEXT } from "../../lib/antigravity.ts";
 
 export default function antigravity(pi: ExtensionAPI) {
 	const agyPath = findAgy();
 	if (!agyPath) return;
 	let cwd = process.cwd();
-	const ag = createAntigravity({
-		agyPath,
-		streamSimple: () => {
-			throw new Error("Antigravity: not available yet");
-		},
-	});
+	let setStatus: ((text: string | undefined) => void) | undefined;
+	const ag = createAntigravity({ agyPath, cwd: () => cwd, status: (t) => setStatus?.(t) });
 	pi.registerProvider(ag.provider as any);
+	// agy processes end with pi: with the session (below), and at exit
+	process.once("exit", () => ag.killAll());
+
+	pi.on("session_shutdown", async () => {
+		setStatus?.(undefined);
+		await ag.closeAll();
+	});
+
+	// pi's compaction would ask agy for a summary of what agy already holds: pi keeps a note instead
+	pi.on("session_before_compact", (event: any, ctx: ExtensionContext) => {
+		if (ctx.model?.provider !== PROVIDER_ID || !event?.preparation) return undefined;
+		return { compaction: { summary: SUMMARY_TEXT, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore } };
+	});
 
 	/** A throwaway session's models into the provider; the line to show. Throws agy's error. */
 	const listModels = async () => {
@@ -42,6 +51,7 @@ export default function antigravity(pi: ExtensionAPI) {
 	pi.on("session_start", (_e: unknown, ctx: ExtensionContext) => {
 		cwd = ctx.cwd || cwd;
 		ag.bind((ctx as any).modelRegistry);
+		setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
 	});
 
 	pi.registerCommand("antigravity-login", {

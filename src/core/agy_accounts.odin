@@ -696,6 +696,16 @@ agy_accounts_sync :: proc() -> string {
 		}
 		append(&plan.add, Entry{name = name, label = label, dir = d, method = "oauth-personal", source = "found", storage = storage})
 	}
+	// profiles under <root>/profiles the file does not name (a file another tool rewrote): named
+	// again, so pi gives them a provider too
+	if entries, err := os.read_all_directory_by_path(profiles, context.temp_allocator); err == nil {
+		for d in entries {
+			p := strings.concatenate({profiles, "/", d.name}, context.temp_allocator)
+			if !agy_valid_name(d.name) || slice.contains(names[:], d.name) || path_kind(p) != .Dir || slice.contains(c.removed[:], p) do continue
+			append(&names, d.name)
+			append(&plan.add, Entry{name = d.name, method = "oauth-personal"})
+		}
+	}
 	if len(plan.add) == 0 && len(plan.drop) == 0 do return ""
 	return agy_accounts_change(proc(o: ^json.Object, data: rawptr) -> bool {
 		plan := (^Plan)(data)
@@ -716,17 +726,19 @@ agy_accounts_sync :: proc() -> string {
 				e, ok := v.(json.Object)
 				if !ok do continue
 				if str_of(e, "name") == a.name do continue next
-				if d := clean_abs(str_of(e, "dir")); d != "" && (d == a.dir || fs_real(d) == fs_real(a.dir)) do continue next
+				if d := clean_abs(str_of(e, "dir")); d != "" && a.dir != "" && (d == a.dir || fs_real(d) == fs_real(a.dir)) do continue next
 				if str_of(e, "storage") == "keyring" do keyring = true
 			}
-			if rm, rok := o^["removedDirs"].(json.Array); rok do for v in rm do if s, so := v.(json.String); so && clean_abs(string(s)) == a.dir do continue next
+			if rm, rok := o^["removedDirs"].(json.Array); rok && a.dir != "" do for v in rm do if s, so := v.(json.String); so && clean_abs(string(s)) == a.dir do continue next
 			e := make(json.Object, context.temp_allocator)
 			e["name"] = json.String(a.name)
-			e["label"] = json.String(a.label)
-			e["dir"] = json.String(a.dir)
 			e["method"] = json.String(a.method)
-			e["source"] = json.String("found")
-			e["storage"] = json.String(a.storage == "keyring" && !keyring ? "keyring" : "file")
+			if a.dir != "" { // a found folder (else one of Deckhand's own profiles, by its name)
+				e["label"] = json.String(a.label)
+				e["dir"] = json.String(a.dir)
+				e["source"] = json.String("found")
+				e["storage"] = json.String(a.storage == "keyring" && !keyring ? "keyring" : "file")
+			}
 			append(&list, json.Value(e))
 			changed = true
 		}

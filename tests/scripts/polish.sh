@@ -13,6 +13,10 @@ FAKE_HOME="$ROOT/build/polish-home"
 STORE="$FAKE_HOME/.pi/agent/sessions"
 rm -rf "$FAKE_HOME" build/test-data
 mkdir -p "$STORE"
+# the shell tab's prompt, the same on every machine (a login sh reads ~/.profile after
+# /etc/profile): the default names the host, and a CI runner's long name put polish.txt's
+# columns in the hostname (clickcell 2 11 1) and its typing at the terminal's edge
+printf "PS1='pi-desk \$ '\n" > "$FAKE_HOME/.profile"
 
 # session PROJECT HOURS-AGO ID TITLE
 session() {

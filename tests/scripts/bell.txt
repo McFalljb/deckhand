@@ -1,5 +1,6 @@
 # The bell (run with tests/scripts/bell.sh): a fake bridge per session plays
-# working → idle (aaaa-1) and working → waiting (bbbb-2), 5 s apart.
+# working → idle (aaaa-1) and working → waiting (bbbb-2), 5 s apart (bbbb-2's 3 s later, so
+# aaaa-1's "finished" always comes first: fake-bridge-bell.py's BELL_GAP).
 wait 800
 command {"type":"select_project","project_id":$project}
 wait 300

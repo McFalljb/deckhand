@@ -376,6 +376,11 @@ static void CEF_CALLBACK on_before_cmdline(cef_app_t* self, const cef_string_t* 
         add_switch_value(cl, "proxy-server", "http://127.0.0.1:9");
         add_switch_value(cl, "proxy-bypass-list", "<-loopback>");
         add_switch(cl, "disable-quic");
+        // a stand-in camera and microphone: a page's getUserMedia still asks (the permission bar,
+        // browser-polish-guard), but never opens this Mac's devices, and asks on a machine with
+        // none (CI's runners: Chromium skips the prompt when there is no device). Not
+        // use-fake-ui-for-media-stream: that would grant it unasked.
+        add_switch(cl, "use-fake-device-for-media-stream");
     } else {
         // RLZ's ping host (also held off by rlz_ping_delay, browser.odin):
         // belt and braces: RLZ's store is Deckhand's own (framework_search_path),

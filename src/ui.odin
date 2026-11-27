@@ -616,6 +616,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	animating, pulsing, ages_shown = false, false, false
 	flash_lit_n, shine_drawn = 0, false
 	drawer_laid_out = false
+	usage_section_shown = false // usage_section sets it again (ui_usage.odin)
 	pulse_drawn = pulse_step()
 	age_minute_drawn = age_minute()
 	ui_win_w = w

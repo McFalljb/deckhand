@@ -130,6 +130,7 @@ core_timer_fire :: proc(now: time.Tick) -> bool {
 	}
 	if !core_timer_due(now) do return false
 	core_loop.timer_ticks += 1
+	if platform.before_timer_tick != nil do platform.before_timer_tick() // the window's facts now (frames stopped: hidden, occluded)
 	core_tick()
 	// nothing going on for a while (hidden and idle): a slower pace, back at once when there is
 	if core_loop_busy() {

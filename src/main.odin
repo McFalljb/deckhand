@@ -304,6 +304,7 @@ platform_app :: proc() -> core.Platform {
 		trash = fs_trash, // editor_platform_*.odin
 		activity = platform_activity,
 		core_timer = platform_core_timer,
+		before_timer_tick = proc() {client_facts()}, // a tick outside frames: hidden or occluded now (client.odin)
 	}
 }
 

@@ -21,6 +21,24 @@ USAGE_LINE_H :: 20 // a bar's line
 USAGE_LABEL_W :: 22 // "5h", "wk"
 USAGE_STALE_ALPHA :: 0.5 // a read over an hour old
 
+// The USAGE section was drawn unfolded in the last layout (client_facts' usage_visible: the core
+// reads usage only then). ui_layout clears it; usage_section sets it.
+usage_section_shown: bool
+
+// What client_facts sends as usage_visible: the section drawn unfolded in the last layout, its
+// header inside the list's visible part (not scrolled out of it), and the column still showing it.
+usage_visible_now :: proc() -> bool {
+	if !usage_section_shown do return false
+	// and still so now: a layout made before a change (the Files tab, the column closed) while
+	// frames were stopped must not say so for a frame
+	if !state.layout.left_open || state.layout.left_tab != .Sessions || state.sidebar.view != .Projects || state.sidebar.folded[.Usage] do return false
+	head := clay.GetElementData(clay.ID("navhead", u32(core.Sidebar_Fold.Usage)))
+	nav := clay.GetElementData(clay.ID("nav"))
+	if !head.found || !nav.found do return false
+	h, n := head.boundingBox, nav.boundingBox
+	return h.y < n.y + n.height && h.y + h.height > n.y
+}
+
 // The section (nothing while no account has usage to show: Codex not installed).
 usage_section :: proc(text_w_max: f32) {
 	if len(state.usage) == 0 do return
@@ -28,6 +46,7 @@ usage_section :: proc(text_w_max: f32) {
 	gap(GAP_SECTION)
 	usage_header(len(rows))
 	folded := state.sidebar.folded[.Usage]
+	usage_section_shown = !folded
 	for r, i in rows {
 		if folded do usage_line(r, i, text_w_max)
 		else do usage_row_full(r, i, text_w_max)
@@ -109,9 +128,10 @@ usage_row_full :: proc(r: core.Usage_Row, i: int, text_w_max: f32) {
 			spacer()
 			if age != "" do clay.TextDynamic(age, txt(with_alpha(th.text_muted, k), FONT_UI_SMALL))
 		}
-		if len(r.bars) == 0 {
+		if r.note != "" { // in place of bars, or with them ("limit reached")
+			col := len(r.bars) > 0 ? th.error : th.text_muted
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(USAGE_LINE_H))}, childAlignment = {y = .Center}}}) {
-				clay.TextDynamic(clip(r.note, text_w_max), txt(with_alpha(th.text_muted, k), FONT_UI_SMALL))
+				clay.TextDynamic(clip(r.note, text_w_max), txt(with_alpha(col, k), FONT_UI_SMALL))
 			}
 		}
 		for b in r.bars do usage_bar_line(b, text_w_max, k)

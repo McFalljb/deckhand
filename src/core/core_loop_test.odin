@@ -15,6 +15,8 @@ Tick_Probe :: struct {
 	inside:   bool,
 	reenter:  proc(), // called once from the first body (a modal loop's timer, a nested frame)
 	fired:    bool, // what core_timer_fire said from inside
+	facts:    int, // platform.before_timer_tick calls
+	late:     int, // of them, after the tick's body ran
 }
 @(private = "file")
 probe: Tick_Probe
@@ -319,4 +321,28 @@ core_launch_env_drops_tab_names :: proc(t: ^testing.T) {
 	claude := []string{"HOME=/Users/u", "CLAUDE_CONFIG_DIR=/c", "CLAUDECODE=1"}
 	testing.expectf(t, len(core_launch_env(claude, from_tab = true)) == 1, "%v", core_launch_env(claude, from_tab = true))
 	testing.expectf(t, len(core_launch_env(claude)) == 2, "%v", core_launch_env(claude))
+}
+
+// Review #1: a tick the timer runs outside a frame (frames stopped: hidden, minimised, occluded)
+// has the window send its facts first, as a frame does (client_facts), so the core sees it hidden.
+@(test)
+core_loop_timer_sends_window_facts :: proc(t: ^testing.T) {
+	l, s, q := loop_setup()
+	defer loop_restore(l, s, q)
+	saved := platform.before_timer_tick
+	defer platform.before_timer_tick = saved
+	platform.before_timer_tick = proc() {
+		probe.facts += 1
+		if probe.runs > 0 do probe.late += 1
+	}
+	testing.expect(t, core_timer_fire(at(0)))
+	testing.expect_value(t, probe.facts, 1)
+	testing.expect_value(t, probe.late, 0) // before the tick's body
+	testing.expect_value(t, probe.runs, 1)
+	// inside a frame the frame sends them: the timer's skipped tick runs at its end, no second call
+	core_frame_begin(at(100))
+	testing.expect(t, !core_timer_fire(at(110)))
+	core_frame_end(at(120))
+	testing.expect_value(t, probe.runs, 2)
+	testing.expect_value(t, probe.facts, 1)
 }

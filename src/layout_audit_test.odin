@@ -1010,3 +1010,42 @@ usage_section_layout :: proc(t: ^testing.T) {
 	}
 	state.settings.theme = .Graphite
 }
+
+// Review #1: the window tells the core the USAGE section can be seen (usage_visible) only when it
+// was drawn unfolded in the open left column's Sessions tab, By project: not folded, on the Files
+// or Jobs tab, in the Attention view, or with the column closed.
+@(test)
+usage_visible_only_when_drawn :: proc(t: ^testing.T) {
+	context.allocator = au_reset("")
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	now := core.usage_now()
+	saved := state.usage
+	defer {
+		state.usage = saved
+		state.sidebar.folded[.Usage] = false
+		state.sidebar.view = .Projects
+		state.layout.left_open, state.layout.left_tab = true, .Sessions
+	}
+	state.usage = []core.Usage_Account{{key = "codex:/a", home = "/a", label = "Codex", status = .Ok, read_at = now - 60, windows = []core.Usage_Window{{used_percent = 42, window_mins = 300}}}}
+	shown :: proc() -> bool {
+		ui_layout(1280, AUDIT_H)
+		return usage_visible_now()
+	}
+	state.layout.left_open, state.layout.left_tab, state.sidebar.view = true, .Sessions, .Projects
+	testing.expect(t, shown(), "drawn: visible")
+	state.sidebar.folded[.Usage] = true
+	testing.expect(t, !shown(), "folded")
+	state.sidebar.folded[.Usage] = false
+	state.layout.left_tab = .Files
+	testing.expect(t, !shown(), "the Files tab")
+	state.layout.left_tab = .Jobs
+	testing.expect(t, !shown(), "the Jobs tab")
+	state.layout.left_tab = .Sessions
+	state.sidebar.view = .Attention
+	testing.expect(t, !shown(), "the Attention view")
+	state.sidebar.view = .Projects
+	state.layout.left_open = false
+	testing.expect(t, !shown(), "the column closed")
+	state.layout.left_open = true
+	testing.expect(t, shown(), "back")
+}

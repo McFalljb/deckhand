@@ -13,6 +13,7 @@ platform_ask :: proc(title, text, yes, no: string) -> bool {return false}
 platform_hide_windows :: proc() {}
 platform_terminate_hook :: proc(cb: proc "c" (logout: c.int) -> c.int) {}
 window_minimised :: proc() -> bool {return false}
+window_occluded :: proc() -> bool {return false}
 cpu_seconds :: proc() -> f64 {return 0}
 window_raise_without_focus :: proc() {}
 window_send_back :: proc() {}

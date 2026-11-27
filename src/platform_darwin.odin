@@ -133,6 +133,13 @@ window_close :: proc() {intrinsics.objc_send(nil, window(), "performClose:", raw
 window_minimize :: proc() {intrinsics.objc_send(nil, window(), "miniaturize:", rawptr(nil))}
 window_restore :: proc() {intrinsics.objc_send(nil, window(), "deminiaturize:", rawptr(nil))}
 window_minimised :: proc() -> bool {return intrinsics.objc_send(bool, window(), "isMiniaturized")}
+// No part of the window can be seen (another Space, the screen locked or asleep, covered whole):
+// NSWindowOcclusionStateVisible (1 << 1) clear. Test mode: never (scenes' windows sit behind each
+// other and behind the desk running them).
+window_occluded :: proc() -> bool {
+	if core.test_mode() do return false
+	return intrinsics.objc_send(uint, window(), "occlusionState") & (1 << 1) == 0
+}
 app_deactivate :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "deactivate")}
 app_hide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "hide:", rawptr(nil))}
 app_is_hidden :: proc() -> bool {return intrinsics.objc_send(bool, NS.Application_sharedApplication(), "isHidden")}

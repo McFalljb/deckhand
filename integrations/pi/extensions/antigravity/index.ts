@@ -43,7 +43,7 @@ import {
 	profileOf,
 	providerIdOf,
 	runDir,
-	saveAccounts,
+	updateAccounts,
 	signInCommand,
 	storedAccounts,
 	storedAgyPath,
@@ -52,6 +52,15 @@ import {
 } from "../../lib/agy-accounts.ts";
 import { agyLogin } from "../../lib/agy-login.ts";
 import { createAntigravity, type Registry, SUMMARY_TEXT } from "../../lib/antigravity.ts";
+
+/** What ends the agy processes when pi exits: one exit listener for the process, however often the extension loads. */
+const KILLERS: Set<() => void> = ((globalThis as any)[Symbol.for("deckhand.antigravity.killers")] ??= (() => {
+	const set = new Set<() => void>();
+	process.once("exit", () => {
+		for (const kill of set) kill();
+	});
+	return set;
+})());
 
 const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "path"] as const;
 export const NOT_FOUND =
@@ -101,9 +110,10 @@ export default function antigravity(pi: ExtensionAPI) {
 		active = true;
 		for (const a of loadAccounts(root)) register(a);
 		// agy processes end with pi: with the session (below), and at exit
-		process.once("exit", () => {
+		const kill = () => {
 			for (const { ag } of live.values()) ag.killAll();
-		});
+		};
+		KILLERS.add(kill);
 
 		pi.on("session_start", (_e: unknown, ctx: ExtensionContext) => {
 			cwd = ctx.cwd || cwd;
@@ -113,6 +123,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		});
 
 		pi.on("session_shutdown", async () => {
+			KILLERS.delete(kill);
 			setStatus?.(undefined);
 			await Promise.all([...live.values()].map(({ ag }) => ag.closeAll()));
 		});
@@ -241,16 +252,17 @@ export default function antigravity(pi: ExtensionAPI) {
 	};
 	const usesKeyOrBrowser = (a: Account) => usesKey(a) || a.method === "oauth-personal" || a.method === "oauth-business";
 
-	const remove = async (ctx: ExtensionContext, name?: string) => {
+	const remove = async (ctx: ExtensionContext, name?: string, yes = false) => {
 		const a = accountOf(name);
 		if (!name || !a) return fail(ctx, `No Antigravity account "${name ?? ""}": /antigravity remove <name>`);
 		if (a.name === "default") return fail(ctx, `The default account stays: /antigravity logout signs it out, /antigravity add default changes its sign-in method`);
 		const p = profileOf(root, a.name);
-		if (ctx.hasUI && !(await ctx.ui.confirm(`Remove the Antigravity account "${a.name}"?`, `Its provider ${providerIdOf(a.name)} goes, and its profile with its saved sign-in and history (${p.geminiHome}).`))) return;
+		if (!ctx.hasUI && !yes) return ctx.ui.notify(`Removing the Antigravity account "${a.name}" deletes its profile and history: run /antigravity remove ${a.name} --yes`, "warning");
+		if (ctx.hasUI && !yes && !(await ctx.ui.confirm(`Remove the Antigravity account "${a.name}"?`, `Its provider ${providerIdOf(a.name)} goes, and its profile with its saved sign-in and history (${p.geminiHome}).`))) return;
 		await live.get(a.name)!.ag.closeAll();
 		if (!usesKey(a) && hasSavedLogin(p)) await agyLogout({ agyPath, cwd, ...launchOf(a, undefined) }).catch(() => {});
 		fs.rmSync(p.geminiHome, { recursive: true, force: true });
-		saveAccounts(root, storedAccounts(root).filter((x) => x.name !== a.name));
+		await updateAccounts(root, (accounts) => ({ accounts: accounts.filter((x) => x.name !== a.name) }));
 		live.delete(a.name);
 		pi.unregisterProvider(providerIdOf(a.name));
 		ctx.ui.notify(`Removed the Antigravity account "${a.name}"${usesKey(a) ? `; its key is still in pi's store: /logout and pick ${providerIdOf(a.name)}` : ""}`, "info");
@@ -276,9 +288,16 @@ export default function antigravity(pi: ExtensionAPI) {
 			if (method === "oauth-business" && !(project && location)) return fail(ctx, "Gemini Enterprise needs a GCP project and location");
 			if (project && location) Object.assign(a, { gcpProject: project, gcpLocation: location });
 		}
-		saveAccounts(root, [...storedAccounts(root).filter((x) => x.name !== a.name), a]);
+		try {
+			await updateAccounts(root, (accounts) => ({ accounts: [...accounts.filter((x) => x.name !== a.name), a] }));
+		} catch (e) {
+			return fail(ctx, (e as Error).message);
+		}
 		register(a);
 		ctx.ui.notify(`Added the Antigravity account "${a.name}" (${methodLabel(a.method)}): its models will be under provider ${providerIdOf(a.name)}. Next: ${signInCommand(a)}`, "info");
+		// a name removed and added again: pi's store may still hold the old account's key
+		if (usesKey(a) && (await keyOf(ctx, a)))
+			ctx.ui.notify(`pi still has an API key for ${providerIdOf(a.name)} (from before): it will be used. To enter another, /logout and pick ${providerIdOf(a.name)}, then /login ${providerIdOf(a.name)}`, "warning");
 	};
 
 	const models = async (ctx: ExtensionContext, name?: string) => {
@@ -297,13 +316,13 @@ export default function antigravity(pi: ExtensionAPI) {
 		if (p && !usableAgyPath(p)) return fail(ctx, `Not an absolute path to an executable file: ${p}`);
 		if (!active) {
 			if (!p) return ctx.ui.notify(NOT_FOUND, "warning");
-			saveAccounts(root, storedAccounts(root), p);
+			await updateAccounts(root, () => ({ agyPath: p }));
 			agyPath = p;
 			activate(ctx);
 			return ctx.ui.notify(`Antigravity now runs ${p}: its models are in /model; /antigravity shows the accounts and signs them in`, "info");
 		}
 		const next = p || findAgy(process.env);
-		saveAccounts(root, storedAccounts(root), p || null);
+		await updateAccounts(root, () => ({ agyPath: p || null }));
 		if (!next) return ctx.ui.notify("Cleared agy's path. There is no agy or antigravity on your PATH, so Antigravity is off from pi's next start", "warning");
 		await Promise.all([...live.values()].map(({ ag }) => ag.closeAll()));
 		agyPath = next;
@@ -359,7 +378,7 @@ export default function antigravity(pi: ExtensionAPI) {
 				case "logout":
 					return logout(ctx, name);
 				case "remove":
-					return remove(ctx, name);
+					return remove(ctx, name, method === "--yes");
 				case "models":
 					return models(ctx, name);
 				default:

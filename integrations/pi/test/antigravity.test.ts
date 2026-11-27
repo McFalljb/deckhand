@@ -2,7 +2,7 @@
 // (test/fake-agy.mjs): never a real agy, pi or model. node --test test/antigravity.test.ts
 import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOME in a temp folder
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -503,7 +503,8 @@ test("two accounts: separate profiles (GEMINI_HOME) and providers; an API key fr
 		await pi.start();
 		const { ctx, notes } = cmdCtx(pi, {}, { "antigravity-work": "k-work-123" });
 		await run(pi, "antigravity", "add work gemini-api-key", ctx);
-		assert.match(notes.at(-1)!, /Added the Antigravity account "work" \(Gemini API key\).*provider antigravity-work\. Next: \/login antigravity-work/);
+		assert.match(notes.at(-2)!, /Added the Antigravity account "work" \(Gemini API key\).*provider antigravity-work\. Next: \/login antigravity-work/);
+		assert.match(notes.at(-1)!, /^pi still has an API key for antigravity-work/, "the key here is already in pi's store");
 		await run(pi, "antigravity", "add work oauth-personal", ctx);
 		assert.match(notes.at(-1)!, /exists/);
 		const file = path.join(a.root, "accounts.json");
@@ -690,6 +691,71 @@ test("finding 4: each agy process has its own TMPDIR folder, gone when it ends; 
 		}
 		assert.ok(!existsSync(path.join(tmp, leftovers.dead)), "a dead process's leftover is swept");
 		for (const k of ["piAlive", "agyAlive", "other"] as const) assert.ok(existsSync(path.join(tmp, leftovers[k])), `${k} kept`);
+	});
+});
+
+test("polish: loading the extension again adds no second exit listener", async () => {
+	await withEnv(accountsEnv().env, async () => {
+		await loadExtension();
+		const before = process.listenerCount("exit");
+		for (let i = 0; i < 3; i++) await loadExtension();
+		assert.equal(process.listenerCount("exit"), before);
+	});
+});
+
+test("polish: /antigravity remove without a UI needs --yes", async () => {
+	await withEnv(accountsEnv().env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi);
+		await run(pi, "antigravity", "add work oauth-personal", ctx);
+		const headless = { ...ctx, hasUI: false };
+		await run(pi, "antigravity", "remove work", headless);
+		assert.equal(notes.at(-1), 'Removing the Antigravity account "work" deletes its profile and history: run /antigravity remove work --yes');
+		assert.ok(prov(pi, "antigravity-work") && !pi.extensions[0].unregistered.includes("antigravity-work"), "still there");
+		await run(pi, "antigravity", "remove work --yes", headless);
+		assert.deepEqual(pi.extensions[0].unregistered, ["antigravity-work"]);
+	});
+});
+
+test("polish: ADC variables (GOOGLE_APPLICATION_CREDENTIALS, CLOUDSDK_CONFIG, CLOUDSDK_AUTH_*) reach only an Agent Platform account that signs in with ADC", () => {
+	const base = { PATH: "/bin", GOOGLE_APPLICATION_CREDENTIALS: "/k.json", CLOUDSDK_CONFIG: "/gc", CLOUDSDK_AUTH_ACCESS_TOKEN_FILE: "/t", cloudsdk_auth_x: "y" };
+	const p = profileOf("/r", "x");
+	const adc = (a: any, key?: string) => Object.keys(agyEnvFor(a, p, key, base)).filter((k) => /^(GOOGLE_APPLICATION|CLOUDSDK_(CONFIG|AUTH))/i.test(k)).sort();
+	assert.deepEqual(adc({ name: "x", method: "oauth-personal" }), []);
+	assert.deepEqual(adc({ name: "x", method: "gemini-api-key" }, "k"), []);
+	assert.deepEqual(adc({ name: "x", method: "agent-platform" }, "k"), [], "a key: not ADC");
+	assert.deepEqual(adc({ name: "x", method: "agent-platform", gcpProject: "p", gcpLocation: "l" }), ["CLOUDSDK_AUTH_ACCESS_TOKEN_FILE", "CLOUDSDK_CONFIG", "GOOGLE_APPLICATION_CREDENTIALS", "cloudsdk_auth_x"]);
+});
+
+test("polish: re-adding an API-key account whose old key is still in pi's store says so", async () => {
+	await withEnv(accountsEnv().env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi, {}, { "antigravity-k": "old-key" });
+		await run(pi, "antigravity", "add k gemini-api-key", ctx);
+		assert.match(notes.at(-1)!, /pi still has an API key for antigravity-k \(from before\): it will be used\. To enter another, \/logout and pick antigravity-k, then \/login antigravity-k/);
+		assert.ok(!notes.join("\n").includes("old-key"), "never the key itself");
+	});
+});
+
+test("polish: changing accounts.json waits for another process's change and keeps it", async () => {
+	const a = accountsEnv();
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx } = cmdCtx(pi);
+		mkdirSync(a.root, { recursive: true });
+		const file = path.join(a.root, "accounts.json");
+		const other = spawn("sleep", ["5"]); // another pi, changing accounts.json
+		writeFileSync(`${file}.lock`, JSON.stringify({ pid: other.pid }));
+		const adding = run(pi, "antigravity", "add mine oauth-personal", ctx);
+		await new Promise((r) => setTimeout(r, 150));
+		writeFileSync(file, JSON.stringify({ accounts: [{ name: "theirs", method: "oauth-personal" }] }));
+		rmSync(`${file}.lock`);
+		other.kill();
+		await adding;
+		assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).accounts.map((x: any) => x.name).sort(), ["mine", "theirs"]);
 	});
 });
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {

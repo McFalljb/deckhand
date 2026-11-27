@@ -116,6 +116,49 @@ export function saveAccounts(root: string, accounts: Account[], agyPath: string 
 	fs.renameSync(tmp, accountsFile(root));
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Changes accounts.json under a lock (`accounts.json.lock`, O_EXCL, with this pid), reading it
+ * again inside, so two pi processes changing accounts never lose each other's change. A lock whose
+ * process is gone is taken over; one held longer than `waitMs` by a live process is an error.
+ */
+export async function updateAccounts(
+	root: string,
+	change: (accounts: Account[], agyPath: string | undefined) => { accounts?: Account[]; agyPath?: string | null },
+	waitMs = 5000,
+): Promise<void> {
+	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+	const lock = `${accountsFile(root)}.lock`;
+	const until = Date.now() + waitMs;
+	for (;;) {
+		try {
+			fs.writeFileSync(lock, JSON.stringify({ pid: process.pid }), { flag: "wx", mode: 0o600 });
+			break;
+		} catch (e: any) {
+			if (e?.code !== "EEXIST") throw e;
+		}
+		let pid: number | undefined, age = 0;
+		try {
+			age = Date.now() - fs.statSync(lock).mtimeMs;
+			pid = Number(JSON.parse(fs.readFileSync(lock, "utf8"))?.pid);
+		} catch {}
+		const stale = pid ? !alive(pid) : age > 2000; // no pid yet: being written, unless old
+		if (stale) {
+			fs.rmSync(lock, { force: true });
+			continue;
+		}
+		if (Date.now() > until) throw new Error(`Another pi (process ${pid}) is changing the Antigravity accounts: try again`);
+		await sleep(50);
+	}
+	try {
+		const next = change(storedAccounts(root), storedAgyPath(root));
+		saveAccounts(root, next.accounts ?? storedAccounts(root), next.agyPath === undefined ? storedAgyPath(root) : next.agyPath);
+	} finally {
+		fs.rmSync(lock, { force: true });
+	}
+}
+
 export interface Profile {
 	geminiHome: string;
 	acpDir: string;
@@ -260,8 +303,16 @@ export const REMOVED_ENV = new Set([
  */
 export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, base: NodeJS.ProcessEnv = process.env, tmpDir = p.tmpDir): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
+	// Application Default Credentials (gcloud's) are an Agent Platform account's own sign-in when it
+	// has a project and no key; every other account gets none of them. (t3code drops
+	// GOOGLE_APPLICATION_CREDENTIALS for every method and leaves CLOUDSDK_* alone.)
+	const adc = a.method === "agent-platform" && !usesKey(a);
 	for (const [k, v] of Object.entries(base)) {
 		const K = k.toUpperCase();
+		if (K === "GOOGLE_APPLICATION_CREDENTIALS" || K === "CLOUDSDK_CONFIG" || K.startsWith("CLOUDSDK_AUTH_")) {
+			if (adc) env[k] = v;
+			continue;
+		}
 		if (REMOVED_ENV.has(K) || K.startsWith("GOOGLE_") || K.startsWith("DECKHAND_")) continue;
 		env[k] = v;
 	}

@@ -76,14 +76,18 @@ test("no bundled extension registers a tool or flag while loading (pi would refu
 	const bin = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-bin-"));
 	symlinkSync(path.join(ROOT, "test/fake-agy.mjs"), path.join(bin, "agy"));
 	assertTempData();
-	for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}, { PATH: bin }])
-		for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"])
-			await withEnv(env, async () => {
-				const pi = piRules();
-				await pi.load(ourPath(name), await ours(name));
-				const [x] = pi.extensions;
-				assert.deepEqual([...x.tools.keys(), ...x.flags.keys()], [], `${name} with ${Object.keys(env).join(", ") || "no Deckhand variables"}`);
-			});
+	try {
+		for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}, { PATH: bin }])
+			for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"])
+				await withEnv(env, async () => {
+					const pi = piRules();
+					await pi.load(ourPath(name), await ours(name));
+					const [x] = pi.extensions;
+					assert.deepEqual([...x.tools.keys(), ...x.flags.keys()], [], `${name} with ${Object.keys(env).join(", ") || "no Deckhand variables"}`);
+				});
+	} finally {
+		rmSync(bin, { recursive: true, force: true });
+	}
 });
 
 test("shell: next to a stand-in pi-kit shell from the user's settings, pi starts with one copy of each tool (theirs) and one /shells; ours says so", async () => {

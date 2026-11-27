@@ -28,7 +28,7 @@ const ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), "..");
 const KIT = process.env.PI_KIT_DIR ? path.join(process.env.PI_KIT_DIR, "extensions") : "";
 const noKit = !KIT || !existsSync(path.join(KIT, "shell/index.ts")) ? "PI_KIT_DIR (a pi-kit checkout) not set" : false;
 const SHELL_TOOLS = ["bash_bg", "monitor", "wake_later", "shell_stop", "shell_list"];
-const ENV = ["DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR", "PI_KIT_READONLY", "PI_CODING_AGENT_DIR", "PI_SUBAGENT_CHILD"];
+const ENV = ["DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR", "PI_KIT_READONLY", "PI_CODING_AGENT_DIR", "PI_SUBAGENT_CHILD", "DECKHAND_AGY_PATH"];
 
 /** Runs `f` with exactly `env` set among ENV (and Deckhand's in-memory copies cleared), then puts everything back. */
 async function withEnv<T>(env: Record<string, string>, f: () => T | Promise<T>): Promise<T> {
@@ -71,8 +71,9 @@ test("pi's rule: two extensions that register one tool name while loading stop p
 });
 
 test("no bundled extension registers a tool or flag while loading (pi would refuse to start next to an extension with the same name)", async () => {
-	for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}])
-		for (const name of ["bridge", "desk", "browser", "panels", "guardrails", "shell", "notes"])
+	const agy = path.join(ROOT, "test/fake-agy.mjs"); // antigravity active: a stand-in agy, never started while loading
+	for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}, { DECKHAND_AGY_PATH: agy }])
+		for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"])
 			await withEnv(env, async () => {
 				const pi = piRules();
 				await pi.load(ourPath(name), await ours(name));
@@ -172,7 +173,7 @@ test("loadedTools, loadedCommands: who else provides a name; nothing when pi can
 test("overlap: ours next to pi-kit's own extensions (shell, guardrails, notes, desk, desk-browser, desk-bridge), pi starts", { skip: noKit }, async () => {
 	await withEnv({ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, async () => {
 		const pi = piRules();
-		for (const name of ["bridge", "desk", "browser", "panels", "guardrails", "shell", "notes"]) await pi.load(ourPath(name), await ours(name));
+		for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"]) await pi.load(ourPath(name), await ours(name));
 		// (pi-kit's sidebar registers only /sidebar, a name Deckhand does not use; it needs more of pi-tui than the stub)
 		for (const name of ["shell", "guardrails", "notes", "desk", "desk-browser", "desk-bridge"]) {
 			const file = path.join(KIT, name, "index.ts");

@@ -7,6 +7,8 @@ import path from "node:path";
 import { test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
+import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
+import { piRules } from "./pi-rules.ts";
 
 const TMP_ROOT = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-test-"));
 process.on("exit", () => rmSync(TMP_ROOT, { recursive: true, force: true }));
@@ -228,4 +230,138 @@ test("probeModels: a throwaway session, closed again", async () => {
 	assert.deepEqual(r.thinking, ["low", "high"]);
 	assert.deepEqual(methods(f.read()).slice(-1), ["session/close"]);
 	assert.deepEqual(modelsOf({ models: { availableModels: [{ modelId: "m1", name: "M 1" }, { name: "bad" }] } }), [{ id: "m1", name: "M 1" }], "v1's models field");
+});
+
+// ---- step 2: sign-in and models ----
+
+const LINK = "https://accounts.google.com/o/oauth2/auth?client_id=fake&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=s123";
+
+test("sign-in link and answer checks (t3code's): Google's code flow only; a code, or the page URL of this sign-in", () => {
+	const l = parseSignInLink(LINK)!;
+	assert.equal(l.redirectUri, CODE_REDIRECT_URI);
+	assert.equal(l.state, "s123");
+	assert.equal(parseSignInLink(LINK.replace("accounts.google.com", "accounts.google.com.evil.example")), undefined);
+	assert.equal(parseSignInLink(LINK.replace("response_type=code", "response_type=token")), undefined);
+	assert.equal(parseSignInLink(`${LINK}&state=two`), undefined, "one state");
+	assert.equal(parseSignInLink(`${LINK} x`), undefined);
+	assert.equal(linkInLine(`  ${LINK}  `)?.url, LINK);
+	assert.equal(linkInLine(`Open the following link to authenticate the ACP server: ${LINK}`)?.url, LINK);
+	assert.equal(linkInLine("Paste the code here:"), undefined);
+	assert.equal(loginAnswer(l, " 4/0Ab-cd_ef.gh~ "), "4/0Ab-cd_ef.gh~");
+	assert.equal(loginAnswer(l, "code\nmore"), undefined, "one line only");
+	assert.equal(loginAnswer(l, "https://antigravity.google/oauth-callback?state=s123&code=abc"), "https://antigravity.google/oauth-callback?state=s123&code=abc");
+	assert.equal(loginAnswer(l, "https://antigravity.google/oauth-callback?state=other&code=abc"), undefined, "another sign-in's page");
+	assert.equal(loginAnswer(l, "https://evil.example/oauth-callback?state=s123&code=abc"), undefined);
+});
+
+test("agyLogin: shows agy's link, writes the pasted code to agy's stdin, reports agy's result", async () => {
+	const f = fake();
+	const shown: string[] = [];
+	const ok = await agyLogin({ agyPath: FAKE, cwd: f.cwd, env: f.env, showLink: (u) => shown.push(u), askCode: async () => " good-code " });
+	assert.deepEqual(ok, { ok: true });
+	assert.deepEqual(shown, [LINK]);
+	assert.deepEqual(f.read().map((m) => m.argv ?? m.loginCode).filter(Boolean), [["acp", "--login"], "good-code"]);
+	const bad = await agyLogin({ agyPath: FAKE, cwd: f.cwd, env: f.env, showLink: () => {}, askCode: async () => "wrong" });
+	assert.equal(bad.ok, false);
+	assert.match((bad as any).error, /could not finish/);
+	const cancelled = await agyLogin({ agyPath: FAKE, cwd: f.cwd, env: f.env, showLink: () => {}, askCode: async () => undefined });
+	assert.deepEqual(cancelled, { ok: false, error: "Sign-in cancelled" });
+	const junk = fake();
+	const refused = await agyLogin({ agyPath: FAKE, cwd: junk.cwd, env: junk.env, showLink: () => {}, askCode: async () => "https://evil.example/?code=1" });
+	assert.match((refused as any).error, /not a code/);
+	assert.equal(junk.read().filter((m) => m.loginCode !== undefined).length, 0, "nothing written to agy");
+	const silent = path.join(TMP_ROOT, "silent-agy.mjs");
+	writeFileSync(silent, "#!/usr/bin/env node\nprocess.stdout.write('no link here\\n');\n");
+	chmodSync(silent, 0o755);
+	assert.deepEqual(await agyLogin({ agyPath: silent, cwd: TMP_ROOT, showLink: () => assert.fail("no link"), askCode: async () => "x" }), { ok: false, error: "Antigravity (agy) gave no Google sign-in link" });
+});
+
+const ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), "..");
+
+/** Runs `f` with `env` set (undefined: unset) in process.env, then puts it back. */
+async function withEnv<T>(env: Record<string, string | undefined>, f: () => Promise<T>): Promise<T> {
+	const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+	for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+	try {
+		return await f();
+	} finally {
+		for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+	}
+}
+
+/** Loads extensions/antigravity into the model of pi (test/pi-rules.ts) as process.env is now. */
+async function loadExtension() {
+	const pi = piRules();
+	const mod = await import(`../extensions/antigravity/index.ts?${Math.random()}`);
+	await pi.load(path.join(ROOT, "extensions/antigravity"), mod.default);
+	return pi;
+}
+
+test("dormant without agy: no provider, command, hook or notice", async () => {
+	await withEnv({ DECKHAND_AGY_PATH: undefined, PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) }, async () => {
+		const pi = await loadExtension();
+		const [x] = pi.extensions;
+		assert.deepEqual([x.providers.length, x.commands.size, x.tools.size, x.flags.size, x.handlers.size], [0, 0, 0, 0, 0]);
+		assert.deepEqual(await pi.start(), { exitCode: 0, errors: [] });
+		assert.deepEqual(pi.notices, []);
+	});
+});
+
+test("with agy: the antigravity provider (agy's default model), /antigravity-login and /antigravity-models; nothing started while loading", async () => {
+	const f = fake();
+	await withEnv({ DECKHAND_AGY_PATH: FAKE, FAKE_AGY_LOG: f.log }, async () => {
+		const pi = await loadExtension();
+		const [x] = pi.extensions;
+		assert.equal(x.providers.length, 1);
+		const p = x.providers[0];
+		assert.equal(p.id, "antigravity");
+		assert.deepEqual(p.getModels().map((m: any) => [m.provider, m.id, m.api]), [["antigravity", "default", "antigravity-acp"]]);
+		assert.deepEqual(await p.auth.apiKey.check({}), { type: "api_key", source: `agy (${FAKE})` });
+		assert.equal(p.auth.apiKey.login, undefined, "no key to enter: agy keeps its sign-in");
+		assert.deepEqual([...x.commands.keys()], ["antigravity-login", "antigravity-models"]);
+		assert.deepEqual([...x.tools.keys(), ...x.flags.keys()], []);
+		await pi.start();
+		assert.equal(f.read().length, 0, "agy is not started by loading or by session start");
+		assert.deepEqual(pi.notices, []);
+	});
+});
+
+test("/antigravity-models lists the account's models into the provider, and pi's registry is refreshed", async () => {
+	const f = fake();
+	await withEnv({ DECKHAND_AGY_PATH: FAKE, FAKE_AGY_LOG: f.log }, async () => {
+		const pi = await loadExtension();
+		const refreshed: any[] = [];
+		pi.ctx.modelRegistry = { refresh: async (o: any) => void refreshed.push(o) };
+		await pi.start();
+		const notes: string[] = [];
+		const ctx = { ...pi.ctx, ui: { ...pi.ctx.ui, notify: (m: string) => notes.push(m) } };
+		await pi.extensions[0].commands.get("antigravity-models").handler("", ctx);
+		assert.deepEqual(notes, ["2 Antigravity models in /model (agy agy_acp_server_1.5.12)"]);
+		const p = pi.extensions[0].providers[0];
+		assert.deepEqual(p.getModels().map((m: any) => [m.id, m.name, m.reasoning]), [
+			["default", "Antigravity (agy's default model)", false],
+			["gemini-3.8-pro", "Gemini 3.8 Pro (Antigravity)", true],
+			["gemini-3.8-flash", "Gemini 3.8 Flash (Antigravity)", true],
+		]);
+		assert.deepEqual(refreshed, [{ providers: ["antigravity"], allowNetwork: false }]);
+		assert.deepEqual(methods(f.read()), ["initialize", "session/new", "session/set_config_option", "session/close"], "a throwaway session");
+	});
+});
+
+test("/antigravity-login: the link shown, the code asked for, then the models listed", async () => {
+	const f = fake();
+	await withEnv({ DECKHAND_AGY_PATH: FAKE, FAKE_AGY_LOG: f.log }, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const notes: string[] = [];
+		const asked: string[] = [];
+		const ctx = { ...pi.ctx, hasUI: true, ui: { ...pi.ctx.ui, notify: (m: string) => notes.push(m), input: async (t: string) => (asked.push(t), "good-code") } };
+		await pi.extensions[0].commands.get("antigravity-login").handler("", ctx);
+		assert.match(notes[0], /Open this link and sign in with Google.*\nhttps:\/\/accounts\.google\.com\//s);
+		assert.deepEqual(asked, ["Antigravity sign-in code"]);
+		assert.deepEqual(notes.slice(1), ["Signed in to Antigravity", "2 Antigravity models in /model (agy agy_acp_server_1.5.12)"]);
+		const headless = { ...ctx, hasUI: false };
+		await pi.extensions[0].commands.get("antigravity-login").handler("", headless);
+		assert.match(notes.at(-1)!, /needs the interactive pi/);
+	});
 });

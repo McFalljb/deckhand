@@ -22,7 +22,7 @@
 // node --test never runs pi; this is what the tests load our extensions into.
 import os from "node:os";
 
-type Ext = { path: string; tools: Map<string, any>; commands: Map<string, any>; flags: Map<string, any>; handlers: Map<string, any[]> };
+type Ext = { path: string; tools: Map<string, any>; commands: Map<string, any>; flags: Map<string, any>; handlers: Map<string, any[]>; providers: any[] };
 
 export function piRules() {
 	const exts: Ext[] = [];
@@ -68,13 +68,16 @@ export function piRules() {
 
 	/** Runs one extension's factory, as pi loads `path`. */
 	async function load(path: string, factory: (pi: any) => unknown) {
-		const x: Ext = { path, tools: new Map(), commands: new Map(), flags: new Map(), handlers: new Map() };
+		const x: Ext = { path, tools: new Map(), commands: new Map(), flags: new Map(), handlers: new Map(), providers: [] };
 		exts.push(x);
 		const api = {
 			registerTool: (t: any) => void x.tools.set(t.name, t),
 			registerCommand: (name: string, c: any) => void x.commands.set(name, { name, ...c }),
 			registerFlag: (name: string, f: any) => void x.flags.set(name, f),
 			registerShortcut: () => {},
+			// pi queues registrations made while loading and applies them once the runner starts
+			// (runner.js); a provider id registered twice: the later replaces the earlier
+			registerProvider: (p: any, config?: any) => void x.providers.push(config ? { id: p, ...config } : p),
 			on: (e: string, f: any) => void x.handlers.set(e, [...(x.handlers.get(e) ?? []), f]),
 			events,
 			getAllTools: () => (loading ? notInitialized() : allTools().map(({ name, sourceInfo }) => ({ name, sourceInfo }))),

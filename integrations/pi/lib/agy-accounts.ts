@@ -353,10 +353,6 @@ export function profileDirs(root: string, env: NodeJS.ProcessEnv = process.env):
 	return [...out];
 }
 
-/** Whether `rel` (inside a profile) is the user's own config agy reads (the core's config_entry): GEMINI.md, AGENTS.md, skills. */
-export const profileConfigEntry = (rel: string) =>
-	rel === "GEMINI.md" || rel === "AGENTS.md" || rel === "config/skills.json" || rel.startsWith("config/skills/") || rel.startsWith("antigravity-cli/skills/");
-
 /** A run folder: `<pi's pid>-<6 random>`, under the profile's tmp. */
 const RUN_DIR = /^(\d+)-[A-Za-z0-9]{6}$/;
 

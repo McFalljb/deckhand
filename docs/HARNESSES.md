@@ -279,31 +279,32 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `default` mode (fail closed, as above), where it asks, and each request is answered once: agy's
   `allow_once` option, never `allow_always` (no `allow_once` offered: rejected), a rejection
   `reject_once` (else `cancelled`); a dialog takes the turn's abort signal and an abort answers
-  `cancelled`. The policy matches a pi tab's for pi's own tools (`lib/guardrails.ts`): allowed,
-  except, in this order:
+  `cancelled`. The policy matches a pi tab's for pi's own tools (`lib/guardrails.ts`, which just
+  run): allowed with no dialog, except, in this order (refusals are a note, never a dialog):
   - a path (locations, diffs, rawInput `TargetFile`/`AbsolutePath`/`path`/…) that is a
     credential file, or a command whose words name one: rejected. `credentialPath` mirrors the
     core's `credential_path` (`src/core/settings_files.odin`) by its name rules (pi's sign-ins and
     private files in its agent dir; Claude's `.credentials.json`/`.claude.json*`; Codex's
-    `auth.json` in `.codex` or `CODEX_HOME`), everything in an agy profile but `GEMINI.md`,
-    `AGENTS.md` and skills as the core's `agy_credential` (`profileDirs` in `lib/agy-accounts.ts`:
-    Deckhand's `profiles/` whole, each account's profile including a `dir` used in place, removed
-    folders and agy's default profile while marked, any marked folder above the path), and
-    Gemini CLI's `oauth_creds.json`/`google_accounts.json` by name; the core's Claude/Codex
-    account-folder and hard-link rules are not repeated. The approvals mode is pi-only
-    (`/antigravity approvals`), not a Settings row;
+    `auth.json` in `.codex` or `CODEX_HOME`), and agy's sign-in files: `acp_token.json`,
+    `oauth_creds.json` and `google_accounts.json` by name anywhere, and `antigravity-acp/settings.json`
+    (the sign-in method) of any agy profile (`profileDirs` in `lib/agy-accounts.ts`: anything under
+    Deckhand's `profiles/`, each account's profile including a `dir` used in place, removed folders
+    and agy's default profile while marked, any marked folder). The rest of a profile (agy's plans,
+    conversations) is allowed, narrower than the core's `agy_credential`, which keeps Deckhand's
+    own file views out of all of it. The core's Claude/Codex account-folder and hard-link rules are
+    not repeated. The approvals mode is pi-only (`/antigravity approvals`), not a Settings row;
   - `switch_mode`: rejected;
   - a command (kind `execute`, or rawInput `CommandLine`/`command_line`/`commandLine`/`command`, as
     t3code normalizes): guardrails' `checkCommand` with the tab's folder and PI_KIT_READONLY (the
-    user's rules apply whether or not the optional guardrails extension is on, as for `shell`); a
-    command it cannot read is asked;
-  - an edit, delete or move: rejected in a read-only session; asked when a path is outside the
-    tab's folder (real paths, t3code's containment) or cannot be named;
+    user's rules apply whether or not the optional guardrails extension is on, as for `shell`): a
+    `block` rule rejects, an `ask` rule confirms; a command it cannot read runs (read-only: rejected);
+  - an edit, delete or move: rejected in a read-only session, else allowed wherever it is (no
+    folder check, as pi's own edit and write);
   - any other kind in a read-only session but read, search, fetch and think: rejected;
   - the account's `approvals: "ask"` (`accounts.json`, `/antigravity approvals`): everything left
     is confirmed.
-  "Asked" is `ctx.ui.confirm`; without a UI (print/json mode, the tool where there is none) it is a
-  rejection. A request naming its tool call by id only takes the call's kind, input and paths from
+  "Confirmed" is `ctx.ui.confirm`, only for the user's `ask` rules and `ask` mode; without a UI
+  (print/json mode, the tool where there is none) it is a rejection. A request naming its tool call by id only takes the call's kind, input and paths from
   agy's `tool_call` updates (`ToolCallTracker`, as t3code's `withTrackedPermissionToolCall`). A
   question (`interaction_…`) is a `ctx.ui.select` of agy's options; a form elicitation a select
   (enum, oneOf, boolean) or an input (string, number) per field; without a UI cancelled or
@@ -311,7 +312,8 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   (`✓ ran: npm test`, `✗ blocked by guardrails: rm -rf …`; commands redacted and clipped, never
   file contents). Unlike t3code: no "allow for this thread" (Deckhand never stores a grant), agy's
   own `auto` mode is not offered, reads of credential files are refused rather than always
-  allowed, and with no sandbox setting the default is to allow (a pi tab's), not to ask.
+  allowed, and the default is to allow everywhere (a pi tab's) rather than to ask or to keep
+  changes inside the workspace.
 - **Sign-in** (`lib/agy-login.ts`): `agy acp --login` in the account's profile; the accounts.google.com link is checked
   and shown, the pasted code (or the callback page's URL for this sign-in) is checked and written
   to agy's stdin as one line; agy stores the credential.

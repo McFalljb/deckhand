@@ -3,18 +3,19 @@
 // treats pi's own tools (lib/guardrails.ts). agy runs in its `default` mode, where it asks before
 // it acts, and every ask is answered here, once: never `allow_always`, so agy keeps no standing grant.
 //
-// - Default (`allow`): allowed (agy's allow_once option), except:
+// - Default (`allow`): allowed (agy's allow_once option), with no dialog, as a pi tab runs pi's own
+//   tools; only the user's own opt-ins ask. Except:
 //   - a command (an `execute` call, or any call whose rawInput carries CommandLine / command_line /
 //     commandLine / command, the fields t3code normalizes) goes through guardrails' checkCommand,
-//     the one command gate: a `block` rule rejects it, an `ask` rule confirms it (rejected without a
-//     UI), a read-only session rejects mutating commands. A command Deckhand cannot read is asked.
-//   - read-only sessions (PI_KIT_READONLY=1) reject every edit, delete and move, and every call of a
-//     kind that is not a read, search, fetch or think (MCP tools, subagents: they may write).
-//   - an edit, delete or move whose paths are not all inside the tab's folder (symlinks resolved, as
-//     t3code's acpMutationStaysInWorkspace) is asked, and rejected without a UI.
+//     the one command gate: a `block` rule rejects it, an `ask` rule (the user wrote it) confirms
+//     it, rejected without a UI; a read-only session rejects mutating commands.
+//   - read-only sessions (PI_KIT_READONLY=1) reject every edit, delete and move, every command
+//     Deckhand cannot read, and every call of a kind that is not a read, search, fetch or think
+//     (MCP tools, subagents: they may write).
 //   - a read or edit of a protected credential file (credentialPath below), or a command naming one,
-//     is rejected.
-//   - agy asking to change its mode (kind switch_mode) is rejected: Deckhand keeps it in `default`.
+//     is rejected, with a note and no dialog.
+//   - agy asking to change its mode (kind switch_mode) is rejected: Deckhand keeps it in `default`,
+//     so its requests keep coming here.
 // - `ask` (per account, /antigravity approvals ask): everything that is not rejected above is
 //   confirmed first; without a UI it is rejected.
 // - Questions (agy's ask_question: a permission request whose toolCallId is `interaction_…`) are a
@@ -32,7 +33,7 @@ import os from "node:os";
 import path from "node:path";
 import { type AgentAnswer, answerAgentRequest } from "./acp.ts";
 import { checkCommand as guardrailsCheck, redact } from "./guardrails.ts";
-import { dataRoot, profileConfigEntry, profileDirs, profileMarked } from "./agy-accounts.ts";
+import { dataRoot, profileDirs, profileMarked } from "./agy-accounts.ts";
 
 export type ApprovalMode = "allow" | "ask";
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["allow", "ask"];
@@ -47,7 +48,7 @@ export interface ApprovalUi {
 }
 
 export interface ApprovalContext {
-	/** The tab's working folder: edits outside it are asked; the project guardrails file is read from it. */
+	/** The tab's working folder: relative paths resolve against it; the project guardrails file is read from it. */
 	cwd: string;
 	hasUI: boolean;
 	ui?: ApprovalUi;
@@ -174,19 +175,6 @@ export function canonical(p: string): string | undefined {
 	}
 }
 
-/** Whether every path is inside `root` (both real paths). */
-export function insideFolder(paths: string[], root: string, cwd = root): boolean {
-	const r = canonical(path.resolve(root));
-	if (!r || paths.length === 0) return false;
-	return paths.every((p) => {
-		const abs = resolvePath(p, cwd);
-		const c = abs && canonical(abs);
-		if (!c) return false;
-		const rel = path.relative(r, c);
-		return rel === "" || (!rel.startsWith(`..${path.sep}`) && rel !== ".." && !path.isAbsolute(rel));
-	});
-}
-
 // ---- credential files (the core's credential_path, by name) ----
 
 // pi's own config files at the top of its agent dir: never credentials by their mode alone
@@ -196,27 +184,20 @@ const AGENT_CONFIG_FILES = new Set(["settings.json", "models.json", "keybindings
 const AGY_TOKEN_FILES = new Set(["acp_token.json", "oauth_creds.json", "google_accounts.json"]);
 
 /**
- * Whether `p` (absolute, real or as written) is inside an agy profile and not the user's own config
- * there (GEMINI.md, AGENTS.md, skills): the core's agy_credential. Profiles: profileDirs (every
- * account's, Deckhand's profiles folder whole, agy's default and removed ones while marked), and any
- * folder above `p` (below HOME) that holds agy's marks.
+ * Whether `p` (absolute, real or as written) is the file of an agy profile that holds its sign-in
+ * method (`antigravity-acp/settings.json`; the tokens are refused by name anywhere). The rest of a
+ * profile is agy's own (its planning files, conversations): allowed. Profiles: profileDirs (every
+ * account's, agy's default and removed ones while marked), anything under Deckhand's profiles
+ * folder, and any folder that holds agy's marks.
  */
-function inAgyProfile(p: string, env: NodeJS.ProcessEnv): boolean {
-	const home = path.resolve(env.HOME || os.homedir());
+function agySignInSettings(p: string, env: NodeJS.ProcessEnv): boolean {
+	if (path.basename(p).toLowerCase() !== "settings.json" || path.basename(path.dirname(p)).toLowerCase() !== "antigravity-acp") return false;
+	const profile = path.dirname(path.dirname(p));
 	const root = dataRoot(env);
 	const profilesRoot = path.join(root, "profiles");
-	for (const d of profileDirs(root, env)) {
-		for (const c of new Set([d, canonical(d) ?? d])) {
-			if (!p.startsWith(`${c}/`)) continue;
-			if (d === profilesRoot) return true;
-			return !profileConfigEntry(p.slice(c.length + 1));
-		}
-	}
-	for (let d = path.dirname(p); d !== "/" && d !== home && !home.startsWith(`${d}/`) && d !== path.dirname(d); d = path.dirname(d)) {
-		if (d === path.join(home, "Library") || path.dirname(d) === "/Users") continue; // never a user's home
-		if (profileMarked(d)) return !profileConfigEntry(p.slice(d.length + 1));
-	}
-	return false;
+	for (const c of new Set([profilesRoot, canonical(profilesRoot) ?? profilesRoot])) if (profile.startsWith(`${c}/`)) return true;
+	for (const d of profileDirs(root, env)) if (profile === d || profile === canonical(d)) return true;
+	return profileMarked(profile);
 }
 
 const expandHome = (d: string, home: string) => (d === "~" ? home : d.startsWith("~/") ? path.join(home, d.slice(2)) : d);
@@ -226,9 +207,10 @@ const expandHome = (d: string, home: string) => (d === "~" ? home : d.startsWith
  * the core's credential_path (src/core/settings_files.odin) by its name rules: pi's sign-ins in its
  * agent dir (auth.json, models-store.json, cursor-sdk*.json, intercom/, and any other private file
  * there but pi's config), Claude Code's (.credentials.json, .claude.json, .claude.json.*), Codex's
- * (auth.json in .codex or CODEX_HOME), everything in an agy profile but GEMINI.md, AGENTS.md and
- * skills (inAgyProfile: the core's agy_credential, over lib/agy-accounts.ts's accounts), plus
- * Gemini CLI's OAuth files by name. The core also matches Claude's and Codex's account folders and
+ * (auth.json in .codex or CODEX_HOME), plus agy's sign-in files: the tokens (AGY_TOKEN_FILES) by
+ * name anywhere and each agy profile's antigravity-acp/settings.json (agySignInSettings, over
+ * lib/agy-accounts.ts's accounts). Narrower than the core's agy_credential on purpose: agy may
+ * write the rest of its own profile (the user's policy: as pi's own tools, which just run). The core also matches Claude's and Codex's account folders and
  * hard links; this is the subset an ACP request can be checked against cheaply. Names compare
  * case-insensitively, as on APFS (profile folders as written and as real paths).
  */
@@ -241,7 +223,7 @@ export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env):
 		const lc = c.toLowerCase();
 		const base = path.basename(lc);
 		if (AGY_TOKEN_FILES.has(base)) return true;
-		if (inAgyProfile(c, env)) return true;
+		if (agySignInSettings(c, env)) return true;
 		if (base === ".credentials.json" || base === ".claude.json" || base.startsWith(".claude.json.")) return true;
 		if (base === "auth.json" && path.basename(path.dirname(lc)) === ".codex") return true;
 		if (env.CODEX_HOME && base === "auth.json" && path.dirname(lc) === path.resolve(expandHome(env.CODEX_HOME, home)).toLowerCase()) return true;
@@ -420,8 +402,10 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 
 	if (kind === "execute" || cmd) {
 		if (!cmd) {
+			// read-only cannot tell whether it mutates: refused; otherwise it runs, as pi's own tools do
 			if (c.readonly) return reject("refused (read-only session)");
-			return confirmed("Allow this Antigravity command?", `${title}\n\nDeckhand cannot read the command line agy sent.`, title, "refused (a command Deckhand cannot read, and no UI to ask)");
+			if (c.mode === "ask") return confirmed("Allow this Antigravity command?", `${title}\n\nDeckhand cannot read the command line agy sent.`, title, "refused (approvals: ask, and no UI)");
+			return allow(`ran: ${title} (a command Deckhand cannot read)`);
 		}
 		const shown = shownCommand(cmd);
 		let asked = false;
@@ -446,11 +430,6 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 	if (MUTATION_KINDS.has(kind)) {
 		if (c.readonly) return reject("refused (read-only session)");
 		const what = known.length ? `${kind} ${clip(known.map((p) => path.basename(p)).join(", "), 100)}` : title;
-		const inside = paths !== "unknown" && insideFolder(paths, c.cwd);
-		if (!inside) {
-			const where = paths === "unknown" ? "files Deckhand cannot name" : known.map((p) => resolvePath(p, c.cwd) ?? p).join("\n");
-			return confirmed("Allow this Antigravity change outside the tab's folder?", `${title}\n\n${where}\n\nThe tab's folder: ${c.cwd}`, `${what} (outside the tab's folder)`, "refused (outside the tab's folder, and no UI to ask)");
-		}
 		if (c.mode === "ask") return confirmed("Allow this Antigravity change?", `${title}\n\n${known.join("\n")}`, what, "refused (approvals: ask, and no UI)");
 		return allow(`allowed: ${what}`);
 	}

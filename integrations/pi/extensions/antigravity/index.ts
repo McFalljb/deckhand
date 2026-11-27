@@ -23,8 +23,7 @@
  *   (`/login antigravity-<name>`) and reaches agy only in its environment.
  * - Approvals (lib/agy-approvals.ts): agy runs in its `default` mode and asks; Deckhand answers as a
  *   pi tab treats pi's own tools: allowed once (never "always"), except what the user's guardrails
- *   rules block or ask, what a read-only session forbids, changes outside the tab's folder (asked)
- *   and protected credential files (refused). `/antigravity approvals ask [name]` confirms every
+ *   rules block or ask, what a read-only session forbids and protected credential files (refused). `/antigravity approvals ask [name]` confirms every
  *   action of that account; `allow` (the default) goes back. agy's questions are a select.
  * - One tool, `antigravity` (lib/agy-delegate.ts): any pi model hands a self-contained task to a
  *   fresh agy session on a signed-in account and gets agy's final answer. Registered at
@@ -456,7 +455,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		if (!mode) {
 			const lines = [...live.values()].filter(({ account }) => !name || account.name === name).map(({ account }) => `- ${account.name}: ${approvalsOf(root, account.name)}`);
 			return ctx.ui.notify(
-				`Antigravity approvals (allow: agy's actions run unless your guardrails rules, a read-only session, a change outside the folder or a credential file say otherwise; ask: every action is confirmed first):\n${lines.join("\n")}\nSet with /antigravity approvals ${APPROVAL_MODES.join("|")} [account]`,
+				`Antigravity approvals (allow: agy's actions run unless your guardrails rules, a read-only session or a credential file say otherwise; ask: every action is confirmed first):\n${lines.join("\n")}\nSet with /antigravity approvals ${APPROVAL_MODES.join("|")} [account]`,
 				"info",
 			);
 		}
@@ -474,7 +473,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		ctx.ui.notify(
 			mode === "ask"
 				? `Antigravity (account "${a.name}"): every action agy asks to take is confirmed first; without a UI it is refused`
-				: `Antigravity (account "${a.name}"): agy's actions run unless your guardrails rules, a read-only session, a change outside the folder or a credential file say otherwise`,
+				: `Antigravity (account "${a.name}"): agy's actions run unless your guardrails rules, a read-only session or a credential file say otherwise`,
 			"info",
 		);
 	};

@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { agyEnv } from "../lib/acp.ts";
-import { credentialPath, credentialsInCommand, decide, insideFolder, pathsOf, ToolCallTracker } from "../lib/agy-approvals.ts";
+import { credentialPath, credentialsInCommand, decide, pathsOf, ToolCallTracker } from "../lib/agy-approvals.ts";
 import { approvalsOf, dataRoot, updateAccounts } from "../lib/agy-accounts.ts";
 import { createAntigravity } from "../lib/antigravity.ts";
 import { piRules } from "./pi-rules.ts";
@@ -164,26 +164,32 @@ test("read-only sessions: edits, mutating commands and other tools rejected; rea
 	}
 });
 
-test("edits outside the tab's folder are confirmed with a UI (the folder named), rejected without one; a symlink out of the folder counts as outside", async () => {
+test("no confirm by default: edits outside the tab's folder (a link out of it, unnamed paths) and commands Deckhand cannot read just run, with a UI or without", async () => {
 	const p = project();
 	const elsewhere = mkdtempSync(path.join(TMP_ROOT, "elsewhere-"));
 	symlinkSync(elsewhere, path.join(p.cwd, "link"));
-	const { ui, asked } = fakeUi({ confirm: [true, false] });
+	const { ui, asked } = fakeUi();
 	const withUi = tab(p, { ui });
 	const headless = tab(p);
 	try {
-		const msg = await withUi.turn(`edit: ${elsewhere}/x.ts\nedit: ${p.cwd}/link/y.ts\nedit: ${p.cwd}/inside.ts`);
-		assert.deepEqual(outcomes(msg).map(([, o]) => o.optionId), ["once", "deny", "once"]);
-		assert.equal(asked.length, 2, "the edit inside is not asked");
-		assert.match(asked[0].title, /outside the tab's folder/);
-		assert.ok(asked[0].body!.includes(`The tab's folder: ${p.cwd}`));
-		assert.deepEqual(notes(msg), ["✓ you allowed: edit x.ts (outside the tab's folder)", "✗ you declined: edit y.ts (outside the tab's folder)", "✓ allowed: edit inside.ts"]);
-		const h = await headless.turn(`edit: ${elsewhere}/x.ts\nwrite: ../up.md`);
-		assert.deepEqual(outcomes(h).map(([, o]) => o.optionId), ["deny", "deny"]);
-		assert.match(thinkingOf(h), /✗ refused \(outside the tab's folder, and no UI to ask\)/);
+		const msg = await withUi.turn(`edit: ${elsewhere}/x.ts\nedit: ${p.cwd}/link/y.ts\nwrite: ../up.md`);
+		assert.deepEqual(outcomes(msg).map(([, o]) => o.optionId), ["once", "once", "once"]);
+		assert.equal(asked.length, 0, "nothing asked");
+		assert.deepEqual(notes(msg), ["✓ allowed: edit x.ts", "✓ allowed: edit y.ts", "✓ allowed: edit up.md"]);
+		const h = await headless.turn(`edit: ${elsewhere}/x.ts`);
+		assert.deepEqual(outcomes(h).map(([, o]) => o.optionId), ["once"]);
 	} finally {
 		await withUi.ag.closeAll();
 		await headless.ag.closeAll();
+	}
+	const opts = [{ optionId: "once", kind: "allow_once" }, { optionId: "deny", kind: "reject_once" }];
+	const unread = { toolCall: { toolCallId: "c", kind: "execute", title: "Run something" }, options: opts };
+	const unnamed = { toolCall: { toolCallId: "e", kind: "edit", title: "Edit", locations: [{ line: 1 }] }, options: opts };
+	for (const params of [unread, unnamed]) {
+		const d = await decide("session/request_permission", params, { cwd: p.cwd, hasUI: false, readonly: false, mode: "allow" });
+		assert.equal(d.allowed, true, params.toolCall.title);
+		const ro = await decide("session/request_permission", params, { cwd: p.cwd, hasUI: false, readonly: true, mode: "allow" });
+		assert.equal(ro.allowed, false, "read-only still refuses what it cannot tell is harmless");
 	}
 });
 
@@ -220,7 +226,7 @@ test("credentialPath mirrors the core's names (pi's sign-ins and private files, 
 	assert.deepEqual(credentialsInCommand("npm test -- --grep auth", "/w", env), []);
 });
 
-test("credentialPath guards every agy profile as the core does: Deckhand's profiles whole, a folder used in place, agy's default ~/.gemini and any marked folder, all but GEMINI.md, AGENTS.md and skills", () => {
+test("agy's profiles: its sign-in files are refused (the tokens anywhere, antigravity-acp/settings.json of any profile: Deckhand's, one used in place, ~/.gemini, a marked folder); the rest of a profile is agy's own and allowed", () => {
 	const home = mkdtempSync(path.join(TMP_ROOT, "home-"));
 	const env = { HOME: home } as any;
 	const root = dataRoot(env);
@@ -233,9 +239,10 @@ test("credentialPath guards every agy profile as the core does: Deckhand's profi
 	const marked = mkdtempSync(path.join(TMP_ROOT, "marked-"));
 	mkdirSync(path.join(marked, "antigravity-acp"));
 	writeFileSync(path.join(marked, "antigravity-acp", "installation_id"), "x");
-	for (const p of [path.join(root, "profiles", "default", "GEMINI.md"), path.join(root, "profiles", "x", "antigravity", "brain", "a.md"), path.join(own, "antigravity", "conversations", "c.pb"), path.join(own, "settings.json"), path.join(gem, "antigravity", "brain", "t.md"), path.join(gem, "settings.json"), path.join(marked, "history.db")])
+	const unmarked = mkdtempSync(path.join(TMP_ROOT, "proj-"));
+	for (const p of [path.join(root, "profiles", "default", "antigravity-acp", "settings.json"), path.join(root, "profiles", "x", "antigravity-acp", "acp_token.json"), path.join(own, "antigravity-acp", "settings.json"), path.join(gem, "antigravity-acp", "settings.json"), path.join(gem, "oauth_creds.json"), path.join(gem, "google_accounts.json"), path.join(marked, "antigravity-acp", "settings.json")])
 		assert.equal(credentialPath(p, env), true, p);
-	for (const p of [path.join(own, "GEMINI.md"), path.join(own, "AGENTS.md"), path.join(own, "config", "skills", "s", "SKILL.md"), path.join(gem, "antigravity-cli", "skills", "x.md"), path.join(gem, "config", "skills.json"), path.join(marked, "AGENTS.md"), path.join(home, "project", "a.ts")])
+	for (const p of [path.join(root, "profiles", "default", "antigravity", "brain", "plan.md"), path.join(own, "antigravity", "conversations", "c.pb"), path.join(own, "settings.json"), path.join(gem, "antigravity", "brain", "t.md"), path.join(marked, "history.db"), path.join(unmarked, "antigravity-acp", "settings.json"), path.join(home, "project", "a.ts")])
 		assert.equal(credentialPath(p, env), false, p);
 });
 
@@ -260,10 +267,6 @@ test("pathsOf: locations, diffs and agy's path fields; a part without a readable
 	assert.deepEqual(pathsOf({ locations: [{ path: "/a" }], content: [{ type: "diff", path: "/b" }], rawInput: { TargetFile: "/c", AbsolutePath: "/a" } }).sort(), ["/a", "/b", "/c"]);
 	assert.equal(pathsOf({ locations: [{ line: 3 }] }), "unknown");
 	assert.deepEqual(pathsOf({ title: "x" }), []);
-	const root = mkdtempSync(path.join(TMP_ROOT, "in-"));
-	assert.equal(insideFolder(["a/b.ts", `${root}/c`], root), true);
-	assert.equal(insideFolder(["../x"], root), false);
-	assert.equal(insideFolder([], root), false, "a change that names no file is not known to be inside");
 });
 
 test("questions (ask_question) go through select with agy's options; dismissed or without a UI, cancelled", async () => {

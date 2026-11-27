@@ -1,7 +1,8 @@
 // The Antigravity extension (extensions/antigravity, lib/acp.ts, lib/agy.ts) against a stand-in agy
 // (test/fake-agy.mjs): never a real agy, pi or model. node --test test/antigravity.test.ts
+import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOME in a temp folder
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -10,6 +11,7 @@ import { AgySession, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
 import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf } from "../lib/agy-accounts.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
 import { createAntigravity, planTurn, SUMMARY_TEXT } from "../lib/antigravity.ts";
+import { NOT_FOUND } from "../extensions/antigravity/index.ts";
 import { piRules } from "./pi-rules.ts";
 
 const TMP_ROOT = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-test-"));
@@ -307,6 +309,7 @@ after(async () => {
 	for (const pi of loaded) await pi.fire("session_shutdown");
 });
 async function loadExtension() {
+	assertTempData();
 	const pi = piRules();
 	loaded.push(pi);
 	const mod = await import(`../extensions/antigravity/index.ts?${Math.random()}`);
@@ -314,14 +317,43 @@ async function loadExtension() {
 	return pi;
 }
 
-test("dormant without agy: no provider, command, hook or notice", async () => {
+test("without agy: only /antigravity, which says where to get agy; no provider, hook, status or output; a path set there turns the rest on in the same session", async () => {
 	const home = mkdtempSync(path.join(TMP_ROOT, "home-"));
 	await withEnv({ HOME: home, XDG_DATA_HOME: path.join(home, "xdg"), PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) }, async () => {
 		const pi = await loadExtension();
 		const [x] = pi.extensions;
-		assert.deepEqual([x.providers.length, x.commands.size, x.tools.size, x.flags.size, x.handlers.size], [0, 0, 0, 0, 0]);
+		assert.deepEqual([...x.commands.keys()], ["antigravity"]);
+		assert.deepEqual([x.providers.length, x.tools.size, x.flags.size, x.handlers.size], [0, 0, 0, 0]);
 		assert.deepEqual(await pi.start(), { exitCode: 0, errors: [] });
 		assert.deepEqual(pi.notices, []);
+		assert.ok(!existsSync(path.join(home, "Library")) && !existsSync(path.join(home, "xdg")), "nothing written");
+		const statuses: any[] = [];
+		const menus: string[][] = [];
+		const { ctx, notes } = cmdCtx(pi);
+		const c = { ...ctx, ui: { ...ctx.ui, setStatus: (...a: any[]) => void statuses.push(a), select: async (_t: string, items: string[]) => (menus.push(items), "Close") } };
+		await run(pi, "antigravity", "", c);
+		assert.deepEqual(notes, [NOT_FOUND]);
+		assert.equal(NOT_FOUND, "Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (1.5.12 or newer), or set its path with /antigravity path <abs path>");
+		assert.deepEqual(menus, [["Set agy's path…", "Close"]], "the menu offers only the path");
+		await run(pi, "antigravity", "status", c);
+		await run(pi, "antigravity", "add work", c);
+		assert.deepEqual(notes.slice(1), [NOT_FOUND, NOT_FOUND]);
+		await run(pi, "antigravity", "path relative/agy", c);
+		assert.equal(notes.at(-1), "Not an absolute path to an executable file: relative/agy");
+		assert.equal(x.providers.length, 0);
+		// a path from the menu: the providers, hooks and /antigravity-login, now
+		const m = { ...c, ui: { ...c.ui, select: async () => "Set agy's path…", input: async () => FAKE } };
+		await run(pi, "antigravity", "", m);
+		assert.match(notes.at(-1)!, new RegExp(`^Antigravity now runs ${FAKE.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}: its models are in /model`));
+		assert.deepEqual(x.providers.map((p: any) => p.id), ["antigravity"]);
+		assert.deepEqual([...x.commands.keys()], ["antigravity", "antigravity-login"]);
+		assert.deepEqual([...x.handlers.keys()].sort(), ["session_before_compact", "session_shutdown", "session_start"]);
+		assert.equal(JSON.parse(readFileSync(path.join(dataRoot(), "accounts.json"), "utf8")).agyPath, FAKE);
+		await run(pi, "antigravity", "status", c);
+		assert.match(notes.at(-1)!, /^Antigravity CLI: .*fake-agy\.mjs \(.*\), set by \/antigravity path\n/);
+		await run(pi, "antigravity", `path ${FAKE}`, c);
+		assert.equal(x.providers.filter((p: any) => p.id === "antigravity").length, 2, "a second path re-registers; no second set of hooks");
+		assert.equal(x.handlers.get("session_start").length, 1);
 	});
 });
 
@@ -333,6 +365,7 @@ function accountsEnv(extra: Record<string, string | undefined> = {}) {
 	const env = { HOME: home, XDG_DATA_HOME: path.join(home, ".local", "share"), PATH: PATH_WITH_AGY, ...extra };
 	const root = dataRoot(env);
 	assert.ok(root.startsWith(home + path.sep), "never the real data dir");
+	assert.ok(home.startsWith(realpathSync(os.tmpdir())) || home.startsWith(os.tmpdir()), "HOME in a temp folder");
 	return { home, root, env };
 }
 /** The provider registered last under `id`. */

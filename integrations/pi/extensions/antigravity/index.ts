@@ -2,9 +2,10 @@
  * Deckhand's Antigravity extension: Google Antigravity in pi tabs, through the user's own
  * Antigravity CLI (`agy acp`, ACP over stdio: lib/acp.ts, lib/agy.ts), as t3code drives it.
  *
- * - Dormant without agy: when no agy is found (the path set by `/antigravity path` in
- *   accounts.json, else `agy` or `antigravity` on PATH: a few stats) it registers nothing at all.
- *   No provider, command, hook or output. No environment variable picks the binary.
+ * - Without agy (the path set by `/antigravity path` in accounts.json, else `agy` or
+ *   `antigravity` on PATH: a few stats, no process) only `/antigravity` is registered: it says
+ *   where to get agy and sets its path. No provider, hook, status line or output. Once a path is
+ *   set, the rest is registered in the same pi session. No environment variable picks the binary.
  * - With agy: one pi provider per account (lib/agy-accounts.ts): `antigravity` for the account
  *   `default`, `antigravity-<name>` for the others, each with a private agy profile and its own
  *   sign-in method. The user picks the account by picking its model; nothing switches accounts by
@@ -51,11 +52,13 @@ import { agyLogin } from "../../lib/agy-login.ts";
 import { createAntigravity, type Registry, SUMMARY_TEXT } from "../../lib/antigravity.ts";
 
 const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "path"] as const;
+export const NOT_FOUND =
+	"Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (1.5.12 or newer), or set its path with /antigravity path <abs path>";
 
 export default function antigravity(pi: ExtensionAPI) {
 	const root = dataRoot();
 	let agyPath = findAgy(process.env, storedAgyPath(root));
-	if (!agyPath) return;
+	let active = false;
 	let cwd = process.cwd();
 	let setStatus: ((text: string | undefined) => void) | undefined;
 	let registry: Registry | undefined;
@@ -85,30 +88,49 @@ export default function antigravity(pi: ExtensionAPI) {
 		if (old) void old.ag.closeAll();
 		pi.registerProvider(ag.provider as any);
 	};
-	for (const a of loadAccounts(root)) register(a);
-	// agy processes end with pi: with the session (below), and at exit
-	process.once("exit", () => {
-		for (const { ag } of live.values()) ag.killAll();
-	});
+	/**
+	 * Registers the accounts' providers, the hooks and /antigravity-login, once agy is found: at load,
+	 * or later in the session from /antigravity path (`ctx` then stands in for session_start).
+	 */
+	const activate = (ctx?: ExtensionContext) => {
+		if (active || !agyPath) return;
+		active = true;
+		for (const a of loadAccounts(root)) register(a);
+		// agy processes end with pi: with the session (below), and at exit
+		process.once("exit", () => {
+			for (const { ag } of live.values()) ag.killAll();
+		});
 
-	pi.on("session_start", (_e: unknown, ctx: ExtensionContext) => {
-		cwd = ctx.cwd || cwd;
-		registry = (ctx as any).modelRegistry;
-		for (const { ag } of live.values()) ag.bind(registry);
-		setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
-	});
+		pi.on("session_start", (_e: unknown, ctx: ExtensionContext) => {
+			cwd = ctx.cwd || cwd;
+			registry = (ctx as any).modelRegistry;
+			for (const { ag } of live.values()) ag.bind(registry);
+			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
+		});
 
-	pi.on("session_shutdown", async () => {
-		setStatus?.(undefined);
-		await Promise.all([...live.values()].map(({ ag }) => ag.closeAll()));
-	});
+		pi.on("session_shutdown", async () => {
+			setStatus?.(undefined);
+			await Promise.all([...live.values()].map(({ ag }) => ag.closeAll()));
+		});
 
-	// pi's compaction would ask agy for a summary of what agy already holds: pi keeps a note instead
-	pi.on("session_before_compact", (event: any, ctx: ExtensionContext) => {
-		const p = ctx.model?.provider;
-		if (!p || ![...live.values()].some(({ ag }) => ag.provider.id === p) || !event?.preparation) return undefined;
-		return { compaction: { summary: SUMMARY_TEXT, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore } };
-	});
+		// pi's compaction would ask agy for a summary of what agy already holds: pi keeps a note instead
+		pi.on("session_before_compact", (event: any, ctx: ExtensionContext) => {
+			const p = ctx.model?.provider;
+			if (!p || ![...live.values()].some(({ ag }) => ag.provider.id === p) || !event?.preparation) return undefined;
+			return { compaction: { summary: SUMMARY_TEXT, firstKeptEntryId: event.preparation.firstKeptEntryId, tokensBefore: event.preparation.tokensBefore } };
+		});
+
+		pi.registerCommand("antigravity-login", {
+			description: "Sign in to Google Antigravity (the default account; /antigravity for the others)",
+			handler: async (_args: string, c: ExtensionContext) => login(c, "default"),
+		});
+		if (ctx) {
+			cwd = ctx.cwd || cwd;
+			registry = (ctx as any).modelRegistry;
+			for (const { ag } of live.values()) ag.bind(registry);
+			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
+		}
+	};
 
 	/** pi's stored key for an API-key account (pi's credential store), else undefined. */
 	const keyOf = async (ctx: ExtensionContext, a: Account): Promise<string | undefined> => {
@@ -268,6 +290,13 @@ export default function antigravity(pi: ExtensionAPI) {
 	const setPath = async (ctx: ExtensionContext, given: string) => {
 		const p = given.trim();
 		if (p && !usableAgyPath(p)) return fail(ctx, `Not an absolute path to an executable file: ${p}`);
+		if (!active) {
+			if (!p) return ctx.ui.notify(NOT_FOUND, "warning");
+			saveAccounts(root, storedAccounts(root), p);
+			agyPath = p;
+			activate(ctx);
+			return ctx.ui.notify(`Antigravity now runs ${p}: its models are in /model; /antigravity shows the accounts and signs them in`, "info");
+		}
 		const next = p || findAgy(process.env);
 		saveAccounts(root, storedAccounts(root), p || null);
 		if (!next) return ctx.ui.notify("Cleared agy's path. There is no agy or antigravity on your PATH, so Antigravity is off from pi's next start", "warning");
@@ -302,6 +331,13 @@ export default function antigravity(pi: ExtensionAPI) {
 		getArgumentCompletions: (prefix: string) => SUBCOMMANDS.filter((s) => s.startsWith(prefix)).map((s) => ({ value: s, label: s })),
 		handler: async (args: string, ctx: ExtensionContext) => {
 			const [sub, name, method] = (args ?? "").trim().split(/\s+/).filter(Boolean);
+			if (!active && sub !== "path") {
+				ctx.ui.notify(NOT_FOUND, "warning");
+				if (sub !== undefined || !ctx.hasUI) return;
+				if ((await ctx.ui.select("Antigravity", ["Set agy's path…", "Close"])) !== "Set agy's path…") return;
+				const p = await ctx.ui.input("agy's full path", "/usr/local/bin/agy");
+				return p?.trim() ? setPath(ctx, p) : undefined;
+			}
 			switch (sub) {
 				case "path":
 					return setPath(ctx, (args ?? "").trim().slice("path".length));
@@ -327,8 +363,5 @@ export default function antigravity(pi: ExtensionAPI) {
 		},
 	} as any);
 
-	pi.registerCommand("antigravity-login", {
-		description: "Sign in to Google Antigravity (the default account; /antigravity for the others)",
-		handler: async (_args: string, ctx: ExtensionContext) => login(ctx, "default"),
-	});
+	activate();
 }

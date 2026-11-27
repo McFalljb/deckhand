@@ -217,6 +217,7 @@ agy_accounts_commands :: proc(t: ^testing.T) {
 	refused(t, core.Add_Antigravity_Account{dir = fmt.tprintf("%s/nope", env.home)}, "no such folder")
 	refused(t, core.Add_Antigravity_Account{dir = env.home}, "not your home folder or above it")
 	refused(t, core.Add_Antigravity_Account{dir = "/"}, "not your home folder or above it")
+	os.make_directory_all(fmt.tprintf("%s/profiles/personal", env.root))
 	refused(t, core.Add_Antigravity_Account{dir = fmt.tprintf("%s/profiles/personal", env.root)}, "Deckhand's own profiles")
 	// a folder holding a project, the main folder, the data folder, or a Claude config folder
 	proj := fmt.tprintf("%s/work/code", env.home)
@@ -346,12 +347,12 @@ agy_accounts_guard :: proc(t: ^testing.T) {
 	}
 	for p in secrets {
 		testing.expectf(t, core.settings_credential(p), "%s is refused", p)
+		r := core.run_command(core.Open_File{path = p}, AG_UI) // not even the user, in the editor
+		testing.expectf(t, !r.ok && r.error == core.CREDENTIAL_REFUSED, "%s opened: %v", p, r)
 		for c in ([]core.Caller{AG_UI, {kind = .Control}, {kind = .Script}}) {
-			r := core.run_command(core.Open_File{path = p}, c)
-			testing.expectf(t, !r.ok && r.error == core.CREDENTIAL_REFUSED, "%s opened by %v: %v", p, c.kind, r)
+			r = core.run_command(core.File_Read{path = p}, c) // file_read (a browser's, scripts', Atlas's)
+			testing.expectf(t, !r.ok, "%s read by %v", p, c.kind)
 		}
-		r := core.run_command(core.File_Read{path = p}, {kind = .Script})
-		testing.expectf(t, !r.ok, "%s read by a script", p)
 	}
 	for p in ([]string{fmt.tprintf("%s/GEMINI.md", work), fmt.tprintf("%s/config/skills/s/SKILL.md", work)}) {
 		testing.expectf(t, !core.settings_credential(p), "%s is the user's config", p)

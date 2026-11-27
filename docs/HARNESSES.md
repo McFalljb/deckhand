@@ -179,8 +179,13 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG` and `CLOUDSDK_AUTH_*` reach only an
   `agent-platform` account with a project and no key (Application Default Credentials are its
   sign-in); t3code drops the first for every method and keeps `CLOUDSDK_*`.
-- **agy's processes**: each gets its own TMPDIR, `antigravity-acp/tmp/<pi's pid>-<random>` (0700;
-  agy unpacks its runtime there), marked with agy's pid and removed when it ends. Before each
+- **agy's processes**: each gets its own TMPDIR, `antigravity-acp/tmp/<pi's pid>-<random>` (0700),
+  marked with agy's pid and removed when it ends. (agy 1.5.18 on macOS, no sign-in: nothing in
+  TMPDIR; about 920 KB in the profile, `builtin/`, `config/`, databases and
+  `log/acp-server-<date>-<pid>.log`; one process, no children; it exits 0 within 200 ms of its
+  stdin's end or SIGTERM. The folder per run is kept: it costs nothing and keeps runs apart.)
+  Each launch keeps agy's newest 20 `acp-server-*.log` per profile, removing older ones only when
+  the agy in their name is gone. Before each
   launch, folders whose pi and agy processes are both gone are removed (t3code's
   `retireAntigravityRuntimeTempDirs` removes all of them, as one process owns its profile; pi
   processes share one). Closing agy: its stdin first, SIGTERM if it is still there after 1 s,

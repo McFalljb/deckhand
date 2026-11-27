@@ -166,7 +166,7 @@ export async function reapGroup(pid: number | undefined, graceMs = GROUP_GRACE_M
 }
 
 /**
- * Ends a child gently: its stdin first (agy ends its session and cleans up its unpacked files),
+ * Ends a child gently: its stdin first (agy ends its session and exits: 1.5.18 within 200 ms),
  * SIGTERM if it is still there after stdinWaitMs, SIGKILL only after a further termGraceMs.
  */
 export async function endChild(child: ChildProcess, exited: Promise<unknown>, t: CloseTimes = {}): Promise<void> {

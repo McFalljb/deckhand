@@ -211,15 +211,52 @@ export async function sweepRunDirs(tmpDir: string): Promise<void> {
 	await Promise.all(jobs);
 }
 
+/** agy's own logs kept per profile (`log/acp-server-<date>-<pid>.log`, one per agy run). */
+export const KEPT_LOGS = 20;
+const AGY_LOG = /^acp-server-.*-(\d+)\.log$/;
+
 /**
- * A new agy process's own TMPDIR (agy unpacks its runtime there): `tmp/<pi's pid>-<random>`, 0700,
- * after sweeping dead processes' leftovers (as t3code's retireAntigravityRuntimeTempDirs, but by
- * pid: several pi processes share a profile). The connection removes it when agy ends.
+ * Trims agy's logs in a profile to the newest KEPT_LOGS (by mtime). Only a log whose agy (the pid in
+ * its name) is gone is removed: one still running is kept, however old; anything else is left.
+ * Both places agy may keep them are looked at: the profile, and its app-data folder.
+ */
+export function trimAgyLogs(p: Profile) {
+	for (const dir of [path.join(p.geminiHome, "log"), path.join(p.acpDir, "log")]) {
+		let logs: { p: string; pid: number; t: number }[] = [];
+		try {
+			for (const e of fs.readdirSync(dir)) {
+				const m = AGY_LOG.exec(e);
+				if (!m) continue;
+				const full = path.join(dir, e);
+				const st = fs.lstatSync(full);
+				if (st.isFile()) logs.push({ p: full, pid: Number(m[1]), t: st.mtimeMs });
+			}
+		} catch {
+			continue;
+		}
+		logs.sort((x, y) => y.t - x.t);
+		for (const l of logs.slice(KEPT_LOGS)) {
+			if (alive(l.pid)) continue;
+			try {
+				fs.rmSync(l.p, { force: true });
+			} catch {}
+		}
+	}
+}
+
+/**
+ * A new agy process's own TMPDIR: `tmp/<pi's pid>-<random>`, 0700, so a pi's agy runs never share
+ * temp files (agy 1.5.18 wrote nothing there before sign-in on macOS, and writes its ~1 MB of
+ * builtin/, config/, databases and logs into the profile; a folder per run costs next to nothing).
+ * Each launch first sweeps dead processes' leftovers (as t3code's retireAntigravityRuntimeTempDirs,
+ * but by pid: several pi processes share a profile), prunes the session ledger and trims agy's
+ * logs. The connection removes the folder when agy ends.
  */
 export function runDir(p: Profile): string {
 	fs.mkdirSync(p.tmpDir, { recursive: true, mode: 0o700 });
 	void sweepRunDirs(p.tmpDir);
 	pruneLedger(path.join(p.acpDir, "deckhand-sessions"));
+	trimAgyLogs(p);
 	return fs.mkdtempSync(path.join(p.tmpDir, `${process.pid}-`));
 }
 

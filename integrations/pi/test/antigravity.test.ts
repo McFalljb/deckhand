@@ -1032,6 +1032,44 @@ test("agy 1.5.18's --login output: three lines, the link indented two spaces; a 
 	assert.equal(f.read().find((m) => m.loginCode)?.loginCode, page);
 });
 
+test("agy 1.5.18's logs: each launch's sweep keeps the newest 20 log/acp-server-*.log per profile, and never one whose agy still runs", async () => {
+	const a = accountsEnv();
+	const prof = path.join(a.root, "profiles", "default");
+	const acp = path.join(prof, "antigravity-acp");
+	mkdirSync(acp, { recursive: true });
+	writeFileSync(path.join(acp, "acp_token.json"), "{}"); // as if signed in
+	const other = spawn("sleep", ["30"]);
+	const dead = spawnSync("true").pid!;
+	try {
+		const logs = path.join(prof, "log");
+		mkdirSync(logs, { recursive: true });
+		const at = (name: string, ageMin: number) => {
+			const p = path.join(logs, name);
+			writeFileSync(p, "x");
+			const t = new Date(Date.now() - ageMin * 60_000);
+			utimesSync(p, t, t);
+		};
+		for (let i = 0; i < 25; i++) at(`acp-server-2026-11-${String(i + 1).padStart(2, "0")}-${dead}.log`, 100 + i);
+		at(`acp-server-2026-10-01-${other.pid}.log`, 10_000); // the oldest, but its agy still runs
+		at("notes.txt", 10_000); // not agy's log
+		await withEnv(a.env, async () => {
+			const pi = await loadExtension();
+			await pi.start();
+			const { ctx, notes } = cmdCtx(pi);
+			await run(pi, "antigravity", "models", ctx);
+			assert.match(notes.at(-1)!, /2 models/);
+		});
+		const left = readdirSync(logs).sort();
+		const dropped = Array.from({ length: 5 }, (_, i) => `acp-server-2026-11-${String(25 - i).padStart(2, "0")}-${dead}.log`); // the 5 oldest dead ones
+		for (const d of dropped) assert.ok(!left.includes(d), `${d} goes`);
+		assert.equal(left.filter((f) => f.endsWith(`-${dead}.log`)).length, 20);
+		assert.ok(left.includes(`acp-server-2026-10-01-${other.pid}.log`), "a running agy's log stays");
+		assert.ok(left.includes("notes.txt"));
+	} finally {
+		other.kill();
+	}
+});
+
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));

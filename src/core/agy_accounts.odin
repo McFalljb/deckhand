@@ -751,6 +751,7 @@ agy_accounts_sync :: proc() -> string {
 // the user set to another executable stays. "" = done or nothing to do.
 agy_accounts_set_path :: proc(bin: string) -> string {
 	if bin == "" || !filepath.is_abs(bin) do return ""
+	bin := bin
 	return agy_accounts_change(proc(o: ^json.Object, data: rawptr) -> bool {
 		bin := (^string)(data)^
 		cur := str_of(o^, "agyPath")

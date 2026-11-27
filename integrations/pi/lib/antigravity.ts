@@ -33,6 +33,7 @@
 //   provider never sets) are refused.
 import type { AgyModel } from "./agy.ts";
 import { AgySession } from "./agy.ts";
+import { fileLedger, type Ledger } from "./agy-ledger.ts";
 
 
 export const PROVIDER_ID = "antigravity";
@@ -122,13 +123,25 @@ export interface Produced {
 /** `prior`: the transcript up to the last answer, for catch-up text if agy cannot pick its session up. */
 export type TurnPlan = { error: string } | { blocks: any[]; mode: "continue" | "resume" | "new"; resumeId?: string; prior?: any[] };
 
+/** Whether an agy session whose answers are `produced` holds exactly the turns up to the answer `ts` (only failed ones after it, which pi drops before a retry). */
+export function endsAt(produced: Produced[] | undefined, ts: number): boolean {
+	const i = produced?.findIndex((p) => p.ts === ts) ?? -1;
+	return i >= 0 && produced!.slice(i + 1).every((p) => !p.ok);
+}
+
 /**
- * How a turn reaches agy. `continue`: agy's session is pi's transcript (its last answer is the
- * newest one this session produced, or only failed ones came after it, which pi drops before a
- * retry). `resume`: the last answer came from an agy session not open here (a restart; another
- * branch). `new`: the first turn, or the transcript is not agy's (then with catchUpText first).
+ * How a turn reaches agy. `continue`: agy's session is pi's transcript (endsAt its last answer).
+ * `resume`: the last answer came from an agy session not open here (a restart, /resume, /fork),
+ * and `resumable` says that session ends at that answer and nobody else holds it (lib/agy-ledger.ts;
+ * without it, never). `new`: the first turn, or the transcript is not agy's, or is not where its
+ * session stands (then with catchUpText first).
  */
-export function planTurn(messages: any[], state: { acpSessionId?: string; produced: Produced[] } | undefined, provider = PROVIDER_ID): TurnPlan {
+export function planTurn(
+	messages: any[],
+	state: { acpSessionId?: string; produced: Produced[] } | undefined,
+	provider = PROVIDER_ID,
+	resumable?: (sessionId: string, ts: number) => boolean,
+): TurnPlan {
 	const convo = messages.filter((m) => m?.role !== "system");
 	let last = -1;
 	for (let i = convo.length - 1; i >= 0; i--)
@@ -142,9 +155,9 @@ export function planTurn(messages: any[], state: { acpSessionId?: string; produc
 	const answer = convo[last];
 	if (answer.provider === provider && typeof answer.responseId === "string" && answer.responseId) {
 		const prior = convo.slice(0, last + 1);
-		if (state?.acpSessionId !== answer.responseId) return { blocks, mode: "resume", resumeId: answer.responseId, prior };
-		const i = state.produced.findIndex((p) => p.ts === answer.timestamp);
-		if (i >= 0 && state.produced.slice(i + 1).every((p) => !p.ok)) return { blocks, mode: "continue", prior };
+		if (state?.acpSessionId === answer.responseId) {
+			if (endsAt(state.produced, answer.timestamp)) return { blocks, mode: "continue", prior };
+		} else if (resumable?.(answer.responseId, answer.timestamp)) return { blocks, mode: "resume", resumeId: answer.responseId, prior };
 	}
 	return { blocks: [{ type: "text", text: catchUpText(convo.slice(0, last + 1)) }, ...blocks], mode: "new" };
 }
@@ -296,6 +309,8 @@ export interface AntigravityOptions {
 	status?: (text: string | undefined) => void;
 	spawnImpl?: Parameters<typeof AgySession.open>[0]["spawnImpl"];
 	cancelWaitMs?: number;
+	/** Where the record of agy's sessions lives (lib/agy-ledger.ts; the account profile's). Without it, no session is ever resumed from a transcript. */
+	ledgerDir?: string;
 }
 
 interface SessionState {
@@ -316,6 +331,7 @@ export function createAntigravity(o: AntigravityOptions) {
 	let models: PiModel[] = modelList([], [], pid, account);
 	let registry: Registry | undefined;
 	const sessions = new Map<string, SessionState>();
+	const ledger: Ledger | undefined = o.ledgerDir ? fileLedger(o.ledgerDir) : undefined;
 	const auth = { type: "api_key" as const, source: `agy (${o.agyPath})` };
 
 	const setModels = async (list: AgyModel[], thinking: string[]) => {
@@ -337,7 +353,10 @@ export function createAntigravity(o: AntigravityOptions) {
 	async function ensureSession(st: SessionState, plan: Exclude<TurnPlan, { error: string }>, apiKey: string | undefined): Promise<{ agy: AgySession; lost: boolean }> {
 		if (plan.mode === "continue" && st.agy?.conn.alive) return { agy: st.agy, lost: false };
 		drop(st);
-		const resumeId = plan.mode === "resume" ? plan.resumeId : plan.mode === "continue" ? st.acpSessionId : undefined;
+		let resumeId = plan.mode === "resume" ? plan.resumeId : plan.mode === "continue" ? st.acpSessionId : undefined;
+		// a session another pi session took in the meantime is not picked up: a new one, caught up
+		const wanted = resumeId;
+		if (resumeId && ledger && !ledger.claim(resumeId, st)) resumeId = undefined;
 		let agy: AgySession | undefined;
 		const how = o.launch?.(apiKey) ?? {};
 		agy = await AgySession.open({
@@ -359,11 +378,16 @@ export function createAntigravity(o: AntigravityOptions) {
 				if (agy && st.agy === agy) st.agy = undefined;
 			},
 		});
-		if (plan.mode === "new" || agy.sessionId !== st.acpSessionId) st.produced = [];
+		if (agy.sessionId !== st.acpSessionId) {
+			if (st.acpSessionId) ledger?.release(st.acpSessionId, st);
+			ledger?.claim(agy.sessionId, st);
+			// resumed from the record (another process, or before a restart): its answers so far
+			st.produced = plan.mode === "resume" && agy.sessionId === resumeId ? ledger?.read(agy.sessionId) ?? [] : [];
+		} else if (plan.mode === "new") st.produced = [];
 		st.agy = agy;
 		st.acpSessionId = agy.sessionId;
 		void setModels(agy.models, agy.thinkingLevels);
-		return { agy, lost: !!resumeId && agy.sessionId !== resumeId };
+		return { agy, lost: !!wanted && agy.sessionId !== wanted };
 	}
 
 	function streamSimple(model: any, context: any, options?: any) {
@@ -399,9 +423,11 @@ export function createAntigravity(o: AntigravityOptions) {
 			recorded = true;
 			st!.produced.push({ ts: answer.msg.timestamp, ok });
 			if (dispatched) st!.failedSent = ok ? undefined : sentKey;
+			if (st!.acpSessionId) ledger?.write(st!.acpSessionId, st!.produced);
 		};
 		if (st.acpSessionId) answer.msg.responseId = st.acpSessionId;
-		let plan = planTurn(messages, st, pid);
+		const owner = st;
+		let plan = planTurn(messages, st, pid, (id, ts) => !!ledger && ledger.free(id, owner) && endsAt(ledger.read(id), ts));
 		if ("error" in plan) {
 			record(false);
 			return answer.finish("error", plan.error);
@@ -554,6 +580,7 @@ export function createAntigravity(o: AntigravityOptions) {
 		async closeAll() {
 			const all = [...sessions.values()];
 			sessions.clear();
+			for (const st of all) if (st.acpSessionId) ledger?.release(st.acpSessionId, st);
 			await Promise.all(all.map((st) => st.agy?.close().catch(() => {})));
 		},
 		/** SIGTERM to every agy process, synchronously (pi's process exits). */

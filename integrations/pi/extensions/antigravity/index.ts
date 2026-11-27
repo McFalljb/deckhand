@@ -22,6 +22,7 @@
  * - No tools or flags are registered (test/conflicts.test.ts).
  */
 import fs from "node:fs";
+import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { findAgy, usableAgyPath } from "../../lib/acp.ts";
 import { agyLogout, agyVersion, probeModels } from "../../lib/agy.ts";
@@ -81,6 +82,7 @@ export default function antigravity(pi: ExtensionAPI) {
 			keyAuth: usesKey(a),
 			explain: (m) => explainError(m, a),
 			launch: (key) => launchOf(a, key),
+			ledgerDir: path.join(profileOf(root, a.name).acpDir, "deckhand-sessions"),
 		});
 		ag.bind(registry);
 		const old = live.get(a.name);

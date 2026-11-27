@@ -520,6 +520,7 @@ test("two accounts: separate profiles (GEMINI_HOME) and providers; an API key fr
 		const work = await drive(prov(pi, "antigravity-work").streamSimple({ id: "gemini-3.8-flash", provider: "antigravity-work", api: "antigravity-acp" }, { messages: [user("w")] }, { sessionId: "s1", apiKey: "k-work-123" }));
 		assert.equal(work.msg.stopReason, "stop");
 		assert.equal(work.msg.provider, "antigravity-work");
+		assert.ok(existsSync(path.join(a.root, "profiles", "work", "antigravity-acp", "deckhand-sessions")), "the account's own record of its agy sessions");
 		mkdirSync(path.join(a.root, "profiles", "default", "antigravity-acp"), { recursive: true });
 		writeFileSync(path.join(a.root, "profiles", "default", "antigravity-acp", "acp_token.json"), "{}"); // as if signed in
 		const def = await drive(prov(pi, "antigravity").streamSimple({ id: "default", provider: "antigravity", api: "antigravity-acp" }, { messages: [user("d")] }, { sessionId: "s1" }));
@@ -910,11 +911,75 @@ test("finding 2: when agy cannot resume, the new session gets pi's transcript as
 	}
 });
 
-test("pi restarted: a new provider resumes the agy session named on the transcript's last answer", async () => {
-	const r = rig();
+
+test("finding 1: /fork never writes into the agy session another pi session holds, nor resumes one ahead of its branch", async () => {
+	const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
+	const r = rig({}, { ledgerDir });
+	const forkTurn = async (key: string, msgs: any[]) => drive(r.ag.provider.streamSimple(MODEL, { messages: msgs }, { sessionId: key }));
+	try {
+		const a1 = (await r.turn("one")).msg;
+		const a2 = (await r.turn("two")).msg;
+		const S = a2.responseId;
+		assert.equal(a1.responseId, S);
+		// a fork from the earlier answer: S holds "two" as well, which this branch does not have
+		const early = await forkTurn("pi-fork-early", [SYS, r.messages[1], a1, user("forked early")]);
+		assert.equal(early.msg.stopReason, "stop");
+		assert.notEqual(early.msg.responseId, S, "a new agy session");
+		assert.match(r.prompts().at(-1)![0].text, /^\[The conversation so far[\s\S]*User: one/);
+		// a fork from the latest answer, while pi-1 still holds S
+		const late = await forkTurn("pi-fork-late", [SYS, r.messages[1], a1, r.messages[3], a2, user("forked late")]);
+		assert.notEqual(late.msg.responseId, S, "S is pi-1's: never two pi sessions in one agy session");
+		assert.ok(!r.f.read().some((m) => m.method === "session/resume"), "S was never resumed");
+		const own = await r.turn("three");
+		assert.equal(own.msg.responseId, S, "pi-1 goes on in S");
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "three" }]);
+	} finally {
+		await r.ag.closeAll();
+	}
+});
+
+test("finding 1: a new pi process resumes an agy session only from its latest answer; an older branch gets a new session", async () => {
+	const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
+	const r = rig({}, { ledgerDir });
+	const a1 = (await r.turn("one")).msg;
+	const a2 = (await r.turn("two")).msg;
+	await r.ag.closeAll();
+	const again = () => createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: r.f.env, ledgerDir });
+	const p1 = again();
+	try {
+		// /resume onto the older branch after a restart
+		const older = await drive(p1.provider.streamSimple(MODEL, { messages: [SYS, r.messages[1], a1, user("older branch")] }, { sessionId: "pi-1" }));
+		assert.equal(older.msg.stopReason, "stop");
+		assert.notEqual(older.msg.responseId, a1.responseId);
+		assert.ok(!r.f.read().some((m) => m.method === "session/resume"));
+		assert.match(r.prompts().at(-1)![0].text, /^\[The conversation so far[\s\S]*User: one/);
+	} finally {
+		await p1.closeAll();
+	}
+	const p2 = again();
+	try {
+		const latest = await drive(p2.provider.streamSimple(MODEL, { messages: [...r.messages, user("latest branch")] }, { sessionId: "pi-2" }));
+		assert.equal(latest.msg.responseId, a2.responseId, "the latest answer: resumed");
+		assert.deepEqual(r.prompts().at(-1), [{ type: "text", text: "latest branch" }]);
+	} finally {
+		await p2.closeAll();
+	}
+	const p3 = again();
+	try {
+		const none = createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: r.f.env });
+		const blind = await drive(none.provider.streamSimple(MODEL, { messages: [...r.messages, user("no record")] }, { sessionId: "pi-3" }));
+		assert.notEqual(blind.msg.responseId, a2.responseId, "no record of agy's sessions: never resumed");
+		await none.closeAll();
+	} finally {
+		await p3.closeAll();
+	}
+});
+test("pi restarted: a new provider resumes the agy session named on the transcript's last answer (the record says it ends there)", async () => {
+	const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
+	const r = rig({}, { ledgerDir });
 	const first = await r.turn("hi");
 	await r.ag.closeAll();
-	const again = createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: r.f.env });
+	const again = createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: r.f.env, ledgerDir });
 	try {
 		r.messages.push(user("after restart"));
 		const { msg } = await drive(again.provider.streamSimple(MODEL, { messages: r.messages }, { sessionId: "pi-1" }));
@@ -956,7 +1021,10 @@ test("planTurn: continue, resume, new; a retry after a failed answer continues",
 	assert.equal((planTurn([u("x"), a(5)], undefined) as any).error, "Antigravity: there is no new message to send");
 	const st = { acpSessionId: "S", produced: [{ ts: 5, ok: true }] };
 	assert.equal((planTurn([u("x"), a(5), u("y")], st) as any).mode, "continue");
-	const { prior, ...resume } = planTurn([u("x"), a(5), u("y")], { acpSessionId: "T", produced: [] }) as any;
+	assert.equal((planTurn([u("x"), a(5), u("y")], { acpSessionId: "T", produced: [] }) as any).mode, "new", "no record of S: never resumed");
+	const seen: any[] = [];
+	const { prior, ...resume } = planTurn([u("x"), a(5), u("y")], { acpSessionId: "T", produced: [] }, "antigravity", (id, ts) => (seen.push([id, ts]), true)) as any;
+	assert.deepEqual(seen, [["S", 5]]);
 	assert.deepEqual(resume, { blocks: [{ type: "text", text: "y" }], mode: "resume", resumeId: "S" });
 	assert.deepEqual(prior, [u("x"), a(5)], "the transcript to catch agy up with, if it cannot resume");
 	const retried = { acpSessionId: "S", produced: [{ ts: 5, ok: true }, { ts: 6, ok: false }] };

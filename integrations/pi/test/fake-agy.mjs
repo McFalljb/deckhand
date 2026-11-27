@@ -62,13 +62,21 @@ if (args[0] !== "acp") {
 }
 
 if (args.includes("--login")) {
-	process.stdout.write("Signing in to Antigravity.\n");
-	process.stdout.write(`${LINK}\n`);
-	process.stdout.write("Paste the code here: ");
+	// agy 1.5.18's own lines
+	process.stdout.write("Open this link in a browser to log in with Google:\n");
+	process.stdout.write(`  ${LINK}\n`);
+	process.stdout.write("Then paste the authorization code, or the full URL of the page you land on, and press Enter:\n");
 	const rl = readline.createInterface({ input: process.stdin });
+	let answered = false;
 	rl.once("line", (code) => {
+		answered = true;
 		log({ loginCode: code });
-		if (code.trim() === (env.FAKE_AGY_LOGIN_CODE ?? "good-code")) {
+		const good = env.FAKE_AGY_LOGIN_CODE ?? "good-code";
+		let pageCode;
+		try {
+			pageCode = new URL(code.trim()).searchParams.get("code");
+		} catch {}
+		if (code.trim() === good || pageCode === good) {
 			if (tokenFile) fs.writeFileSync(tokenFile, JSON.stringify({ fake: "not a real token" }));
 			process.stdout.write("\nSigned in.\n");
 			process.exit(0);
@@ -76,7 +84,11 @@ if (args.includes("--login")) {
 		process.stdout.write("\nThat code did not work.\n");
 		process.exit(1);
 	});
-	rl.once("close", () => process.exit(1));
+	rl.once("close", () => {
+		if (answered) return;
+		process.stdout.write("login cancelled: no authorization code was entered\n");
+		process.exit(1);
+	});
 } else {
 	serve();
 }

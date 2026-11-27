@@ -1014,6 +1014,24 @@ test("agy 1.5.18's initialize: protocol 1, a bare version, its capabilities; ima
 	await u.close();
 });
 
+test("agy 1.5.18's --login output: three lines, the link indented two spaces; a bare code or the full page URL is accepted; stdin's end cancels", async () => {
+	const AGY_LOGIN_OUT = ["Open this link in a browser to log in with Google:", `  ${LINK}`, "Then paste the authorization code, or the full URL of the page you land on, and press Enter:"];
+	// the fake prints exactly that
+	const raw = spawnSync(process.execPath, [FAKE, "acp", "--login"], { input: "", encoding: "utf8", env: fake().env });
+	assert.deepEqual(raw.stdout.split("\n").slice(0, 3), AGY_LOGIN_OUT);
+	assert.equal(raw.stdout.split("\n")[3], "login cancelled: no authorization code was entered");
+	assert.equal(raw.status, 1);
+	// the indented link line is the link
+	assert.equal(linkInLine(AGY_LOGIN_OUT[1])?.url, LINK);
+	assert.equal(linkInLine(AGY_LOGIN_OUT[0]), undefined);
+	assert.equal(linkInLine(AGY_LOGIN_OUT[2]), undefined);
+	// the full URL of the page landed on, as agy takes it
+	const f = fake();
+	const page = "https://antigravity.google/oauth-callback?state=s123&code=good-code";
+	assert.deepEqual(await agyLogin({ agyPath: FAKE, cwd: f.cwd, env: f.env, showLink: () => {}, askCode: async () => page }), { ok: true });
+	assert.equal(f.read().find((m) => m.loginCode)?.loginCode, page);
+});
+
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));

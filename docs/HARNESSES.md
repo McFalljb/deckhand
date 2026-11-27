@@ -137,7 +137,7 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   (only that name, as t3code: `antigravity` may be the Antigravity IDE's launcher; another name
   needs `/antigravity path`); a few stats at load. No environment variable picks the binary (what Deckhand ships reads
   only the variables `scripts/check-env-reads.py` lists). Not found: the extension registers
-  only `/antigravity`, which says where to get agy (1.5.12 or newer) and offers `/antigravity path`;
+  only `/antigravity`, which says where to get agy (1.5.18 or newer) and offers `/antigravity path`;
   no provider, hook, status line or output. Found (at load, or when `/antigravity path` sets a path
   later in the session): the accounts' providers and hooks for
   `session_start`, `session_shutdown` and `session_before_compact` (pi takes providers and hooks
@@ -146,8 +146,10 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   switch, so a command registered later would not be offered (an earlier `/antigravity-login` was
   folded into `/antigravity login` for that reason). No flags.
 - **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
-  `clientInfo`/`clientCapabilities`: agy answers `protocolVersion: 2` in the v1 shape), no fs and
-  no terminal capability; agy older than 1.5.1 (`agentInfo.version`) is refused; `session/new`
+  `clientInfo`/`clientCapabilities`: agy 1.5.18 answers `protocolVersion: 1` in the v1 shape,
+  `agentInfo.version` a bare `1.5.18`), no fs and no terminal capability; agy older than 1.5.1
+  is refused; prompt blocks go only in the kinds `promptCapabilities` names (1.5.18: images and
+  embedded resources, no audio; another becomes a short note); `session/new`
   (or `session/resume`), agy's `default` mode, then the model and thinking by config option
   (`session/set_config_option`, `model` and the `thought_level` category). `authenticate` with
   the account's method always comes before `session/new`, as in t3code (agy picks its credential

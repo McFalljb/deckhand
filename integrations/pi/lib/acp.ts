@@ -10,10 +10,12 @@
 //   request it makes of the client is answered: session/request_permission and ask_question
 //   (`interaction_…` tool calls) are declined, elicitations declined, anything else "method not
 //   found". Approvals are a later, separately reviewed step (docs/HARNESSES.md §3a).
-// - agy reports `protocolVersion: 2` with the v1 response shape (agentInfo, agentCapabilities:
-//   effect-acp client.ts "Antigravity, for example, reports version 2 with the v1 … shape"), so the
-//   request carries both shapes, as t3code's does, and the response is read as v1.
-// - Version: agentInfo.version (`agy_acp_server_1.5.12`); below 1.5.1 is refused (older runtimes
+// - The request carries both ACP shapes (v2's `info`/`capabilities` and v1's `clientInfo`/
+//   `clientCapabilities`), as t3code's does; agy 1.5.18 answers `protocolVersion: 1` in the v1
+//   shape (agentInfo, agentCapabilities, some fields twice in snake_case), which is how it is read.
+//   (t3code's effect-acp notes older builds answering 2 with the v1 shape.)
+// - Version: agentInfo.version (1.5.18 reports a bare `1.5.18`; some builds `agy_acp_server_1.5.12`);
+//   below 1.5.1 is refused (older runtimes
 //   allowlist the editors their models serve: t3code OPEN_MODEL_ACCESS_RELEASE). Unparseable passes.
 // - agy prints its sign-in link on stdout or stderr when it has no sign-in ("Open the following
 //   link to authenticate the ACP server: <url>"); such a line is not JSON-RPC and means "sign in".
@@ -23,7 +25,7 @@ import path from "node:path";
 
 export const CLIENT_INFO = { name: "deckhand-pi", title: "Deckhand (pi)", version: "0.1.0" } as const;
 export const AGY_MIN_VERSION = "1.5.1";
-export const AGY_RECOMMENDED_VERSION = "1.5.12";
+export const AGY_RECOMMENDED_VERSION = "1.5.18";
 /** Overrides the PATH lookup with an absolute path to agy (or a stand-in, in tests). */
 export const SIGN_IN_PREFIX = "Open the following link to authenticate the ACP server: ";
 /** What every request of agy's for approval or input gets until approvals are reviewed. */

@@ -212,7 +212,7 @@ sidebar hands its sections to Deckhand's right column.
 #### Google Antigravity in pi tabs (preview)
 
 With Google's Antigravity CLI installed (`agy` on your `PATH`, or another path set with
-`/antigravity path`; version 1.5.1 or newer, 1.5.12 recommended), a pi tab can use your Antigravity models. Without it, only
+`/antigravity path`; version 1.5.1 or newer, 1.5.18 recommended), a pi tab can use your Antigravity models. Without it, only
 **`/antigravity`** is there: it links to Google's download page for agy and offers to set agy's
 path; once it is set, the rest turns on in the same tab. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
 turn: its model, its tools, its own instructions. Deckhand never reads or stores your Google

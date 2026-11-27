@@ -26,7 +26,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { findAgy, usableAgyPath } from "../../lib/acp.ts";
+import { AGY_RECOMMENDED_VERSION, findAgy, usableAgyPath } from "../../lib/acp.ts";
 import { agyLogout, agyVersion, probeModels } from "../../lib/agy.ts";
 import {
 	type Account,
@@ -66,7 +66,7 @@ const KILLERS: Set<() => void> = ((globalThis as any)[Symbol.for("deckhand.antig
 
 const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "path"] as const;
 export const NOT_FOUND =
-	"Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (1.5.12 or newer), or set its path with /antigravity path <abs path>";
+	`Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (${AGY_RECOMMENDED_VERSION} or newer), or set its path with /antigravity path <abs path>`;
 
 export default function antigravity(pi: ExtensionAPI) {
 	const root = dataRoot();

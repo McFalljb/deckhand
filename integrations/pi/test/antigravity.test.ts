@@ -100,7 +100,7 @@ test("startup: initialize, authenticate (oauth-personal by default), session/new
 	const s = await AgySession.open({ agyPath: FAKE, cwd: f.cwd, env: f.env });
 	try {
 		assert.match(s.sessionId, /^sess-/);
-		assert.equal(s.agentVersion, "agy_acp_server_1.5.12");
+		assert.equal(s.agentVersion, "1.5.18");
 		assert.deepEqual(s.models.map((m) => m.id), ["gemini-3.8-pro", "gemini-3.8-flash"], "groups flattened");
 		assert.deepEqual(s.thinkingLevels, ["low", "high"]);
 		const msgs = f.read();
@@ -150,7 +150,7 @@ test("startup without a mode config option: session/set_mode default", async () 
 
 test("version refusal: agy older than 1.5.1 is stopped after initialize, with what to do", async () => {
 	const f = fake({ FAKE_AGY_VERSION: "agy_acp_server_1.5.0" });
-	await assert.rejects(AgySession.open({ agyPath: FAKE, cwd: f.cwd, env: f.env }), /1\.5\.0 is older than 1\.5\.1.*update agy \(1\.5\.12/);
+	await assert.rejects(AgySession.open({ agyPath: FAKE, cwd: f.cwd, env: f.env }), /1\.5\.0 is older than 1\.5\.1.*update agy \(1\.5\.18/);
 	assert.deepEqual(methods(f.read()), ["initialize"], "no session started");
 });
 
@@ -358,7 +358,7 @@ test("without agy: only /antigravity, which says where to get agy; no provider, 
 		const c = { ...ctx, ui: { ...ctx.ui, setStatus: (...a: any[]) => void statuses.push(a), select: async (_t: string, items: string[]) => (menus.push(items), "Close") } };
 		await run(pi, "antigravity", "", c);
 		assert.deepEqual(notes, [NOT_FOUND]);
-		assert.equal(NOT_FOUND, "Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (1.5.12 or newer), or set its path with /antigravity path <abs path>");
+		assert.equal(NOT_FOUND, "Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (1.5.18 or newer), or set its path with /antigravity path <abs path>");
 		assert.deepEqual(menus, [["Set agy's path…", "Close"]], "the menu offers only the path");
 		await run(pi, "antigravity", "status", c);
 		await run(pi, "antigravity", "add work", c);
@@ -463,7 +463,7 @@ test("/antigravity login (no name: the default account): agy's --login in the de
 		assert.ok(!existsSync(path.join(prof, "GEMINI.md")), "only what the user has");
 		const st = cmdCtx(pi);
 		await run(pi, "antigravity", "status", st.ctx);
-		assert.match(st.notes[0], /^Antigravity CLI: .*\/agy \(agy_acp_server_1\.5\.12\)\nAccounts \(.*\):\n- default → antigravity · Google account · signed in · 2 models$/);
+		assert.match(st.notes[0], /^Antigravity CLI: .*\/agy \(1\.5\.18\)\nAccounts \(.*\):\n- default → antigravity · Google account · signed in · 2 models$/);
 		await run(pi, "antigravity", "logout", st.ctx);
 		assert.equal(st.notes.at(-1), 'Signed out of Antigravity (account "default"); its history is kept');
 		assert.ok(f.read().some((m) => m.method === "logout"));
@@ -619,7 +619,7 @@ test("/antigravity path: an absolute executable is kept in accounts.json and use
 		assert.deepEqual(saved.accounts.map((x: any) => x.name), ["work"], "accounts kept");
 		assert.deepEqual(await prov(pi, "antigravity-work").auth.apiKey.check({}), { type: "api_key", source: `agy (${FAKE})` }, "every account's provider follows");
 		await run(pi, "antigravity", "status", ctx);
-		assert.match(notes.at(-1)!, /^Antigravity CLI: .*fake-agy\.mjs \(agy_acp_server_1\.5\.12\), set by \/antigravity path\n/);
+		assert.match(notes.at(-1)!, /^Antigravity CLI: .*fake-agy\.mjs \(1\.5\.18\), set by \/antigravity path\n/);
 		await run(pi, "antigravity", "add other oauth-personal", ctx);
 		assert.equal(JSON.parse(readFileSync(path.join(a.root, "accounts.json"), "utf8")).agyPath, FAKE, "kept when accounts change");
 	});
@@ -643,7 +643,7 @@ test("/antigravity path: an absolute executable is kept in accounts.json and use
 		await again.start();
 		const c2 = cmdCtx(again);
 		await run(again, "antigravity", "status", c2.ctx);
-		assert.match(c2.notes[0], new RegExp(`^Antigravity CLI: ${AGY.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} \\(agy_acp_server_1\\.5\\.12\\)\\n  The path set by /antigravity path is not an executable file, so agy is taken from PATH: /nowhere/agy\\n`));
+		assert.match(c2.notes[0], new RegExp(`^Antigravity CLI: ${AGY.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} \\(1\\.5\\.18\\)\\n  The path set by /antigravity path is not an executable file, so agy is taken from PATH: /nowhere/agy\\n`));
 	});
 });
 
@@ -972,6 +972,41 @@ test("agy 1.5.18: every agy Deckhand starts (sessions, probes, the login) has AG
 	const starts = f.read().filter((m) => m.argv);
 	assert.equal(starts.length, 3);
 	for (const s of starts) assert.equal(s.env.AGY_CLI_DISABLE_AUTO_UPDATE, "true", s.argv.join(" "));
+});
+
+test("agy 1.5.18's initialize: protocol 1, a bare version, its capabilities; images go only when promptCapabilities.image, audio only when .audio", async () => {
+	const f = fake();
+	const s = await AgySession.open({ agyPath: FAKE, cwd: f.cwd, env: f.env });
+	try {
+		assert.equal(s.initialize.protocolVersion, 1);
+		assert.deepEqual(s.initialize.agentInfo, { name: "Antigravity ACP Server", version: "1.5.18" });
+		assert.deepEqual(s.initialize.agentCapabilities.promptCapabilities, { image: true, audio: false, embeddedContext: true });
+		assert.equal(s.initialize.agentCapabilities.mcpCapabilities, undefined);
+		assert.equal(s.agentVersion, "1.5.18");
+		const img = { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" };
+		const audio = { type: "audio", mimeType: "audio/wav", data: "UklGRg==" };
+		await s.prompt([{ type: "text", text: "look" }, img, audio]);
+		const sent = f.read().filter((m) => m.method === "session/prompt").at(-1).params.prompt;
+		assert.deepEqual(sent.map((b: any) => b.type), ["text", "image", "text"], "the image goes; the audio becomes a note");
+		assert.match(sent[2].text, /audio .*left out/i);
+	} finally {
+		await s.close();
+	}
+	const g = fake({ FAKE_AGY_NO_IMAGE: "1" });
+	const t = await AgySession.open({ agyPath: FAKE, cwd: g.cwd, env: g.env });
+	try {
+		await t.prompt([{ type: "text", text: "look" }, { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }]);
+		const sent = g.read().filter((m) => m.method === "session/prompt").at(-1).params.prompt;
+		assert.deepEqual(sent.map((b: any) => b.type), ["text", "text"]);
+		assert.match(sent[1].text, /image .*left out/i);
+	} finally {
+		await t.close();
+	}
+	// the prefixed form some builds report still parses
+	const p = fake({ FAKE_AGY_VERSION: "agy_acp_server_1.5.12" });
+	const u = await AgySession.open({ agyPath: FAKE, cwd: p.cwd, env: p.env });
+	assert.equal(u.agentVersion, "agy_acp_server_1.5.12");
+	await u.close();
 });
 
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {

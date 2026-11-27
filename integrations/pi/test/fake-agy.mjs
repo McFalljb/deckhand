@@ -1,15 +1,18 @@
 #!/usr/bin/env node
 // A stand-in for Google's Antigravity CLI (`agy acp`, `agy acp --login`) for the tests: never a
-// real agy, no network. It answers as agy does in t3code's fixtures and adapters
-// (packages/effect-acp/test/fixtures/antigravity-initialize.json: protocolVersion 2 with the v1
-// shape; authMethods; session/new with `model` and `thought_level` config options and modes;
+// real agy, no network. Its initialize, its sign-in errors and its --login output are agy 1.5.18's,
+// as a no-login handshake against the real binary showed (protocolVersion 1, agentInfo
+// "Antigravity ACP Server" with a bare version; promptCapabilities image and embeddedContext, no
+// audio; no mcpCapabilities); the rest is as t3code's fixtures and adapters have it (session/new
+// with `model` and `thought_level` config options and modes;
 // streamed agent_thought_chunk / agent_message_chunk / tool_call / tool_call_update / plan updates;
 // session/cancel; session/request_permission, ask_question as `interaction_…`, elicitation).
 //
 // What a prompt does depends on its text: "crash", "permission", "question", "elicit", "fsread",
 // "slow" (streams until cancelled), "stubborn" (ignores cancel), "late" (an update after the
 // prompt ended), "refuse"; anything else streams a thought, a tool call, a plan and an echo.
-// Environment: FAKE_AGY_LOG (every message received, one JSON per line), FAKE_AGY_VERSION,
+// Environment: FAKE_AGY_LOG (every message received, one JSON per line), FAKE_AGY_VERSION (default
+// 1.5.18; some builds report agy_acp_server_1.5.12), FAKE_AGY_NO_IMAGE=1 (promptCapabilities.image false),
 // FAKE_AGY_SIGNED_OUT=1 (no sign-in: authenticate prints the link; with --gemini-dir, signed in
 // means the profile's acp_token.json exists, which --login writes and logout removes; agy's
 // stored sign-in is never read by the client), FAKE_AGY_BROWSER_SIGNIN=1 (a browser sign-in
@@ -229,25 +232,32 @@ function serve() {
 			return;
 		}
 		switch (method) {
-			case "initialize":
+			case "initialize": {
+				const sessionCaps = { ...(env.FAKE_AGY_NO_RESUME === "1" ? {} : { resume: {} }), close: {}, load: {}, list: {}, additionalDirectories: {} };
+				// as agy 1.5.18 answers it (a no-login handshake against the real binary)
 				return send({
 					id,
 					result: {
-						protocolVersion: 2,
+						protocolVersion: 1,
 						agentCapabilities: {
 							loadSession: true,
-							promptCapabilities: { image: true, audio: true, embeddedContext: true },
-							mcpCapabilities: { http: true, sse: true },
-							sessionCapabilities: { list: {}, ...(env.FAKE_AGY_NO_RESUME === "1" ? {} : { resume: {} }), close: {} },
+							load_session: true,
+							promptCapabilities: { image: env.FAKE_AGY_NO_IMAGE !== "1", audio: false, embeddedContext: true },
+							sessionCapabilities: sessionCaps,
+							session_capabilities: sessionCaps,
 							auth: { logout: {} },
+							_meta: { antigravity: { tier: true, systemPrompt: { append: true } } },
 						},
+						agentInfo: { name: "Antigravity ACP Server", version: env.FAKE_AGY_VERSION ?? "1.5.18" },
 						authMethods: [
 							{ id: "oauth-personal", name: "Log in with Google", description: "Log in with your Google account" },
+							{ id: "oauth-business", name: "Log in with Gemini Enterprise", description: "Log in with your Gemini Enterprise account" },
 							{ id: "gemini-api-key", name: "Gemini API key", description: "Use an API key with Gemini Developer API" },
+							{ id: "agent-platform", name: "Gemini Enterprise Agent Platform", description: "Use Gemini Enterprise Agent Platform (formerly Vertex AI) with Application Default Credentials" },
 						],
-						agentInfo: { name: "antigravity-acp", title: "Google Antigravity", version: env.FAKE_AGY_VERSION ?? "agy_acp_server_1.5.12" },
 					},
 				});
+			}
 			case "authenticate": {
 				const m = params?.methodId;
 				const ok = () => ((authed = true), send({ id, result: {} }));

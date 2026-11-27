@@ -228,8 +228,9 @@ export class AgySession {
 	}
 
 	/** One prompt turn; resolves with agy's PromptResponse ({stopReason, usage?}). */
+	/** session/prompt, with only the kinds of block agy said it takes (promptBlocksFor). */
 	prompt(prompt: unknown[]): Promise<any> {
-		return this.conn.request("session/prompt", { sessionId: this.sessionId, prompt });
+		return this.conn.request("session/prompt", { sessionId: this.sessionId, prompt: promptBlocksFor(this.initialize?.agentCapabilities?.promptCapabilities, prompt) });
 	}
 
 	cancel() {
@@ -255,6 +256,20 @@ export async function probeModels(o: Omit<AgySessionOptions, "resumeId">): Promi
 }
 
 type BareOptions = Pick<AgySessionOptions, "agyPath" | "cwd" | "args" | "env" | "spawnImpl" | "makeRunDir">;
+
+/**
+ * The prompt blocks agy takes, by its initialize's promptCapabilities: text always; image, audio
+ * and embedded resources only when it says true (agy 1.5.18: image and embeddedContext, no audio).
+ * A block left out becomes a short note, so the model knows something was there.
+ */
+export function promptBlocksFor(caps: any, blocks: unknown[]): unknown[] {
+	const takes: Record<string, boolean> = { image: caps?.image === true, audio: caps?.audio === true, resource: caps?.embeddedContext === true };
+	return blocks.map((b: any) => {
+		const t = b?.type;
+		if (t === "text" || t === "resource_link" || !(t in takes) || takes[t]) return b;
+		return { type: "text", text: `[An ${t === "resource" ? "attached file" : t} was left out: this Antigravity CLI does not take ${t === "resource" ? "attached files" : `${t} input`}]` };
+	});
+}
 
 /** `initialize` only (no session, no sign-in): agy's reported version. */
 export async function agyVersion(o: BareOptions): Promise<string> {

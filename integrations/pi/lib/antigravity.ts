@@ -357,9 +357,12 @@ export function createAntigravity(o: AntigravityOptions) {
 		// a session another pi session took in the meantime is not picked up: a new one, caught up
 		const wanted = resumeId;
 		if (resumeId && ledger && !ledger.claim(resumeId, st)) resumeId = undefined;
+		// claimed for this resume only (not st's own session): given up again if the resume does not happen
+		const claimedNow = !!resumeId && !!ledger && resumeId !== st.acpSessionId;
+		const unclaim = () => claimedNow && ledger!.release(resumeId!, st);
 		let agy: AgySession | undefined;
 		const how = o.launch?.(apiKey) ?? {};
-		agy = await AgySession.open({
+		const opening = AgySession.open({
 			agyPath: o.agyPath,
 			cwd: o.cwd(),
 			env: how.env ?? o.env,
@@ -379,6 +382,13 @@ export function createAntigravity(o: AntigravityOptions) {
 				if (agy && st.agy === agy) st.agy = undefined;
 			},
 		});
+		try {
+			agy = await opening;
+		} catch (e) {
+			unclaim();
+			throw e;
+		}
+		if (agy.sessionId !== resumeId) unclaim(); // agy started a new session instead
 		if (agy.sessionId !== st.acpSessionId) {
 			if (st.acpSessionId) ledger?.release(st.acpSessionId, st);
 			ledger?.claim(agy.sessionId, st);
@@ -596,8 +606,13 @@ export function createAntigravity(o: AntigravityOptions) {
 		async closeAll() {
 			const all = [...sessions.values()];
 			sessions.clear();
-			for (const st of all) if (st.acpSessionId) ledger?.release(st.acpSessionId, st);
-			await Promise.all(all.map((st) => st.agy?.close().catch(() => {})));
+			// each session's locks go only once its agy has ended
+			await Promise.all(
+				all.map(async (st) => {
+					await st.agy?.close().catch(() => {});
+					ledger?.releaseAll(st);
+				}),
+			);
 		},
 		/** SIGTERM to every agy process, synchronously (pi's process exits). */
 		killAll() {

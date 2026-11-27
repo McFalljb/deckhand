@@ -3,6 +3,7 @@
 import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOME in a temp folder
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -1131,6 +1132,38 @@ test("finding 1: a new pi process resumes an agy session only from its latest an
 	} finally {
 		await p3.closeAll();
 	}
+});
+
+test("round 2, finding 2: a resume that does not happen (agy fails it, or cannot resume) leaves the agy session free for another pi session", async () => {
+	for (const knob of ["FAKE_AGY_RESUME_FAIL", "FAKE_AGY_NO_RESUME"]) {
+		const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
+		const r = rig({}, { ledgerDir });
+		const a1 = (await r.turn("one")).msg;
+		await r.ag.closeAll();
+		const tried = createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: { ...r.f.env, [knob]: "1" }, ledgerDir });
+		const other = createAntigravity({ agyPath: FAKE, cwd: () => r.f.cwd, env: r.f.env, ledgerDir });
+		try {
+			const t = await drive(tried.provider.streamSimple(MODEL, { messages: [...r.messages, user("try")] }, { sessionId: "pi-a" }));
+			assert.notEqual(t.msg.responseId === a1.responseId && t.msg.stopReason === "stop", true, `${knob}: not resumed`);
+			const o = await drive(other.provider.streamSimple(MODEL, { messages: [...r.messages, user("other")] }, { sessionId: "pi-b" }));
+			assert.equal(o.msg.responseId, a1.responseId, `${knob}: the session is free, so the other pi session resumes it`);
+		} finally {
+			await tried.closeAll();
+			await other.closeAll();
+		}
+	}
+});
+
+test("round 2, finding 3: closeAll gives up an agy session's lock only after agy has ended", async () => {
+	const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));
+	const r = rig({}, { ledgerDir });
+	const a1 = (await r.turn("one")).msg;
+	const lock = path.join(ledgerDir, `${createHash("sha256").update(a1.responseId).digest("hex").slice(0, 32)}.lock`);
+	assert.ok(existsSync(lock));
+	const closing = r.ag.closeAll();
+	assert.ok(existsSync(lock), "agy is still ending: the lock stays");
+	await closing;
+	assert.ok(!existsSync(lock), "released once agy ended");
 });
 test("pi restarted: a new provider resumes the agy session named on the transcript's last answer (the record says it ends there)", async () => {
 	const ledgerDir = mkdtempSync(path.join(TMP_ROOT, "ledger-"));

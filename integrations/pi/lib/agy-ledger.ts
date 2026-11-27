@@ -39,12 +39,14 @@ export interface Ledger {
 	/** Takes the session for `owner`; false when someone else holds it. */
 	claim(sessionId: string, owner: object): boolean;
 	release(sessionId: string, owner: object): void;
+	/** Gives up every session `owner` holds in this ledger. */
+	releaseAll(owner: object): void;
 }
 
 export function fileLedger(dir: string): Ledger {
 	const key = (id: string) => createHash("sha256").update(id).digest("hex").slice(0, 32);
 	const file = (id: string) => path.join(dir, `${key(id)}.json`);
-	const lock = (id: string) => path.join(dir, `${key(id)}.lock`);
+	const lock = (id: string) => path.join(path.resolve(dir), `${key(id)}.lock`);
 	const holderPid = (p: string): number | undefined => {
 		try {
 			return Number(JSON.parse(fs.readFileSync(p, "utf8"))?.pid);
@@ -60,6 +62,13 @@ export function fileLedger(dir: string): Ledger {
 		if (!fs.existsSync(p)) return false;
 		const pid = holderPid(p);
 		return pid !== undefined && pid !== process.pid && alive(pid);
+	};
+	const unlock = (p: string, owner: object) => {
+		if (HELD.get(p) !== owner) return;
+		HELD.delete(p);
+		try {
+			if (holderPid(p) === process.pid) fs.rmSync(p, { force: true });
+		} catch {}
 	};
 	return {
 		read(id) {
@@ -95,12 +104,10 @@ export function fileLedger(dir: string): Ledger {
 			return true;
 		},
 		release(id, owner) {
-			const p = lock(id);
-			if (HELD.get(p) !== owner) return;
-			HELD.delete(p);
-			try {
-				if (holderPid(p) === process.pid) fs.rmSync(p, { force: true });
-			} catch {}
+			unlock(lock(id), owner);
+		},
+		releaseAll(owner) {
+			for (const [p, held] of [...HELD]) if (held === owner && path.dirname(p) === path.resolve(dir)) unlock(p, owner);
 		},
 	};
 }

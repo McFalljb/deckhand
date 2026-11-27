@@ -267,6 +267,7 @@ function serve() {
 				return send({ id, result: setup(newSession(`sess-${process.pid}-${sessions.size + 1}`)) });
 			case "session/resume": {
 				if (!authed) return send({ id, error: { code: -32000, message: "Authentication required" } });
+				if (env.FAKE_AGY_RESUME_FAIL === "1") return send({ id, error: { code: -32603, message: "Session not found" } });
 				const s = sessions.get(params.sessionId) ?? newSession(params.sessionId);
 				s.resumed = true;
 				const { sessionId: _, ...rest } = setup(s);

@@ -926,6 +926,17 @@ test("gap A3: each launch's sweep prunes session records unused for 30 days and 
 		other.kill();
 	}
 });
+
+test("gap A4: ending pi's session closes its agy processes in parallel within about 3 s, even ones that ignore stdin and SIGTERM", async () => {
+	const r = rig({ FAKE_AGY_HOLD_ON: "1" });
+	await r.turn("one", { sessionId: "pi-1" });
+	await r.turn("two", { sessionId: "pi-2" });
+	const t0 = Date.now();
+	await r.ag.closeAll();
+	const took = Date.now() - t0;
+	assert.ok(took >= 2500 && took < 3800, `closed in ${took} ms`);
+	assert.equal(r.f.read().filter((m) => m.event === "sigterm").length, 2, "both got SIGTERM after their stdin closed");
+});
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));

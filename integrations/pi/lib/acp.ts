@@ -114,8 +114,10 @@ export interface CloseTimes {
 	stdinWaitMs?: number;
 	termGraceMs?: number;
 }
+// About 3 s in all before SIGKILL: pi's session_shutdown waits for every agy to end (all at once),
+// and so does quitting pi. (It was 1 s + 5 s: an agy ignoring both stdin and SIGTERM held pi 6 s.)
 export const CLOSE_STDIN_WAIT_MS = 1000;
-export const CLOSE_TERM_GRACE_MS = 5000;
+export const CLOSE_TERM_GRACE_MS = 2000;
 
 // agy runs as the leader of its own process group (spawned detached), so what it starts (its
 // tools, its language servers) is ended with it: every signal below goes to the whole group.

@@ -435,3 +435,24 @@ test("bridge: pi.name names the session with pi's setSessionName (as /name), tri
 		dh.close();
 	}
 });
+
+test("bridge: desk_show in a pi tab reaches Deckhand as show_file over the tab's own connection; a session given is dropped (#210)", async () => {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			const { pi } = await runtime([await fromFile(path.join(import.meta.dirname, "../extensions/browser/index.ts"))]);
+			await dh.waitFor("pi.status", (m) => m.type === "pi.status"); // the bridge is connected
+			const show = pi.tools().find((t: any) => t.name === "desk_show");
+			assert.ok(show, "a pi tab has desk_show");
+			const shows = () => dh.got.filter((m) => m.type === "command" && m.command?.type === "show_file").map((m) => m.command);
+			// its own session: forwarded as desk_show built it
+			await show.tool.execute("s1", { path: "docs/plan.md", anchor: "setup" }, undefined, undefined, pi.ctx);
+			assert.deepEqual(shows(), [{ type: "show_file", path: "docs/plan.md", anchor: "setup" }]);
+			// a session from a pi tab never goes out (Deckhand keeps a pi tab to its own)
+			await show.tool.execute("s2", { path: "notes.txt", line: 3, session: 9 }, undefined, undefined, pi.ctx);
+			assert.deepEqual(shows().at(-1), { type: "show_file", path: "notes.txt", line: 3 });
+		});
+	} finally {
+		dh.close();
+	}
+});

@@ -994,14 +994,14 @@ test("desk bridge: commands for other extensions end with their result, or a lon
 	assert.equal(calls.size, 0);
 });
 
-test("desk-browser routes forward only the browser tools' commands (bridge and control)", async () => {
+test("desk-browser routes forward only the browser, app and desk_show tools' commands (bridge and control)", async () => {
 	const proto: Record<string, any> = await import("../lib/protocol.ts");
 	assert.equal(typeof proto.browserRefusal, "function", "protocol.ts exports browserRefusal");
-	for (const type of ["browser_tabs", "browser_open", "browser_navigate", "browser_read", "browser_screenshot", "browser_wait", "browser_console", "browser_network", "browser_comments"])
+	for (const type of ["browser_tabs", "browser_open", "browser_navigate", "browser_read", "browser_screenshot", "browser_wait", "browser_console", "browser_network", "browser_comments", "show_file"])
 		assert.equal(proto.browserRefusal({ type, tab_id: 3 }), undefined, type);
 	for (const type of ["send_text", "close_tab", "browser_agent_stop", "browser_back", "pi.prompt", "comments_clear", "", "BROWSER_READ"])
-		assert.match(proto.browserRefusal({ type }) ?? "", /only the browser tools' commands/, type);
-	assert.match(proto.browserRefusal(undefined) ?? "", /only the browser tools' commands/);
+		assert.match(proto.browserRefusal({ type }) ?? "", /forwards only the commands of the browser, app and desk_show tools/, type);
+	assert.match(proto.browserRefusal(undefined) ?? "", /forwards only the commands of the browser, app and desk_show tools/);
 });
 
 test("desk-browser: screenshots carry the page-data note; recordings say what ends them", () => {
@@ -1160,7 +1160,7 @@ test("desk-browser routes: the act commands are forwarded; the user-only ones st
 	for (const type of ["browser_click", "browser_type", "browser_press", "browser_scroll", "browser_select", "browser_hover", "browser_upload"])
 		assert.equal(proto.browserRefusal({ type, tab_id: 3 }), undefined, type);
 	for (const type of ["browser_upload_answer", "browser_agent_take_over", "browser_agent_stop", "browser_eval", "browser_drag"])
-		assert.match(proto.browserRefusal({ type, tab_id: 3 }) ?? "", /only the browser tools' commands/, type);
+		assert.match(proto.browserRefusal({ type, tab_id: 3 }) ?? "", /forwards only the commands of the browser, app and desk_show tools/, type);
 });
 
 // ---- step 8, security review round 1 ----
@@ -1384,8 +1384,11 @@ test("desk-browser: a pi tab's app tools go over the bridge route (its session's
 
 // ---- the desk extension against a fake Deckhand (no pi, no model): typebox stubbed ----
 
-/** Loads extensions/desk/index.ts with a fake pi and connects it to a fake Deckhand over a unix socket. */
-async function deskHarness(answer: (cmd: any, reply: (m: any) => void) => void) {
+/**
+ * Loads extensions/desk/index.ts with a fake pi and connects it to a fake Deckhand over a unix socket.
+ * `withBrowser`: extensions/browser loads first, as in Home (its commands go over the desk's control route).
+ */
+async function deskHarness(answer: (cmd: any, reply: (m: any) => void) => void, withBrowser = false) {
 	const mod: any = await import("node:module");
 	if (!(globalThis as any).__kitTypeboxStub) {
 		(globalThis as any).__kitTypeboxStub = true;
@@ -1428,6 +1431,10 @@ async function deskHarness(answer: (cmd: any, reply: (m: any) => void) => void) 
 	const saved = { s: process.env.DECKHAND_SOCKET, t: process.env.DECKHAND_CONTROL_TOKEN };
 	process.env.DECKHAND_SOCKET = sockPath;
 	process.env.DECKHAND_CONTROL_TOKEN = "ctl";
+	if (withBrowser) {
+		process.env.DECKHAND_TOKEN ??= "tab"; // Home is a pi tab too (the browser tools need its token)
+		(await import("../extensions/browser/index.ts")).default(pi);
+	}
 	const { default: desk } = await import("../extensions/desk/index.ts");
 	desk(pi);
 	for (const f of handlers.get("session_start") ?? []) f({}, { mode: "tui" });
@@ -1498,6 +1505,29 @@ test("desk: Home's own tab is refused before any lookup; a pi prompt with wait k
 		await assert.rejects(h.tools.get("desk_wait").execute("w", { tab_id: 1 }, undefined), /Tab 1 is your own tab/);
 		const r = await h.tools.get("desk_prompt").execute("p2", { tab_id: 2, text: "go", wait: true, timeout_s: 10 }, undefined);
 		assert.match(r.content[0].text, /^Prompt delivered\. Tab 2 is idle\./);
+	} finally {
+		h.close();
+	}
+});
+
+test("desk: desk_show in Home reaches Deckhand as show_file over the control route, with the session Home names (#210)", async () => {
+	const h = await deskHarness((cmd, reply) => {
+		if (cmd.type !== "show_file") return;
+		// as Deckhand: Home has no tabs of its own to show a file in, so it names a session
+		if (cmd.session === undefined) reply({ type: "result", result: { ok: false, error: "Home has no session of its own: name one (session)" } });
+		else reply({ type: "result", result: { ok: true, created_id: 21, data: { kind: "markdown", path: `/p/${cmd.path}`, session: cmd.session } } });
+	}, true);
+	try {
+		const show = h.tools.get("desk_show");
+		assert.ok(show, "Home has desk_show");
+		const shows = () => h.got.filter((m) => m.type === "command" && m.command?.type === "show_file").map((m) => m.command);
+		// Home (a control caller) names an open session: forwarded with it
+		const r = await show.execute("s1", { path: "docs/plan.md", anchor: "setup", session: 5 }, undefined);
+		assert.match(r.content[0].text, /Markdown tab 21/);
+		assert.deepEqual(shows(), [{ type: "show_file", path: "docs/plan.md", anchor: "setup", session: 5 }]);
+		// without one it reaches Deckhand too, and Deckhand's refusal comes back
+		await assert.rejects(show.execute("s2", { path: "notes.md" }, undefined), /name one/);
+		assert.deepEqual(shows().at(-1), { type: "show_file", path: "notes.md" });
 	} finally {
 		h.close();
 	}

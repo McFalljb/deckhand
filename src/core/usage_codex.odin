@@ -12,9 +12,12 @@ package core
 // then closes stdin and stops it (its process group; USAGE_READ_TIMEOUT at most). Codex fetches
 // the numbers with its own sign-in: Deckhand never opens auth.json nor calls any endpoint. The
 // answer (GetAccountRateLimitsResponse, marked experimental) is read loosely: unknown fields are
-// ignored, a missing one is "not said". An error answer that says ChatGPT sign-in is needed is an
-// API-key account (no plan limits); one that says sign-in is needed at all is signed out.
-// initialize's codexHome must be the home asked for, else the answer is not used.
+// ignored, a missing one is "not said". Only Codex's own words (its app-server's account
+// processor, 0.169) make an error answer a state: "chatgpt authentication required to read rate
+// limits" is an API-key account (no plan limits), "codex account authentication required to read
+// rate limits" signed out; any other is an error (the last good numbers kept). initialize must
+// answer, and for any home but Codex's default its codexHome must be the home asked for (missing:
+// the read fails, "can't confirm which account"), else the answer is not used.
 //
 // Test mode runs DECKHAND_CODEX_CMD (tests/scripts/fake-codex.py's app-server mode), never a
 // real codex (codex_tab_cmd); unit tests start nothing unless one asks (usage.odin).
@@ -29,7 +32,7 @@ import "core:time"
 import jg "../jsonguard"
 
 USAGE_READ_TIMEOUT :: 30 * time.Second // the login shell, codex's start, its fetch
-USAGE_REPLY_MAX :: 256 << 10 // bytes of output read at most
+USAGE_REPLY_MAX :: 256 << 10 // bytes of output the whole run may write (more: it is stopped)
 
 // The shell line that runs `codex app-server` for an account's home ("" = none). Temp.
 usage_codex_script :: proc(home: string) -> string {
@@ -51,7 +54,7 @@ usage_codex_requests :: proc() -> (init, initialized, read: string) {
 }
 
 // Runs the exchange and parses its answer (heap; any thread).
-usage_codex_read :: proc(script, home: string) -> ^Usage_Read {
+usage_codex_read :: proc(script, home: string, default_home := false) -> ^Usage_Read {
 	init_reply, read_reply, why := usage_codex_exchange(script)
 	if why != "" {
 		r := new(Usage_Read, runtime.heap_allocator())
@@ -59,7 +62,7 @@ usage_codex_read :: proc(script, home: string) -> ^Usage_Read {
 		r.error = strings.clone(why, runtime.heap_allocator())
 		return r
 	}
-	return usage_codex_parse(init_reply, read_reply, home)
+	return usage_codex_parse(init_reply, read_reply, home, default_home)
 }
 
 // The app-server conversation: the replies to requests 1 and 2 (their JSON lines), or why not.
@@ -117,6 +120,8 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 	chunk: [16 << 10]u8
 	sent_read := false
 	open := why == ""
+	total := 0 // bytes read, the whole run
+	eof := false // its stdout ended (every writer closed it)
 	for open {
 		// each whole line: a reply by its id; anything else (a notification, a profile's output) is skipped
 		for {
@@ -154,25 +159,35 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 		if posix.poll(&pfd[0], 1, i32(min(left / 1e6, 200))) <= 0 do continue
 		n := posix.read(pout[0], &chunk[0], len(chunk))
 		if n <= 0 {
+			eof = n == 0
 			why = init_reply == "" ? "codex app-server ended without an answer (is Codex installed and new enough?)" : "codex app-server ended before it answered"
 			break
 		}
-		if len(buf) + int(n) > USAGE_REPLY_MAX {
-			why = "codex app-server's answer was too long"
+		total += int(n)
+		if total > USAGE_REPLY_MAX {
+			why = "codex app-server's output was too long"
 			break
 		}
 		append(&buf, ..chunk[:n])
 	}
-	// done: stdin closed (the server's end), then its group stopped
+	// done: stdin closed (the server's end); it ends on its own (its output read to the end, so
+	// none of its group still holds it), else its group is stopped
 	posix.close(pin[1])
-	posix.close(pout[0])
 	wstatus: i32
 	exited := false
+	clean := why == "" // it answered: give it the grace to end by itself
 	grace := time.tick_now()._nsec + i64(500 * time.Millisecond)
-	for !exited && time.tick_now()._nsec < grace {
-		if posix.waitpid(pid, &wstatus, {.NOHANG}) == pid do exited = true
-		else do time.sleep(20 * time.Millisecond)
+	for clean && !(exited && eof) && time.tick_now()._nsec < grace {
+		if !exited && posix.waitpid(pid, &wstatus, {.NOHANG}) == pid do exited = true
+		if !eof {
+			pfd := [1]posix.pollfd{{fd = pout[0], events = {.IN}}}
+			if posix.poll(&pfd[0], 1, 20) > 0 {
+				n := posix.read(pout[0], &chunk[0], len(chunk))
+				if n <= 0 do eof = true // the rest is dropped
+			}
+		} else if !exited do time.sleep(20 * time.Millisecond)
 	}
+	posix.close(pout[0])
 	if !exited {
 		posix.killpg(pid, .SIGTERM)
 		grace = time.tick_now()._nsec + i64(changes_kill_grace)
@@ -181,7 +196,9 @@ usage_codex_exchange :: proc(script: string) -> (init_reply, read_reply: string,
 			else do time.sleep(20 * time.Millisecond)
 		}
 	}
-	posix.killpg(pid, .SIGKILL) // the rest of its group
+	// the rest of its group, unless it ended by itself and its output was closed by all: then the
+	// group is gone and its id may be another's by now
+	if !(exited && eof) do posix.killpg(pid, .SIGKILL)
 	if !exited do posix.waitpid(pid, &wstatus, {})
 	if read_reply == "" && why == "" do why = "codex app-server gave no answer"
 	return
@@ -204,20 +221,28 @@ usage_reply_id :: proc(line: string) -> (id: i64, ok: bool) {
 }
 
 // The replies' meaning (heap). Pure but for the hash; tests feed it the schema's examples.
-usage_codex_parse :: proc(init_reply, read_reply, home: string) -> ^Usage_Read {
+usage_codex_parse :: proc(init_reply, read_reply, home: string, default_home := false) -> ^Usage_Read {
 	heap := runtime.heap_allocator()
 	r := new(Usage_Read, heap)
 	r.windows = make([dynamic]Usage_Window, heap)
 	fail :: proc(r: ^Usage_Read, why: string) -> ^Usage_Read {
 		r.status = .Error
-		r.error = strings.clone(cut_utf8(one_line(why, context.temp_allocator), USAGE_ERROR_MAX), runtime.heap_allocator())
+		r.error = strings.clone(cut_utf8(usage_strip_emails(one_line(why, context.temp_allocator)), USAGE_ERROR_MAX), runtime.heap_allocator())
 		return r
 	}
-	// the server's home must be the one asked for (a profile that moved it: not this account's)
-	if iv, err := jg.parse_string(init_reply, .JSON, true, context.temp_allocator); err == nil {
+	// initialize answered, and for any home but the default its codexHome is the home asked for (a
+	// profile that moved CODEX_HOME, or a Codex that does not say: maybe another account's numbers)
+	{
+		iv, err := jg.parse_string(init_reply, .JSON, true, context.temp_allocator)
+		if err != nil do return fail(r, "Codex's initialize answer was not JSON")
 		io, _ := iv.(json.Object)
-		res, _ := io["result"].(json.Object)
-		if got, has := res["codexHome"].(json.String); has && home != "" {
+		if _, has := io["error"]; has do return fail(r, "Codex refused to initialize")
+		res, is := io["result"].(json.Object)
+		if !is do return fail(r, "Codex's initialize answer had no result")
+		got, has := res["codexHome"].(json.String)
+		if !has || got == "" {
+			if !default_home do return fail(r, "can't confirm which account Codex read")
+		} else if home != "" {
 			g, h := strings.trim_right(string(got), "/"), strings.trim_right(home, "/")
 			rg, rh := fs_real(g), fs_real(h)
 			if g != h && (rg == "" || rg != rh) do return fail(r, "Codex answered for another home")
@@ -228,12 +253,11 @@ usage_codex_parse :: proc(init_reply, read_reply, home: string) -> ^Usage_Read {
 	o, _ := v.(json.Object)
 	if e, is := o["error"].(json.Object); is {
 		msg := string(e["message"].(json.String) or_else "")
-		low := strings.to_lower(msg, context.temp_allocator)
-		switch {
-		case strings.contains(low, "chatgpt authentication required"):
+		switch strings.to_lower(strings.trim_space(msg), context.temp_allocator) {
+		case "chatgpt authentication required to read rate limits":
 			r.status = .No_Limits
 			return r
-		case strings.contains(low, "authentication required"), strings.contains(low, "not logged in"), strings.contains(low, "sign in"):
+		case "codex account authentication required to read rate limits":
 			r.status = .Signed_Out
 			return r
 		}

@@ -7,6 +7,8 @@ package core
 // with a stand-in app-server (a shell line: never a real codex).
 
 import "base:runtime"
+import "core:crypto/sha2"
+import "core:encoding/hex"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
@@ -106,7 +108,7 @@ usage_parse_loose :: proc(t: ^testing.T) {
 		testing.expect_value(t, len(r.windows), 2)
 		testing.expect_value(t, r.windows[0].used_percent, 100.0)
 		testing.expect_value(t, r.windows[0].window_mins, i64(0))
-		testing.expect_value(t, r.windows[1].used_percent, 0.0)
+		testing.expect_value(t, r.windows[1].used_percent, -1.0) // below 0: not a percent (unknown, never 0%)
 		testing.expect_value(t, r.windows[1].window_mins, i64(0))
 		testing.expect_value(t, r.windows[1].resets_at, i64(0))
 		testing.expect(t, r.limit_hit)
@@ -180,7 +182,7 @@ usage_rules :: proc(t: ^testing.T) {
 	testing.expect_value(t, usage_window_label(45), "45m")
 	testing.expect_value(t, usage_window_label(0), "limit")
 	testing.expect_value(t, usage_clamp_percent(101), 100.0)
-	testing.expect_value(t, usage_clamp_percent(-0.5), 0.0)
+	testing.expect_value(t, usage_clamp_percent(-0.5), -1.0) // below 0: not a percent
 	testing.expect_value(t, usage_level(79.9, false), Usage_Level.Normal)
 	testing.expect_value(t, usage_level(80, false), Usage_Level.Warn)
 	testing.expect_value(t, usage_level(94.9, false), Usage_Level.Warn)
@@ -353,12 +355,12 @@ usage_due_times :: proc(t: ^testing.T) {
 	testing.expect_value(t, next, UT_NOW + 120 + USAGE_AFTER_STOP)
 	usage_codex_turn_ended("/not/an/account") // none of its own: nothing
 	// Refresh usage: every account forced; refused with no Codex
-	r := run_command(Refresh_Usage{}, {kind = .Control})
+	r := run_command(Refresh_Usage{}, {kind = .Internal})
 	testing.expect(t, r.ok, r.error)
 	_, forced := usage_next_at_for_test(def)
 	testing.expect(t, forced)
 	harness_found[.Codex] = .No
-	r = run_command(Refresh_Usage{}, {kind = .Control})
+	r = run_command(Refresh_Usage{}, {kind = .Internal})
 	testing.expect(t, !r.ok)
 	testing.expect(t, strings.contains(r.error, "Codex is not installed"), r.error)
 }
@@ -407,6 +409,243 @@ usage_exchange_with_a_stand_in :: proc(t: ^testing.T) {
 	defer usage_read_free(r2)
 	testing.expect_value(t, r2.status, Usage_Status.Error)
 	testing.expect(t, strings.contains(r2.error, "ended"), r2.error)
+}
+
+
+// Review #1: automatic reads only while the section can be seen. The window's facts say so
+// (usage_visible: the left column open on the Sessions tab, the USAGE section drawn unfolded;
+// hidden: hidden, minimised or occluded); a due read waits while either says no.
+@(test)
+usage_reads_only_when_seen :: proc(t: ^testing.T) {
+	def := ut_reset()
+	defer ut_done()
+	f := Window_Facts{usage_visible = true}
+	usage_test_facts = &f
+	defer usage_test_facts = nil
+	usage_tick()
+	next, _ := usage_next_at_for_test(def)
+	testing.expect_value(t, next, UT_NOW + USAGE_POLL_EVERY) // seen: read (tried) now
+	later := UT_NOW + USAGE_POLL_EVERY + 60
+	usage_test_now = later
+	cases := []Window_Facts{
+		{usage_visible = true, hidden = true}, // hidden, minimised or occluded
+		{usage_visible = false}, // the Files tab, the Attention view, the column closed, folded
+	}
+	for c in cases {
+		f = c
+		usage_tick()
+		next, _ = usage_next_at_for_test(def)
+		testing.expectf(t, next == UT_NOW + USAGE_POLL_EVERY, "%v: read while not seen (next %d)", c, next - UT_NOW)
+	}
+	// seen again: the read that was due
+	f = {usage_visible = true}
+	usage_tick()
+	next, _ = usage_next_at_for_test(def)
+	testing.expect_value(t, next, later + USAGE_POLL_EVERY)
+	// no facts yet (an older window): nothing is read automatically
+	usage_test_now = later + 2 * USAGE_POLL_EVERY
+	usage_test_facts = nil
+	usage_tick()
+	next, _ = usage_next_at_for_test(def)
+	testing.expect_value(t, next, later + USAGE_POLL_EVERY)
+}
+
+// Review #2: a percent Codex did not say (or said below 0) stays unknown (-1: "?"), never 0%.
+@(test)
+usage_unknown_percent_stays_unknown :: proc(t: ^testing.T) {
+	def := ut_reset()
+	defer ut_done()
+	testing.expect_value(t, usage_clamp_percent(-1), -1.0)
+	testing.expect_value(t, usage_clamp_percent(-3), -1.0)
+	testing.expect_value(t, usage_clamp_percent(0), 0.0)
+	testing.expect_value(t, usage_clamp_percent(150), 100.0)
+	read := ut_ok(p5 = -1)
+	usage_apply_for_test(def, read)
+	testing.expect_value(t, len(state.usage), 1)
+	testing.expect_value(t, state.usage[0].windows[0].used_percent, -1.0)
+	row := usage_row(state.usage[0], UT_NOW)
+	testing.expect_value(t, row.bars[0].percent, -1)
+	testing.expect_value(t, row.bars[0].level, Usage_Level.Normal)
+	testing.expect_value(t, row.fullest, 1) // the known one
+	// saved and restored: still unknown, and a saved window without its percent too
+	b := strings.builder_make(context.temp_allocator)
+	usage_json(&b)
+	text := strings.to_string(b)
+	testing.expect(t, strings.contains(text, `"used_percent":-1.0`), text)
+	saved := strings.concatenate({`[{"key":"codex:`, def, `","source":"codex","home":"`, def, `","status":"ok","read_at":`, fmt.tprint(UT_NOW - 60), `,"windows":[{"name":"","used_percent":-1,"window_mins":300},{"name":"","window_mins":10080}]}]`}, context.temp_allocator)
+	v, err := jg.parse_string(saved, .JSON, true, context.temp_allocator)
+	testing.expect(t, err == nil)
+	usage_restore(v)
+	usage_publish_for_test()
+	testing.expect_value(t, len(state.usage), 1)
+	testing.expect_value(t, len(state.usage[0].windows), 2)
+	testing.expect_value(t, state.usage[0].windows[0].used_percent, -1.0)
+	testing.expect_value(t, state.usage[0].windows[1].used_percent, -1.0)
+	row = usage_row(state.usage[0], UT_NOW)
+	testing.expect_value(t, row.line, "5h ? · 1m ago")
+}
+
+// Review #3: Refresh usage is the user's (it starts a process per account, with no backoff):
+// never an agent's, a script's or a pi tab's.
+@(test)
+usage_refresh_is_the_users :: proc(t: ^testing.T) {
+	testing.expect(t, caller_may({kind = .UI}, Refresh_Usage{}), "the user")
+	testing.expect(t, caller_may({kind = .Internal}, Refresh_Usage{}), "Deckhand")
+	for k in ([]Caller_Kind{.Control, .Script, .Panel, .App}) do testing.expectf(t, !caller_may({kind = k}, Refresh_Usage{}), "%v may refresh usage", k)
+	testing.expect(t, !caller_may({kind = .Panel, claude = true}, Refresh_Usage{}), "a Claude tab")
+}
+
+// Review #4: account hashes use this install's own random salt (a 0600 file in the data dir, never
+// workspace.json), not a fixed public one; the hash never goes over the state wire.
+@(test)
+usage_salt_per_install :: proc(t: ^testing.T) {
+	d := ut_dir("salt")
+	path := fmt.tprintf("%s/usage-salt", d)
+	os.remove(path)
+	a, ok := usage_salt_load_from(path)
+	testing.expect(t, ok, "a salt made")
+	data, rerr := os.read_entire_file(path, context.temp_allocator)
+	testing.expect(t, rerr == nil && len(data) == 32, "32 bytes saved")
+	if fi, e := os.stat(path, context.temp_allocator); testing.expect(t, e == nil) do testing.expectf(t, transmute(u32)fi.mode & 0o777 == 0o600, "mode %o", transmute(u32)fi.mode & 0o777)
+	b, ok2 := usage_salt_load_from(path)
+	testing.expect(t, ok2 && a == b, "read back the same")
+	zero: [32]u8
+	testing.expect(t, a != zero, "random")
+	h := usage_hash_with(a[:], "acct-1")
+	testing.expect_value(t, len(h), 32)
+	testing.expect_value(t, usage_hash_with(b[:], "acct-1"), h)
+	// another install: another salt, another hash
+	os.remove(path)
+	c, _ := usage_salt_load_from(path)
+	testing.expect(t, c != a, "a new salt")
+	testing.expect(t, usage_hash_with(c[:], "acct-1") != h, "another install's hash differs")
+	// the old fixed-salt hash is not what is made now
+	sum: [sha2.DIGEST_SIZE_256]u8
+	ctx: sha2.Context_256
+	sha2.init_256(&ctx)
+	old := "deckhand-usage-account:acct-1"
+	sha2.update(&ctx, transmute([]u8)old)
+	sha2.final(&ctx, sum[:])
+	testing.expect(t, h != string(hex.encode(sum[:16], context.temp_allocator)), "not the fixed salt's")
+	testing.expect_value(t, usage_hash_with(a[:], ""), "")
+	// a salt file that is not 32 bytes: no salt (never a short one)
+	_ = os.write_entire_file(path, transmute([]u8)string("short"))
+	_, ok3 := usage_salt_load_from(path)
+	testing.expect(t, !ok3, "a bad salt file refused")
+	// the hash stays in the core
+	sk := wire_skip("Usage_Account", "account_hash")
+	testing.expect(t, sk != nil && sk.why == .Core_Only, "account_hash is Core_Only on the state wire")
+}
+
+// Review #5: a home other than the default needs initialize's codexHome to match; missing, an
+// error or not JSON: the read fails (never another account's numbers).
+@(test)
+usage_home_must_be_confirmed :: proc(t: ^testing.T) {
+	read := `{"id":2,"result":{"rateLimits":{"primary":{"usedPercent":5,"windowDurationMins":300}}}}`
+	{
+		r := usage_codex_parse(`{"id":1,"result":{"userAgent":"codex"}}`, read, "/h/work")
+		defer usage_read_free(r)
+		testing.expect_value(t, r.status, Usage_Status.Error)
+		testing.expect_value(t, r.error, "can't confirm which account Codex read")
+	}
+	{ // the default home: Codex's own default, nothing to confirm
+		r := usage_codex_parse(`{"id":1,"result":{"userAgent":"codex"}}`, read, "/h/.codex", default_home = true)
+		defer usage_read_free(r)
+		testing.expect_value(t, r.status, Usage_Status.Ok)
+	}
+	for init in ([]string{`{"id":1,"error":{"code":-32600,"message":"bad init"}}`, `not json`, ``, `{"id":1,"result":7}`}) {
+		for def in ([]bool{false, true}) {
+			r := usage_codex_parse(init, read, "/h/work", default_home = def)
+			defer usage_read_free(r)
+			testing.expectf(t, r.status == .Error, "init %q (default %v): %v", init, def, r.status)
+		}
+	}
+}
+
+// Review #6: only Codex's own words for a signed-out or API-key account (its app-server's account
+// processor, 0.169); anything else is an error that keeps the last good numbers.
+@(test)
+usage_signed_out_wording :: proc(t: ^testing.T) {
+	err :: proc(msg: string) -> string {return strings.concatenate({`{"id":2,"error":{"code":-32600,"message":"`, msg, `"}}`}, context.temp_allocator)}
+	Case :: struct {
+		msg:  string,
+		want: Usage_Status,
+	}
+	for c in ([]Case{
+		{"codex account authentication required to read rate limits", .Signed_Out},
+		{"chatgpt authentication required to read rate limits", .No_Limits},
+		{"not logged in", .Error},
+		{"please sign in again", .Error},
+		{"failed to fetch codex rate limits: authentication required by proxy", .Error},
+		{"codex account authentication required to read token usage", .Error},
+	}) {
+		r := usage_codex_parse(init_reply("/h"), err(c.msg), "/h")
+		defer usage_read_free(r)
+		testing.expectf(t, r.status == c.want, "%q: %v, want %v", c.msg, r.status, c.want)
+	}
+}
+
+// Review polish: the rows say what colour alone would (a limit reached, a reset that passed
+// before the read); two windows of no said length are told apart; an email in Codex's words
+// never reaches State.
+@(test)
+usage_rows_polish :: proc(t: ^testing.T) {
+	now := UT_NOW
+	hit := Usage_Account{key = "codex:/h", home = "/h", label = "W", status = .Ok, limit_hit = true, read_at = now - 60, windows = []Usage_Window{{used_percent = 100, window_mins = 300, resets_at = now + 600}}}
+	row := usage_row(hit, now)
+	testing.expect_value(t, row.note, "limit reached")
+	testing.expect(t, strings.has_prefix(row.line, "limit reached · "), row.line)
+	old := Usage_Account{key = "codex:/h", home = "/h", status = .Ok, read_at = now - 60, windows = []Usage_Window{{used_percent = 50, window_mins = 300, resets_at = now - 120}}}
+	row = usage_row(old, now)
+	testing.expect_value(t, row.bars[0].reset, "reset passed")
+	testing.expect(t, !row.bars[0].passed, "the read came after it: its percent holds")
+	two := Usage_Account{key = "codex:/h", home = "/h", status = .Ok, read_at = now, windows = []Usage_Window{{used_percent = 10}, {used_percent = 20}}}
+	row = usage_row(two, now)
+	testing.expect_value(t, len(row.bars), 2)
+	testing.expect(t, row.bars[0].label != row.bars[1].label, "two unnamed windows share a label")
+	r := usage_codex_parse(init_reply("/h"), `{"id":2,"error":{"message":"failed to fetch codex rate limits: account jane.doe+x@example.co.uk is suspended"}}`, "/h")
+	defer usage_read_free(r)
+	testing.expect_value(t, r.status, Usage_Status.Error)
+	testing.expect(t, !strings.contains(r.error, "@") && !strings.contains(r.error, "jane"), r.error)
+	testing.expect(t, strings.contains(r.error, "suspended"), r.error)
+}
+
+// Review polish: saving drops an account that was removed; a saved read time in the future
+// (a clock set back) comes back as now.
+@(test)
+usage_saving_polish :: proc(t: ^testing.T) {
+	w := ut_dir("acct-w")
+	def := ut_reset(w)
+	defer ut_done()
+	usage_apply_for_test(def, ut_ok())
+	usage_apply_for_test(w, ut_ok())
+	clear(&state.settings.codex_accounts)
+	claude_accounts_gen += 1
+	b := strings.builder_make(context.temp_allocator)
+	usage_json(&b)
+	text := strings.to_string(b)
+	testing.expect(t, strings.contains(text, def), text)
+	testing.expect(t, !strings.contains(text, w), "a removed account's read saved")
+	saved := strings.concatenate({`[{"key":"codex:`, def, `","source":"codex","home":"`, def, `","status":"ok","read_at":`, fmt.tprint(UT_NOW + 86400), `,"windows":[]}]`}, context.temp_allocator)
+	v, _ := jg.parse_string(saved, .JSON, true, context.temp_allocator)
+	usage_restore(v)
+	usage_publish_for_test()
+	testing.expect_value(t, len(state.usage), 1)
+	testing.expect_value(t, state.usage[0].read_at, UT_NOW)
+}
+
+// Review polish: the 256 KB is the whole run's output (a server that floods lines it never
+// answers with is stopped at once, not when it ends or times out).
+@(test)
+usage_output_cap :: proc(t: ^testing.T) {
+	ut_reset()
+	defer ut_done()
+	os.set_env("SHELL", "/bin/sh")
+	flood := `read a; i=0; while [ $i -lt 6000 ]; do echo '{"method":"noise","params":{"pad":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}'; i=$((i+1)); done; exit 0`
+	r := usage_codex_read(flood, "/h", default_home = true)
+	defer usage_read_free(r)
+	testing.expect_value(t, r.status, Usage_Status.Error)
+	testing.expect(t, strings.contains(r.error, "too long"), r.error)
 }
 
 } // when TEST_HOOKS

@@ -9,11 +9,15 @@ package core
 // Rules that keep it safe:
 //   - Deckhand never reads a credential and never calls a provider itself: the agent's own
 //     program does the fetch with its own sign-in (usage_codex.odin), and only its answer's numbers
-//     and labels are kept. An account's id is kept only as a salted hash (two homes on one account
-//     are shown once), never shown, never sent anywhere.
-//   - It reads only while the user can see it: the left column's USAGE section unfolded and the
-//     window shown, every USAGE_POLL_EVERY and USAGE_AFTER_STOP after a Codex turn of that account
-//     ended; or when the user asks (Refresh usage). One read at a time.
+//     and labels are kept. An account's id is kept only as a keyed hash (HMAC-SHA256 under this
+//     install's own random salt, usage-salt in the data dir, 0600, never in workspace.json): two
+//     homes on one account are shown once. It stays in the core: never shown, never on the state
+//     wire (STATE_WIRE_SKIPS), never in get_state.
+//   - It reads only while the user can see it: the window says the USAGE section was drawn unfolded
+//     (Window_Facts.usage_visible: the left column open on the Sessions tab, By project) and it is
+//     not hidden, minimised or occluded; then every USAGE_POLL_EVERY, and USAGE_AFTER_STOP after a
+//     Codex turn of that account ended; or when the user asks (Refresh usage, the user's only).
+//     One read at a time.
 //   - What it last read is saved (workspace.json "usage": numbers and labels), so a restart shows
 //     it with its age; the row fades after USAGE_STALE_AFTER, and a window whose reset time passed
 //     says so instead of an old percent.
@@ -22,14 +26,19 @@ package core
 // window draws (usage_rows) are made from it, so a window in another process makes the same.
 
 import "base:runtime"
-import "core:crypto/sha2"
+import "core:crypto"
+import "core:crypto/hash"
+import "core:crypto/hmac"
 import "core:encoding/hex"
 import "core:encoding/json"
 import "core:fmt"
 import "core:math"
 import "core:mem/virtual"
+import "core:os"
 import "core:slice"
 import "core:strings"
+import "core:sync"
+import "core:sys/posix"
 import "core:thread"
 import "core:time"
 
@@ -188,26 +197,90 @@ usage_codex_key :: proc(home: string, allocator := context.temp_allocator) -> st
 	return strings.concatenate({"codex:", home}, allocator)
 }
 
-// The account id's salted hash (hex, 32 chars): enough to tell two accounts apart, nothing to
-// reverse. "" for no id.
+// The account id's hash under this install's salt (usage_hash_with): enough to tell two accounts
+// apart, nothing to reverse or to match across installs. "" for no id, or no salt. Any thread.
 usage_account_hash :: proc(id: string, allocator := context.temp_allocator) -> string {
+	salt, ok := usage_salt()
+	if !ok do return ""
+	return usage_hash_with(salt[:], id, allocator)
+}
+
+@(private = "file")
+usage_salt_state: struct {
+	once: sync.Once,
+	salt: [32]u8,
+	ok:   bool,
+}
+
+// This install's salt, read (or made) once. Unit tests: a random one in memory, no file.
+@(private = "file")
+usage_salt :: proc() -> (salt: [32]u8, ok: bool) {
+	sync.once_do(&usage_salt_state.once, proc() {
+		when ODIN_TEST {
+			crypto.rand_bytes(usage_salt_state.salt[:])
+			usage_salt_state.ok = true
+		} else {
+			if data_dir(context.temp_allocator) == "" do return
+			usage_salt_state.salt, usage_salt_state.ok = usage_salt_load_from(usage_salt_path())
+		}
+	})
+	return usage_salt_state.salt, usage_salt_state.ok
+}
+
+// Where this install's salt for account hashes lives (the data dir; never in workspace.json).
+usage_salt_path :: proc() -> string {return fmt.tprintf("%s/usage-salt", strings.trim_right(data_dir(context.temp_allocator), "/"))}
+
+// This install's salt from path, made there (32 random bytes, 0600) the first time. ok false: no
+// salt (account hashes then off: no merging).
+usage_salt_load_from :: proc(path: string) -> (salt: [32]u8, ok: bool) {
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	read :: proc(fd: posix.FD, salt: ^[32]u8) -> bool {
+		n := posix.read(fd, &salt[0], len(salt))
+		extra: [1]u8
+		return n == len(salt) && posix.read(fd, &extra[0], 1) == 0 // exactly 32 bytes
+	}
+	for _ in 0 ..< 2 {
+		if fd := posix.open(cpath, {.CLOEXEC, .NOFOLLOW}); fd >= 0 {
+			ok = read(fd, &salt)
+			posix.close(fd)
+			if !ok do salt = {}
+			return
+		}
+		// none yet: made here, only by its creator (O_EXCL); another one's made meanwhile is read
+		os.make_directory_all(path[:max(strings.last_index_byte(path, '/'), 0)])
+		fd := posix.open(cpath, {.WRONLY, .CREAT, .EXCL, .CLOEXEC, .NOFOLLOW}, {.IRUSR, .IWUSR})
+		if fd < 0 {
+			if posix.errno() == .EEXIST do continue
+			return {}, false
+		}
+		crypto.rand_bytes(salt[:])
+		wrote := posix.write(fd, &salt[0], len(salt)) == len(salt)
+		posix.fchmod(fd, {.IRUSR, .IWUSR}) // 0600 whatever the umask
+		posix.close(fd)
+		if !wrote {
+			posix.unlink(cpath)
+			return {}, false
+		}
+		return salt, true
+	}
+	return {}, false
+}
+
+// An account id's hash under a salt: HMAC-SHA256, its first 16 bytes in hex (32 chars). "" for no id.
+usage_hash_with :: proc(salt: []u8, id: string, allocator := context.temp_allocator) -> string {
 	if id == "" do return ""
-	sum: [sha2.DIGEST_SIZE_256]u8
-	ctx: sha2.Context_256
-	sha2.init_256(&ctx)
-	salt := "deckhand-usage-account:"
-	sha2.update(&ctx, transmute([]u8)salt)
-	sha2.update(&ctx, transmute([]u8)id)
-	sha2.final(&ctx, sum[:])
+	sum: [32]u8
+	hmac.sum(hash.Algorithm.SHA256, sum[:], transmute([]u8)id, salt)
 	return string(hex.encode(sum[:16], allocator))
 }
 
 // ---- pure rules (tests: usage_test.odin) ----
 
-// A percent as the agent sent it, clamped to 0..100; -1 for none (NaN, not a number).
+// A percent as the agent sent it, at most 100; -1 (not known) for none: NaN or below 0 (-1 is
+// how "not said" is kept, so a saved or a missing one stays "?", never a green 0%).
 usage_clamp_percent :: proc(p: f64) -> f64 {
-	if math.is_nan(p) do return -1
-	return clamp(p, 0, 100)
+	if math.is_nan(p) || p < 0 do return -1
+	return min(p, 100)
 }
 
 // A window's short name from its length: 300 -> "5h", 10080 -> "wk", 1440 -> "1d", 45 -> "45m".
@@ -315,7 +388,7 @@ usage_row :: proc(e: Usage_Account, now: i64) -> Usage_Row {
 		for w in e.windows {
 			if w.name != "" do continue // another bucket: the hover only
 			b := Usage_Bar{label = usage_window_label(w.window_mins), percent = w.used_percent < 0 ? -1 : int(math.round(w.used_percent))}
-			if w.resets_at > 0 do b.reset = fmt.tprintf("resets %s", usage_clock_text(w.resets_at, now))
+			if w.resets_at > 0 do b.reset = w.resets_at <= e.read_at ? "reset passed" : fmt.tprintf("resets %s", usage_clock_text(w.resets_at, now)) // Codex said a time already gone
 			b.passed = usage_reset_passed(w, e.read_at, now)
 			if b.passed do b.note = fmt.tprintf("reset at %s, no new data", usage_clock_text(w.resets_at, now))
 			if !b.passed && w.used_percent > best {
@@ -325,6 +398,12 @@ usage_row :: proc(e: Usage_Account, now: i64) -> Usage_Row {
 			append(&bars, b)
 		}
 		for &b, i in bars do b.level = b.passed || b.percent < 0 ? .Normal : usage_level(f64(b.percent), e.limit_hit && i == r.fullest || b.percent >= 100)
+		// two windows of one label (no length said, or the same): told apart, "limit", "limit 2"
+		for &b, i in bars {
+			n := 1
+			for o in bars[:i] do if o.label == b.label do n += 1
+			if n > 1 do b.label = fmt.tprintf("%s %d", b.label, n)
+		}
 	}
 	r.bars = bars[:]
 	switch e.status {
@@ -332,7 +411,9 @@ usage_row :: proc(e: Usage_Account, now: i64) -> Usage_Row {
 	case .No_Limits:  r.note = "no plan limits (API key)"
 	case .Signed_Out: r.note = "signed out"
 	case .Error:      r.note = e.error != "" ? fmt.tprintf("can't read: %s", e.error) : "can't read"
-	case .Ok:         if len(bars) == 0 do r.note = "no limits reported"
+	case .Ok:
+		if len(bars) == 0 do r.note = "no limits reported"
+		else if e.limit_hit do r.note = "limit reached" // in words too, not only the bar's colour
 	}
 	// the folded line: the fullest window, else what the row says instead
 	if r.fullest >= 0 {
@@ -340,9 +421,12 @@ usage_row :: proc(e: Usage_Account, now: i64) -> Usage_Row {
 		r.line = b.percent >= 0 ? fmt.tprintf("%s %d%%", b.label, b.percent) : fmt.tprintf("%s ?", b.label)
 	} else if len(bars) > 0 && bars[0].passed {
 		r.line = bars[0].note
+	} else if len(bars) > 0 {
+		r.line = fmt.tprintf("%s ?", bars[0].label) // no percent known
 	} else {
 		r.line = r.note
 	}
+	if e.status == .Ok && e.limit_hit && len(bars) > 0 do r.line = fmt.tprintf("limit reached · %s", r.line)
 	if r.age != "" do r.line = fmt.tprintf("%s · %s", r.line, r.age)
 	r.tip = usage_tip(e, now)
 	return r
@@ -361,6 +445,7 @@ usage_tip :: proc(e: Usage_Account, now: i64) -> string {
 			pct := w.used_percent < 0 ? "?" : fmt.tprintf("%d%%", int(math.round(w.used_percent)))
 			s := fmt.tprintf("%s %s", name, pct)
 			if usage_reset_passed(w, e.read_at, now) do s = fmt.tprintf("%s, reset at %s (no new data)", s, usage_clock_text(w.resets_at, now))
+			else if w.resets_at > 0 && w.resets_at <= e.read_at do s = fmt.tprintf("%s, reset passed", s)
 			else if w.resets_at > 0 do s = fmt.tprintf("%s, resets %s", s, usage_clock_text(w.resets_at, now))
 			append(&parts, s)
 		}
@@ -391,6 +476,30 @@ usage_plan_name :: proc(p: string) -> string {
 	s, _ := strings.replace_all(p, "_", " ", context.temp_allocator)
 	if s[0] >= 'a' && s[0] <= 'z' do s = strings.concatenate({string([]u8{s[0] - 32}), s[1:]}, context.temp_allocator)
 	return s
+}
+
+// Codex's words with anything shaped like an email address taken out ("an address"): an error may
+// name the account, and errors go into State and get_state. Temp.
+usage_strip_emails :: proc(s: string) -> string {
+	if strings.index_byte(s, '@') < 0 do return s
+	sep :: proc(c: u8) -> bool {return c <= ' ' || strings.index_byte(`"'<>()[]{},;:`, c) >= 0}
+	b := strings.builder_make(context.temp_allocator)
+	i := 0
+	for i < len(s) {
+		if sep(s[i]) {
+			strings.write_byte(&b, s[i])
+			i += 1
+			continue
+		}
+		j := i
+		for j < len(s) && !sep(s[j]) do j += 1
+		word := s[i:j]
+		at := strings.index_byte(word, '@')
+		if at > 0 && strings.index_byte(word[at + 1:], '.') > 0 do strings.write_string(&b, "(an address)")
+		else do strings.write_string(&b, word)
+		i = j
+	}
+	return strings.to_string(b)
 }
 
 // ---- the accounts Deckhand reads ----
@@ -471,6 +580,8 @@ when TEST_HOOKS {
 	usage_reads_in_unit_tests: bool
 	// Unit tests: the clock the scheduler reads (0 = the real one).
 	usage_test_now: i64
+	// Unit tests: an attached window's facts as the scheduler sees them (nil: the real link's).
+	usage_test_facts: ^Window_Facts
 }
 
 usage_now :: proc() -> i64 {
@@ -480,12 +591,15 @@ usage_now :: proc() -> i64 {
 	return time.now()._nsec / 1e9
 }
 
-// Automatic reads may start: a window (not a hub nor a browser) is attached and shown, and its
-// USAGE section is unfolded.
+// Automatic reads may start: a window (not a hub nor a browser) is attached, not hidden, minimised
+// nor occluded, and says it drew the USAGE section unfolded (usage_visible: the left column open on
+// the Sessions tab, By project). No facts yet: not.
 usage_auto_ok :: proc() -> bool {
-	if !window_link_is_window() do return false
-	if f := window_facts(); f != nil && f.hidden do return false
-	return !state.sidebar.folded[.Usage]
+	is_window, f := window_link_is_window(), window_facts()
+	when TEST_HOOKS {
+		if usage_test_facts != nil do is_window, f = true, usage_test_facts
+	}
+	return is_window && f != nil && !f.hidden && f.usage_visible
 }
 
 // A Codex turn of an account ended (its Stop hook): a read of it is due USAGE_AFTER_STOP later.
@@ -538,12 +652,12 @@ usage_tick :: proc() {
 @(private = "file")
 usage_read_start :: proc(r: ^Usage_Record, now: i64) -> bool {
 	context.allocator = runtime.heap_allocator() // the records outlive any caller's allocator
-	when TEST_HOOKS {
-		if ODIN_TEST && (!usage_reads_in_unit_tests || hook_env(.Codex_Cmd) == "") do return false
-	}
 	r.forced = false
 	r.tried_at = now
 	r.next_at = now + USAGE_POLL_EVERY
+	when TEST_HOOKS {
+		if ODIN_TEST && (!usage_reads_in_unit_tests || hook_env(.Codex_Cmd) == "") do return false // tried, nothing run
+	}
 	when TEST_HOOKS {
 		if test_mode() && hook_env(.Codex_Cmd) == "" do return false // a scene without a stand-in: no read (never the real codex)
 	}
@@ -553,11 +667,12 @@ usage_read_start :: proc(r: ^Usage_Record, now: i64) -> bool {
 	usage.gen += 1
 	Job :: struct {
 		key, script, home: string, // heap
+		default_home:      bool, // Codex's own default: initialize need not name it
 	}
-	job := Job{strings.clone(r.key), script, strings.clone(r.home)}
+	job := Job{strings.clone(r.key), script, strings.clone(r.home), r.home == codex_home()}
 	t := thread.create_and_start_with_poly_data(job, proc(j: Job) {
 		defer free_all(context.temp_allocator)
-		read := usage_codex_read(j.script, j.home)
+		read := usage_codex_read(j.script, j.home, j.default_home)
 		inbox_submit(Usage_Done{key = j.key, read = read}, {kind = .Internal}) // copied: the inbox's
 		delete(j.key)
 		delete(j.script)
@@ -630,7 +745,7 @@ usage_record_apply :: proc(r: ^Usage_Record, read: Usage_Read) {
 		}
 		r.read_at = usage_now()
 	case .Error, .Unknown:
-		r.error = strings.clone(cut_utf8(read.error != "" ? read.error : "no answer", USAGE_ERROR_MAX), heap)
+		r.error = strings.clone(cut_utf8(usage_strip_emails(read.error != "" ? read.error : "no answer"), USAGE_ERROR_MAX), heap)
 		if r.status == .Unknown do r.status = .Error
 	}
 }
@@ -640,8 +755,12 @@ usage_record_apply :: proc(r: ^Usage_Record, read: Usage_Read) {
 usage_json :: proc(b: ^strings.Builder) {
 	strings.write_byte(b, '[')
 	n := 0
+	accts := claude_accounts(.Codex) // removed accounts' reads are not kept (installed or not)
 	for r in usage.records {
 		if r.read_at == 0 || n >= USAGE_ACCOUNTS_MAX do continue // nothing read: nothing to show after a restart
+		still := false
+		for a in accts do if usage_codex_key(a.dir) == r.key do still = true
+		if !still do continue
 		if n > 0 do strings.write_byte(b, ',')
 		n += 1
 		strings.write_string(b, `{"key":`)
@@ -678,13 +797,14 @@ usage_restore :: proc(v: json.Value) {
 	for r in usage.records do record_free(r)
 	clear(&usage.records)
 	str :: proc(o: json.Object, k: string) -> string {return string(o[k].(json.String) or_else "")}
-	num :: proc(o: json.Object, k: string) -> f64 {
+	num :: proc(o: json.Object, k: string, none := 0.0) -> f64 {
 		#partial switch x in o[k] {
 		case json.Integer: return f64(x)
 		case json.Float:   return f64(x)
 		}
-		return 0
+		return none
 	}
+	now := usage_now()
 	for x in list {
 		if len(usage.records) >= USAGE_ACCOUNTS_MAX do break
 		o, is := x.(json.Object)
@@ -701,7 +821,7 @@ usage_restore :: proc(v: json.Value) {
 		r.credits = strings.clone(cut_utf8(str(o, "credits"), USAGE_TEXT_MAX), heap)
 		if h := str(o, "account_hash"); len(h) <= 64 do r.account_hash = strings.clone(h, heap)
 		r.limit_hit = bool(o["limit_hit"].(json.Boolean) or_else false)
-		r.read_at = i64(num(o, "read_at"))
+		r.read_at = min(i64(num(o, "read_at")), now) // a clock set back: never a read from the future
 		r.next_at = r.read_at + USAGE_POLL_EVERY
 		if st == .Ok {
 			ws, _ := o["windows"].(json.Array)
@@ -710,7 +830,7 @@ usage_restore :: proc(v: json.Value) {
 				if len(list) >= USAGE_WINDOWS_MAX do break
 				w, wok := wv.(json.Object)
 				if !wok do continue
-				append(&list, Usage_Window{name = strings.clone(cut_utf8(str(w, "name"), USAGE_TEXT_MAX), heap), used_percent = usage_clamp_percent(num(w, "used_percent")), window_mins = max(i64(num(w, "window_mins")), 0), resets_at = max(i64(num(w, "resets_at")), 0)})
+				append(&list, Usage_Window{name = strings.clone(cut_utf8(str(w, "name"), USAGE_TEXT_MAX), heap), used_percent = usage_clamp_percent(num(w, "used_percent", -1)), window_mins = max(i64(num(w, "window_mins")), 0), resets_at = max(i64(num(w, "resets_at")), 0)})
 			}
 			r.windows = list[:]
 		}

@@ -426,6 +426,52 @@ reload_burst :: proc(t: ^testing.T) {
 	testing.expect(t, !core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 }
 
+// A 0600 extension, prompt or settings.json (a umask of 077) hot-reloads: pi's folder is protected
+// by name, not mode; a .env beside them is never reported, whatever its mode.
+@(test)
+reload_private_files :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	r_reset("alpha")
+	defer r_done()
+	base := core.fs_real(fmt.tprintf("%s/pd-reload-private-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec), context.allocator)
+	ad := fmt.tprintf("%s/agent", base)
+	os.make_directory_all(fmt.tprintf("%s/extensions/x", ad))
+	os.make_directory_all(fmt.tprintf("%s/prompts", ad))
+	os.set_env("PI_CODING_AGENT_DIR", ad)
+	defer os.unset_env("PI_CODING_AGENT_DIR")
+	mk :: proc(p: string, mode: posix.mode_t) {
+		_ = os.write_entire_file(p, transmute([]u8)string("x"))
+		posix.chmod(strings.clone_to_cstring(p, context.temp_allocator), mode)
+	}
+	env := fmt.tprintf("%s/extensions/x/.env", ad)
+	mk(env, {.IRUSR, .IWUSR})
+	core.reload_build({"/tmp/alpha"})
+	far :: proc() -> time.Tick {return time.tick_add(time.tick_now(), 2 * time.Second)}
+	core.reload_fs_event(env)
+	testing.expect(t, !core.reload_flush(far()), "a .env is never reported")
+	for name in ([]string{"extensions/x/index.ts", "prompts/p.md"}) {
+		p := fmt.tprintf("%s/%s", ad, name)
+		mk(p, {.IRUSR, .IWUSR})
+		core.reload_fs_event(p)
+		testing.expectf(t, core.reload_flush(far()), "a 0600 %s reloads", name)
+		testing.expectf(t, slice.contains(state.reload.changed[:], p), "%s listed: %v", name, state.reload.changed)
+	}
+	// settings.json: its keys are compared with what was there (pi writes some itself)
+	sp := fmt.tprintf("%s/settings.json", ad)
+	_ = os.write_entire_file(sp, transmute([]u8)string(`{"theme": "dark"}`))
+	posix.chmod(strings.clone_to_cstring(sp, context.temp_allocator), {.IRUSR, .IWUSR})
+	state.open_sessions[0].cwd = base
+	core.reload_poll()
+	core.reload_flush(far()) // it appeared after the watcher was built: that is a change too
+	clear(&state.reload.changed)
+	core.reload_poll()
+	testing.expect(t, !core.reload_flush(far()), "settings.json as it was")
+	_ = os.write_entire_file(sp, transmute([]u8)string(`{"theme": "light"}`))
+	core.reload_poll()
+	testing.expect(t, core.reload_flush(far()), "a 0600 settings.json reloads")
+	testing.expectf(t, slice.contains(state.reload.changed[:], sp), "settings.json listed: %v", state.reload.changed)
+}
+
 // pi itself writes some keys of settings.json in ordinary use (the model
 // and thinking level it last used, the changelog it showed, its device
 // id): a write that changes only those shows no bar; anything else does.

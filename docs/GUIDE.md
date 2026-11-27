@@ -1422,9 +1422,15 @@ Deckhand has a small code editor with syntax highlighting.
   say they can't be shown. WebP shows in a browser only; an SVG opens as text (a browser also
   previews it).
 - Deckhand does not open other binary files, files over 20 MB, or **credential files**: pi's sign-ins
-  (`auth.json` and similar), other private files in pi's folder, and Claude's and Codex's sign-ins
-  and state. They show "Credentials file: managed by pi (/login), not opened". A project's `.env`
-  opens and saves like any file.
+  (`auth.json` and similar), secret-looking files in pi's folder, and Claude's and Codex's
+  sign-ins and state. They show "Credentials file: managed by pi (/login), not opened". In pi's
+  folder (`~/.pi/agent`) Deckhand goes by the file's name, never its mode, so a strict umask
+  (`077`, every file private) hides nothing of yours: protected are pi's sign-in files at its top
+  (`auth.json`, `oauth.json`, `mcp-auth.json`, `models-store.json`, `cursor-sdk*.json`) and
+  everything in `intercom/`; anywhere in it, a dotfile (`.env`, `.npmrc`…), a name with `token`,
+  `secret` or `credential`, a name ending in `.key`, `.pem` or `.p12`, and an SSH key (`id_…`);
+  and any other name for pi's sign-in files (a link to `auth.json`). A project's `.env` opens and
+  saves like any file.
 
 ## Markdown tabs
 
@@ -2733,7 +2739,7 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 ### Privacy
 
 - Deckhand never shows, opens or logs credential files (coding agents' sign-ins and state,
-  private files in pi's folder), not on the Settings page, in the Files tab's editor, or to Atlas.
+  secret-looking names in pi's folder: [Editor tabs](#editor-tabs)), not on the Settings page, in the Files tab's editor, or to Atlas.
 - Connection tokens for the control socket are never logged or saved.
 - Deckhand's only network call of its own is the [update check](#updates) (and the download
   you start with **Update**), to GitHub. Only pi (and its extensions) talk to model providers.

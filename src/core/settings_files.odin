@@ -24,7 +24,7 @@ package core
 // as in the Files tab). Nothing here edits settings: the editor does, with
 // two guards:
 //
-//   - credential files (pi's sign-ins, other private files in the agent dir)
+//   - credential files (pi's sign-ins, secret-looking names in the agent dir: by name, not mode)
 //     are never shown, also not inside an opened folder, and the
 //     editor refuses to open them at all (settings_credential;
 //     editor_commands.odin, editor_file.odin)
@@ -65,19 +65,21 @@ pi_agent_dir :: proc() -> string {
 
 CREDENTIAL_REFUSED :: "credentials file: managed by pi (/login), not opened"
 
-// Config files of the agent dir that are never credentials by their mode
-// alone (pi may create them 0600 too).
+// pi's sign-in files at the agent dir's top (pi 1.5.2): its providers' keys and OAuth tokens
+// (auth.json; oauth.json, the older file pi still migrates from), its MCP servers' OAuth state
+// (mcp-auth.json, pi's mcp extension), the model store's (models-store.json). cursor-sdk*.json and
+// intercom/ are matched apart.
 @(private = "file")
-AGENT_CONFIG_FILES :: [?]string{"settings.json", "models.json", "keybindings.json", "mcp.json", "modes.json", "AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD", "SYSTEM.md", "APPEND_SYSTEM.md"}
+PI_SIGN_IN_FILES :: [?]string{"auth.json", "oauth.json", "mcp-auth.json", "models-store.json"}
 
-// A file Deckhand never lists, reads or opens: pi's sign-ins (auth.json,
-// models-store.json, cursor-sdk*.json, intercom/), any other private (no
-// group/other access, e.g. 0600) file in the agent dir (any depth; not
-// pi's own config files at its top), Claude's and Codex's sign-ins and
-// state, and any other name for those sign-in files (a symlink, a hard link:
-// the same device and inode). Names match in any case (AUTH.JSON is
-// auth.json on a volume that ignores case). A project's .env is an ordinary
-// file: whoever can open it here can run a shell in the project anyway.
+// A file Deckhand never lists, reads or opens: pi's sign-ins (PI_SIGN_IN_FILES, cursor-sdk*.json,
+// intercom/), any file in the agent dir (any depth) whose name looks like a secret
+// (secret_looking_name), Claude's and Codex's sign-ins and state, and any other name for pi's
+// sign-in files (a symlink, a hard link: the same device and inode). By name, never by the file's
+// mode: a umask of 077 makes every file 0600, and the user's own extensions, prompts and
+// settings are theirs to see. Names match in any case (AUTH.JSON is auth.json on a volume that
+// ignores case). A project's .env is an ordinary file: whoever can open it here can run a shell in
+// the project anyway.
 // ids: credential_ids() when checking many paths (nil: read now).
 settings_credential :: proc(path: string, ids: []Cred_Id = nil) -> bool {
 	if path == "" do return false
@@ -104,15 +106,25 @@ credential_path :: proc(p: string) -> bool {
 		rel := lp[len(ad) + 1:]
 		if rel == "intercom" || strings.has_prefix(rel, "intercom/") do return true
 		if !strings.contains(rel, "/") {
-			if rel == "auth.json" || rel == "models-store.json" do return true
+			for f in PI_SIGN_IN_FILES do if rel == f do return true
 			if strings.has_prefix(rel, "cursor-sdk") && strings.has_suffix(rel, ".json") do return true
-			for c in AGENT_CONFIG_FILES do if filepath.base(p) == c do return false // pi's own config: its exact name only
 		}
-		if k, st := path_stat(p); k == .File && st.mode & 0o077 == 0 do return true
+		if secret_looking_name(filepath.base(rel)) do return true
 	}
 	// Claude Code's credentials, account state, transcripts (claude_reload.odin); Codex's sign-in,
 	// sessions/ transcripts and state (codex.odin)
 	return claude_credential(p) || codex_credential(p)
+}
+
+// A file name (lower case) that looks like it holds a secret: a dotfile (.env, .env.local, .npmrc,
+// .netrc), one naming a token, secret or credential, a key or certificate (.key, .pem, .p12), or
+// an SSH key (id_rsa, id_ed25519...).
+@(private = "file")
+secret_looking_name :: proc(name: string) -> bool {
+	if strings.has_prefix(name, ".") || strings.has_prefix(name, "id_") do return true
+	for w in ([]string{"token", "secret", "credential"}) do if strings.contains(name, w) do return true
+	for ext in ([]string{".key", ".pem", ".p12"}) do if strings.has_suffix(name, ext) do return true
+	return false
 }
 
 Cred_Id :: struct {
@@ -126,8 +138,7 @@ credential_ids :: proc() -> []Cred_Id {
 	add :: proc(out: ^[dynamic]Cred_Id, p: string) {
 		if k, st := path_stat(p); k == .File do append(out, Cred_Id{st.dev, st.inode})
 	}
-	add(&out, fmt.tprintf("%s/auth.json", ad))
-	add(&out, fmt.tprintf("%s/models-store.json", ad))
+	for f in PI_SIGN_IN_FILES do add(&out, fmt.tprintf("%s/%s", ad, f))
 	for p in claude_credential_files() do add(&out, p) // .credentials.json, .claude.json
 	for p in codex_credential_files() do add(&out, p) // Codex's auth.json (codex.odin)
 	for dir in ([2]string{ad, fmt.tprintf("%s/intercom", ad)}) {

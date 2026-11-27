@@ -1,7 +1,7 @@
 # Every test-mode scene, nightly and on demand: tiers required and full in tests/scenes.txt (CEF
-# and app-tab scenes on the runner's virtual GPU, large-folder and many-file timings). Failures
-# of the not-yet-required (full) scenes are warnings and never fail the run; a required one fails
-# it. Also the required scenes with the core in the window's process (--in-process), nightly and
+# and app-tab scenes on the runner's virtual GPU, large-folder and many-file timings). A scene that
+# fails twice (the runner retries once; a pass on retry is reported FLAKY) fails the run, full tier
+# included: nine full-tier scenes once broke unnoticed for two weeks while they were only warnings. Also the required scenes with the core in the window's process (--in-process), nightly and
 # on every push to main (pull requests run only the default, a separate core: ci.yml). What runs
 # where and why: docs/TESTING.md.
 #
@@ -73,7 +73,7 @@ jobs:
         run: python3 tests/scenes.py --all --ci --shard ${{ matrix.shard }}/4 --list
       - name: Scenes
         id: scenes
-        run: python3 tests/scenes.py --all --ci --shard ${{ matrix.shard }}/4 --no-build --soft-tier full
+        run: python3 tests/scenes.py --all --ci --shard ${{ matrix.shard }}/4 --no-build
       - name: Upload screenshots and logs
         if: always()
         uses: actions/upload-artifact@v4

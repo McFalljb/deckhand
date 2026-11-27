@@ -65,7 +65,8 @@ setting's opt-out). `--separate-core` forces a separate core and leaves out scen
 (`tests/linux-release-check.sh`).
 
 `scenes-full.yml` (nightly and on demand, **Actions › Scenes (full) › Run workflow**): required +
-full in four shards, where a full-tier failure is only a warning; the required scenes
+full in four shards, where a scene that fails again on its retry fails the run, full tier included
+(one that passes on the retry is reported FLAKY); the required scenes
 `--in-process` in two shards (also on every push to main); and the strict time budgets as a report.
 Neither runs paid scenes, manual tools, or scenes tagged `noci`. A scene moves to the required
 tier once it has passed in the nightly run a few times.

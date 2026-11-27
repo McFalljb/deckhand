@@ -1331,3 +1331,6 @@ claude_reload_sources_for_test :: proc(harness := Harness.Claude) -> map[string]
 // Whether folder d is a Claude config folder by what it holds (.credentials.json or .claude.json,
 // as claude_credential finds another profile's); never a user's home folder.
 claude_marked_folder :: proc(d: string) -> bool {return !user_home(d) && claude_marked(d)}
+
+// Whether d is a user's home folder (user_home, for other files).
+user_home_dir :: proc(d: string) -> bool {return user_home(d)}

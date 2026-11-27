@@ -517,6 +517,10 @@ Command :: union {
 	Rename_Claude_Account,
 	Remove_Claude_Account,
 	Set_Claude_Account_Default,
+	Add_Antigravity_Account,
+	Rename_Antigravity_Account,
+	Remove_Antigravity_Account,
+	Set_Antigravity_Account_Default,
 	Claude_Rename,
 	Add_Project,
 	Select_Project,
@@ -1407,6 +1411,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Rescan:
 		if scan_thread != nil do return fail("a rescan is already running"), false
 		claude_accounts_refresh() // Claude Code's config folders again, then each one's projects/ (claude_disk.odin)
+		agy_accounts_refresh() // and agy's profiles (agy_accounts.odin)
 		claude_scan_prepare()
 		scan_thread = thread.create_and_start_with_poly_data(request_id, scan_worker)
 		rescan_at = time.tick_now()
@@ -1426,6 +1431,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		codex_recheck() // and Codex (codex.odin)
 		pi_recheck() // and pi (harness.odin)
 		claude_accounts_refresh() // and CLAUDE_CONFIG_DIR may name another default (claude_accounts.odin)
+		agy_accounts_refresh() // and GEMINI_HOME agy's default profile (agy_accounts.odin)
 		harness_checklist_forget() // the coding agents checklist looks again when it next shows (harness_manifest.odin)
 		err := ""
 		if c.ok {
@@ -2012,6 +2018,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			}
 		}
 		return r, ch
+	case Add_Antigravity_Account, Rename_Antigravity_Account, Remove_Antigravity_Account, Set_Antigravity_Account_Default:
+		return agy_account_apply(cmd, caller) // agy_accounts.odin: accounts.json, under its lock
 	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
 		return claude_extra_apply(cmd, caller, request_id) // claude_panels.odin
 	case Claude_Model_Report:

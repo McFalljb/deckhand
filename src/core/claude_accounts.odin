@@ -485,6 +485,7 @@ claude_accounts_restore :: proc(st: json.Object) {
 		}
 	}
 	claude_accounts_refresh()
+	agy_accounts_refresh() // agy's profiles (agy_accounts.odin)
 	// an added account's projects and transcripts: the next scan (at launch the first scan ran
 	// before the settings came back)
 	added := false
@@ -585,6 +586,7 @@ claude_account_holding :: proc(path: string, harness: Harness) -> string {
 account_holding_why :: proc(path: string) -> string {
 	if l := claude_account_holding(path, .Claude); l != "" do return fmt.tprintf("that folder is inside the Claude account %s's config folder (Settings → Claude accounts)", l)
 	if l := claude_account_holding(path, .Codex); l != "" do return fmt.tprintf("that folder is inside the Codex account %s's home (Settings → Codex accounts)", l)
+	if l := agy_account_holding(path); l != "" do return fmt.tprintf("that folder is inside the Antigravity account %s's profile (Settings → Antigravity accounts)", l)
 	return ""
 }
 

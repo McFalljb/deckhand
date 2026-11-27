@@ -937,6 +937,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	fmt.sbprintf(b, `,"claude_installed":%v`, claude_installed()) // Claude Code found (claude.odin): new_claude_session would start
 	fmt.sbprintf(b, `,"codex_installed":%v`, codex_installed()) // Codex found (codex.odin): new_claude_session harness codex would start
 	if !writing_tab_view do claude_accounts_json(b) // the Claude Code accounts (claude_accounts.odin): labels and folders; the full snapshot only
+	if !writing_tab_view do agy_accounts_json(b) // the Antigravity accounts (agy_accounts.odin): names, labels, folders, how each signs in
 	if !writing_tab_view { // other machines over SSH (machines.odin): never their ssh target; [] for none
 		strings.write_string(b, `,"machines":[`)
 		for m, i in s.machines {
@@ -1259,29 +1260,34 @@ harness_json :: proc(f: ^Jw) {
 @(private = "file")
 setup_json :: proc(f: ^Jw) {
 	u, ok := window_setup_state()
-	names := [Setup_Step]string{.Agents = "agents", .Main = "main", .Chats = "chats", .Accounts = "accounts", .Folders = "folders"}
+	names := [Setup_Step]string{.Agents = "agents", .Main = "main", .Chats = "chats", .Accounts = "accounts", .Agy_Accounts = "agy_accounts", .Folders = "folders"}
 	if ok {
 		kv_str(f, "step", names[u.step])
 		kv_u64(f, "steps", u64(u.steps))
 		if u.err != "" do kv_str(f, "error", u.err)
 	}
 	harness_json(f)
-	if !ok || !u.acct_show do return
-	key(f, "accounts")
-	strings.write_byte(f.b, '[')
-	for a, i in u.accounts {
-		if i > 0 do strings.write_byte(f.b, ',')
-		o := obj_begin(f.b)
-		kv_str(&o, "label", a.label)
-		kv_str(&o, "dir", a.dir)
-		kv_bool(&o, "keep", a.keep)
-		kv_bool(&o, "marked", a.marked)
-		if i == u.acct_default && a.keep do kv_bool(&o, "default", true)
-		if a.hand do kv_bool(&o, "added", true)
-		obj_end(&o)
+	if !ok do return
+	list :: proc(f: ^Jw, name: string, accts: []Setup_Account, def: int) {
+		key(f, name)
+		strings.write_byte(f.b, '[')
+		for a, i in accts {
+			if i > 0 do strings.write_byte(f.b, ',')
+			o := obj_begin(f.b)
+			kv_str(&o, "label", a.label)
+			kv_str(&o, "dir", a.dir)
+			if a.name != "" do kv_str(&o, "name", a.name)
+			kv_bool(&o, "keep", a.keep)
+			kv_bool(&o, "marked", a.marked)
+			if i == def && a.keep do kv_bool(&o, "default", true)
+			if a.hand do kv_bool(&o, "added", true)
+			obj_end(&o)
+		}
+		strings.write_byte(f.b, ']')
 	}
-	strings.write_byte(f.b, ']')
-	if u.acct_msg != "" do kv_str(f, "message", u.acct_msg)
+	if u.acct_show do list(f, "accounts", u.accounts, u.acct_default)
+	if u.agy_show do list(f, "agy_accounts", u.agy_accounts, u.agy_default) // Antigravity's (agy_accounts.odin)
+	if (u.acct_show || u.agy_show) && u.acct_msg != "" do kv_str(f, "message", u.acct_msg)
 }
 
 // An open session's panes (panes.odin): "focused_pane", "panes" (in leaf order: id, slot, the

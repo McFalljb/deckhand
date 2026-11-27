@@ -96,7 +96,14 @@ assert_state focus.id settings_page
 assert_drawn Coding agents
 assert_drawn CLAUDE CODE
 shot claude-feeds/hooks-settings
-# Esc: back to the tab, its bar still up
+# Claude's settings.json (where its hooks are) is in the card, below this window's fold: the
+# page's search finds it
+type claude settings.json
+eventually
+assert_drawn permissions, hooks, env, model (applied live)
+# Esc clears the search, then goes back to the tab, its bar still up
+key escape
+wait 200
 key escape
 eventually
 assert_drawn Deckhand's Claude Code hooks aren't running here

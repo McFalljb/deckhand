@@ -145,6 +145,16 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   command then: pi 1.5.2 builds its autocomplete list only at start, `/reload` and a session
   switch, so a command registered later would not be offered (an earlier `/antigravity-login` was
   folded into `/antigravity login` for that reason). No flags.
+- **The `antigravity` tool** (`lib/agy-delegate.ts`): any pi model can hand a self-contained
+  task to agy (`task`, optional `account` and `model`) and gets agy's final answer, with what was
+  declined and whether agy left its default mode. Each call is a fresh agy session in the tab's
+  folder on the chosen account (else `default`, else the first signed in), started like a tab's
+  (the account's profile and environment, `deckhand-pi`, no fs or terminal capability, every
+  permission request and question declined, `default` mode confirmed before the prompt or nothing
+  is sent), closed at the end; abort sends `session/cancel`. Tool calls, the plan and the answer
+  so far stream as tool updates. Registered at `session_start` (never while loading), after a
+  sign-in in the session too, only when agy is found, an account is signed in (a saved sign-in by
+  stat, or a key in pi's store) and no other extension has the name.
 - **Handshake** (`lib/agy.ts`): `initialize` as `deckhand-pi` (v2's fields and v1's
   `clientInfo`/`clientCapabilities`: agy 1.5.18 answers `protocolVersion: 1` in the v1 shape,
   `agentInfo.version` a bare `1.5.18`), no fs and no terminal capability; agy older than 1.5.1

@@ -26,6 +26,8 @@ import path from "node:path";
 export const CLIENT_INFO = { name: "deckhand-pi", title: "Deckhand (pi)", version: "0.1.0" } as const;
 export const AGY_MIN_VERSION = "1.5.1";
 export const AGY_RECOMMENDED_VERSION = "1.5.18";
+/** What /antigravity says when no agy is found (extensions/antigravity). */
+export const NOT_FOUND = `Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (${AGY_RECOMMENDED_VERSION} or newer), or set its path with /antigravity path <abs path>`;
 /** Overrides the PATH lookup with an absolute path to agy (or a stand-in, in tests). */
 export const SIGN_IN_PREFIX = "Open the following link to authenticate the ACP server: ";
 /** What every request of agy's for approval or input gets until approvals are reviewed. */

@@ -21,13 +21,19 @@
  *   (`/login antigravity-<name>`) and reaches agy only in its environment.
  * - Approvals: none yet. agy runs in its `default` mode, every permission request is rejected and
  *   every question declined (lib/acp.ts).
- * - No tools or flags are registered (test/conflicts.test.ts).
+ * - One tool, `antigravity` (lib/agy-delegate.ts): any pi model hands a self-contained task to a
+ *   fresh agy session on a signed-in account and gets agy's final answer. Registered at
+ *   session_start (never while loading: test/conflicts.test.ts), and only when agy is found, an
+ *   account is signed in and no other extension has the name. No flags.
  */
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { AGY_RECOMMENDED_VERSION, findAgy, usableAgyPath } from "../../lib/acp.ts";
-import { agyLogout, agyVersion, probeModels } from "../../lib/agy.ts";
+import { findAgy, NOT_FOUND, usableAgyPath } from "../../lib/acp.ts";
+import { Type } from "typebox";
+import { AgySession, agyLogout, agyVersion, probeModels } from "../../lib/agy.ts";
+import { DELEGATE_DESCRIPTION, DELEGATE_TOOL, delegate } from "../../lib/agy-delegate.ts";
+import { loadedTools } from "../../lib/claims.ts";
 import {
 	type Account,
 	agyArgs,
@@ -66,8 +72,6 @@ const KILLERS: Set<() => void> = ((globalThis as any)[Symbol.for("deckhand.antig
 })());
 
 const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "path"] as const;
-export const NOT_FOUND =
-	`Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (${AGY_RECOMMENDED_VERSION} or newer), or set its path with /antigravity path <abs path>`;
 
 export default function antigravity(pi: ExtensionAPI) {
 	const root = dataRoot();
@@ -118,11 +122,12 @@ export default function antigravity(pi: ExtensionAPI) {
 		};
 		KILLERS.add(kill);
 
-		pi.on("session_start", (_e: unknown, ctx: ExtensionContext) => {
+		pi.on("session_start", async (_e: unknown, ctx: ExtensionContext) => {
 			cwd = ctx.cwd || cwd;
 			registry = (ctx as any).modelRegistry;
 			for (const { ag } of live.values()) ag.bind(registry);
 			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
+			await offerTool(ctx);
 		});
 
 		pi.on("session_shutdown", async () => {
@@ -143,7 +148,49 @@ export default function antigravity(pi: ExtensionAPI) {
 			registry = (ctx as any).modelRegistry;
 			for (const { ag } of live.values()) ag.bind(registry);
 			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
+			void offerTool(ctx);
 		}
+	};
+
+	/** The accounts signed in now: a saved Google sign-in (stat only), or a key in pi's store. */
+	const signedIn = async (ctx: ExtensionContext) => {
+		const out: Account[] = [];
+		for (const { account: a } of live.values()) if (usesKey(a) ? !!(await keyOf(ctx, a)) : hasSavedLogin(profileOf(root, a.name))) out.push(a);
+		return out;
+	};
+
+	/** Registers the `antigravity` tool once: agy found, an account signed in, the name free. */
+	let toolOn = false;
+	const offerTool = async (ctx: ExtensionContext) => {
+		if (toolOn || !agyPath || loadedTools(pi as any, [DELEGATE_TOOL]).size) return;
+		const accounts = await signedIn(ctx);
+		if (!accounts.length || toolOn) return;
+		toolOn = true;
+		pi.registerTool({
+			name: DELEGATE_TOOL,
+			label: "Antigravity",
+			description: DELEGATE_DESCRIPTION,
+			promptSnippet: "Hand a self-contained task to Google Antigravity and get its answer",
+			parameters: Type.Object({
+				task: Type.String({ description: "The whole task: Antigravity sees nothing of this conversation" }),
+				account: Type.Optional(Type.String({ description: `An Antigravity account (default: "default", or the first signed in). Signed in when this tab started: ${accounts.map((a) => a.name).join(", ")}` })),
+				model: Type.Optional(Type.String({ description: "An Antigravity model id (as in /model, without the provider); its default if omitted" })),
+			}),
+			async execute(_id: string, p: { task: string; account?: string; model?: string }, signal: AbortSignal | undefined, onUpdate: any, c: ExtensionContext) {
+				const now = await signedIn(c);
+				const a = p.account ? now.find((x) => x.name === p.account) : (now.find((x) => x.name === "default") ?? now[0]);
+				if (!a) throw new Error(p.account ? `No signed-in Antigravity account "${p.account}": signed in are ${now.map((x) => x.name).join(", ") || "none"}` : "No Antigravity account is signed in: /antigravity login");
+				const key = await keyOf(c, a);
+				const text = await delegate({
+					task: p.task,
+					model: p.model,
+					signal,
+					progress: (t) => onUpdate?.({ content: [{ type: "text", text: t }], details: undefined }),
+					open: (onU, onReq) => AgySession.open({ agyPath: agyPath!, cwd: c.cwd || cwd, ...launchOf(a, key), onUpdate: onU, onAgentRequest: (m, params) => onReq(m, params) }),
+				});
+				return { content: [{ type: "text" as const, text }], details: undefined };
+			},
+		} as any);
 	};
 
 	/** pi's stored key for an API-key account (pi's credential store), else undefined. */
@@ -233,6 +280,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		});
 		if (!r.ok) return ctx.ui.notify(r.error, r.error === "Sign-in cancelled" ? "info" : "error");
 		ctx.ui.notify(`Signed in to Antigravity (account "${a.name}")`, "info");
+		await offerTool(ctx);
 		try {
 			ctx.ui.notify(await listModels(ctx, a), "info");
 		} catch (e) {

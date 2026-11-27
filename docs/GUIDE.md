@@ -224,6 +224,13 @@ add an account, sign in, sign out or remove one. For one Google account with an 
 **`/antigravity login`** is all you need: it shows a Google link, you sign in there and paste the
 code the Antigravity page shows. Then **`/model`** lists your models.
 
+**Handing a task to Antigravity.** Once an account is signed in, every pi tab's model (any
+provider) also has an **`antigravity`** tool: it hands a self-contained task to a fresh
+Antigravity session in the tab's folder, on the account it names (else `default`), and gets
+Antigravity's final answer back; you see its progress while it works. Antigravity sees nothing
+of the conversation but the task, gets no approvals (it is told what was declined), and Esc
+cancels it.
+
 **Accounts.** Each account is its own provider in `/model`: `antigravity` for the default account,
 `antigravity-<name>` for the others (for example **Gemini 3.8 Pro (Antigravity: work)**). You pick
 an account by picking its model; Deckhand never switches accounts by itself, not even when one runs

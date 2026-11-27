@@ -1,6 +1,7 @@
 // The Antigravity extension (extensions/antigravity, lib/acp.ts, lib/agy.ts) against a stand-in agy
 // (test/fake-agy.mjs): never a real agy, pi or model. node --test test/antigravity.test.ts
 import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOME in a temp folder
+import "./typebox-stub.ts"; // before the extension: typebox comes with pi
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -8,14 +9,14 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, 
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
+import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, NOT_FOUND, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, agyVersion, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
 import { agyEnvFor, dataRoot, linkUserConfig, PLANS_URL, profileOf, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
 import { fileLedger } from "../lib/agy-ledger.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
 import { createAntigravity, planTurn, RETRY_NOTE, SUMMARY_TEXT } from "../lib/antigravity.ts";
-import { NOT_FOUND } from "../extensions/antigravity/index.ts";
 import { piRules } from "./pi-rules.ts";
+
 
 const TMP_ROOT = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-test-"));
 process.on("exit", () => rmSync(TMP_ROOT, { recursive: true, force: true }));
@@ -1086,6 +1087,82 @@ test("agy-seen.json: the version agy reported, with the binary's size and mtime,
 	const st = statSync(realpathSync(AGY));
 	assert.deepEqual(JSON.parse(readFileSync(seen, "utf8")), { path: AGY, size: st.size, mtime: Math.floor(st.mtimeMs / 1000), version: "1.5.18" });
 	assert.equal(statSync(seen).mode & 0o777, 0o600);
+});
+
+const signIn = (root: string, name = "default") => {
+	const acp = path.join(root, "profiles", name, "antigravity-acp");
+	mkdirSync(acp, { recursive: true });
+	writeFileSync(path.join(acp, "acp_token.json"), "{}");
+};
+
+test("the antigravity tool: only with agy and a signed-in account, registered at session start (never while loading)", async () => {
+	const a = accountsEnv();
+	await withEnv(a.env, async () => {
+		const out = await loadExtension();
+		assert.deepEqual([...out.extensions[0].tools.keys()], [], "nothing while loading");
+		await out.start();
+		assert.deepEqual([...out.extensions[0].tools.keys()], [], "no account signed in: no tool");
+		signIn(a.root);
+		const pi = await loadExtension();
+		await pi.start();
+		const t = pi.extensions[0].tools.get("antigravity");
+		assert.ok(t, "registered once an account is signed in");
+		assert.match(t.description, /self-contained task/);
+		assert.deepEqual(Object.keys(t.parameters.properties).sort(), ["account", "model", "task"]);
+	});
+	const empty = { ...a.env, PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) };
+	await withEnv(empty, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		assert.equal(pi.extensions[0].tools.get("antigravity"), undefined, "no agy: no tool");
+	});
+});
+
+test("the antigravity tool: a fresh agy session in the tab's folder, default mode, progress as updates, agy's final answer back; refusals and abort as in tabs", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	signIn(a.root);
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const t = pi.extensions[0].tools.get("antigravity");
+		const cwd = mkdtempSync(path.join(TMP_ROOT, "proj-"));
+		const ctx = { ...pi.ctx, cwd };
+		const updates: string[] = [];
+		const r = await t.execute("c1", { task: "summarize the repo" }, undefined, (u: any) => updates.push(u.content[0].text), ctx);
+		assert.match(r.content[0].text, /summarize the repo/, "agy's final answer (the fake echoes)");
+		assert.ok(updates.length > 0 && updates.some((u) => /→ /.test(u)), "tool calls as progress");
+		const starts = f.read().filter((m) => m.argv);
+		assert.equal(starts.at(-1).cwd, realpathSync(cwd));
+		assert.equal(starts.at(-1).env.AGY_CLI_DISABLE_AUTO_UPDATE, "true");
+		assert.equal(starts.at(-1).env.GEMINI_API_KEY, undefined);
+		const ms = methods(f.read());
+		assert.ok(ms.indexOf("session/new") >= 0 && !ms.includes("session/resume"), "a fresh session");
+		const before = f.read().filter((m) => m.method === "session/prompt").at(-1);
+		assert.equal(before.params.prompt.at(-1).text, "summarize the repo");
+		// a permission request is declined, as in tabs
+		const p = await t.execute("c2", { task: "permission please" }, undefined, () => {}, ctx);
+		assert.match(p.content[0].text, /"optionId":"deny"/, "agy saw the refusal (its reject option)");
+		assert.match(p.content[0].text, /Declined: /, "and the caller is told");
+		// abort: session/cancel, and the call fails
+		const ac = new AbortController();
+		const slow = t.execute("c3", { task: "slow" }, ac.signal, () => {}, ctx);
+		setTimeout(() => ac.abort(), 300);
+		await assert.rejects(slow, /cancel/i);
+		assert.ok(methods(f.read()).includes("session/cancel"));
+		// an account that is not signed in (or does not exist)
+		await assert.rejects(t.execute("c4", { task: "x", account: "nope" }, undefined, () => {}, ctx), /No signed-in Antigravity account "nope"/);
+	});
+	const g = fake();
+	const b = accountsEnv({ FAKE_AGY_LOG: g.log, FAKE_AGY_NO_MODE_AT_ALL: "1" });
+	signIn(b.root);
+	await withEnv(b.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const t = pi.extensions[0].tools.get("antigravity");
+		await assert.rejects(t.execute("c5", { task: "hello" }, undefined, () => {}, pi.ctx), /default mode/);
+		assert.ok(!methods(g.read()).includes("session/prompt"), "fail closed: no prompt");
+	});
 });
 
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {

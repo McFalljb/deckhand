@@ -49,6 +49,7 @@ import "core:mem/virtual"
 import "core:slice"
 import "core:strconv"
 import "core:strings"
+import "core:sys/posix"
 import "core:time"
 
 // pi's agent directory: PI_CODING_AGENT_DIR, else ~/.pi/agent. As pi reads it (getAgentDir,
@@ -109,22 +110,61 @@ credential_path :: proc(p: string) -> bool {
 			for f in PI_SIGN_IN_FILES do if rel == f do return true
 			if strings.has_prefix(rel, "cursor-sdk") && strings.has_suffix(rel, ".json") do return true
 		}
-		if secret_looking_name(filepath.base(rel)) do return true
+		// every part of the path below it: a folder for secrets protects what is inside it
+		parts := strings.split(rel, "/", context.temp_allocator)
+		for part, i in parts {
+			if i == len(parts) - 1 ? secret_looking_name(part) : secret_folder(part) do return true
+		}
 	}
 	// Claude Code's credentials, account state, transcripts (claude_reload.odin); Codex's sign-in,
 	// sessions/ transcripts and state (codex.odin)
 	return claude_credential(p) || codex_credential(p)
 }
 
-// A file name (lower case) that looks like it holds a secret: a dotfile (.env, .env.local, .npmrc,
-// .netrc), one naming a token, secret or credential, a key or certificate (.key, .pem, .p12), or
-// an SSH key (id_rsa, id_ed25519...).
+// Folders (names in lower case) whose files are secrets: named for them, or where tools keep
+// theirs (.git/: its config may hold a token in a remote's URL).
+@(private = "file")
+SECRET_FOLDERS :: [?]string{"credential", "credentials", "secret", "secrets", "token", "tokens", ".secret", ".secrets", ".ssh", ".gnupg", ".aws", ".azure", ".docker", ".kube", ".git", ".password-store"}
+
+// Dotfiles (lower case) that hold secrets: .env and .env.*, and the tools' credential files.
+@(private = "file")
+SECRET_DOTFILES :: [?]string{".npmrc", ".netrc", ".pypirc", ".git-credentials", ".pgpass", ".htpasswd", ".dockercfg", ".s3cfg", ".boto"}
+
+// Extensions (lower case) of data files: there a name with token, secret or credential is taken for
+// one. In code or docs (.ts, .js, .md, .py...) such a name is about them, not one.
+@(private = "file")
+DATA_EXTENSIONS :: [?]string{"", ".json", ".jsonl", ".txt", ".yaml", ".yml", ".toml", ".ini", ".env", ".conf", ".cfg"}
+
+@(private = "file")
+secret_folder :: proc(name: string) -> bool {
+	for f in SECRET_FOLDERS do if name == f do return true
+	return false
+}
+
+// A file name (lower case) that looks like it holds a secret: .env or .env.*, a known credential
+// dotfile (SECRET_DOTFILES), a data file whose name says token, secret or credential, a key or
+// certificate (.key, .pem, .p12), an SSH key (id_rsa, id_ed25519...).
 @(private = "file")
 secret_looking_name :: proc(name: string) -> bool {
-	if strings.has_prefix(name, ".") || strings.has_prefix(name, "id_") do return true
-	for w in ([]string{"token", "secret", "credential"}) do if strings.contains(name, w) do return true
+	if name == ".env" || strings.has_prefix(name, ".env.") do return true
+	for f in SECRET_DOTFILES do if name == f do return true
+	if strings.has_prefix(name, "id_") do return true
 	for ext in ([]string{".key", ".pem", ".p12"}) do if strings.has_suffix(name, ext) do return true
+	ext := strings.has_prefix(name, ".") && strings.count(name, ".") == 1 ? "" : filepath.ext(name)
+	data := false
+	for e in DATA_EXTENSIONS do if ext == e do data = true
+	if !data do return false
+	for w in ([]string{"token", "secret", "credential"}) do if strings.contains(name, w) do return true
 	return false
+}
+
+// After an open: the file open on fd is a credential, by its device and inode (credential_inode)
+// or by its real path now (fd_real_path, then the name rule): what a symlink swapped in between a
+// path's check and its open leads to. dev, inode: the open file's (fstat).
+credential_fd :: proc(fd: posix.FD, dev, inode: u64) -> bool {
+	if credential_inode(dev, inode) do return true
+	rp := fd_real_path(fd)
+	return rp != "" && (credential_path(rp) || credential_path(fs_real(rp)))
 }
 
 Cred_Id :: struct {

@@ -380,6 +380,77 @@ settings_files_protected_names :: proc(t: ^testing.T) {
 	testing.expect(t, core.settings_credential(hl), "auth.json by another name in extensions/")
 }
 
+// The name rule looks at every part of the path below pi's folder: a folder named for secrets
+// (credentials/, secrets/, tokens/) or a known secret holder (.secrets/, .ssh/, .git/...)
+// protects what is inside it. The words token, secret and credential count only in data files'
+// names (.json, .txt, .yaml... or none), never in code or docs; of dotfiles only the known secret
+// holders count (.env*, .npmrc, .netrc, .pypirc, .git-credentials...).
+@(test)
+settings_files_name_rule_paths :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	protected := []string{
+		"credentials/github.json", ".secrets/openai", "extensions/x/.secrets/key", "extensions/x/secrets/a.ts",
+		"extensions/x/.git/config", "skills/s/.ssh/config", "tokens/x.md", "extensions/x/Credentials/notes.md",
+		"extensions/x/session-token.json", "extensions/x/my-secret", "prompts/credential.yaml", "extensions/x/.env.production",
+		"extensions/x/.pypirc", "extensions/x/.git-credentials", "extensions/x/.netrc",
+	}
+	visible := []string{
+		"extensions/pi-subagents/src/shared/session-tokens.js", "extensions/pi-web-access/credential-source.ts",
+		"extensions/x/secret-sauce.md", "extensions/x/token_count.py", "extensions/x/.gitignore", "extensions/x/.prettierrc",
+		"extensions/x/.editorconfig", "extensions/x/.github/workflows/ci.yml", "extensions/token-meter/index.ts",
+	}
+	for name in protected {
+		p := fmt.tprintf("%s/%s", ad, name)
+		os.make_directory_all(filepath.dir(p))
+		write_mode(p, "K=v", 0o644)
+		testing.expectf(t, core.settings_credential(p), "%s is protected", name)
+		for c in ([]core.Caller{ui, {kind = .Control}, {kind = .Script}}) {
+			r := core.run_command(core.Open_File{path = p}, c)
+			testing.expectf(t, !r.ok, "%s opened for %v", name, c.kind)
+		}
+	}
+	for name in visible {
+		p := fmt.tprintf("%s/%s", ad, name)
+		os.make_directory_all(filepath.dir(p))
+		write_mode(p, "x", 0o644)
+		testing.expectf(t, !core.settings_credential(p), "%s is the user's own", name)
+		_, _, refused := disk_read(p, context.temp_allocator)
+		testing.expectf(t, refused == "", "%s reads: %s", name, refused)
+		_, editable := core.settings_editable(p)
+		if strings.has_prefix(name, "extensions/") do testing.expectf(t, editable, "%s is editable", name)
+	}
+}
+
+// After the open, the file open is checked again by its real path (fd_real_path): what a symlink
+// swapped in between the path's check and the open leads to is refused there.
+@(test)
+settings_files_credential_fd :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	os.make_directory_all(fmt.tprintf("%s/credentials", ad))
+	check :: proc(p: string) -> bool {
+		fd := posix.open(strings.clone_to_cstring(p, context.temp_allocator), {})
+		if fd < 0 do return false
+		defer posix.close(fd)
+		st: posix.stat_t
+		posix.fstat(fd, &st)
+		return core.credential_fd(fd, u64(st.st_dev), u64(st.st_ino))
+	}
+	cred := fmt.tprintf("%s/credentials/github.json", ad)
+	write_mode(cred, "{}", 0o644)
+	testing.expect(t, check(cred), "a file in credentials/, by the open file's path")
+	ord := fmt.tprintf("%s/settings.json", ad)
+	testing.expect(t, !check(ord), "settings.json")
+	// opened through a link outside pi's folder: still its real path
+	link := fmt.tprintf("%s/innocent.json", home)
+	os.remove(link)
+	testing.expect(t, posix.symlink(strings.clone_to_cstring(cred, context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator)) == .OK, "symlink made")
+	testing.expect(t, check(link), "opened through a symlink")
+}
+
 // Review fix 5: Create never overwrites (a file made since the tree was
 // drawn stays as it is, and opens).
 @(test)

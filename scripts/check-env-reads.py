@@ -12,7 +12,7 @@ process.env anywhere but `.NAME` or `[...]` (`const env = process.env`, a spread
 Object.keys), process itself as a value (`= process;`, `{ env } = process`) and an import or
 require of process or node:process; Objective-C's NSProcessInfo environment by anything but a
 literal key (the word anywhere in code); C's environ, _NSGetEnviron and secure_getenv; Odin's
-os.environ(). posix.environ and the holder's _NSGetEnviron() hand the environment on to execve
+os.environ() (under any import name) and replace_environment_placeholders(). posix.environ and the holder's _NSGetEnviron() hand the environment on to execve
 and posix_spawn as it is; they are not looked at.
 scripts/check-release-build.sh runs this (so release.sh does); ./build.sh test too, with its own
 test (tests/check-env-reads-test.sh).
@@ -62,15 +62,18 @@ TS_KNOWN = {
     "PI_KIT_SHELL_LOG_CAP", "PI_KIT_SHELL_CHECKIN_MS", "PI_KIT_NOTES_REMIND_PERCENT",
 }
 
-CALL = re.compile(r"\b(?:os\.|c\.|posix\.)?(get_env|lookup_env|getenv)\s*\(\s*([^,)]*)|\b(env_lookup)\s*\([^,]*,\s*([^,)]*)")
-TS_CALL = re.compile(r"\b(deckhandEnv|envToken)\s*\(\s*([^,)]*)|process\.env\.([A-Za-z_][A-Za-z0-9_]*)|process\.env\[\s*([^\]]*)\]")
+# the name is the first argument, or the second (env_lookup's list, the _buf variants' buffer first)
+CALL = re.compile(r"\b(?:os\.|c\.|posix\.)?(get_env|lookup_env|getenv)(?:_alloc)?\s*\(\s*([^,)]*)|\b(env_lookup|get_env_buf|lookup_env_buf)\s*\([^,]*,\s*([^,)]*)")
+# (optional chaining too: process?.env?.NAME, process.env?.["NAME"])
+TS_CALL = re.compile(r"\b(deckhandEnv|envToken)\s*\(\s*([^,)]*)|process\s*\??\.\s*env\s*\??\.\s*([A-Za-z_][A-Za-z0-9_]*)|process\s*\??\.\s*env\s*(?:\?\.)?\[\s*([^\]]*)\]")
 # process.env as a whole (or process["env"], globalThis.process.env): an alias, a spread, a
 # destructuring, Object.keys... (what TS_CALL takes is left out: `.NAME` and `[...]`)
-TS_WHOLE = re.compile(r"\bprocess\s*(?:\.\s*env\b(?!\s*(?:\.\s*[A-Za-z_]|\[))|\[\s*[\"'`]env[\"'`]\s*\])")
+TS_WHOLE = re.compile(r"\bprocess\s*(?:\??\.\s*env\b(?!\s*(?:\??\.\s*[A-Za-z_]|(?:\?\.)?\[))|\[\s*[\"'`]env[\"'`]\s*\])")
 # process itself as a value (strings blanked first): `= process;`, `{ env } = process`,
 # `(globalThis as any).process`; and an import or require of process or node:process
 # (followed by what ends a value: text such as `process group` in a nested template is not one)
-TS_PROCESS = re.compile(r"\bprocess\b(?=\s*(?:[;,)}\]]|$|as\b|\?\?|\|\||&&))")
+# (not a property of something else: opts.process, job.process ?? null; globalThis's is process)
+TS_PROCESS = re.compile(r"(?:(?<![.\w$])|(?<=globalThis\.)|(?<=\)\.))process\b(?=\s*(?:[;,)}\]]|$|as\b|\?(?!\.)|\|\||&&))")
 TS_IMPORT = re.compile(r"(?:\bfrom|\brequire\s*\(|\bimport\s*\()\s*[\"'`](?:node:)?process[\"'`]")
 # Objective-C: NSProcessInfo's environment dictionary (the word anywhere in code: its `]` may be on
 # the next line), by a literal key only
@@ -79,7 +82,8 @@ OBJC_KEY = re.compile(r"environment\s*\]?\s*(?:\[\s*|objectForKey:\s*)@\"([A-Za-
 # C and Objective-C: the environment as a whole, or a read the calls above don't check
 C_WHOLE = re.compile(r"\b(?:environ|_?NSGetEnviron|secure_getenv)\b")
 # Odin: the environment as a whole
-ODIN_WHOLE = re.compile(r"\bos\.environ\s*\(")
+# (os under any import name: os2.environ(; and the placeholders it expands from the environment)
+ODIN_WHOLE = re.compile(r"\b\w+\.environ\s*\(|\breplace_environment_placeholders\s*\(")
 LIT = re.compile(r'^"([A-Za-z_][A-Za-z0-9_]*)"$')
 IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # a constant's name (FOO, pkg.FOO): on a marked line, refused unless resolved or named by the marker
@@ -231,7 +235,7 @@ def main():
                 for m in C_WHOLE.finditer(bc):
                     bad.append(f"{rel}:{n}: {m.group(0)}: the environment as a whole, or a read this check can't follow (or mark the line: // {MARKER} why)")
             if p.suffix == ".odin" and not marked and ODIN_WHOLE.search(bc):
-                bad.append(f"{rel}:{n}: os.environ(: the environment as a whole: read a variable by name (or mark the line: // {MARKER} why)")
+                bad.append(f"{rel}:{n}: {ODIN_WHOLE.search(bc).group(0).strip()}: the environment as a whole: read a variable by name (or mark the line: // {MARKER} why)")
             for m in CALL.finditer(code):
                 fn, arg = (m.group(1), m.group(2)) if m.group(1) else (m.group(3), m.group(4))
                 arg = arg.strip()

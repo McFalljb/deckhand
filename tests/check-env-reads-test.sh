@@ -22,6 +22,9 @@ a :: proc() {
 	_ = os.get_env(TYPED_HOME, context.temp_allocator) // a typed constant: HOME
 	_ = os.get_env(core.SOCKET_VAR, context.temp_allocator) // env-read-ok: DECKHAND_SOCKET
 	env, _ := os.environ(context.temp_allocator) // env-read-ok: passed on to a child whole
+	buf: [64]u8
+	_ = os.get_env_buf(buf[:], "HOME")
+	_, _ = os.lookup_env_alloc("PATH", context.allocator)
 }
 TYPED_HOME : string : "HOME"
 ODIN
@@ -49,6 +52,10 @@ import { spawn } from "node:child_process";
 const args = process.argv.slice(2);
 const msg = "the process exited; = process; { env } = process";
 if (args.length === 0) process.exit(1);
+const job = { process: 1 }, opts = { process: 2 };
+const p1 = opts.process;
+const p2 = job.process ?? null;
+const p3 = process?.env?.PI_KIT_NOTES_DIR;
 TS
 }
 reset
@@ -109,4 +116,18 @@ refused odin 'x := os.get_env(core.FOO, context.temp_allocator) // env-read-ok: 
 refused ts 'const x = envToken(ENV); // env-read-ok: ENV is a constant'
 refused ts 'const x = envToken(ENV); // env-read-ok: a constant' 'const ENV = "DECKHAND_FOO";'
 refused m 'const char* s = getenv(NAME); // env-read-ok: a constant'
+# optional chaining (#212 round 2)
+refused ts 'const x = process?.env?.DECKHAND_EVIL;'
+refused ts 'const x = process?.env.DECKHAND_EVIL;'
+refused ts 'const x = process.env?.DECKHAND_EVIL;'
+refused ts 'const x = process.env?.["DECKHAND_EVIL"];'
+refused ts 'const e = process?.env;'
+refused ts 'const p = process ? 1 : 0;'
+# Odin's other readers: _alloc and _buf, placeholders, an aliased os
+refused odin 'x := os.get_env_alloc("DECKHAND_X", context.allocator)'
+refused odin 'x, _ := os.lookup_env_alloc("DECKHAND_X", context.allocator)'
+refused odin 'x := os.get_env_buf(buf[:], "DECKHAND_X")'
+refused odin 'x, _ := os.lookup_env_buf(buf[:], "DECKHAND_X")'
+refused odin 'x := os.replace_environment_placeholders(s)'
+refused odin 'e, _ := os2.environ(context.temp_allocator)'
 echo "check-env-reads-test: ok"

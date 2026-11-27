@@ -162,22 +162,36 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   user's `~/.gemini` `config/skills`, `antigravity-cli/skills`, `config/skills.json`, `AGENTS.md`
   and `GEMINI.md` linked in. No automatic switching, rotation or fallback between accounts.
 - **agy's environment** (`agyEnvFor`): pi's, without t3code's list (`GEMINI_API_KEY`,
-  `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_CLOUD_*`, `GOOGLE_GENAI_USE_VERTEXAI`,
+  `GOOGLE_API_KEY`, `GOOGLE_CLOUD_*`, `GOOGLE_GENAI_USE_VERTEXAI`,
   `GCLOUD_PROJECT`, `CLOUDSDK_CORE_PROJECT`, `AGY_ACP_*`, `GEMINI_HOME`, `BROWSER`, …, matched
   case-insensitively), any other `GOOGLE_*` and `DECKHAND_*`; then `GEMINI_HOME` (the profile),
-  `AGY_ACP_FORCE_FILE_STORAGE=1`, `AGY_CLI_DISABLE_AUTO_UPDATE=true`, `TMPDIR`
-  (`antigravity-acp/tmp`), and the account's key as `GEMINI_API_KEY` (`gemini-api-key`) or
+  `AGY_ACP_FORCE_FILE_STORAGE=1`, `AGY_CLI_DISABLE_AUTO_UPDATE=true`, `TMPDIR` (the process's
+  own folder, below), and the account's key as `GEMINI_API_KEY` (`gemini-api-key`) or
   `GOOGLE_API_KEY` (`agent-platform`). A Google-account (`oauth-personal`) agy also gets
   `SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0`, as in t3code: agy 1.5 ignores file storage and keeps
   Google sign-ins in one OS keyring entry for every profile unless it believes it runs over SSH, so
   without it two accounts would share one sign-in; over "SSH" it signs in by the pasted code
   (`--login`). `BROWSER` is not set (t3code points it at a helper; here agy's link is shown in pi).
+  `GOOGLE_APPLICATION_CREDENTIALS`, `CLOUDSDK_CONFIG` and `CLOUDSDK_AUTH_*` reach only an
+  `agent-platform` account with a project and no key (Application Default Credentials are its
+  sign-in); t3code drops the first for every method and keeps `CLOUDSDK_*`.
+- **agy's processes**: each gets its own TMPDIR, `antigravity-acp/tmp/<pi's pid>-<random>` (0700;
+  agy unpacks its runtime there), marked with agy's pid and removed when it ends. Before each
+  launch, folders whose pi and agy processes are both gone are removed (t3code's
+  `retireAntigravityRuntimeTempDirs` removes all of them, as one process owns its profile; pi
+  processes share one). Closing agy: its stdin first, SIGTERM if it is still there after 1 s,
+  SIGKILL after 5 s more. agy's own children are not killed as a group (nor in t3code): an open
+  risk once approvals let agy run commands.
+- **Mode and model, fail closed**: a session (new or resumed) that reports no mode option and no
+  modes, or whose mode option does not take `default`, is refused before any prompt; so is a model
+  other than `default` when agy offers no model option.
 - **API keys**: `gemini-api-key` and key-based `agent-platform` accounts use pi's own credential
   store: the provider's `auth.apiKey.login` asks with pi's masked secret prompt (`/login
   antigravity-<name>`), pi keeps the key in `~/.pi/agent/auth.json` (0600) like every API key, and
   passes it to the provider per turn; it reaches agy only in its process environment. `/logout`
   removes it.
-- **`/antigravity`**: the status (agy's path and version from an `initialize`, each account's
+- **`/antigravity`** (`remove` needs `--yes` without a UI; accounts.json changes are made under a
+  lock file and read again inside): the status (agy's path and version from an `initialize`, each account's
   provider, method, sign-in state and model count; "signed in" is the existence of agy's
   `acp_token.json`, which is never read, or a key in pi's store) and, with a UI, a menu;
   `add <name> [method]`, `login`, `logout` (agy's ACP `logout`, when advertised; the history
@@ -197,10 +211,17 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `model` option (a throwaway session on `/antigravity models` and after sign-in; every real
   session too), in memory only.
 - **Turns** (`lib/antigravity.ts`): one agy process and session per pi session and account
-  (`options.sessionId`); its id is each answer's `responseId`. Only the user messages after the last
-  answer are sent; when the transcript is not agy's (another provider answered, `/tree`), a new
-  agy session gets the transcript as text first; after a restart or crash the session named on
-  the last answer is resumed. Text streams as text, thoughts as thinking, tool calls, plan and
+  (`options.sessionId`); its id is each answer's `responseId`, also on an answer that failed before
+  its prompt. Only the user messages after the last answer are sent. An agy session is picked up
+  again (`session/resume`, after a restart, crash, `/resume` or `/fork`) only when
+  `lib/agy-ledger.ts` says it ends at the transcript's last answer and no other pi session holds
+  it: per profile, `antigravity-acp/deckhand-sessions/` keeps each session's answers ({ts, ok},
+  written temp then rename) and a lock (O_EXCL, with the holder's pid; a dead holder's is taken
+  over). Otherwise (another provider answered, `/tree` or `/fork` to an older answer, a session
+  another pi holds, an agy without `session/resume`, no record) a new agy session gets the
+  transcript as text first. A message pi sends again after a failed turn that had reached agy
+  (its auto-retry) gets a note first that agy may already have it; Deckhand's own error texts do
+  not match pi's retry patterns. Text streams as text, thoughts as thinking, tool calls, plan and
   declined requests as lines of thinking and the status line, never as pi tool calls. Abort sends
   `session/cancel` and waits 10 s, then stops the process. Usage is agy's per-turn
   `PromptResponse.usage`; cost 0. pi's summaries (compaction, branch summaries) are answered

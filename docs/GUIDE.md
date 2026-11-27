@@ -239,8 +239,8 @@ out of quota. Each account has its own agy profile, so its sign-in and history s
   credential store, as it does every API key; it is never written to Deckhand's files.
 - **`/antigravity logout <name>`** signs out (agy forgets the saved sign-in; the history stays).
   For an API key, `/logout` and pick the account's provider.
-- **`/antigravity remove <name>`** removes an account, its profile and its history. The default
-  account stays.
+- **`/antigravity remove <name>`** removes an account, its profile and its history, after asking
+  (without a window to ask in, add `--yes`). The default account stays.
 - **`/antigravity models <name>`** lists an account's models again.
 - **`/antigravity path /full/path/to/agy`** runs that agy instead of the one on your `PATH` (it must
   be an executable file); **`/antigravity path`** alone goes back to your `PATH`. It works before
@@ -262,8 +262,11 @@ names the command to run.
   edit a file, run a command) or asks you a question, Deckhand declines, and the thinking says so.
   So for now agy reads and answers; whatever it would ask your approval for is not done.
 - agy keeps the conversation itself. When pi compacts, it keeps a short note instead of a summary.
-  If another model answered earlier in the session, or you went back in `/tree`, Deckhand starts a
-  new agy session and gives it the conversation so far as text.
+  Deckhand goes on in agy's session only when it holds exactly the conversation you see. If another
+  model answered earlier, you went back in `/tree`, `/fork`ed or `/resume`d an older branch, or
+  another pi session is using that agy session, Deckhand starts a new agy session and gives it the
+  conversation so far as text. If pi retries a message that had already reached agy, agy is told
+  so.
 
 ## How Deckhand runs
 

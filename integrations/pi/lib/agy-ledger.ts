@@ -31,6 +31,45 @@ export function alive(pid: number): boolean {
 	}
 }
 
+/** A session record not written for this long is pruned (its agy session is not picked up after that: a new one, caught up). */
+export const RECORD_MAX_AGE_MS = 30 * 86_400_000;
+/** Lock temp files (agy-lock.ts) left by a process that died mid-way are pruned after this. */
+const TEMP_MAX_AGE_MS = 3_600_000;
+
+/**
+ * Prunes a ledger folder (lib/agy-accounts.ts runs it with each launch's sweep): records unused for
+ * RECORD_MAX_AGE_MS (unless a live process holds their session), locks whose process is gone (and
+ * that no owner in this process holds), and old lock temp files.
+ */
+export function pruneLedger(dir: string, now = Date.now()) {
+	let entries: string[] = [];
+	try {
+		entries = fs.readdirSync(dir);
+	} catch {
+		return;
+	}
+	const root = path.resolve(dir);
+	const live = (lockPath: string) => {
+		if (HELD.has(lockPath)) return true;
+		const seen = readLock(lockPath);
+		if (!seen) return false;
+		if (seen.pid === undefined) return now - seen.mtimeMs <= EMPTY_LOCK_GRACE_MS;
+		return alive(seen.pid);
+	};
+	for (const e of entries) {
+		const p = path.join(root, e);
+		try {
+			if (/\.lock$/.test(e)) {
+				if (!live(p)) fs.rmSync(p, { force: true });
+			} else if (/\.json$/.test(e)) {
+				if (now - fs.statSync(p).mtimeMs > RECORD_MAX_AGE_MS && !live(p.replace(/\.json$/, ".lock"))) fs.rmSync(p, { force: true });
+			} else if (/\.(lock\.(new|stale)|json\.tmp)-/.test(e)) {
+				if (now - fs.statSync(p).mtimeMs > TEMP_MAX_AGE_MS) fs.rmSync(p, { force: true });
+			}
+		} catch {}
+	}
+}
+
 export interface Ledger {
 	/** The answers recorded for an agy session, or undefined when Deckhand never drove it here. */
 	read(sessionId: string): Produced[] | undefined;

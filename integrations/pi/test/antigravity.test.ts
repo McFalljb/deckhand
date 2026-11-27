@@ -4,7 +4,7 @@ import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOM
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -887,6 +887,41 @@ test("gap A2: taking over a stale lock never takes one another process took in t
 		writeFileSync(alock, JSON.stringify({ pid: dead }));
 		await updateAccounts(root, (accounts) => ({ accounts }), 200);
 		assert.ok(!existsSync(alock));
+	} finally {
+		other.kill();
+	}
+});
+
+test("gap A3: each launch's sweep prunes session records unused for 30 days and locks of dead processes", async () => {
+	const a = accountsEnv();
+	const acp = path.join(a.root, "profiles", "default", "antigravity-acp");
+	const ledger = path.join(acp, "deckhand-sessions");
+	mkdirSync(ledger, { recursive: true });
+	writeFileSync(path.join(acp, "acp_token.json"), "{}"); // as if signed in
+	const other = spawn("sleep", ["30"]);
+	const dead = spawnSync("true").pid!;
+	try {
+		const files = { old: "a.json", fresh: "b.json", deadLock: "c.lock", liveLock: "d.lock", oldLeft: "e.lock.new-1-x" };
+		writeFileSync(path.join(ledger, files.old), JSON.stringify({ sessionId: "old", produced: [] }));
+		writeFileSync(path.join(ledger, files.fresh), JSON.stringify({ sessionId: "fresh", produced: [] }));
+		writeFileSync(path.join(ledger, files.deadLock), JSON.stringify({ pid: dead }));
+		writeFileSync(path.join(ledger, files.liveLock), JSON.stringify({ pid: other.pid }));
+		writeFileSync(path.join(ledger, files.oldLeft), "{}");
+		const longAgo = new Date(Date.now() - 31 * 86_400_000);
+		utimesSync(path.join(ledger, files.old), longAgo, longAgo);
+		utimesSync(path.join(ledger, files.oldLeft), longAgo, longAgo);
+		await withEnv(a.env, async () => {
+			const pi = await loadExtension();
+			await pi.start();
+			const { ctx, notes } = cmdCtx(pi);
+			await run(pi, "antigravity", "models", ctx);
+			assert.match(notes.at(-1)!, /2 models/);
+		});
+		const left = readdirSync(ledger).sort();
+		assert.ok(!left.includes(files.old), "a record unused for 31 days goes");
+		assert.ok(!left.includes(files.deadLock), "a dead process's lock goes");
+		assert.ok(!left.includes(files.oldLeft), "an old leftover temp file goes");
+		assert.ok(left.includes(files.fresh) && left.includes(files.liveLock), "the rest stays");
 	} finally {
 		other.kill();
 	}

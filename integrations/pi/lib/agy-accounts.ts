@@ -24,7 +24,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { groupAlive, reapGroup, signalGroup } from "./acp.ts";
-import { alive } from "./agy-ledger.ts";
+import { alive, pruneLedger } from "./agy-ledger.ts";
 import { readLock, tryLock, unlock } from "./agy-lock.ts";
 
 export type Method = "oauth-personal" | "oauth-business" | "gemini-api-key" | "agent-platform";
@@ -219,6 +219,7 @@ export async function sweepRunDirs(tmpDir: string): Promise<void> {
 export function runDir(p: Profile): string {
 	fs.mkdirSync(p.tmpDir, { recursive: true, mode: 0o700 });
 	void sweepRunDirs(p.tmpDir);
+	pruneLedger(path.join(p.acpDir, "deckhand-sessions"));
 	return fs.mkdtempSync(path.join(p.tmpDir, `${process.pid}-`));
 }
 

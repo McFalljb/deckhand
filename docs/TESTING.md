@@ -283,6 +283,11 @@ The causes seen so far, and the rule each one taught:
 - **State left by the previous test** (late git results landing on the next test's editor). Wait
   for in-flight work in setup, and keep ids increasing across tests.
 - **Shared system state** (the system pasteboard, a `$TMPDIR` sweep). Keep it per scene.
+- **The developer's umask.** With 077 every fixture file is 0600, and Deckhand takes a private
+  file in pi's agent folder for a sign-in (not listed, watched or opened): `settings` and `reload`
+  saw none of theirs. The runner and `fresh-build.sh` set 022.
+- **A row id by number** (`pop N`). Ids come from an enum's order: retire a row in place, never
+  remove it (`pop_item_ids_stay_put`).
 - **Order that depends on the clock** (commits in the same second). Give fixtures fixed dates.
 - **Rows found by position.** Use `clickid`/`rclickid NAME @PATH`, so a new row above can't move it.
 - **A fake's writes in the wrong order** (argv before env). Write what the test reads last.

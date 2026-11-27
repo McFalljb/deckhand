@@ -254,7 +254,7 @@ show_file_peek :: proc(path: string) -> string {
 	defer os.close(f)
 	sb: posix.stat_t
 	if posix.fstat(posix.FD(os.fd(f)), &sb) != .OK || !posix.S_ISREG(sb.st_mode) do return "Not a regular file (a pipe, device or socket): not opened"
-	if credential_inode(u64(sb.st_dev), u64(sb.st_ino)) do return CREDENTIALS_NOT_OPENED
+	if credential_fd(posix.FD(os.fd(f)), u64(sb.st_dev), u64(sb.st_ino)) do return CREDENTIALS_NOT_OPENED // by inode, or the open file's real path
 	if i64(sb.st_size) > limit do return too_large(i64(sb.st_size), limit)
 	if img do return ""
 	buf: [8192 + 8]u8 // a little past looks_binary's window: a cut sequence at its end is fine

@@ -25,6 +25,7 @@
 # a release build has neither the test key nor the fixture variables compiled in.
 # Usage: tests/scripts/update.sh   (needs ./build.sh's libraries; builds build/update-sign)
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 W="$ROOT/build/update"

@@ -19,6 +19,7 @@
 #   string; update-sign's none rules; release.sh refusing before its build
 # Usage: tests/scripts/release-checks.sh   (builds build/update-sign)
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 W="$ROOT/build/release-checks"

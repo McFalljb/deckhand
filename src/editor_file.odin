@@ -118,7 +118,7 @@ disk_read :: proc(path: string, allocator := context.allocator, limit := i64(cor
 	defer os.close(f)
 	ff, fok := fd_stamp(f)
 	if !fok do return nil, {}, "Not a regular file (a pipe, device or socket): not opened"
-	if core.credential_inode(ff.dev, ff.inode) do return nil, {}, core.CREDENTIALS_NOT_OPENED // swapped in after the check
+	if core.credential_fd(posix.FD(os.fd(f)), ff.dev, ff.inode) do return nil, {}, core.CREDENTIALS_NOT_OPENED // swapped in after the check (by inode, or the open file's real path)
 	if ff.size > limit do return nil, {}, too_large(ff.size, limit)
 	buf := make([dynamic]u8, 0, int(ff.size), allocator)
 	chunk: [64 * 1024]u8

@@ -23,6 +23,7 @@
 # Nothing is uploaded, tagged or published; the worktree is removed at the end.
 # Usage: tests/scripts/update-from-release.sh ZIP VERSION [--prev vX.Y.Z]
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 [ $# -ge 2 ] || { echo "usage: tests/scripts/update-from-release.sh ZIP VERSION [--prev vX.Y.Z]" >&2; exit 2; }

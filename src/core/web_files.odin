@@ -140,7 +140,7 @@ web_file_bytes :: proc(dirfd: posix.FD, name: string, since := "", key := "", li
 	if fd < 0 do return nil, st, posix.errno() == .ELOOP ? "a link: open the file it points to" : "no such file", false
 	defer posix.close(fd)
 	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return nil, st, "not a regular file", false
-	if credential_inode(u64(st.st_dev), u64(st.st_ino)) do return nil, st, CREDENTIAL_REFUSED, false
+	if credential_fd(fd, u64(st.st_dev), u64(st.st_ino)) do return nil, st, CREDENTIAL_REFUSED, false // by inode, or the open file's real path
 	if i64(st.st_size) > i64(limit) do return nil, st, fmt.tprintf("too large to open in a browser (%.1f MB; at most %d MB)", f64(st.st_size) / (1 << 20), limit >> 20), false
 	if since != "" {
 		if seen, ok := web_file_seen[key]; ok && seen == web_file_seen_as(st, since) do return nil, st, "", true

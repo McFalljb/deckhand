@@ -6,6 +6,7 @@
 #   2. relaunch with the same data dir: pins, sort, hidden items and widths back
 # Screenshots go to build/shots/sidebar/. Usage: tests/scripts/sidebar.sh
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"

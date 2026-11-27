@@ -122,7 +122,7 @@ settings_files_credentials_refused :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	home, proj := setup()
 	ad := fmt.tprintf("%s/.pi/agent", home)
-	for name in ([]string{"auth.json", "models-store.json", "private-thing.json", "cursor-sdk-x.json", "intercom/inbox.json"}) {
+	for name in ([]string{"auth.json", "models-store.json", "cursor-sdk-x.json", "intercom/inbox.json"}) {
 		p := fmt.tprintf("%s/%s", ad, name)
 		testing.expectf(t, core.settings_credential(p), "%s is a credential file", name)
 		for c in ([]core.Caller{ui, {kind = .Control}, {kind = .Script}}) {
@@ -311,6 +311,144 @@ settings_files_hard_link_and_private_subfolder :: proc(t: ^testing.T) {
 	priv := fmt.tprintf("%s/extensions/foo/token.json", ad)
 	write_mode(priv, `{"t": "x"}`, 0o600)
 	testing.expect(t, core.settings_credential(priv), "a private file in a subfolder")
+}
+
+// pi's folder is protected by name, not by mode (a umask of 077 makes every file 0600): private
+// files with ordinary names are the user's own (listed, editable).
+@(test)
+settings_files_private_ordinary_files :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	for d in ([]string{"extensions/x", "prompts"}) do os.make_directory_all(fmt.tprintf("%s/%s", ad, d))
+	for name in ([]string{"extensions/x/index.ts", "prompts/p.md", "settings.json", "notes.json"}) {
+		p := fmt.tprintf("%s/%s", ad, name)
+		write_mode(p, name == "settings.json" ? `{"defaultModel": "x"}` : "x", 0o600)
+		testing.expectf(t, !core.settings_credential(p), "%s (0600) is the user's own, not a credential", name)
+		_, _, refused := disk_read(p, context.temp_allocator)
+		testing.expectf(t, refused == "", "%s (0600) reads: %s", name, refused)
+	}
+	for name in ([]string{"extensions/x/index.ts", "prompts/p.md"}) {
+		_, editable := core.settings_editable(fmt.tprintf("%s/%s", ad, name))
+		testing.expectf(t, editable, "%s (0600) is editable", name)
+	}
+	testing.expect(t, core.run_command(core.Open_File{path = fmt.tprintf("%s/settings.json", ad)}, ui).ok, "a 0600 settings.json opens")
+	for q in ([]string{"index", "p.md"}) {
+		found := false
+		for h in core.settings_search(q, deep = true) do if h.kind == .File && (strings.has_suffix(h.row.path, "extensions/x/index.ts") || strings.has_suffix(h.row.path, "prompts/p.md")) do found = true
+		testing.expectf(t, found, "the page's search lists the 0600 file for %q", q)
+	}
+}
+
+// What pi's folder protects, by name, whatever the file's mode: pi's sign-ins (auth.json,
+// models-store.json, mcp-auth.json, the legacy oauth.json, cursor-sdk*.json, intercom/), and
+// anywhere under it a secret-looking name. Refused to the user, agents and scripts; never listed.
+@(test)
+settings_files_protected_names :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	for d in ([]string{"extensions/x", "skills/s", "prompts", "themes", "intercom", "other"}) do os.make_directory_all(fmt.tprintf("%s/%s", ad, d))
+	names := []string{
+		"auth.json", "AUTH.JSON", "models-store.json", "mcp-auth.json", "oauth.json", "cursor-sdk-x.json", "intercom/inbox.json",
+		".env", "extensions/x/.env", "extensions/x/.env.local", "prompts/.npmrc", "extensions/x/api-token.json",
+		"skills/s/my-secret.txt", "themes/Credentials.json", "other/server.key", "prompts/cert.pem",
+		"extensions/x/client.p12", "other/id_ed25519", "id_rsa",
+	}
+	for mode in ([]int{0o600, 0o644}) {
+		for name in names {
+			p := fmt.tprintf("%s/%s", ad, name)
+			write_mode(p, "K=v", mode)
+			testing.expectf(t, core.settings_credential(p), "%s (%o) is protected", name, mode)
+			for c in ([]core.Caller{ui, {kind = .Control}, {kind = .Script}}) {
+				r := core.run_command(core.Open_File{path = p}, c)
+				testing.expectf(t, !r.ok, "%s (%o) opened for %v", name, mode, c.kind)
+			}
+			_, _, refused := disk_read(p, context.temp_allocator)
+			testing.expectf(t, refused != "", "%s (%o) read", name, mode)
+		}
+		for q in ([]string{"env", "token", "secret", "credential", "key", "pem", "p12", "id_", "npmrc"}) {
+			for h in core.settings_search(q, deep = true) do if h.kind == .File {
+				for name in names do testing.expectf(t, !strings.has_suffix(h.row.path, fmt.tprintf("/%s", name)), "the page's search lists %s", name)
+			}
+		}
+	}
+	// a hard link to auth.json under an ordinary name: the device/inode rule
+	hl := fmt.tprintf("%s/extensions/x/data.json", ad)
+	os.remove(hl)
+	testing.expect(t, os.link(fmt.tprintf("%s/auth.json", ad), hl) == nil, "hard link made")
+	testing.expect(t, core.settings_credential(hl), "auth.json by another name in extensions/")
+}
+
+// The name rule looks at every part of the path below pi's folder: a folder named for secrets
+// (credentials/, secrets/, tokens/) or a known secret holder (.secrets/, .ssh/, .git/...)
+// protects what is inside it. The words token, secret and credential count only in data files'
+// names (.json, .txt, .yaml... or none), never in code or docs; of dotfiles only the known secret
+// holders count (.env*, .npmrc, .netrc, .pypirc, .git-credentials...).
+@(test)
+settings_files_name_rule_paths :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	protected := []string{
+		"credentials/github.json", ".secrets/openai", "extensions/x/.secrets/key", "extensions/x/secrets/a.ts",
+		"extensions/x/.git/config", "skills/s/.ssh/config", "tokens/x.md", "extensions/x/Credentials/notes.md",
+		"extensions/x/session-token.json", "extensions/x/my-secret", "prompts/credential.yaml", "extensions/x/.env.production",
+		"extensions/x/.pypirc", "extensions/x/.git-credentials", "extensions/x/.netrc",
+	}
+	visible := []string{
+		"extensions/pi-subagents/src/shared/session-tokens.js", "extensions/pi-web-access/credential-source.ts",
+		"extensions/x/secret-sauce.md", "extensions/x/token_count.py", "extensions/x/.gitignore", "extensions/x/.prettierrc",
+		"extensions/x/.editorconfig", "extensions/x/.github/workflows/ci.yml", "extensions/token-meter/index.ts",
+	}
+	for name in protected {
+		p := fmt.tprintf("%s/%s", ad, name)
+		os.make_directory_all(filepath.dir(p))
+		write_mode(p, "K=v", 0o644)
+		testing.expectf(t, core.settings_credential(p), "%s is protected", name)
+		for c in ([]core.Caller{ui, {kind = .Control}, {kind = .Script}}) {
+			r := core.run_command(core.Open_File{path = p}, c)
+			testing.expectf(t, !r.ok, "%s opened for %v", name, c.kind)
+		}
+	}
+	for name in visible {
+		p := fmt.tprintf("%s/%s", ad, name)
+		os.make_directory_all(filepath.dir(p))
+		write_mode(p, "x", 0o644)
+		testing.expectf(t, !core.settings_credential(p), "%s is the user's own", name)
+		_, _, refused := disk_read(p, context.temp_allocator)
+		testing.expectf(t, refused == "", "%s reads: %s", name, refused)
+		_, editable := core.settings_editable(p)
+		if strings.has_prefix(name, "extensions/") do testing.expectf(t, editable, "%s is editable", name)
+	}
+}
+
+// After the open, the file open is checked again by its real path (fd_real_path): what a symlink
+// swapped in between the path's check and the open leads to is refused there.
+@(test)
+settings_files_credential_fd :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, _ := setup()
+	ad := fmt.tprintf("%s/.pi/agent", home)
+	os.make_directory_all(fmt.tprintf("%s/credentials", ad))
+	check :: proc(p: string) -> bool {
+		fd := posix.open(strings.clone_to_cstring(p, context.temp_allocator), {})
+		if fd < 0 do return false
+		defer posix.close(fd)
+		st: posix.stat_t
+		posix.fstat(fd, &st)
+		return core.credential_fd(fd, u64(st.st_dev), u64(st.st_ino))
+	}
+	cred := fmt.tprintf("%s/credentials/github.json", ad)
+	write_mode(cred, "{}", 0o644)
+	testing.expect(t, check(cred), "a file in credentials/, by the open file's path")
+	ord := fmt.tprintf("%s/settings.json", ad)
+	testing.expect(t, !check(ord), "settings.json")
+	// opened through a link outside pi's folder: still its real path
+	link := fmt.tprintf("%s/innocent.json", home)
+	os.remove(link)
+	testing.expect(t, posix.symlink(strings.clone_to_cstring(cred, context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator)) == .OK, "symlink made")
+	testing.expect(t, check(link), "opened through a symlink")
 }
 
 // Review fix 5: Create never overwrites (a file made since the tree was
@@ -975,9 +1113,9 @@ sf_text :: proc() -> string {
 	return strings.to_string(b)
 }
 
-// New file… in pi's config folders under a strict umask (077): the file Deckhand makes is 0644,
-// so it is not taken for a credential (a private file in the agent dir is one) and opens. A
-// credential's name stays refused, and a private file Deckhand did not make stays a credential.
+// New file… in pi's config folders under a strict umask (077): the file Deckhand makes keeps the
+// umask (0600) and is the user's: it opens, renames and deletes (pi's folder is protected by name,
+// not mode). A secret-looking name (.env) is refused.
 @(test)
 settings_files_new_file_strict_umask :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -991,23 +1129,22 @@ settings_files_new_file_strict_umask :: proc(t: ^testing.T) {
 		r := core.run_command(core.Create_File{path = p}, ui)
 		testing.expectf(t, r.ok, "%s: %s", sub, r.error)
 		_, st := core.path_stat(p)
-		testing.expectf(t, st.mode & 0o777 == 0o644, "%s: made %o", sub, st.mode & 0o777)
+		testing.expectf(t, st.mode & 0o777 == 0o600, "%s: made %o (the umask's)", sub, st.mode & 0o777)
 		testing.expectf(t, !core.settings_credential(p), "%s: not a credential", sub)
 		_, editable := core.settings_editable(p)
 		testing.expectf(t, editable, "%s: the user's to rename and delete", sub)
 		o := core.run_command(core.Open_File{path = p}, ui)
 		testing.expectf(t, o.ok, "%s: opens: %s", sub, o.error)
 	}
-	// a .env made there is an ordinary file (0644, readable), not a credential
+	// a .env there is a protected name: not made
 	env := fmt.tprintf("%s/prompts/.env", ad)
-	if core.run_command(core.Create_File{path = env}, ui).ok {
-		_, st := core.path_stat(env)
-		testing.expectf(t, st.mode & 0o777 == 0o644 && !core.settings_credential(env), ".env made %o", st.mode & 0o777)
-	}
-	// a private file the user (or pi) made there is still a credential
+	testing.expect(t, !core.run_command(core.Create_File{path = env}, ui).ok, ".env is refused in pi's folder")
+	testing.expect(t, !os.exists(env), ".env not made")
+	// a private file the user (or pi) made there is theirs: by name, not mode
 	mine := fmt.tprintf("%s/prompts/mine.md", ad)
 	write_mode(mine, "x", 0o600)
-	testing.expect(t, core.settings_credential(mine), "a private file Deckhand did not make")
+	testing.expect(t, !core.settings_credential(mine), "a private prompt is the user's")
+	testing.expect(t, core.run_command(core.Open_File{path = mine}, ui).ok, "and opens")
 	// outside pi's config folders the umask is the user's: a project file stays as made
 	os.make_directory_all(fmt.tprintf("%s/proj/notes", home))
 	pf := fmt.tprintf("%s/proj/notes/x.md", home)

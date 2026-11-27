@@ -343,6 +343,7 @@ case "$MODE" in
     python3 -B tests/scenes_test.py -q
     # every environment read names a known variable (test knobs go through hook_env)
     python3 -I scripts/check-env-reads.py
+    sh tests/check-env-reads-test.sh
     # a test stops only what it started: no unscoped pkill or killall in tests/ (and the check's test)
     python3 -I scripts/check-scoped-kills.py
     sh tests/check-scoped-kills-test.sh

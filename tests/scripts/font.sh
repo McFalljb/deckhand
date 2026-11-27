@@ -3,6 +3,7 @@
 # store and pi (tests/scripts/looks.sh) with script font.txt.
 # Usage: tests/scripts/font.sh TAG
 set -eu
+umask 022 # the fixtures' modes as on CI, whatever the user's umask (as fresh-build.sh)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 TAG=${1:-now}
 mkdir -p "$ROOT/build"

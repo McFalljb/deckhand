@@ -76,6 +76,22 @@ expect_tip :: proc(t: ^testing.T, h: Hit, action_id: string, loc := #caller_loca
 	testing.expectf(t, label == a.label && keys == a.keys, "tooltip of %v: %q %q, want %q %q", h, label, keys, a.label, a.keys, loc = loc)
 }
 
+// Quick settings' rows keep their element ids ("pop" N): scenes hover and click them by number
+// (reload, claude-runtime, login-path, buttons, font). A row is retired in place, never removed:
+// #133 removed Chats_Readonly, and every row after it moved down one.
+@(test)
+pop_item_ids_stay_put :: proc(t: ^testing.T) {
+	testing.expect_value(t, int(Pop_Item.Appearance_Dark), 2)
+	testing.expect_value(t, int(Pop_Item.Look_Ghostty), 5)
+	testing.expect_value(t, int(Pop_Item.Rescan), 17)
+	testing.expect_value(t, int(Pop_Item.Text_Small), 20)
+	testing.expect_value(t, int(Pop_Item.Text_Large), 23)
+	testing.expect_value(t, int(Pop_Item.Reload_Pi), 25)
+	testing.expect_value(t, int(Pop_Item.Refresh_Env), 28)
+	testing.expect_value(t, int(Pop_Item.Restart_Claude), 29)
+	testing.expect_value(t, int(Pop_Item.Dim_Panes), 43)
+}
+
 @(test)
 buttons_name_actions_once :: proc(t: ^testing.T) {
 	seen := make(map[string]string, context.temp_allocator) // action -> control
@@ -90,7 +106,7 @@ buttons_name_actions_once :: proc(t: ^testing.T) {
 		seen[info.action] = fmt.tprint(b)
 	}
 	for it in Pop_Item {
-		if it == .Bell_OS do continue // retired: not drawn (the grid's macOS column)
+		if it == .Bell_OS || it == .Chats_Readonly do continue // retired: not drawn
 		id := POP_ACTIONS[it]
 		testing.expectf(t, action_by_id(id) != nil, "popover row %v: no action %q", it, id)
 		testing.expectf(t, id not_in seen, "action %q has a toolbar button and a popover row", id)

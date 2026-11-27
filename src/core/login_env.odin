@@ -465,7 +465,7 @@ login_env_shell_merge :: proc(launch: []string, from_claude: bool, shell: string
 // the shell (login_env_shell_merge). Call before
 // any thread starts (setenv is not thread-safe).
 login_env_fix :: proc(gui: bool, shell: string, dirs: []string, timeout: time.Duration, probe: Login_Env_Probe = login_env_ask) -> Login_Env_Result {
-	inherited, _ := os.environ(context.temp_allocator)
+	inherited, _ := os.environ(context.temp_allocator) // env-read-ok: merged with the login shell's by key; lookups go through env_lookup
 	env := login_env_strip_claude(inherited, false)
 	result := Login_Env_Result.Kept
 	if gui do env, result, _ = login_env_shell_merge(env, login_env_from_claude(inherited), shell, timeout, probe, dirs)
@@ -498,7 +498,7 @@ login_env: struct {
 login_env_startup :: proc(no_window := false) {
 	path := os.get_env("PATH", context.temp_allocator)
 	test_mode := hook_env(.Script) != ""
-	env, _ := os.environ(context.temp_allocator)
+	env, _ := os.environ(context.temp_allocator) // env-read-ok: env_lookup over the literal proof list, and kept for a refresh
 	ppid := int(posix.getppid())
 	if no_window do ppid = 1
 	gui := login_env_gui_launch(ppid, path, login_env_gui_switch(), test_mode, login_env_from_claude(env))
@@ -529,7 +529,7 @@ core_launch_env :: proc(env: []string, from_tab := false) -> []string {
 // timeout), unless it inherited a core's environment already merged (inherited: a handover's
 // successor) or DECKHAND_GUI_LAUNCH=0 or test mode says no. Call before any thread starts.
 login_env_adopt :: proc(no_window := false, inherited := false, probe: Login_Env_Probe = login_env_ask) {
-	env, _ := os.environ(context.temp_allocator)
+	env, _ := os.environ(context.temp_allocator) // env-read-ok: env_lookup over the literal proof list, and kept for a refresh
 	login_env.from_claude = login_env_from_claude(env)
 	ppid := int(posix.getppid())
 	if no_window do ppid = 1 // as launchd's child: never a terminal's
@@ -551,7 +551,7 @@ login_env_adopt_asks :: proc(no_window, inherited, gui: bool) -> bool {
 // at startup; checked again here, whatever the base).
 child_base_env :: proc() -> []string {
 	env := login_env.children
-	if env == nil do env, _ = os.environ(context.temp_allocator)
+	if env == nil do env, _ = os.environ(context.temp_allocator) // env-read-ok: the children's base environment, passed on whole
 	return login_env_strip_claude(env, false)
 }
 

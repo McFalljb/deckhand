@@ -43,7 +43,7 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 		if st == .Ok do return 0, true, ""
 		log_fln("Deckhand: background core: systemctl --user start %s failed (%v: %s): starting it directly", SYSTEMD_UNIT, st, strings.trim_space(out))
 	}
-	ours, _ := os.environ(context.temp_allocator)
+	ours, _ := os.environ(context.temp_allocator) // env-read-ok: the core's launch environment, passed on whole (core_launch_env)
 	return scope_launch(bin, run, data, core_launch_env(ours, from_tab), "serve", secret)
 }
 
@@ -70,7 +70,7 @@ core_exec_in_place :: proc(bin, run, data, secret: string) -> string {
 	append(&args, strings.clone_to_cstring(bin, context.temp_allocator), "serve", "--run", strings.clone_to_cstring(run, context.temp_allocator), "--data", strings.clone_to_cstring(data, context.temp_allocator))
 	if secret != "" do append(&args, "--secret-stdin")
 	append(&args, nil)
-	ours, _ := os.environ(context.temp_allocator)
+	ours, _ := os.environ(context.temp_allocator) // env-read-ok: the core's environment for the exec in place, passed on whole (core_launch_env)
 	env := core_launch_env(ours, false)
 	cenv := make([]cstring, len(env) + 1, context.temp_allocator)
 	for e, i in env do cenv[i] = strings.clone_to_cstring(e, context.temp_allocator)

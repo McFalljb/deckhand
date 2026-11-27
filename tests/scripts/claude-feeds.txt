@@ -90,8 +90,23 @@ eventually
 assert_tip Show Claude Code's settings files (Settings → Coding agents)
 clickid cl_status_go
 eventually
-assert_drawn Claude Code (global)
+assert_state focus.id settings_page
+# the Settings page at Coding agents, Claude Code's card (#128: the old Settings tab's "Claude Code
+# (global)" group is gone); its files are further down the card, below pi's at this window's size
+assert_drawn Coding agents
+assert_drawn CLAUDE CODE
 shot claude-feeds/hooks-settings
+# Claude's settings.json (where its hooks are) is in the card, below this window's fold: the
+# page's search finds it
+type claude settings.json
+eventually
+assert_drawn permissions, hooks, env, model (applied live)
+# Esc clears the search, then goes back to the tab, its bar still up
+key escape
+wait 200
+key escape
+eventually
+assert_drawn Deckhand's Claude Code hooks aren't running here
 clickid cl_status_dismiss
 wait 300
 assert_not_drawn hooks aren't running here

@@ -6,7 +6,7 @@
 // load order (`-e` first).
 // node --test test/conflicts.test.ts (Node 22.18+ strips the types; never runs pi).
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -28,7 +28,7 @@ const ROOT = path.join(path.dirname(new URL(import.meta.url).pathname), "..");
 const KIT = process.env.PI_KIT_DIR ? path.join(process.env.PI_KIT_DIR, "extensions") : "";
 const noKit = !KIT || !existsSync(path.join(KIT, "shell/index.ts")) ? "PI_KIT_DIR (a pi-kit checkout) not set" : false;
 const SHELL_TOOLS = ["bash_bg", "monitor", "wake_later", "shell_stop", "shell_list"];
-const ENV = ["DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR", "PI_KIT_READONLY", "PI_CODING_AGENT_DIR", "PI_SUBAGENT_CHILD", "DECKHAND_AGY_PATH"];
+const ENV = ["DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR", "PI_KIT_READONLY", "PI_CODING_AGENT_DIR", "PI_SUBAGENT_CHILD"];
 
 /** Runs `f` with exactly `env` set among ENV (and Deckhand's in-memory copies cleared), then puts everything back. */
 async function withEnv<T>(env: Record<string, string>, f: () => T | Promise<T>): Promise<T> {
@@ -71,8 +71,10 @@ test("pi's rule: two extensions that register one tool name while loading stop p
 });
 
 test("no bundled extension registers a tool or flag while loading (pi would refuse to start next to an extension with the same name)", async () => {
-	const agy = path.join(ROOT, "test/fake-agy.mjs"); // antigravity active: a stand-in agy, never started while loading
-	for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}, { DECKHAND_AGY_PATH: agy }])
+	// antigravity active: a stand-in agy on PATH, never started while loading
+	const bin = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-bin-"));
+	symlinkSync(path.join(ROOT, "test/fake-agy.mjs"), path.join(bin, "agy"));
+	for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}, { PATH: bin }])
 		for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"])
 			await withEnv(env, async () => {
 				const pi = piRules();

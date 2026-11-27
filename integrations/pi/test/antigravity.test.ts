@@ -16,6 +16,11 @@ const TMP_ROOT = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-test-"));
 process.on("exit", () => rmSync(TMP_ROOT, { recursive: true, force: true }));
 const FAKE = path.join(path.dirname(new URL(import.meta.url).pathname), "fake-agy.mjs");
 chmodSync(FAKE, 0o755);
+// the stand-in as `agy` on a PATH of its own (no environment variable picks agy's binary)
+const AGY_BIN = mkdtempSync(path.join(TMP_ROOT, "agy-bin-"));
+const AGY = path.join(AGY_BIN, "agy");
+symlinkSync(FAKE, AGY);
+const PATH_WITH_AGY = [AGY_BIN, process.env.PATH ?? ""].join(path.delimiter);
 
 let n = 0;
 /** A fresh log file and the env the stand-in runs with. */
@@ -40,7 +45,7 @@ test("agy versions: parse agy's forms; below 1.5.1 is too old; unparseable is no
 	assert.equal(agyTooOld(undefined), false);
 });
 
-test("findAgy: the override when it is an absolute executable, else agy then antigravity on PATH; never relative", () => {
+test("findAgy: the path setting when it is an absolute executable, else agy then antigravity on PATH; never relative", () => {
 	const dir = mkdtempSync(path.join(TMP_ROOT, "bin-"));
 	const other = mkdtempSync(path.join(TMP_ROOT, "bin-"));
 	const mk = (d: string, name: string, mode = 0o755) => {
@@ -57,9 +62,10 @@ test("findAgy: the override when it is an absolute executable, else agy then ant
 	mk(dir, "agy", 0o644);
 	assert.equal(findAgy({ PATH: [dir, other].join(path.delimiter) }), agy, "not executable: skipped");
 	assert.equal(findAgy({ PATH: "relative/bin" }), undefined);
-	assert.equal(findAgy({ PATH: other, DECKHAND_AGY_PATH: FAKE }), FAKE, "the override");
-	assert.equal(findAgy({ PATH: other, DECKHAND_AGY_PATH: "fake-agy.mjs" }), undefined, "a relative override is refused, not looked up");
-	assert.equal(findAgy({ PATH: other, DECKHAND_AGY_PATH: path.join(dir, "missing") }), undefined);
+	assert.equal(findAgy({ PATH: other }, FAKE), FAKE, "the setting");
+	assert.equal(findAgy({ PATH: dir }, "fake-agy.mjs"), undefined, "a relative setting is not looked up");
+	assert.equal(findAgy({ PATH: other }, path.join(dir, "missing")), agy, "an unusable setting: PATH's");
+	assert.equal(findAgy({ PATH: other, DECKHAND_AGY_PATH: FAKE }), agy, "no environment variable picks the binary");
 	assert.deepEqual(Object.keys(agyEnv({ DECKHAND_TOKEN: "t", DECKHAND_SOCKET: "s", HOME: "/h" })), ["HOME"], "Deckhand's variables stay out of agy");
 });
 
@@ -309,7 +315,8 @@ async function loadExtension() {
 }
 
 test("dormant without agy: no provider, command, hook or notice", async () => {
-	await withEnv({ DECKHAND_AGY_PATH: undefined, PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) }, async () => {
+	const home = mkdtempSync(path.join(TMP_ROOT, "home-"));
+	await withEnv({ HOME: home, XDG_DATA_HOME: path.join(home, "xdg"), PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) }, async () => {
 		const pi = await loadExtension();
 		const [x] = pi.extensions;
 		assert.deepEqual([x.providers.length, x.commands.size, x.tools.size, x.flags.size, x.handlers.size], [0, 0, 0, 0, 0]);
@@ -318,13 +325,15 @@ test("dormant without agy: no provider, command, hook or notice", async () => {
 	});
 });
 
-/** A temp HOME (with a ~/.gemini of skills and rules), a temp accounts folder, agy = the stand-in. */
+/** A temp HOME (with a ~/.gemini of skills and rules; Deckhand's data dir beneath it), agy = the stand-in on PATH. */
 function accountsEnv(extra: Record<string, string | undefined> = {}) {
 	const home = mkdtempSync(path.join(TMP_ROOT, "home-"));
 	mkdirSync(path.join(home, ".gemini", "config", "skills", "my-skill"), { recursive: true });
 	writeFileSync(path.join(home, ".gemini", "AGENTS.md"), "# my rules\n");
-	const root = path.join(mkdtempSync(path.join(TMP_ROOT, "data-")), "antigravity");
-	return { home, root, env: { HOME: home, DECKHAND_ANTIGRAVITY_DIR: root, DECKHAND_AGY_PATH: FAKE, ...extra } };
+	const env = { HOME: home, XDG_DATA_HOME: path.join(home, ".local", "share"), PATH: PATH_WITH_AGY, ...extra };
+	const root = dataRoot(env);
+	assert.ok(root.startsWith(home + path.sep), "never the real data dir");
+	return { home, root, env };
 }
 /** The provider registered last under `id`. */
 const prov = (pi: any, id: string) => [...pi.extensions[0].providers].reverse().find((p: any) => p.id === id);
@@ -352,7 +361,7 @@ test("with agy: one provider per account (antigravity for the default), /antigra
 		assert.deepEqual(x.providers.map((p: any) => p.id), ["antigravity", "antigravity-work"], "bad entries skipped");
 		const p = x.providers[0];
 		assert.deepEqual(p.getModels().map((m: any) => [m.provider, m.id, m.api]), [["antigravity", "default", "antigravity-acp"]]);
-		assert.deepEqual(await p.auth.apiKey.check({}), { type: "api_key", source: `agy (${FAKE})` });
+		assert.deepEqual(await p.auth.apiKey.check({}), { type: "api_key", source: `agy (${AGY})` });
 		assert.equal(p.auth.apiKey.login, undefined, "a Google account: agy keeps the sign-in");
 		const w = x.providers[1];
 		assert.equal(typeof w.auth.apiKey.login, "function", "an API key: pi's /login asks for it");
@@ -394,7 +403,7 @@ test("/antigravity-login: agy's --login in the default account's own profile (GE
 		assert.ok(!existsSync(path.join(prof, "GEMINI.md")), "only what the user has");
 		const st = cmdCtx(pi);
 		await run(pi, "antigravity", "status", st.ctx);
-		assert.match(st.notes[0], /^Antigravity CLI: .*fake-agy\.mjs \(agy_acp_server_1\.5\.12\)\nAccounts \(.*\):\n- default → antigravity · Google account · signed in · 2 models$/);
+		assert.match(st.notes[0], /^Antigravity CLI: .*\/agy \(agy_acp_server_1\.5\.12\)\nAccounts \(.*\):\n- default → antigravity · Google account · signed in · 2 models$/);
 		await run(pi, "antigravity", "logout", st.ctx);
 		assert.equal(st.notes.at(-1), 'Signed out of Antigravity (account "default"); its history is kept');
 		assert.ok(f.read().some((m) => m.method === "logout"));
@@ -528,6 +537,53 @@ test("Gemini Enterprise: project and location in the profile's settings; sign-in
 	});
 });
 
+
+test("/antigravity path: an absolute executable is kept in accounts.json and used from then on (also by a new pi); anything else refused; no argument clears it", async () => {
+	const a = accountsEnv();
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi);
+		await run(pi, "antigravity", "path fake-agy.mjs", ctx);
+		assert.equal(notes.at(-1), "Not an absolute path to an executable file: fake-agy.mjs");
+		await run(pi, "antigravity", `path ${path.join(a.home, "missing")}`, ctx);
+		assert.match(notes.at(-1)!, /^Not an absolute path to an executable file/);
+		assert.ok(!existsSync(path.join(a.root, "accounts.json")), "nothing saved");
+		await run(pi, "antigravity", "add work oauth-personal", ctx);
+		await run(pi, "antigravity", `path ${FAKE}`, ctx);
+		assert.equal(notes.at(-1), `Antigravity now runs ${FAKE}`);
+		const saved = JSON.parse(readFileSync(path.join(a.root, "accounts.json"), "utf8"));
+		assert.equal(saved.agyPath, FAKE);
+		assert.deepEqual(saved.accounts.map((x: any) => x.name), ["work"], "accounts kept");
+		assert.deepEqual(await prov(pi, "antigravity-work").auth.apiKey.check({}), { type: "api_key", source: `agy (${FAKE})` }, "every account's provider follows");
+		await run(pi, "antigravity", "status", ctx);
+		assert.match(notes.at(-1)!, /^Antigravity CLI: .*fake-agy\.mjs \(agy_acp_server_1\.5\.12\), set by \/antigravity path\n/);
+		await run(pi, "antigravity", "add other oauth-personal", ctx);
+		assert.equal(JSON.parse(readFileSync(path.join(a.root, "accounts.json"), "utf8")).agyPath, FAKE, "kept when accounts change");
+	});
+	// a new pi, agy on no PATH: the setting finds it
+	await withEnv({ ...a.env, PATH: mkdtempSync(path.join(TMP_ROOT, "empty-")) }, async () => {
+		const pi = await loadExtension();
+		assert.equal(prov(pi, "antigravity").baseUrl, "acp:agy");
+		assert.deepEqual(await prov(pi, "antigravity").auth.apiKey.check({}), { type: "api_key", source: `agy (${FAKE})` });
+	});
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi);
+		await run(pi, "antigravity", "path", ctx);
+		assert.equal(notes.at(-1), `Cleared agy's path: Antigravity runs ${AGY} from your PATH`);
+		assert.equal(JSON.parse(readFileSync(path.join(a.root, "accounts.json"), "utf8")).agyPath, undefined);
+		// a setting that went stale: PATH's agy, and the status says why
+		const file = path.join(a.root, "accounts.json");
+		writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), agyPath: "/nowhere/agy" }));
+		const again = await loadExtension();
+		await again.start();
+		const c2 = cmdCtx(again);
+		await run(again, "antigravity", "status", c2.ctx);
+		assert.match(c2.notes[0], new RegExp(`^Antigravity CLI: ${AGY.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} \\(agy_acp_server_1\\.5\\.12\\)\\n  The path set by /antigravity path is not an executable file, so agy is taken from PATH: /nowhere/agy\\n`));
+	});
+});
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {
 	const user = mkdtempSync(path.join(TMP_ROOT, "gem-"));
 	const prof = mkdtempSync(path.join(TMP_ROOT, "prof-"));
@@ -544,7 +600,8 @@ test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder
 	assert.throws(() => lstatSync(path.join(prof, "AGENTS.md")), "dangling link removed");
 	assert.equal(dataRoot({ HOME: "/h" }, "darwin"), "/h/Library/Application Support/Deckhand/antigravity");
 	assert.equal(dataRoot({ HOME: "/h" }, "linux"), "/h/.local/share/deckhand/antigravity");
-	assert.equal(dataRoot({ HOME: "/h", DECKHAND_ANTIGRAVITY_DIR: "/x/ag" }, "darwin"), "/x/ag");
+	assert.equal(dataRoot({ HOME: "/h", XDG_DATA_HOME: "/x" }, "linux"), "/x/deckhand/antigravity");
+	assert.equal(dataRoot({ HOME: "/h", DECKHAND_ANTIGRAVITY_DIR: "/x/ag" }, "darwin"), "/h/Library/Application Support/Deckhand/antigravity", "no environment override");
 });
 
 // ---- step 3: the passthrough provider ----
@@ -852,7 +909,7 @@ test("pi's request hooks: onPayload sees (and may replace) the prompt; onProvide
 });
 
 test("session_before_compact: an Antigravity session's compaction is a note, without asking agy; other models' are left to pi", async () => {
-	await withEnv({ DECKHAND_AGY_PATH: FAKE }, async () => {
+	await withEnv(accountsEnv().env, async () => {
 		const pi = await loadExtension();
 		await pi.start();
 		const [h] = pi.extensions[0].handlers.get("session_before_compact");

@@ -15,9 +15,10 @@
 //   pi's own credential store (`/login antigravity-<name>`, a masked prompt; pi keeps it in
 //   auth.json, 0600, as every pi API key) and reaches agy only in its process environment.
 // - Where: <Deckhand's data dir>/antigravity (macOS `~/Library/Application Support/Deckhand`, or
-//   the older `pi-desk` when only that exists; Linux `~/.local/share/deckhand`), or
-//   DECKHAND_ANTIGRAVITY_DIR. accounts.json there (0600) holds names, methods and GCP
-//   project/location, never a secret; profiles/<name> (0700) the profiles.
+//   the older `pi-desk` when only that exists; Linux `$XDG_DATA_HOME/deckhand` or
+//   `~/.local/share/deckhand`). accounts.json there (0600) holds names, methods and GCP
+//   project/location, and agy's path when the user set one (`/antigravity path`), never a secret;
+//   profiles/<name> (0700) the profiles.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -42,7 +43,6 @@ export interface Account {
 
 export const DEFAULT_ACCOUNT: Account = { name: "default", method: "oauth-personal" };
 export const PLANS_URL = "https://antigravity.google/docs/plans";
-export const ROOT_ENV = "DECKHAND_ANTIGRAVITY_DIR";
 
 /** A provider id per account: `antigravity` for the default one. */
 export const providerIdOf = (name: string) => (name === "default" ? "antigravity" : `antigravity-${name}`);
@@ -59,8 +59,6 @@ export const usesBrowser = (a: Account) => a.method === "oauth-personal" || a.me
 
 /** Where the accounts and profiles live. */
 export function dataRoot(env: NodeJS.ProcessEnv = process.env, platform = process.platform): string {
-	const o = env[ROOT_ENV]?.trim();
-	if (o && path.isAbsolute(o)) return o;
 	const home = env.HOME || os.homedir(); // dataRoot(env) for tests; os.homedir() reads HOME too
 	if (platform === "darwin") {
 		const support = path.join(home, "Library", "Application Support");
@@ -98,10 +96,20 @@ export function loadAccounts(root: string): Account[] {
 	return [def, ...list.filter((a) => a.name !== "default")];
 }
 
-/** Writes accounts.json (0600, in a 0700 folder). It never holds a key. */
-export function saveAccounts(root: string, accounts: Account[]) {
+/** agy's path as the user set it (`/antigravity path`), unchecked; undefined when not set. */
+export function storedAgyPath(root: string): string | undefined {
+	try {
+		const p = JSON.parse(fs.readFileSync(accountsFile(root), "utf8"))?.agyPath;
+		return typeof p === "string" && p.trim() ? p.trim() : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/** Writes accounts.json (0600, in a 0700 folder), keeping or replacing agy's path. It never holds a key. */
+export function saveAccounts(root: string, accounts: Account[], agyPath: string | null | undefined = storedAgyPath(root)) {
 	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-	const body = JSON.stringify({ about: "Deckhand's Antigravity accounts (pi tabs). No secrets: API keys are in pi's credential store.", accounts: accounts.map(({ name, method, gcpProject, gcpLocation }) => ({ name, method, gcpProject, gcpLocation })) }, null, 2);
+	const body = JSON.stringify({ about: "Deckhand's Antigravity accounts (pi tabs). No secrets: API keys are in pi's credential store.", ...(agyPath ? { agyPath } : {}), accounts: accounts.map(({ name, method, gcpProject, gcpLocation }) => ({ name, method, gcpProject, gcpLocation })) }, null, 2);
 	const tmp = `${accountsFile(root)}.tmp-${process.pid}`;
 	fs.writeFileSync(tmp, `${body}\n`, { mode: 0o600 });
 	fs.renameSync(tmp, accountsFile(root));

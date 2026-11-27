@@ -25,7 +25,6 @@ export const CLIENT_INFO = { name: "deckhand-pi", title: "Deckhand (pi)", versio
 export const AGY_MIN_VERSION = "1.5.1";
 export const AGY_RECOMMENDED_VERSION = "1.5.12";
 /** Overrides the PATH lookup with an absolute path to agy (or a stand-in, in tests). */
-export const AGY_PATH_ENV = "DECKHAND_AGY_PATH";
 export const SIGN_IN_PREFIX = "Open the following link to authenticate the ACP server: ";
 /** What every request of agy's for approval or input gets until approvals are reviewed. */
 export const DECLINED_NOTE = "declined: Deckhand's Antigravity tabs do not grant approvals yet";
@@ -56,13 +55,16 @@ function executable(p: string): boolean {
 	}
 }
 
+/** Whether `p` can be agy's path setting: an absolute path to an executable file (never looked up). */
+export const usableAgyPath = (p: string | undefined): p is string => !!p && path.isAbsolute(p) && executable(p);
+
 /**
- * The agy binary: DECKHAND_AGY_PATH when it is an absolute path to an executable file, else `agy`
- * or `antigravity` (the name of macOS downloads) on PATH. A few stats, no process started.
+ * The agy binary: `agy` or `antigravity` (the name of macOS downloads) on PATH. A few stats, no
+ * process started. The user's own path setting (`/antigravity path`) comes first: the extension
+ * passes it as `configured` when it is usable.
  */
-export function findAgy(env: NodeJS.ProcessEnv = process.env): string | undefined {
-	const override = env[AGY_PATH_ENV]?.trim();
-	if (override) return path.isAbsolute(override) && executable(override) ? override : undefined;
+export function findAgy(env: NodeJS.ProcessEnv = process.env, configured?: string): string | undefined {
+	if (usableAgyPath(configured)) return configured;
 	const dirs = (env.PATH ?? "").split(path.delimiter).filter((d) => d && path.isAbsolute(d));
 	for (const name of ["agy", "antigravity"]) for (const d of dirs) if (executable(path.join(d, name))) return path.join(d, name);
 	return undefined;

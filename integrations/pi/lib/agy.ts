@@ -46,6 +46,8 @@ export interface AgySessionOptions {
 	resumeId?: string;
 	/** agy's arguments (the account's profile: agyArgs); `acp` alone by default. */
 	args?: string[];
+	/** The process's own TMPDIR folder (agy-accounts runDir), removed when it ends. */
+	runDir?: string;
 	env?: NodeJS.ProcessEnv;
 	/** The sign-in method passed to `authenticate` (the account's). */
 	authMethod?: string;
@@ -80,6 +82,7 @@ export class AgySession {
 		let self!: AgySession;
 		const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], {
 			cwd: o.cwd,
+			runDir: o.runDir,
 			env: o.env ?? agyEnv(),
 			spawnImpl: o.spawnImpl,
 			onUpdate: (p) => o.onUpdate?.(p),
@@ -93,7 +96,7 @@ export class AgySession {
 			await self.handshake(o);
 			return self;
 		} catch (e) {
-			await conn.close(200);
+			await conn.close();
 			throw e;
 		}
 	}
@@ -227,29 +230,29 @@ export async function probeModels(o: Omit<AgySessionOptions, "resumeId">): Promi
 	}
 }
 
-type BareOptions = Pick<AgySessionOptions, "agyPath" | "cwd" | "args" | "env" | "spawnImpl">;
+type BareOptions = Pick<AgySessionOptions, "agyPath" | "cwd" | "args" | "env" | "spawnImpl" | "runDir">;
 
 /** `initialize` only (no session, no sign-in): agy's reported version. */
 export async function agyVersion(o: BareOptions): Promise<string> {
-	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl });
+	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl, runDir: o.runDir });
 	conn.start();
 	try {
 		const init = await conn.request("initialize", initializeParams(), 30_000);
 		return String(init?.agentInfo?.version ?? init?.info?.version ?? "");
 	} finally {
-		await conn.close(200);
+		await conn.close();
 	}
 }
 
 /** Sign-out by agy's own ACP `logout` (t3code AntigravityAuth.logout): its saved login goes, its history stays. */
 export async function agyLogout(o: BareOptions): Promise<void> {
-	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl });
+	const conn = new AcpConnection(o.agyPath, o.args ?? ["acp"], { cwd: o.cwd, env: o.env ?? agyEnv(), spawnImpl: o.spawnImpl, runDir: o.runDir });
 	conn.start();
 	try {
 		const init = await conn.request("initialize", initializeParams(), 30_000);
 		if (init?.agentCapabilities?.auth?.logout == null) throw new AcpError("This Antigravity version cannot sign out: update agy");
 		await conn.request("logout", {}, 90_000);
 	} finally {
-		await conn.close(200);
+		await conn.close();
 	}
 }

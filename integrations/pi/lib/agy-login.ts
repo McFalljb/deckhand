@@ -5,7 +5,7 @@
 // stores a token. The link and the code are checked as t3code checks them
 // (antigravityAuthSupport.ts parseAntigravityAuthorizationUrl, antigravityLoginResponse).
 import { type ChildProcess, spawn } from "node:child_process";
-import { agyEnv, SIGN_IN_PREFIX } from "./acp.ts";
+import { agyEnv, endChild, endRun, markRun, SIGN_IN_PREFIX } from "./acp.ts";
 
 const MAX_URL = 16_384;
 /** Where `agy acp --login` sends Google; the page there shows the code. */
@@ -61,6 +61,8 @@ export interface LoginOptions {
 	env?: NodeJS.ProcessEnv;
 	/** agy's arguments, `--login` included (the account's profile: agyArgs(p, true)). */
 	args?: string[];
+	/** The process's own TMPDIR folder (agy-accounts runDir), removed when it ends. */
+	runDir?: string;
 	/** Shows the link to the user. */
 	showLink: (url: string) => void;
 	/** Asks for the code; undefined or empty cancels. */
@@ -78,12 +80,15 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 	try {
 		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: o.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"] });
 	} catch (e) {
+		endRun(o.runDir);
 		return { ok: false, error: `Antigravity (agy) could not start: ${(e as Error).message}` };
 	}
+	markRun(o.runDir, child.pid);
 	const exited = new Promise<number | null>((resolve) => {
 		child.on("close", (code) => resolve(code)); // after stdout is read to its end
 		child.on("error", () => resolve(-1));
 	});
+	void exited.then(() => endRun(o.runDir));
 	child.stdin!.on("error", () => {});
 	child.stderr!.resume(); // agy's log stays out of pi
 	const link = await new Promise<SignInLink | undefined>((resolve) => {
@@ -107,10 +112,7 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 			resolve(undefined);
 		});
 	});
-	const stop = async () => {
-		if (child.exitCode === null && child.signalCode === null) child.kill("SIGTERM");
-		await exited;
-	};
+	const stop = () => endChild(child, exited);
 	if (!link) {
 		await stop();
 		return { ok: false, error: "Antigravity (agy) gave no Google sign-in link" };

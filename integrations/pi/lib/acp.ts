@@ -109,8 +109,65 @@ export function signInLink(line: string): string | undefined {
 	return undefined;
 }
 
+/** How long closing waits: for agy to end after its stdin closed, then after SIGTERM (then SIGKILL). */
+export interface CloseTimes {
+	stdinWaitMs?: number;
+	termGraceMs?: number;
+}
+export const CLOSE_STDIN_WAIT_MS = 1000;
+export const CLOSE_TERM_GRACE_MS = 5000;
+
+/**
+ * Ends a child gently: its stdin first (agy ends its session and cleans up its unpacked files),
+ * SIGTERM if it is still there after stdinWaitMs, SIGKILL only after a further termGraceMs.
+ */
+export async function endChild(child: ChildProcess, exited: Promise<unknown>, t: CloseTimes = {}): Promise<void> {
+	const running = () => child.exitCode === null && child.signalCode === null;
+	if (!running()) return;
+	let gone = false;
+	void exited.then(() => (gone = true));
+	const wait = (ms: number) =>
+		new Promise<void>((r) => {
+			const timer = setTimeout(r, ms);
+			void exited.then(() => {
+				clearTimeout(timer);
+				r();
+			});
+		});
+	try {
+		child.stdin?.end();
+	} catch {}
+	await wait(t.stdinWaitMs ?? CLOSE_STDIN_WAIT_MS);
+	if (gone || !running()) return;
+	try {
+		child.kill("SIGTERM");
+	} catch {}
+	await wait(t.termGraceMs ?? CLOSE_TERM_GRACE_MS);
+	if (gone || !running()) return;
+	try {
+		child.kill("SIGKILL");
+	} catch {}
+	await exited;
+}
+
+/** A process's own TMPDIR folder (lib/agy-accounts.ts runDir): marked with agy's pid while it runs, removed when it ends. */
+export function markRun(dir: string | undefined, pid: number | undefined) {
+	if (!dir || !pid) return;
+	try {
+		fs.writeFileSync(path.join(dir, "agy.pid"), String(pid), { mode: 0o600 });
+	} catch {}
+}
+export function endRun(dir: string | undefined) {
+	if (!dir) return;
+	try {
+		fs.rmSync(dir, { recursive: true, force: true });
+	} catch {}
+}
+
 export interface AcpConnectionOptions {
 	cwd: string;
+	/** This process's own TMPDIR folder: marked with its pid, removed when it ends. */
+	runDir?: string;
 	env?: NodeJS.ProcessEnv;
 	/** Each session/update notification's params. */
 	onUpdate?: (params: any) => void;
@@ -152,6 +209,7 @@ export class AcpConnection {
 	start(): void {
 		const child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: this.opts.env ?? agyEnv(), stdio: ["pipe", "pipe", "pipe"] });
 		this.child = child;
+		markRun(this.opts.runDir, child.pid);
 		child.stdout!.setEncoding("utf8");
 		child.stdout!.on("data", (s: string) => this.onData(s));
 		let errBuf = "";
@@ -163,8 +221,12 @@ export class AcpConnection {
 			for (const l of lines) this.noticeLink(l);
 		});
 		child.stdin!.on("error", () => {}); // EPIPE after a crash: reported by "exit"
-		child.on("error", (e) => this.fail(new AcpError(`Antigravity (agy) could not start: ${e.message}`)));
+		child.on("error", (e) => {
+			this.fail(new AcpError(`Antigravity (agy) could not start: ${e.message}`));
+			if (child.pid === undefined) endRun(this.opts.runDir);
+		});
 		child.on("exit", (code, signal) => {
+			endRun(this.opts.runDir);
 			this.fail(new AcpError(`Antigravity (agy) ended${code !== null ? ` with exit code ${code}` : signal ? ` (${signal})` : ""}`));
 			this.markExited({ code, signal });
 			this.opts.onExit?.(code, signal);
@@ -266,22 +328,12 @@ export class AcpConnection {
 		} catch {}
 	}
 
-	/** Ends the process: SIGTERM, then SIGKILL after `graceMs`. */
-	close(graceMs = 1000): Promise<void> {
+	/** Ends the process gently (endChild): stdin, then SIGTERM, then SIGKILL. */
+	close(t: CloseTimes = {}): Promise<void> {
 		const child = this.child;
 		this.fail(new AcpError("Antigravity (agy) was stopped"));
-		if (!child || child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-		try {
-			child.stdin!.end();
-			child.kill("SIGTERM");
-		} catch {}
-		const t = setTimeout(() => {
-			try {
-				child.kill("SIGKILL");
-			} catch {}
-		}, graceMs);
-		t.unref?.();
-		return this.exited.then(() => clearTimeout(t));
+		if (!child) return Promise.resolve();
+		return endChild(child, this.exited, t);
 	}
 }
 

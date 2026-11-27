@@ -21,6 +21,12 @@ import readline from "node:readline";
 
 const env = process.env;
 const log = (x) => env.FAKE_AGY_LOG && fs.appendFileSync(env.FAKE_AGY_LOG, `${JSON.stringify(x)}\n`);
+// how it ends: on stdin's end it exits, unless FAKE_AGY_HOLD_ON=1 (then it also ignores SIGTERM)
+const HOLD_ON = env.FAKE_AGY_HOLD_ON === "1";
+process.on("SIGTERM", () => {
+	log({ event: "sigterm", t: Date.now() });
+	if (!HOLD_ON) process.exit(0);
+});
 const send = (x) => process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...x })}\n`);
 const LINK = "https://accounts.google.com/o/oauth2/auth?client_id=fake&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&state=s123";
 const args = process.argv.slice(2);
@@ -281,5 +287,9 @@ function serve() {
 				if (id !== undefined) send({ id, error: { code: -32601, message: `Method not found: ${method}` } });
 		}
 	});
-	rl.on("close", () => process.exit(0));
+	rl.on("close", () => {
+		log({ event: "stdin closed", t: Date.now() });
+		if (HOLD_ON) setInterval(() => {}, 1000);
+		else process.exit(0);
+	});
 }

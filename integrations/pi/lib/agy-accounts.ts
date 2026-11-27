@@ -22,6 +22,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { alive } from "./agy-ledger.ts";
 
 export type Method = "oauth-personal" | "oauth-business" | "gemini-api-key" | "agent-platform";
 
@@ -127,6 +128,46 @@ export const profileOf = (root: string, name: string): Profile => {
 	return { geminiHome, acpDir, tmpDir: path.join(acpDir, "tmp") };
 };
 
+/** A run folder: `<pi's pid>-<6 random>`, under the profile's tmp. */
+const RUN_DIR = /^(\d+)-[A-Za-z0-9]{6}$/;
+
+/**
+ * Removes the run folders of processes that are gone: pi's (the name) and agy's (its agy.pid) both
+ * dead. A folder either process still has is never touched; nor is anything else in tmp.
+ */
+export function sweepRunDirs(tmpDir: string) {
+	let entries: string[] = [];
+	try {
+		entries = fs.readdirSync(tmpDir);
+	} catch {
+		return;
+	}
+	for (const e of entries) {
+		const m = RUN_DIR.exec(e);
+		if (!m || alive(Number(m[1]))) continue;
+		const dir = path.join(tmpDir, e);
+		let agyPid = 0;
+		try {
+			agyPid = Number(fs.readFileSync(path.join(dir, "agy.pid"), "utf8").trim());
+		} catch {}
+		if (agyPid && alive(agyPid)) continue;
+		try {
+			fs.rmSync(dir, { recursive: true, force: true });
+		} catch {}
+	}
+}
+
+/**
+ * A new agy process's own TMPDIR (agy unpacks its runtime there): `tmp/<pi's pid>-<random>`, 0700,
+ * after sweeping dead processes' leftovers (as t3code's retireAntigravityRuntimeTempDirs, but by
+ * pid: several pi processes share a profile). The connection removes it when agy ends.
+ */
+export function runDir(p: Profile): string {
+	fs.mkdirSync(p.tmpDir, { recursive: true, mode: 0o700 });
+	sweepRunDirs(p.tmpDir);
+	return fs.mkdtempSync(path.join(p.tmpDir, `${process.pid}-`));
+}
+
 /** agy's arguments for a profile (t3code buildAntigravityAcpSpawnInput); `--login` for the code sign-in. */
 export const agyArgs = (p: Profile, login = false) => ["acp", "--gemini-dir", p.geminiHome, "--app-data-dir", "antigravity-acp", ...(login ? ["--login"] : [])];
 
@@ -217,7 +258,7 @@ export const REMOVED_ENV = new Set([
  * profile (it ignores AGY_ACP_FORCE_FILE_STORAGE) unless it believes it runs over SSH, so without it
  * two accounts would share, and overwrite, one sign-in.
  */
-export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, base: NodeJS.ProcessEnv = process.env, tmpDir = p.tmpDir): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = {};
 	for (const [k, v] of Object.entries(base)) {
 		const K = k.toUpperCase();
@@ -235,7 +276,7 @@ export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, ba
 		AGY_CLI_DISABLE_AUTO_UPDATE: "true",
 		PYTHONUNBUFFERED: "1",
 		ELECTRON_RUN_AS_NODE: "1",
-		TMPDIR: p.tmpDir,
+		TMPDIR: tmpDir,
 	};
 }
 

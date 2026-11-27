@@ -2,6 +2,7 @@
 // (test/fake-agy.mjs): never a real agy, pi or model. node --test test/antigravity.test.ts
 import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOME in a temp folder
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -446,8 +447,10 @@ test("/antigravity-login: agy's --login in the default account's own profile (GE
 		const prof = path.join(a.root, "profiles", "default");
 		const starts = f.read().filter((m) => m.argv);
 		assert.deepEqual(starts[0].argv, ["acp", "--gemini-dir", prof, "--app-data-dir", "antigravity-acp", "--login"]);
-		for (const s of starts)
-			assert.deepEqual(s.env, { GEMINI_HOME: prof, TMPDIR: path.join(prof, "antigravity-acp", "tmp"), SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_ACP_FORCE_FILE_STORAGE: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "true", ELECTRON_RUN_AS_NODE: "1" });
+		for (const s of starts) {
+			assert.equal(path.dirname(s.env.TMPDIR), path.join(prof, "antigravity-acp", "tmp"), "its own folder in the profile's tmp");
+			assert.deepEqual({ ...s.env, TMPDIR: undefined }, { GEMINI_HOME: prof, TMPDIR: undefined, SSH_CONNECTION: "127.0.0.1 0 127.0.0.1 0", AGY_ACP_FORCE_FILE_STORAGE: "1", AGY_CLI_DISABLE_AUTO_UPDATE: "true", ELECTRON_RUN_AS_NODE: "1" });
+		}
 		assert.deepEqual(JSON.parse(readFileSync(path.join(prof, "antigravity-acp", "settings.json"), "utf8")), { auth: { type: "oauth-personal" } });
 		assert.equal(statSync(prof).mode & 0o777, 0o700);
 		assert.equal(f.read().find((m) => m.method === "authenticate").params.methodId, "oauth-personal");
@@ -638,6 +641,55 @@ test("/antigravity path: an absolute executable is kept in accounts.json and use
 		const c2 = cmdCtx(again);
 		await run(again, "antigravity", "status", c2.ctx);
 		assert.match(c2.notes[0], new RegExp(`^Antigravity CLI: ${AGY.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} \\(agy_acp_server_1\\.5\\.12\\)\\n  The path set by /antigravity path is not an executable file, so agy is taken from PATH: /nowhere/agy\\n`));
+	});
+});
+
+test("finding 4: closing agy: its stdin first, SIGTERM only when it stays, SIGKILL after the grace", async () => {
+	const events = (f: any) => f.read().filter((m: any) => m.event);
+	const f = fake();
+	const c = new AcpConnection(FAKE, ["acp"], { cwd: f.cwd, env: f.env });
+	c.start();
+	await c.request("initialize", initializeParams());
+	await c.close();
+	assert.deepEqual(events(f).map((e: any) => e.event), ["stdin closed"], "an agy that ends on its own gets no signal");
+	const h = fake({ FAKE_AGY_HOLD_ON: "1" });
+	const d = new AcpConnection(FAKE, ["acp"], { cwd: h.cwd, env: h.env });
+	d.start();
+	await d.request("initialize", initializeParams());
+	const t0 = Date.now();
+	await d.close({ stdinWaitMs: 150, termGraceMs: 200 });
+	const e = events(h);
+	assert.deepEqual(e.map((x: any) => x.event), ["stdin closed", "sigterm"]);
+	assert.ok(e[1].t - e[0].t >= 120, `SIGTERM ${e[1].t - e[0].t} ms after stdin closed`);
+	assert.equal((await d.exited).signal, "SIGKILL");
+	assert.ok(Date.now() - t0 >= 330);
+});
+
+test("finding 4: each agy process has its own TMPDIR folder, gone when it ends; leftovers of dead processes are swept, live ones never", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	const prof = path.join(a.root, "profiles", "default");
+	const tmp = path.join(prof, "antigravity-acp", "tmp");
+	mkdirSync(tmp, { recursive: true });
+	writeFileSync(path.join(prof, "antigravity-acp", "acp_token.json"), "{}"); // as if signed in
+	const dead = spawnSync("true").pid!; // a process that has ended
+	const leftovers = { dead: `${dead}-aaaaaa`, piAlive: `${process.pid}-bbbbbb`, agyAlive: `${dead}-cccccc`, other: "agy-own" };
+	for (const d of Object.values(leftovers)) mkdirSync(path.join(tmp, d));
+	writeFileSync(path.join(tmp, leftovers.agyAlive, "agy.pid"), String(process.pid));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi);
+		await run(pi, "antigravity", "models", ctx);
+		assert.match(notes.at(-1)!, /2 models/);
+		const used = f.read().filter((m) => m.argv).map((m) => m.env.TMPDIR);
+		assert.ok(used.length >= 1);
+		for (const t of used) {
+			assert.match(t, new RegExp(`^${tmp.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}/${process.pid}-[A-Za-z0-9]{6}$`), "its own folder");
+			assert.ok(!existsSync(t), "removed when agy ended");
+		}
+		assert.ok(!existsSync(path.join(tmp, leftovers.dead)), "a dead process's leftover is swept");
+		for (const k of ["piAlive", "agyAlive", "other"] as const) assert.ok(existsSync(path.join(tmp, leftovers[k])), `${k} kept`);
 	});
 });
 test("linkUserConfig: links what ~/.gemini has, replaces agy's empty placeholder, drops dangling links, keeps a profile's own content", () => {

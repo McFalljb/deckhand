@@ -41,6 +41,7 @@ KNOWN = {
     "DECKHAND_GUI_LAUNCH", "DECKHAND_CEF_SHARED_TEXTURE",  # the user's workarounds
     "_DECKHAND_RESPONSIBLE",  # the holder's own TCC re-exec marker (src/holder/sys_darwin.odin; check-release-build.sh)
     "DECKHAND_STATUSLINE_DEPTH",  # deckhand statusline's own guard against running itself again (statusline.odin)
+    "DECKHAND_STATUSLINE_USER",  # a Claude tab's own status line command from its start, run when Deckhand does not answer (usage_claude.odin)
     # their old names, read after the new ones (src/core/env_names.odin: the rename's fallback)
     "PI_DESK_SOCKET", "PI_DESK_TOKEN", "PI_DESK_CLAUDE_TOKEN", "PI_DESK_SHOTS_DIR",
     "PI_DESK_GUI_LAUNCH", "PI_DESK_CEF_SHARED_TEXTURE",

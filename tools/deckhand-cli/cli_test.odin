@@ -1166,3 +1166,56 @@ statusline_quiet_without_deckhand :: proc(t: ^testing.T) {
 	testing.expect_value(t, run(&c5, {"statusline"}), 0)
 	testing.expect_value(t, len(f5.sent), 0)
 }
+
+// Review 1 #4: the user's status line runs with SIGPIPE as it would be (default: a writer to a
+// closed pipe ends), not inherited ignored from this CLI; `yes | head -1` then ends too.
+@(test)
+statusline_user_gets_default_sigpipe :: proc(t: ^testing.T) {
+	f: Fake
+	// a subshell writing to a pipe nobody reads: killed by SIGPIPE (default), or told EPIPE (ignored)
+	f.replies["claude.usage"] = `{"ok":true,"data":{"command":"exec 3>&1; { sleep 0.2; printf abc; echo \"ignored $?\" >&3; } | true; echo end"}}`
+	c := test_ctx(&f, SL_INPUT)
+	testing.expect_value(t, run(&c, {"statusline"}), 0)
+	out := strings.to_string(c.out)
+	testing.expect_value(t, out, "end\n")
+	if out != "end\n" do return // SIGPIPE ignored: `yes` would never end
+	f2: Fake
+	f2.replies["claude.usage"] = `{"ok":true,"data":{"command":"yes | head -1"}}`
+	c2 := test_ctx(&f2, SL_INPUT)
+	testing.expect_value(t, run(&c2, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c2.out), "y\n")
+}
+
+// Review 1 polish: with Deckhand not answering (a restart, a handover, an account removed), the
+// user's own status line from the tab's start (DECKHAND_STATUSLINE_USER) still runs; never when
+// Deckhand answers, even with no command (the user removed theirs since).
+@(test)
+statusline_fallback_when_deckhand_is_away :: proc(t: ^testing.T) {
+	env := make(map[string]string)
+	env["DECKHAND_SOCKET"] = "/nonexistent.sock"
+	env["DECKHAND_CLAUDE_TOKEN"] = "t"
+	env["DECKHAND_STATUSLINE_USER"] = "printf fallback"
+	f: Fake
+	f.fail = "Deckhand is not running"
+	c := test_ctx(&f, SL_INPUT, env)
+	testing.expect_value(t, run(&c, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c.out), "fallback")
+	f2: Fake
+	f2.replies["claude.usage"] = `{"ok":false,"error":"this tab's account is no longer configured"}`
+	c2 := test_ctx(&f2, SL_INPUT, env)
+	run(&c2, {"statusline"})
+	testing.expect_value(t, strings.to_string(c2.out), "fallback")
+	f3: Fake
+	f3.replies["claude.usage"] = `{"ok":true,"data":{}}`
+	c3 := test_ctx(&f3, SL_INPUT, env)
+	run(&c3, {"statusline"})
+	testing.expect_value(t, strings.to_string(c3.out), "")
+	// no socket at all: the same fallback
+	env4 := make(map[string]string)
+	env4["DECKHAND_STATUSLINE_USER"] = "printf fallback"
+	f4: Fake
+	c4 := test_ctx(&f4, SL_INPUT, env4)
+	c4.tr = nil
+	run(&c4, {"statusline"})
+	testing.expect_value(t, strings.to_string(c4.out), "fallback")
+}

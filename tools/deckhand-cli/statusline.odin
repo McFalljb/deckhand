@@ -7,16 +7,19 @@ package deckhand_cli
 // five-hour and weekly windows' used_percentage and resets_at, a spend limit's), never the
 // transcript path, folder, session, model or anything else; then runs the user's own status line
 // (the command Deckhand answers with: the tab's account's and project's settings) with the same
-// stdin, and its output goes out unchanged, byte for byte, with its exit status. With no Deckhand
-// to ask (outside a Deckhand tab, the socket gone) or no status line of the user's it prints
-// nothing: Claude Code has no status line text of its own to fall back to.
+// stdin, and its output goes out unchanged, byte for byte, with its exit status. When Deckhand
+// does not answer (a core restart or handover, a slow answer, the tab's account removed) it runs
+// the command Deckhand put in the tab's environment at its start (DECKHAND_STATUSLINE_USER, the
+// same user's command as resolved then), so the user's footer does not go blank; with neither, or
+// Deckhand answering that there is none, it prints nothing.
 
 import "core:encoding/json"
 import "core:strings"
 import "core:sys/posix"
 
-STATUSLINE_HELLO_MS :: 1500 // Claude Code redraws the footer when it ends: never long
-STATUSLINE_CALL_MS :: 1500
+// Claude Code redraws the footer when it ends: never long. The two together are at most 1.5 s.
+STATUSLINE_HELLO_MS :: 700
+STATUSLINE_CALL_MS :: 800
 // Set for the user's status line: a status line that runs `deckhand statusline` again (copied
 // into their settings) prints nothing, rather than run itself forever.
 STATUSLINE_DEPTH_ENV :: "DECKHAND_STATUSLINE_DEPTH"
@@ -55,16 +58,25 @@ statusline_cmd :: proc(input: string) -> string {
 run_statusline :: proc(c: ^Ctx) -> int {
 	raw := c.read_stdin != nil ? c.read_stdin() : ""
 	if c.getenv("DECKHAND_STATUSLINE_DEPTH") != "" do return 0 // the user's own runs this again: nothing
-	path, token := tab_env(c)
-	if path == "" || token == "" do return 0 // not a Deckhand tab: nothing to say, nothing to run
-	t, terr := transport(c, STATUSLINE_HELLO_MS)
-	if terr != "" do return 0
-	r, err := t.call(t, statusline_cmd(raw), STATUSLINE_CALL_MS)
-	if err != "" || !is_true(r, "ok") do return 0 // Deckhand gone or refusing: no footer, never an error in it
-	user, _ := get_str(get_obj(r, "data"), "command")
+	user := statusline_ask(c, raw)
 	if strings.trim_space(user) == "" do return 0
 	if c.run_cmd != nil do return c.run_cmd(c, user, raw)
 	return statusline_run_user(c, user, raw)
+}
+
+// The user's command: Deckhand's answer, or when it gives none (not there, too slow, refusing)
+// the tab's start's (DECKHAND_STATUSLINE_USER). Never an error in the footer.
+@(private = "file")
+statusline_ask :: proc(c: ^Ctx, raw: string) -> string {
+	fallback := c.getenv("DECKHAND_STATUSLINE_USER")
+	path, token := tab_env(c)
+	if path == "" || token == "" do return fallback
+	t, terr := transport(c, STATUSLINE_HELLO_MS)
+	if terr != "" do return fallback
+	r, err := t.call(t, statusline_cmd(raw), STATUSLINE_CALL_MS)
+	if err != "" || !is_true(r, "ok") do return fallback
+	user, _ := get_str(get_obj(r, "data"), "command") // answered: theirs as it is now ("" none)
+	return user
 }
 
 // The user's status line as Claude Code runs one: `/bin/sh -c COMMAND` in this folder, with this
@@ -88,6 +100,7 @@ statusline_run_user :: proc(c: ^Ctx, command, stdin_text: string) -> int {
 		return 1
 	}
 	if pid == 0 {
+		posix.signal(.SIGPIPE, auto_cast posix.SIG_DFL) // the user's command as Claude Code runs it: an ignored signal stays ignored across exec
 		posix.dup2(pin[0], 0)
 		posix.dup2(pout[1], 1)
 		for fd in ([4]posix.FD{pin[0], pin[1], pout[0], pout[1]}) do posix.close(fd)

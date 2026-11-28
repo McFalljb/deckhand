@@ -44,12 +44,15 @@ DECKHAND_HOLDER_HOOKS"
 #   DECKHAND_STATUSLINE_DEPTH: `deckhand statusline` sets it for the user's own status line and
 #     prints nothing when it finds it set (a copy of Deckhand's in their settings would run itself
 #     forever; tools/deckhand-cli/statusline.odin); it steers nothing else
+#   DECKHAND_STATUSLINE_USER: a Claude tab's own status line command (its user's settings) set at
+#     its start, which `deckhand statusline` runs only when Deckhand does not answer
 ALLOWED_SUFFIXES="SOCKET TOKEN CONTROL_TOKEN CLAUDE_TOKEN CLAUDE_TAB CLAUDE_ACCOUNT CODEX_ACCOUNT CLI SHOTS_DIR APP JOB RUN RUN_DIR SCHEDULED_AT GUI_LAUNCH CEF_SHARED_TEXTURE"
 ALLOWED="DECKHAND_
 PI_DESK_
 DECKHAND_RESPONSIBLE
 DECKHAND_SUCCESSOR_SECRET
-DECKHAND_STATUSLINE_DEPTH"
+DECKHAND_STATUSLINE_DEPTH
+DECKHAND_STATUSLINE_USER"
 for x in $ALLOWED_SUFFIXES; do ALLOWED="$ALLOWED
 DECKHAND_$x
 PI_DESK_$x"; done

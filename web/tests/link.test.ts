@@ -17,7 +17,10 @@ class FakeSocket {
     this.url = url;
     sockets.push(this);
   }
-  send() {}
+  sent: Uint8Array[] = [];
+  send(b: Uint8Array) {
+    this.sent.push(b);
+  }
   close() {}
 }
 const g = globalThis as any;
@@ -29,7 +32,7 @@ g.localStorage = { getItem: () => "a".repeat(64), setItem: () => {}, removeItem:
 g.fetch = async () => ({ ok: true, status: 200, json: async () => ({ paired: true }) });
 
 const { Link } = await import("../src/link.ts");
-const { jsonFrame, encodeFrame, Kind } = await import("../src/wire.ts");
+const { jsonFrame, encodeFrame, decodeFrame, text, Kind } = await import("../src/wire.ts");
 
 function deliver(ws: FakeSocket, msg: object) {
   const f = jsonFrame(msg);
@@ -95,4 +98,49 @@ test("a new socket: the serial moves on and the old socket's channels are forgot
   assert.ok(link.serial > first, "a new socket");
   frame(3); // channel 3 on the new socket: not the old stream's
   assert.equal(old, 1);
+});
+
+// The hello a socket said (its first message).
+function helloOf(ws: FakeSocket): any {
+  ws.readyState = 1;
+  ws.onopen!();
+  return JSON.parse(text(decodeFrame(ws.sent[0])!.payload));
+}
+
+// A browser's own connects (the page's start, a redial) never take the view from the Mac's window:
+// their hello has no "take". Only its user's View here (or Take back), or the first connect after
+// pairing, says "take": true; a redial after that says it again only until a hello was answered.
+test("take: only on the user's action", () => {
+  timers.length = 0; // the earlier tests' links' redials
+  const statuses: any[] = [];
+  const link = new Link({ up: () => {}, status: (s: any) => statuses.push(s) } as any);
+  link.start();
+  let ws = sockets.at(-1)!;
+  assert.equal(helloOf(ws).take, undefined, "the page's own connect");
+  deliver(ws, { type: "result", id: "hello", result: { ok: true, data: { core: "c1" } } });
+  // the Mac's window is attached: the core says the hello's result, then web.taken by the window
+  deliver(ws, { type: "web.taken", by: "window", name: "" });
+  assert.deepEqual(statuses.at(-1), { kind: "displaced", by: "" });
+  const n = sockets.length;
+  timers.splice(0).forEach((t) => t.fn());
+  assert.equal(sockets.length, n, "displaced: no redial of its own");
+  // View here
+  link.takeBack();
+  ws = sockets.at(-1)!;
+  assert.equal(helloOf(ws).take, true, "View here takes");
+  // it fails before its hello is answered: the redial still takes
+  ws.onclose!({ code: 1006 });
+  timers.at(-1)!.fn();
+  ws = sockets.at(-1)!;
+  assert.equal(helloOf(ws).take, true, "a redial of View here");
+  deliver(ws, { type: "result", id: "hello", result: { ok: true, data: { core: "c1" } } });
+  deliver(ws, { type: "state.full", version: 1, state: {} });
+  // up: a later drop's redial is the browser's own again
+  ws.onclose!({ code: 1006 });
+  timers.at(-1)!.fn();
+  assert.equal(helloOf(sockets.at(-1)!).take, undefined, "a redial after it was up");
+  // the first connect after pairing is the user's own
+  const paired = new Link({ up: () => {}, status: () => {} } as any);
+  paired.start(true);
+  assert.equal(helloOf(sockets.at(-1)!).take, true, "just paired");
 });

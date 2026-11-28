@@ -82,6 +82,7 @@ Client :: struct {
 	retry_at:       time.Tick,
 	retry_delay:    time.Duration,
 	retry_toasted:  bool,
+	tick_last:      time.Tick, // the end of the last client_core_tick while lost (a sleep shows as a gap)
 	last_try_why:   string,
 	lost_why:       string,
 	handing_over: bool, // a core handover at attach: its connection's end is expected (client_core.odin)
@@ -189,6 +190,7 @@ client_take_result :: proc(id: string) -> core.Result {return client_take(id)}
 // A ui command; its outcome comes back as state (ui_do). menu: a menu row's label, whose
 // failure is shown (core.menu_result).
 client_send :: proc(cmd: core.Command, menu := "") {
+	if client_lost_refuse() do return
 	if !client.attached {
 		core.inbox_submit(cmd, {kind = .UI}, menu = menu)
 		return
@@ -200,6 +202,7 @@ client_send :: proc(cmd: core.Command, menu := "") {
 
 // A separate core: a Set_Focus (ui_do), whose answer the next event waits for (client_before_event).
 client_send_focus :: proc(cmd: core.Command) {
+	if client_lost_refuse(note = false) do return
 	client_facts()
 	id := client_id()
 	client_raw(core.window_msg_command(cmd, id))
@@ -214,6 +217,7 @@ client_send_focus :: proc(cmd: core.Command) {
 
 // A ui command's result, after everything queued before it ran (ui_run). Temp-allocated strings.
 client_run :: proc(cmd: core.Command) -> core.Result {
+	if client_lost_refuse() do return core.fail(LOST_NOTE)
 	if !client.attached {
 		reply: core.Reply
 		core.inbox_submit(cmd, {kind = .UI}, &reply)
@@ -235,6 +239,7 @@ client_run :: proc(cmd: core.Command) -> core.Result {
 // one of core.WINDOW_COMMANDS. Main thread. Temp-allocated strings.
 client_call :: proc(cmd: core.Command, kind: core.Caller_Kind = .UI) -> core.Result {
 	assert(kind == .UI || kind == .Internal)
+	if kind == .UI && client_lost_refuse() do return core.fail(LOST_NOTE)
 	if !client.attached do return core.run_command(cmd, {kind = kind})
 	client_facts()
 	id := client_id()

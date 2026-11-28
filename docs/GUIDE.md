@@ -264,9 +264,13 @@ start fresh.
 scheduled job and nothing running on another machine it is linked to (whose alerts it shows) for
 10 minutes, it saves and exits; opening Deckhand starts it again. If it
 crashes, the holder starts it again and the window reconnects. A reconnect that fails (the core
-answers but drops the window, or sends it nothing) is tried again after a short wait (a quarter
-of a second, then longer), with a toast: "Reconnecting to Deckhand's background core…". The
-window gives up only when no core answers for 15 seconds or six tries in a minute fail: then it
+answers but drops the window, or sends it nothing, or a core can't be launched for a moment) is
+tried again after a short wait (a quarter of a second, then longer). "Reconnecting to Deckhand's
+background core…" stays at the bottom of the window until it is back ("Reconnected", briefly).
+Meanwhile what needs the core (typing in a terminal, closing or renaming tabs, the Files tree,
+settings) is refused with "Not connected to Deckhand's background core yet. Try again in a
+moment." It is not kept for later; ⌘S still saves an open file. The window gives up only when no
+core answers for 15 seconds (a sleep of the Mac doesn't count) or six tries in a minute fail: then it
 says "Deckhand lost its background core", with the reason, how the connection ended, and where
 its log is; files with unsaved changes stay open so you can save them. If it keeps crashing (or never
 comes up), the window offers **Use Previous Core** (the one from before the last update) or **Run

@@ -89,7 +89,7 @@ const MUTATION_KINDS = new Set(["edit", "delete", "move"]);
 const COMMAND_FIELDS = ["CommandLine", "command_line", "commandLine", "command"] as const;
 const CWD_FIELDS = ["Cwd", "WorkingDirectory", "working_dir", "workingDir", "cwd"] as const;
 // agy's own tools name their file in these (t3code AntigravityChildWork, clientPolicy ACP_RAW_INPUT_PATH_KEYS)
-const PATH_FIELDS = ["path", "filePath", "file_path", "Path", "TargetFile", "AbsolutePath", "File", "DirectoryPath", "SearchPath", "SearchDirectory"] as const;
+const PATH_FIELDS = ["path", "filePath", "file_path", "Path", "TargetFile", "AbsolutePath", "File", "DirectoryPath", "SearchPath", "SearchDirectory", "Url"] as const; // Url: a file:// one is a path (resolvePath), another scheme is ignored
 const MAX_PATHS = 256;
 
 const rec = (v: unknown): Record<string, any> | undefined => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : undefined);

@@ -270,6 +270,7 @@ test("pathsOf: locations, diffs and agy's path fields; an unreadable part keeps 
 	assert.deepEqual(pathsOf({ locations: [{ path: "/a" }], content: [{ type: "diff", path: "/b" }], rawInput: { TargetFile: "/c", AbsolutePath: "/a" } }).paths.sort(), ["/a", "/b", "/c"]);
 	assert.deepEqual(pathsOf({ locations: [{ line: 3 }, { path: "/x" }] }), { paths: ["/x"], complete: false });
 	assert.deepEqual(pathsOf({ title: "x" }), { paths: [], complete: true });
+	assert.deepEqual(pathsOf({ rawInput: { Url: "file:///Users/u/.pi/agent/auth.json" } }).paths, ["file:///Users/u/.pi/agent/auth.json"]);
 });
 
 test("questions (ask_question) go through select with agy's options; dismissed or without a UI, cancelled", async () => {

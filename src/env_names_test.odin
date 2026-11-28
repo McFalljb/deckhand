@@ -195,3 +195,20 @@ data_dir_both_with_holder :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.data_dir_pick(new, old), old)
 	testing.expect(t, strings.contains(core.data_dir_note, "holder"), core.data_dir_note)
 }
+
+// Review 2 #3: the status line's own names (DECKHAND_STATUSLINE_USER, the user's command from a
+// Claude tab's start; DECKHAND_STATUSLINE_DEPTH, deckhand statusline's guard) are Deckhand's: a
+// Deckhand started from a Claude tab never hands them on to its tabs, nor takes them from the
+// login shell.
+@(test)
+env_statusline_names_never_inherited :: proc(t: ^testing.T) {
+	keys := []string{"DECKHAND_STATUSLINE_USER", "DECKHAND_STATUSLINE_DEPTH", "PI_DESK_STATUSLINE_USER", "PI_DESK_STATUSLINE_DEPTH"}
+	for k in keys {
+		testing.expectf(t, core.env_desk_set(k), "%s is Deckhand's", k)
+		testing.expectf(t, core.env_desk_owned(k), "%s never comes from the login shell", k)
+		os.set_env(k, "inherited")
+	}
+	defer for k in keys do os.unset_env(k)
+	env := core.child_env({"DECKHAND_SOCKET=/new"})
+	for e in env do for k in keys do testing.expectf(t, !strings.has_prefix(e, strings.concatenate({k, "="}, context.temp_allocator)), "a tab inherited %s", e)
+}

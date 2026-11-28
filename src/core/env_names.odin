@@ -20,6 +20,7 @@ DESK_SET_ENV := [?]string {
 	"CLAUDE_TOKEN", "CLAUDE_TAB", "CLAUDE_ACCOUNT", "CLI", // Claude tabs
 	"CODEX_ACCOUNT", // Codex tabs (CODEX_ACCOUNT_SH)
 	"CLAUDE_READONLY", // no longer set (read-only chats are gone); still dropped, so a tab never inherits an old one
+	"STATUSLINE_USER", "STATUSLINE_DEPTH", // a Claude tab's status line (usage_claude.odin) and deckhand statusline's guard
 	"APP", // app tabs
 	"JOB", "RUN", "RUN_DIR", "SCHEDULED_AT", // job runs
 }

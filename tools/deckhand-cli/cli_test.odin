@@ -1057,3 +1057,165 @@ hook_codex_comments :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(f2.sent), 2)
 	testing.expect_value(t, strings.to_string(c.out), "")
 }
+
+// ---- the status line (statusline.odin) ----
+
+SL_INPUT :: `{"hook_event_name":"Status","session_id":"s-123","transcript_path":"/Users/me/.claude/projects/-x/s-123.jsonl","cwd":"/Users/me/secret-project","session_name":"SECRET NAME","model":{"id":"claude-opus-5","display_name":"Opus"},"workspace":{"current_dir":"/Users/me/secret-project","project_dir":"/Users/me/secret-project"},"cost":{"total_cost_usd":1.25},"rate_limits":{"five_hour":{"used_percentage":42.5,"resets_at":1795003600},"seven_day":{"used_percentage":12,"resets_at":1795400000},"spend_limit":{"used_percentage":20,"resets_at":1796000000,"used_usd":10,"limit_usd":50}}}`
+
+// Only the plan numbers go to Deckhand: never the transcript, folder, session, model or cost.
+@(test)
+statusline_sends_numbers_only :: proc(t: ^testing.T) {
+	f: Fake
+	c := test_ctx(&f, SL_INPUT)
+	code := run(&c, {"statusline"})
+	testing.expect_value(t, code, 0)
+	testing.expect_value(t, len(f.sent), 1)
+	if len(f.sent) == 0 do return
+	testing.expect_value(t, f.sent[0], `{"type":"claude.usage","five_hour":42.5,"five_hour_resets":1795003600,"seven_day":12,"seven_day_resets":1795400000,"spend":20,"spend_resets":1796000000,"spend_used_usd":10,"spend_limit_usd":50}`)
+	for bad in ([]string{"transcript", "secret", "SECRET", "s-123", "opus", "cost"}) do testing.expectf(t, !strings.contains(f.sent[0], bad), "%q sent", bad)
+	testing.expect_value(t, strings.to_string(c.out), "") // no status line of the user's: nothing
+	testing.expect(t, f.timeouts[0] <= 2000, "a short call: Claude Code's footer waits for it")
+	// no rate_limits (before the first API answer, or an API key): the call still asks for the
+	// user's status line; numbers that are not numbers, or a reset past the year 3000, are left out
+	f2: Fake
+	c2 := test_ctx(&f2, `{"rate_limits":{"five_hour":{"used_percentage":"x","resets_at":99999999999}},"cwd":"/x"}`)
+	run(&c2, {"statusline"})
+	testing.expect_value(t, f2.sent[0], `{"type":"claude.usage"}`)
+	f3: Fake
+	c3 := test_ctx(&f3, "not json at all")
+	testing.expect_value(t, run(&c3, {"statusline"}), 0)
+	testing.expect_value(t, f3.sent[0], `{"type":"claude.usage"}`)
+}
+
+// The user's status line runs with the same stdin and its output goes out unchanged, byte for
+// byte (escapes, blank lines, trailing spaces), with its exit status.
+@(test)
+statusline_runs_the_users_own :: proc(t: ^testing.T) {
+	f: Fake
+	f.replies["claude.usage"] = `{"ok":true,"data":{"command":"printf '\\033[1;32mmain\\033[0m  \\n\\n  42%%  '; exit 0"}}`
+	c := test_ctx(&f, SL_INPUT)
+	testing.expect_value(t, run(&c, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c.out), "\x1b[1;32mmain\x1b[0m  \n\n  42%  ")
+	// its stdin: the same bytes Claude Code gave
+	f2: Fake
+	f2.replies["claude.usage"] = `{"ok":true,"data":{"command":"cat"}}`
+	c2 := test_ctx(&f2, SL_INPUT)
+	run(&c2, {"statusline"})
+	testing.expect_value(t, strings.to_string(c2.out), SL_INPUT)
+	// its exit status
+	f3: Fake
+	f3.replies["claude.usage"] = `{"ok":true,"data":{"command":"printf x; exit 3"}}`
+	c3 := test_ctx(&f3, SL_INPUT)
+	testing.expect_value(t, run(&c3, {"statusline"}), 3)
+	testing.expect_value(t, strings.to_string(c3.out), "x")
+	// a big stdin to a command that writes before it reads, and one that never reads it
+	big := strings.repeat("y", 300_000)
+	f4: Fake
+	f4.replies["claude.usage"] = `{"ok":true,"data":{"command":"head -c 200000 /dev/zero | tr '\\\\0' z; wc -c | tr -d ' '"}}`
+	c4 := test_ctx(&f4, big)
+	testing.expect_value(t, run(&c4, {"statusline"}), 0)
+	out := strings.to_string(c4.out)
+	testing.expect_value(t, len(out), 200_000 + len("300000\n"))
+	testing.expect(t, strings.has_suffix(out, "300000\n"), out[max(len(out) - 20, 0):])
+	f5: Fake
+	f5.replies["claude.usage"] = `{"ok":true,"data":{"command":"printf done"}}`
+	c5 := test_ctx(&f5, big)
+	testing.expect_value(t, run(&c5, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c5.out), "done")
+}
+
+// Quiet when there is no Deckhand to ask (no socket, or it is gone or refuses) and when the user's
+// own status line is this command again: nothing printed, exit 0, never an error in the footer.
+@(test)
+statusline_quiet_without_deckhand :: proc(t: ^testing.T) {
+	f: Fake
+	env := make(map[string]string)
+	c := test_ctx(&f, SL_INPUT, env)
+	c.tr = nil
+	testing.expect_value(t, run(&c, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c.out), "")
+	testing.expect_value(t, strings.to_string(c.err), "")
+	// a socket named but nobody there
+	env2 := make(map[string]string)
+	env2["DECKHAND_SOCKET"] = "/nonexistent/deckhand.sock"
+	env2["DECKHAND_CLAUDE_TOKEN"] = "t"
+	f2: Fake
+	c2 := test_ctx(&f2, SL_INPUT, env2)
+	c2.tr = nil
+	testing.expect_value(t, run(&c2, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c2.out), "")
+	testing.expect_value(t, strings.to_string(c2.err), "")
+	// Deckhand refuses, or the call fails
+	f3: Fake
+	f3.replies["claude.usage"] = `{"ok":false,"error":"no such Claude tab"}`
+	c3 := test_ctx(&f3, SL_INPUT)
+	testing.expect_value(t, run(&c3, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c3.out), "")
+	f4: Fake
+	f4.fail = "Deckhand is not running"
+	c4 := test_ctx(&f4, SL_INPUT)
+	testing.expect_value(t, run(&c4, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c4.out), "")
+	// run again from the user's own status line: nothing sent, nothing run
+	env5 := make(map[string]string)
+	env5["DECKHAND_SOCKET"] = "/nonexistent.sock"
+	env5["DECKHAND_CLAUDE_TOKEN"] = "t"
+	env5[STATUSLINE_DEPTH_ENV] = "1"
+	f5: Fake
+	c5 := test_ctx(&f5, SL_INPUT, env5)
+	testing.expect_value(t, run(&c5, {"statusline"}), 0)
+	testing.expect_value(t, len(f5.sent), 0)
+}
+
+// Review 1 #4: the user's status line runs with SIGPIPE as it would be (default: a writer to a
+// closed pipe ends), not inherited ignored from this CLI; `yes | head -1` then ends too.
+@(test)
+statusline_user_gets_default_sigpipe :: proc(t: ^testing.T) {
+	f: Fake
+	// a subshell writing to a pipe nobody reads: killed by SIGPIPE (default), or told EPIPE (ignored)
+	f.replies["claude.usage"] = `{"ok":true,"data":{"command":"exec 3>&1; { sleep 0.2; printf abc; echo \"ignored $?\" >&3; } | true; echo end"}}`
+	c := test_ctx(&f, SL_INPUT)
+	testing.expect_value(t, run(&c, {"statusline"}), 0)
+	out := strings.to_string(c.out)
+	testing.expect_value(t, out, "end\n")
+	if out != "end\n" do return // SIGPIPE ignored: `yes` would never end
+	f2: Fake
+	f2.replies["claude.usage"] = `{"ok":true,"data":{"command":"yes | head -1"}}`
+	c2 := test_ctx(&f2, SL_INPUT)
+	testing.expect_value(t, run(&c2, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c2.out), "y\n")
+}
+
+// Review 1 polish: with Deckhand not answering (a restart, a handover, an account removed), the
+// user's own status line from the tab's start (DECKHAND_STATUSLINE_USER) still runs; never when
+// Deckhand answers, even with no command (the user removed theirs since).
+@(test)
+statusline_fallback_when_deckhand_is_away :: proc(t: ^testing.T) {
+	env := make(map[string]string)
+	env["DECKHAND_SOCKET"] = "/nonexistent.sock"
+	env["DECKHAND_CLAUDE_TOKEN"] = "t"
+	env["DECKHAND_STATUSLINE_USER"] = "printf fallback"
+	f: Fake
+	f.fail = "Deckhand is not running"
+	c := test_ctx(&f, SL_INPUT, env)
+	testing.expect_value(t, run(&c, {"statusline"}), 0)
+	testing.expect_value(t, strings.to_string(c.out), "fallback")
+	f2: Fake
+	f2.replies["claude.usage"] = `{"ok":false,"error":"this tab's account is no longer configured"}`
+	c2 := test_ctx(&f2, SL_INPUT, env)
+	run(&c2, {"statusline"})
+	testing.expect_value(t, strings.to_string(c2.out), "fallback")
+	f3: Fake
+	f3.replies["claude.usage"] = `{"ok":true,"data":{}}`
+	c3 := test_ctx(&f3, SL_INPUT, env)
+	run(&c3, {"statusline"})
+	testing.expect_value(t, strings.to_string(c3.out), "")
+	// no socket at all: the same fallback
+	env4 := make(map[string]string)
+	env4["DECKHAND_STATUSLINE_USER"] = "printf fallback"
+	f4: Fake
+	c4 := test_ctx(&f4, SL_INPUT, env4)
+	c4.tr = nil
+	run(&c4, {"statusline"})
+	testing.expect_value(t, strings.to_string(c4.out), "fallback")
+}

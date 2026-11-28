@@ -77,6 +77,7 @@ Hook :: enum u8 {
 	Core_Release, // file:///dir/: the Linux core's release (release.json, the tarball, its .sig) instead of GitHub's (machine_install.odin)
 	Core_Version, // X.Y.Z: the version this core says (core_version); a handover's successor no longer has it (core_handover.odin)
 	Test_Asid, // N: this process's login (audit session) as the other-login checks see it (login_session.odin)
+	Claude_Managed_Dir, // Claude Code's managed settings folder instead of /Library/Application Support/ClaudeCode ("" = none; usage_claude.odin)
 }
 
 when TEST_HOOKS {
@@ -124,6 +125,7 @@ when TEST_HOOKS {
 		.Core_Release     = "DECKHAND_TEST_CORE_RELEASE",
 		.Core_Version     = "DECKHAND_TEST_CORE_VERSION",
 		.Test_Asid        = "DECKHAND_TEST_ASID",
+		.Claude_Managed_Dir = "DECKHAND_CLAUDE_MANAGED_DIR",
 	}
 }
 

@@ -104,6 +104,11 @@ Spage :: struct {
 		field:  Text_Field,
 		err:    string, // why the last try failed (owned)
 	},
+	// a card shown on purpose (settings_page_open_card): scrolled into view, its border lit a while
+	card:      string, // its title ("" = none; a literal)
+	card_at:   time.Tick, // when it was asked for
+	card_find: int, // layouts left to find it in (it may first show a frame later)
+	card_moved: bool, // the page was scrolled to it: a search then starts from the top
 	// layout state
 	first_row: bool, // the next row is its card's first (no line above it)
 	card_w:    f32, // the cards' width
@@ -123,9 +128,47 @@ settings_page_open :: proc {
 settings_page_open_here :: proc() {sp_open(nil)}
 settings_page_open_at :: proc(section: core.Setting_Section) {sp_open(section)}
 
+SP_CARD_LIT :: 3 * time.Second // a card asked for keeps its lit border this long
+
+// Opens the page at a section with one of its cards (its title, a literal: "Claude Code") scrolled
+// into view and its border lit for SP_CARD_LIT (the Claude hooks bar's Show settings).
+settings_page_open_card :: proc(section: core.Setting_Section, card: string) {
+	sp_open(section)
+	spage.card, spage.card_at, spage.card_find, spage.card_moved = card, time.tick_now(), 3, false
+}
+
+// Whether the card asked for is lit now.
+@(private = "file")
+sp_card_lit :: proc(title: string) -> bool {
+	return spage.card != "" && title == spage.card && time.tick_since(spage.card_at) < SP_CARD_LIT && spage.query == ""
+}
+
+// The card asked for into view (its top under the page's top edge), once its layout is there.
+@(private = "file")
+sp_card_scroll :: proc() {
+	if spage.card_find <= 0 do return
+	sc := clay.GetScrollContainerData(clay.ID("spbody"))
+	body, it := clay.GetElementData(clay.ID("spbody")), clay.GetElementData(clay.ID("sp_card_focus"))
+	if !sc.found || !body.found || !it.found {
+		spage.card_find -= 1
+		app.redraw = true
+		return
+	}
+	spage.card_find = 0
+	b, r := body.boundingBox, it.boundingBox
+	top := b.y + px(SP_4)
+	if r.y != top {
+		sc.scrollPosition.y += top - r.y
+		if sc.scrollPosition.y > 0 do sc.scrollPosition.y = 0
+		spage.card_moved = true
+		app.redraw = true
+	}
+}
+
 @(private = "file")
 sp_open :: proc(section: Maybe(core.Setting_Section)) {
 	peek_close() // one look at a time (ui_peek.odin)
+	spage.card, spage.card_find, spage.card_moved = "", 0, false // settings_page_open_card sets them after
 	if sec, ok := section.?; ok && sec != spage.section {
 		spage.section = sec
 		spage.top = true
@@ -511,11 +554,17 @@ settings_page_layout :: proc() {
 		spage.top = false
 		if sc := clay.GetScrollContainerData(clay.ID("spbody")); sc.found do sc.scrollPosition^ = {}
 	}
+	sp_card_scroll()
 	query := strings.trim_space(tf_text(&spage.search))
 	if query != spage.query { 	// a new search: the keyboard starts over
 		delete(spage.query)
 		spage.query = strings.clone(query)
 		spage.sel = -1
+		if spage.card_moved { // scrolled to a card (settings_page_open_card): the results from the top
+			spage.card, spage.card_find, spage.card_moved = "", 0, false
+			spage.top = true
+			app.redraw = true
+		}
 	}
 	rows := sp_rows_now()
 	project := core.settings_project_cwd()
@@ -764,12 +813,19 @@ sp_close2 :: proc() {
 @(deferred_none = sp_close)
 sp_card :: proc(title: string, badge := "") -> bool {
 	th := theme()
-	clay._OpenElement()
+	lit := sp_card_lit(title)
+	if lit do clay._OpenElementWithId(clay.ID("sp_card_focus"))
+	else do clay._OpenElement()
+	if lit do app.redraw = true // until it goes out
+	else if spage.card != "" && title == spage.card {
+		spage.card = "" // its time is up: one more frame without it
+		app.redraw = true
+	}
 	clay.ConfigureOpenElement({
 		layout = {sizing = {clay.SizingFixed(spage.card_w), clay.SizingFit()}, layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_sidebar),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + 2)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
+		border = {color = cc(lit ? th.accent : th.border), width = clay.BorderOutside(pu(lit ? 2 * core.BORDER_W : core.BORDER_W))},
 	})
 	if title != "" {
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_3), pu(SP_3), pu(SP_2), 0}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
@@ -897,6 +953,8 @@ sp_switch_on :: proc(s: ^core.Setting) -> bool {
 	case "agent_notify":            return !st.notify_off
 	case "claude_skip_permissions": return st.claude_skip_permissions
 	case "codex_full_access":       return st.codex_full_access
+	case "claude_usage_statusline": return !st.claude_usage_statusline_off
+	case "claude_usage_background": return !st.claude_usage_background_off
 	case "remote_machines":         return st.remote_machines
 	case "machines_reachable":      return st.machines_reachable
 	case "web_access":              return st.web_access

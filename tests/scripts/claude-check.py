@@ -52,7 +52,11 @@ starts = [e["start"] for e in entries if "start" in e]
 check(len(starts) == 5, f"claude started five times (new, resumed, restarted twice, restored): {len(starts)}")
 check(bool(starts) and starts[0][0] == "--plugin-dir" and "--resume" not in starts[0], "a new tab: --plugin-dir, no --resume")
 check(all(s[0] == "--plugin-dir" and s[1].endswith("claude-code") for s in starts), "always Deckhand's plugin")
-check(all(s[2:4] == ["--resume", SID] for s in starts[1:]), "resume, restart and restore: --resume <its session id>")
+# Deckhand's status line (docs/CLAUDE-TABS.md §6c) right after the plugin: --settings with only a statusLine
+def ours(s):
+    return len(s) > 3 and s[2] == "--settings" and list(json.loads(s[3]).keys()) == ["statusLine"] and s[3].endswith(' statusline"}}')
+check(all(ours(s) for s in starts), "always Deckhand's status line (--settings with its statusLine only)")
+check(all(s[4:6] == ["--resume", SID] for s in starts[1:]), "resume, restart and restore: --resume <its session id>")
 
 hooks = [e for e in entries if "hook" in e]
 check(len(hooks) > 0 and all(e["exit"] == 0 for e in hooks), "every hook exits 0")

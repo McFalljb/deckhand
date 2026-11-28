@@ -1059,6 +1059,8 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 		}
 		s.settings.claude_skip_permissions = opt_bool(&sr, "claude_skip_permissions").? or_else false
 		s.settings.codex_full_access = opt_bool(&sr, "codex_full_access").? or_else false
+		s.settings.claude_usage_statusline_off = !(opt_bool(&sr, "claude_usage_statusline").? or_else true)
+		s.settings.claude_usage_background_off = !(opt_bool(&sr, "claude_usage_background").? or_else true)
 		s.settings.agent_name = get_str(&sr, "agent_name", optional = true)
 		s.settings.agent_model = get_str(&sr, "agent_model", optional = true)
 		s.settings.notify_off = !(opt_bool(&sr, "notify").? or_else true)

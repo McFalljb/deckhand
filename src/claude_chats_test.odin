@@ -120,7 +120,10 @@ ch_after :: proc(argv: []string, f: string) -> string {
 ch_full :: proc(t: ^testing.T, argv: []string, loc := #caller_location) {
 	joined := strings.join(argv, " ", context.temp_allocator)
 	testing.expectf(t, len(argv) > 0, "claude started", loc = loc)
-	testing.expectf(t, !ch_has(argv, "--disallowedTools") && !ch_has(argv, "plan") && !ch_has(argv, "--settings"), "a full agent: %s", joined, loc = loc)
+	// --settings only for Deckhand's status line (usage_claude.odin): never a profile's permissions
+	own := true
+	for a, i in argv do if a == "--settings" && (i + 1 >= len(argv) || !strings.has_prefix(argv[i + 1], `{"statusLine":`) || strings.contains(argv[i + 1], "permissions")) do own = false
+	testing.expectf(t, !ch_has(argv, "--disallowedTools") && !ch_has(argv, "plan") && own, "a full agent: %s", joined, loc = loc)
 }
 
 

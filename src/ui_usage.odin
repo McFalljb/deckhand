@@ -6,7 +6,8 @@ package main
 // time. Folded: one line per account, its fullest window. A bar is amber from 80% and red from 95%
 // or a limit hit; the percent is always written, so colour is never the only signal. A read over
 // an hour old fades; a window whose reset passed says "reset at 15:40, no new data". The hover
-// has the plan, every window, credits, the source and the account's home.
+// has the plan, every window, credits, the source and the account's home. A Claude Code row may
+// end with a quiet line saying why a running tab sends no live numbers ("managed status line").
 //
 // The rows come from core.usage_rows, so a full Usage page (a later step) draws the same.
 
@@ -39,7 +40,7 @@ usage_visible_now :: proc() -> bool {
 	return h.y < n.y + n.height && h.y + h.height > n.y
 }
 
-// The section (nothing while no account has usage to show: Codex not installed).
+// The section (nothing while no account has usage to show: neither Codex nor Claude Code installed).
 usage_section :: proc(text_w_max: f32) {
 	if len(state.usage) == 0 do return
 	rows := core.usage_rows(state.usage, core.usage_now())
@@ -135,6 +136,12 @@ usage_row_full :: proc(r: core.Usage_Row, i: int, text_w_max: f32) {
 			}
 		}
 		for b in r.bars do usage_bar_line(b, text_w_max, k)
+		// why a running tab of it sends no live numbers (a Claude account: "managed status line" …)
+		if r.aside != "" {
+			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(USAGE_LINE_H))}, childAlignment = {y = .Center}}}) {
+				clay.TextDynamic(clip(r.aside, text_w_max, FONT_UI_SMALL), txt(with_alpha(th.text_muted, k), FONT_UI_SMALL))
+			}
+		}
 	}
 }
 

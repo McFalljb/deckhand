@@ -142,7 +142,7 @@ claude_click :: proc(p: ^core.Pane, h: Hit_Claude) {
 		switch {
 		case h == 3 && pi: core.pi_status_dismiss(t)
 		case h == 3: core.claude_status_dismiss(t)
-		case hooks:  settings_page_open(.Agents)
+		case hooks:  settings_page_open_card(.Agents, "Claude Code") // its card in view, lit a moment
 		case:
 			cmd := status_update_command(t)
 			if cmd == "" do return

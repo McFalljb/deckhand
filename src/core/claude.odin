@@ -499,8 +499,22 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 	// the claude found now (harness_path, as the version bar reads it) is the one the tab starts;
 	// the account again after the login profile
 	cmd := strings.concatenate({CLAUDE_ACCOUNT_SH, claude_tab_cmd(harness_path(.Claude))}, context.temp_allocator)
+	fallback := ""
 	argv := shell_script_argv(login_shell(), cmd, "claude") // fish and co.: /bin/sh (commands.odin)
 	append(&argv, "--plugin-dir", plugin)
+	args := flags ? ct.args : nil // the user's; an agent's restart starts without them (§3)
+	if defaults do args = claude_with_defaults(args)
+	// Deckhand's status line (usage_claude.odin): --settings naming `deckhand statusline` here, or
+	// merged into the user's own --settings; never saved into the tab's flags
+	{
+		dir := claude_account_dir(ct.account, .Claude)
+		insert, wrapped, wrap := usage_claude_inject(args, cli, dir, cwd)
+		append(&argv, ..insert)
+		sources, _ := usage_claude_sources(args)
+		usage_claude_tab_started(tab_id, dir, cwd, wrap, sources)
+		fallback = usage_claude_fallback_env(dir, cwd, sources, wrap) // its own status line when Deckhand does not answer
+		args = wrapped
+	}
 	if ct.session_id != "" {
 		// a transcript found on disk resumes by its path while it is still that conversation's file
 		// under its account's projects/ (claude_disk.odin); else by id
@@ -508,12 +522,11 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		if rp != "" && strings.has_suffix(rp, strings.concatenate({"/", ct.session_id, ".jsonl"}, context.temp_allocator)) && path_kind(rp) == .File do append(&argv, "--resume", rp)
 		else do append(&argv, "--resume", ct.session_id)
 	}
-	args := flags ? ct.args : nil // the user's; an agent's restart starts without them (§3)
-	if defaults do args = claude_with_defaults(args)
 	append(&argv, ..args)
 	env := make([dynamic]string, context.temp_allocator)
 	append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli))) // + PI_KIT_NOTES_DIR, as pi tabs get it (folders.odin)
 	append(&env, ..claude_account_env(ct.account, .Claude)) // its account: CLAUDE_CONFIG_DIR (none for the default)
+	if fallback != "" do append(&env, fallback)
 	claude_shots_tidy()
 	// every DECKHAND_ name with its PI_DESK_ twin (env_names.odin)
 	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Claude}) {
@@ -1312,6 +1325,7 @@ claude_command_tab :: proc(cmd: Command) -> u64 {
 	case Claude_Held_Op:        return c.tab_id
 	case Claude_Deliver:        return c.tab_id
 	case Claude_Model_Report:   return c.tab_id
+	case Claude_Usage_Report:   return c.tab_id
 	}
 	return claude_extra_tab(cmd) // claude_panels.odin
 }

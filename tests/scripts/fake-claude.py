@@ -53,6 +53,21 @@ hooks.json) with realistic JSON on stdin, and the plugin's `deckhand` command, a
   after its Stop hook (then print `OSC IDLE`): the two signals disagree for a while.
 - FAKE_CLAUDE_SESSION: the session id of a new conversation (else a new uuid4).
 - FAKE_CLAUDE_TOKEN_FILE: the tab's token is appended to it (the scene checks no log holds it).
+- The status line: with a `--settings` JSON that has statusLine (type command), `!status` runs its
+  command as Claude Code does (`/bin/sh -c`, the status line JSON on stdin: the session, its
+  transcript path, cwd, model, workspace and, when the config dir (CLAUDE_CONFIG_DIR, else
+  ~/.claude) has fake-rate-limits.json, its object as `rate_limits`), prints `STATUS: <repr of its
+  stdout>` and logs {"statusline": stdout, "exit": n, "padding", "refresh"}; with
+  disableAllHooks in that JSON or --fake-no-hooks none runs. FAKE_CLAUDE_STATUS_START=1: it also
+  runs once after SessionStart.
+- Print mode (`--print --input-format stream-json --output-format stream-json`): the Agent SDK's
+  control protocol on stdio, as Deckhand's background usage read speaks it. It answers
+  `initialize` (account: the config dir's fake-usage.json "account") and `get_usage` (its
+  "usage": the response, or "error": an error answer; "hang": never answers), logs each request
+  ({"probe": subtype, "config_dir", "args"}), refuses any other request, logs {"probe_prompt": …}
+  for a user message (never allowed), and exits when stdin ends. It checks that nobody holds the
+  config dir's .credentials.json or .claude.json open when they are FIFOs (a reader would block
+  there): {"probe_credentials_open": [names]}.
 """
 
 import json
@@ -387,7 +402,113 @@ def clean(line):
     return line.replace(PASTE_START, "").replace(PASTE_END, "").rstrip("\r\n")
 
 
+def config_dir():
+    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def read_json(path, default=None):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def log_to(obj):
+    path = os.environ.get("FAKE_CLAUDE_LOG", "")
+    if path:
+        with open(path, "a") as f:
+            f.write(json.dumps(obj) + "\n")
+
+
+def held_open(path):
+    """Whether a FIFO at path has a reader now (an open for writing succeeds only then)."""
+    try:
+        import stat
+        if not stat.S_ISFIFO(os.stat(path).st_mode):
+            return False
+        fd = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+        os.close(fd)
+        return True
+    except OSError:
+        return False
+
+
+def probe(argv):
+    """Print mode: the SDK's control protocol (initialize, get_usage), never a model call."""
+    cfg = config_dir()
+    fake = read_json(os.path.join(cfg, "fake-usage.json"), {}) or {}
+    held = [n for n in (".credentials.json", ".claude.json") if held_open(os.path.join(cfg, n))]
+    log_to({"probe_start": argv, "config_dir": cfg, "probe_credentials_open": held, "env": {k: os.environ.get(k, "") for k in ("ENABLE_CLAUDEAI_MCP_SERVERS", "CLAUDE_CODE_AUTO_CONNECT_IDE", "DISABLE_AUTOUPDATER")}})
+    if fake.get("startup_ms"):
+        time.sleep(fake["startup_ms"] / 1000)
+    print("not json: a login profile's output", flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        if msg.get("type") == "user":
+            log_to({"probe_prompt": msg})
+            continue
+        if msg.get("type") != "control_request":
+            continue
+        req = msg.get("request") or {}
+        sub = req.get("subtype")
+        rid = msg.get("request_id")
+        log_to({"probe": sub, "config_dir": cfg, "request": req})
+        if sub == "initialize":
+            resp = {"commands": [], "models": [], "account": fake.get("account", {"subscriptionType": "max", "email": "someone@example.com"})}
+            reply = {"type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": resp}}
+        elif sub == "get_usage":
+            if fake.get("hang"):
+                continue
+            if fake.get("error"):
+                reply = {"type": "control_response", "response": {"subtype": "error", "request_id": rid, "error": fake["error"]}}
+            else:
+                reply = {"type": "control_response", "response": {"subtype": "success", "request_id": rid, "response": fake.get("usage", {"rate_limits_available": False, "rate_limits": None})}}
+        else:
+            reply = {"type": "control_response", "response": {"subtype": "error", "request_id": rid, "error": "fake claude: " + str(sub) + " is not answered"}}
+        print(json.dumps({"type": "system", "subtype": "noise"}), flush=True)
+        print(json.dumps(reply), flush=True)
+    log_to({"probe_end": True, "config_dir": cfg})
+
+
+def status_line(fake):
+    """Runs the --settings status line as Claude Code does; prints and logs what it wrote."""
+    sl = (SETTINGS or {}).get("statusLine") or {}
+    if NO_HOOKS or (SETTINGS or {}).get("disableAllHooks") or sl.get("type") != "command" or not sl.get("command"):
+        out("STATUS: (no status line)")
+        return
+    data = {
+        "hook_event_name": "Status",
+        "session_id": fake.session_id,
+        "transcript_path": fake.transcript,
+        "cwd": fake.cwd,
+        "session_name": "FAKE SECRET SESSION NAME",
+        "model": {"id": "claude-opus-5", "display_name": "Opus"},
+        "workspace": {"current_dir": fake.cwd, "project_dir": fake.cwd, "added_dirs": []},
+        "version": "2.1.332",
+        "cost": {"total_cost_usd": 0.01},
+    }
+    rl = read_json(os.path.join(config_dir(), "fake-rate-limits.json"))
+    if rl:
+        data["rate_limits"] = rl
+    e = fake.env()
+    e["COLUMNS"] = "120"
+    p = subprocess.run(["/bin/sh", "-c", sl["command"]], input=json.dumps(data).encode(), capture_output=True, env=e, timeout=30, cwd=fake.cwd)
+    text = p.stdout.decode("utf-8", "replace")
+    fake.log({"statusline": text, "exit": p.returncode, "padding": sl.get("padding"), "refresh": sl.get("refreshInterval"), "err": p.stderr.decode("utf-8", "replace")})
+    out("STATUS: " + repr(text))
+
+
 def main():
+    if "--print" in sys.argv[1:] or "-p" in sys.argv[1:]:
+        probe(sys.argv[1:])
+        return
     plugin_dir, resume, rest = parse_args(sys.argv[1:])
     out("FAKE CLAUDE ARGS: " + " ".join(sys.argv[1:]))
     if resume:  # on a line of its own: at a long worktree path the one above wraps through the id
@@ -408,6 +529,8 @@ def main():
     if model != "-":
         start["model"] = model
     fake.log({"session_start_out": fake.run_hooks("SessionStart", start)})
+    if os.environ.get("FAKE_CLAUDE_STATUS_START") == "1":
+        status_line(fake)
     script = os.environ.get("FAKE_CLAUDE_SCRIPT", "")
     if script:
         with open(script) as f:
@@ -426,6 +549,9 @@ def main():
             continue
         if line == "!quit":
             break
+        if line == "!status":
+            status_line(fake)
+            continue
         fake.turn(line)
     sys.stdout.write(ESC + "[?2004l")
     out("bye")

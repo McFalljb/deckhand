@@ -225,8 +225,10 @@ command {"type":"get_state"}
 assert_result ok true
 command {"type":"close_tab","tab_id":$last}
 wait 300
-# ---- a hung app (reads nothing any more): not responding, then Restart
-app_open build/fake-app --hang-after 30 --once $datadir/hang.once
+# ---- a hung app (reads nothing any more): not responding, then Restart. It hangs after 60 frames,
+# as the busy one freezes: a window shows frames at its display's rate, and CI's virtual display
+# showed 15-17 of 30 (the 20 below never came)
+app_open build/fake-app --hang-after 60 --once $datadir/hang.once
 app_waitframe 20 20000
 app_waitstatus not_responding 8000
 assert_app_pixel 5 5 202830
@@ -240,7 +242,7 @@ assert_app_surfaces 3
 command {"type":"close_tab","tab_id":$last}
 wait 300
 # ---- a crash: the last frame stays, dimmed; the bar has Restart and Log
-app_open build/fake-app --crash-after 20 --once $datadir/crash.once
+app_open build/fake-app --crash-after 40 --once $datadir/crash.once
 app_waitframe 10 20000
 app_waitstatus exited 20000
 assert_app_dimmed yes
@@ -258,7 +260,7 @@ assert_app_surfaces 3
 command {"type":"close_tab","tab_id":$last}
 wait 300
 # a crashed app's tab closed without a restart: everything goes, Deckhand stays up
-app_open build/fake-app --crash-after 20
+app_open build/fake-app --crash-after 40
 app_waitframe 10 20000
 app_waitstatus exited 20000
 assert_app_surfaces 1

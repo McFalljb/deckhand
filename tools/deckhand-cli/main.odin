@@ -27,6 +27,7 @@ Ctx :: struct {
 	started:    u64, // clock() when run began (before stdin is read): the hook's seq
 	tr:         ^Transport, // nil: made from the environment on first use
 	mcp:        bool, // `deckhand mcp` (a Codex tab): screenshots say view_image, not the Read tool
+	run_cmd:    proc(c: ^Ctx, command, stdin_text: string) -> int, // tests: the user's status line instead of /bin/sh (nil = statusline_run_user)
 	out:        strings.Builder, // tests: what was written
 	err:        strings.Builder,
 }
@@ -114,6 +115,9 @@ run :: proc(c: ^Ctx, args: []string) -> int {
 		if c.clock != nil && c.started == 0 do c.started = c.clock() // the hook's start, before its stdin
 		run_hook(c, len(args) > 1 ? args[1] : "")
 		return 0
+	}
+	if args[0] == "statusline" && len(args) == 1 {
+		return run_statusline(c) // Claude Code's status line (statusline.odin): never JSON of ours on stdout
 	}
 	if args[0] == "mcp" && len(args) == 1 {
 		mcp_serve(c) // Codex tabs: these commands as MCP tools over stdio (mcp.odin)

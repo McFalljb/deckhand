@@ -80,6 +80,7 @@ Hook :: enum u8 {
 	Agy_Release, // file:///dir/: Install agy's manifest (dir/manifests/<platform>.json) and download (dir/antigravity-cli/…) instead of Google's (agy_install.odin)
 	Agy_Bin_Dir, // the folder Install agy puts agy in instead of ~/.local/bin (agy_install.odin)
 	Agy_Signed, // 1: Install agy's signature and notarization verdict says yes (a fixture is not Google's: agy_install.odin)
+	Claude_Managed_Dir, // Claude Code's managed settings folder instead of /Library/Application Support/ClaudeCode ("" = none; usage_claude.odin)
 }
 
 when TEST_HOOKS {
@@ -130,6 +131,7 @@ when TEST_HOOKS {
 		.Agy_Release      = "DECKHAND_TEST_AGY_RELEASE",
 		.Agy_Bin_Dir      = "DECKHAND_TEST_AGY_BIN_DIR",
 		.Agy_Signed       = "DECKHAND_TEST_AGY_SIGNED",
+		.Claude_Managed_Dir = "DECKHAND_CLAUDE_MANAGED_DIR",
 	}
 }
 

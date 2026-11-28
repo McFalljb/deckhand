@@ -212,6 +212,8 @@ web_setting_json :: proc(b: ^strings.Builder, s: ^Setting, rows: []Settings_File
 		case "agent_notify":            on = !st.notify_off
 		case "claude_skip_permissions": on = st.claude_skip_permissions
 		case "codex_full_access":       on = st.codex_full_access
+		case "claude_usage_statusline": on = !st.claude_usage_statusline_off
+		case "claude_usage_background": on = !st.claude_usage_background_off
 		case "remote_machines":         on = st.remote_machines
 		case "machines_reachable":      on = st.machines_reachable
 		case "web_access":              on = st.web_access

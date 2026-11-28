@@ -186,14 +186,37 @@ function serve() {
 			setTimeout(() => process.exit(3), 20);
 			return;
 		}
-		if (/refuse/.test(said)) return end("refusal");
+		if (/refuse/.test(said) && !s.pendingAsks) return end("refusal");
+		// agy 1.5.18 as logged: an ask_question it waits on, answered by the next prompt ("Responding
+		// to pending ask_question"): its tool call, then its choices in its message, then end_turn
+		if (s.pendingQuestion) {
+			s.pendingQuestion = false;
+			update(sid, { sessionUpdate: "tool_call_update", toolCallId: "call_askq", status: "completed" });
+			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: `answered: ${said}` } });
+			return end("end_turn");
+		}
+		if (/^askq$/m.test(said)) {
+			update(sid, { sessionUpdate: "tool_call", toolCallId: "call_askq", title: "Run ask_question", kind: "other", status: "pending" });
+			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "\nWhat should I name the new file?\n- [1] (Recommended) scratch.md\n- [2] todo.md\n- [3] summary.txt\n" } });
+			s.pendingQuestion = true;
+			return end("end_turn");
+		}
 		// one permission request per line "<shape>: <arg>", each in t3code's fixtures' shape, agy's
 		// answers echoed as `<shape>:<json>`: run (a command: run_command, rawInput CommandLine and
 		// Cwd), edit (edit_file: a diff, locations, TargetFile), write (write_to_file: TargetFile and
 		// CodeContent only), read (view_file: AbsolutePath), idonly (a command described by its
 		// tool_call, the request naming it by id only), mcp (kind other), switchmode, alwaysonly (no
 		// allow_once option)
-		const asks = said.split("\n").map((l) => /^(run|edit|write|read|idonly|mcp|switchmode|alwaysonly): ?(.*)$/.exec(l.trim())).filter(Boolean);
+		// FAKE_AGY_REJECT_ENDS=end_turn|cancelled: as agy 1.5.18 logged it, a refused action ends the
+		// turn at once with that stop reason and no message; the next prompt carries on with the
+		// steps left (its text echoed in the message as `continued after: …`)
+		let asks = said.split("\n").map((l) => /^(run|edit|write|read|idonly|mcp|switchmode|alwaysonly): ?(.*)$/.exec(l.trim())).filter(Boolean);
+		let prefix = "";
+		if (s.pendingAsks) {
+			asks = s.pendingAsks;
+			s.pendingAsks = undefined;
+			prefix = `continued after: ${said}\n`;
+		}
 		if (asks.length) {
 			const opts = [
 				{ optionId: "always", name: "Allow always", kind: "allow_always" },
@@ -219,8 +242,12 @@ function serve() {
 				});
 				out.push(`${shape}:${JSON.stringify(r)}`);
 				update(sid, { sessionUpdate: "tool_call_update", toolCallId, status: r?.outcome?.optionId === "once" ? "completed" : "failed" });
+				if (env.FAKE_AGY_REJECT_ENDS && r?.outcome?.optionId !== "once") {
+					s.pendingAsks = asks.slice(i + 1);
+					return end(env.FAKE_AGY_REJECT_ENDS);
+				}
 			}
-			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: out.join("\n") } });
+			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: prefix + out.join("\n") } });
 			return end("end_turn");
 		}
 		if (/elicitpick/.test(said)) {

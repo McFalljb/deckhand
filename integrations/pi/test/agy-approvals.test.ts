@@ -425,3 +425,91 @@ test("the antigravity tool follows the same policy (the caller's UI, folder and 
 		assert.match(notes.at(-1)!, /neither a mode nor an account/);
 	});
 });
+
+// ---- agy 1.5.18 ends its turn on a refusal, and waits on ask_question ----
+
+const prompts = (p: ReturnType<typeof project>) => p.read().filter((m) => m.method === "session/prompt").map((m) => m.params.prompt.map((b: any) => b.text ?? "").join(""));
+const credFile = () => path.join(HOME, ".pi", "agent", "auth.json");
+
+for (const ends of ["end_turn", "cancelled"])
+	test(`a refused action that ends agy's turn (${ends}, as agy 1.5.18 does): agy is asked once to carry on, into the same answer, with no error`, async () => {
+		const p = project();
+		p.env.FAKE_AGY_REJECT_ENDS = ends;
+		const { ag, turn } = tab(p);
+		const r = await turn(`read: ${credFile()}\nrun: ls`);
+		assert.equal(r.stopReason, "stop", r.errorMessage);
+		assert.equal(r.errorMessage, undefined);
+		const sent = prompts(p);
+		assert.equal(sent.length, 2);
+		assert.equal(sent[1], `[Deckhand] This was refused: refused (a protected credential file): ${credFile()}. It can't be done here. Carry on with the remaining steps and report what you did and didn't do.`);
+		assert.match(textOf(r), /^continued after: \[Deckhand\] This was refused/);
+		assert.deepEqual(outcomes({ content: [{ type: "text", text: textOf(r).split("\n").slice(1).join("\n") }] }), [["run", { outcome: "selected", optionId: "once" }]]);
+		assert.match(thinkingOf(r), /↻ Deckhand asks Antigravity to carry on without it \(1 of 3\)/);
+		await ag.closeAll();
+	});
+
+test("auto-continue: at most 3 times in one user turn, then the answer says agy stopped", async () => {
+	const p = project();
+	p.env.FAKE_AGY_REJECT_ENDS = "end_turn";
+	const { ag, turn } = tab(p);
+	const r = await turn(Array.from({ length: 5 }, () => `read: ${credFile()}`).join("\n"));
+	assert.equal(r.stopReason, "stop");
+	assert.equal(prompts(p).length, 4, "the user's prompt and 3 follow-ups");
+	assert.match(thinkingOf(r), /\(3 of 3\)/);
+	assert.match(thinkingOf(r), /Antigravity stopped after a refused action \(Deckhand asked it to carry on 3 times\)/);
+	// the next user turn may carry on again
+	await turn("hello");
+	await ag.closeAll();
+});
+
+test("no auto-continue after the user's own no (approvals ask, declined), or after Esc", async () => {
+	const p = project();
+	p.env.FAKE_AGY_REJECT_ENDS = "end_turn";
+	const { ui } = fakeUi({ confirm: [false] });
+	const t = tab(p, { ui, mode: "ask" });
+	const r = await t.turn("edit: notes.md\nrun: ls");
+	assert.equal(r.stopReason, "stop");
+	assert.equal(prompts(p).length, 1);
+	assert.match(thinkingOf(r), /✗ you declined: edit notes\.md\n(.*\n)?Antigravity stopped: you declined that action/);
+	await t.ag.closeAll();
+
+	// Esc while agy's request is answered: aborted, nothing more sent
+	const q = project();
+	q.env.FAKE_AGY_REJECT_ENDS = "end_turn";
+	const ac = new AbortController();
+	const ag = createAntigravity({ agyPath: FAKE, cwd: () => q.cwd, env: q.env, approvals: () => (ac.abort(), { cwd: q.cwd, hasUI: false, readonly: false, mode: "allow" }) });
+	const e = await drive(ag.provider.streamSimple(MODEL, { messages: [SYS, user(`read: ${credFile()}\nrun: ls`)] }, { sessionId: "esc", signal: ac.signal }));
+	assert.equal(e.stopReason, "aborted");
+	assert.equal(prompts(q).length, 1);
+	await ag.closeAll();
+});
+
+test("agy's ask_question that waits for the next prompt: its choices in a picker (plus your own answer), the pick sent at once; without a UI the status says your next message is the answer", async () => {
+	const p = project();
+	const { ui, asked } = fakeUi({ select: ["(Recommended) scratch.md", "Type my own answer…"], input: ["ideas.md"] });
+	const t = tab(p, { ui });
+	const r = await t.turn("askq");
+	assert.equal(r.stopReason, "stop");
+	assert.deepEqual(asked[0], { kind: "select", title: "Antigravity asks: What should I name the new file?", options: ["(Recommended) scratch.md", "todo.md", "summary.txt", "Type my own answer…"] });
+	assert.deepEqual(prompts(p), ["askq", "scratch.md"]);
+	assert.match(textOf(r), /- \[3\] summary\.txt\n\nanswered: scratch\.md$/);
+	assert.match(thinkingOf(r), /\? What should I name the new file\? → scratch\.md/);
+	const own = await t.turn("askq");
+	assert.match(textOf(own), /answered: ideas\.md$/);
+	assert.deepEqual(asked.slice(1).map((a) => a.kind), ["select", "input"]);
+	await t.ag.closeAll();
+
+	// no UI (or the picker dismissed): left as agy has it; the status says what the next message is
+	const q = project();
+	const status: (string | undefined)[] = [];
+	const ag = createAntigravity({ agyPath: FAKE, cwd: () => q.cwd, env: q.env, status: (s) => status.push(s), approvals: () => ({ cwd: q.cwd, hasUI: false, readonly: false, mode: "allow" }) });
+	const go = (text: string) => drive(ag.provider.streamSimple(MODEL, { messages: [SYS, user(text)] }, { sessionId: "noui" }));
+	const w = await go("askq");
+	assert.equal(w.stopReason, "stop");
+	assert.equal(status.at(-1), "Antigravity is waiting for your answer");
+	assert.equal(prompts(q).length, 1);
+	const a = await drive(ag.provider.streamSimple(MODEL, { messages: [SYS, user("askq"), w, user("todo.md")] }, { sessionId: "noui" }));
+	assert.match(textOf(a), /answered: todo\.md/);
+	assert.equal(status.at(-1), undefined);
+	await ag.closeAll();
+});

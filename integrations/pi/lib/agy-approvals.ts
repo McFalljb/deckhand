@@ -70,6 +70,11 @@ export interface Decision {
 	note: string;
 	/** Whether agy may go ahead. */
 	allowed: boolean;
+	/**
+	 * Who said no to an action (not to a question): Deckhand's policy or guardrails' block
+	 * ("deckhand"; agy may be asked to carry on without it), or the user in a dialog ("user").
+	 */
+	refusedBy?: "deckhand" | "user";
 }
 
 export const readonlySession = () => process.env.PI_KIT_READONLY === "1";
@@ -373,7 +378,7 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 
 	const tc = params?.toolCall ?? {};
 	const title = clip(tc.title || tc.kind || "an action");
-	const reject = (why: string, what = title): Decision => ({ answer: c.signal?.aborted ? CANCELLED : rejectOnce(params), note: `✗ ${why}: ${what}`, allowed: false });
+	const reject = (why: string, what = title): Decision => ({ answer: c.signal?.aborted ? CANCELLED : rejectOnce(params), note: `✗ ${why}: ${what}`, allowed: false, refusedBy: why === "you declined" ? "user" : "deckhand" });
 	const once = allowOnce(params);
 	const allow = (what: string): Decision => (once ? { answer: once, note: `✓ ${what}`, allowed: true } : reject("refused (agy offered no one-time approval)"));
 	const env = c.env ?? process.env; // env-read-ok: credentialPath's names only

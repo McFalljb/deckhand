@@ -316,7 +316,20 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   agy's `tool_call` updates (`ToolCallTracker`, as t3code's `withTrackedPermissionToolCall`). A
   question (`interaction_…`) is a `ctx.ui.select` of agy's options; a form elicitation a select
   (enum, oneOf, boolean) or an input (string, number) per field; without a UI cancelled or
-  declined. `fs/*` and `terminal/*` stay "method not found". Each answer is one line of thinking
+  declined. agy 1.5.18 also asks in its message: a `tool_call` titled `Run ask_question`, its
+  choices as `- [1] (Recommended) scratch.md` lines, then `end_turn`, and the next
+  `session/prompt` is the answer ("Responding to pending ask_question"). With a UI those choices
+  (rawInput's options, when it has them) are a `ctx.ui.select` plus "Type my own answer…", and the
+  pick is sent as the next prompt into the same answer (5 per turn at most). Otherwise the status
+  is "Antigravity is waiting for your answer". agy 1.5.18 also ends its turn when an action is
+  rejected (`end_turn` 7 ms after the reject, or `cancelled`; its log: "CancelCascadeInvocation")
+  and waits. When a turn ends right after Deckhand's own refusal (`Decision.refusedBy` "deckhand",
+  with no message or tool call after it), one follow-up prompt asks it to carry on without that
+  action (`[Deckhand] This was refused: …`), into the same answer, at most `AUTO_CONTINUES` (3)
+  times a user turn. Never after the user's own no (the turn ends with a note) or Esc. t3code
+  asks the user for every permission and has no such follow-up; its `cancelBehavior:
+  "wait-for-prompt"` only waits out a user's cancel. `fs/*` and `terminal/*` stay "method not
+  found". Each answer is one line of thinking
   (`✓ ran: npm test`, `✗ blocked by guardrails: rm -rf …`; commands redacted and clipped, never
   file contents). Unlike t3code: no "allow for this thread" (Deckhand never stores a grant), agy's
   own `auto` mode is not offered, reads of credential files are refused rather than always

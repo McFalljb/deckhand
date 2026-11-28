@@ -37,7 +37,7 @@
 import type { AgyModel } from "./agy.ts";
 import { AgySession, ModeUnconfirmed } from "./agy.ts";
 import { fileLedger, type Ledger } from "./agy-ledger.ts";
-import { type ApprovalContext, decide, readonlySession } from "./agy-approvals.ts";
+import { type ApprovalContext, type Decision, decide, readonlySession } from "./agy-approvals.ts";
 import { answerAgentRequest } from "./acp.ts";
 
 
@@ -49,6 +49,70 @@ const CONTEXT_WINDOW = 1_000_000;
 const MAX_TOKENS = 65_536;
 const ZERO_COST = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const CANCEL_WAIT_MS = 10_000;
+
+/** How often one user turn asks agy to carry on after a refused action. */
+export const AUTO_CONTINUES = 3;
+/** How many of agy's ask_question one user turn answers from a picker. */
+const QUESTIONS_PER_TURN = 5;
+export const WAITING_STATUS = "Antigravity is waiting for your answer";
+export const OWN_ANSWER = "Type my own answer…";
+
+/** The follow-up prompt after a refused action: what was refused and why (the decision's note). */
+export function continueText(note: string): string {
+	const what = note.replace(/^✗\s*/, "").trim();
+	return `[Deckhand] This was refused: ${what}. It can't be done here. Carry on with the remaining steps and report what you did and didn't do.`;
+}
+
+/** agy's ask_question tool call (agy 1.5.18: title "Run ask_question"; its choices follow in its message). */
+export function isAskQuestion(u: any): boolean {
+	const named = (v: unknown) => typeof v === "string" && /\bask_?question\b/i.test(v);
+	return named(u?.title) || named(u?.rawInput?.toolName) || named(u?.rawInput?.name) || named(u?._meta?.toolName);
+}
+
+/**
+ * An ask_question's question and choices: from its rawInput when it has them ({question, options:
+ * [string | {label}]}, or questions[0]), else from agy's message after the call, as agy 1.5.18
+ * writes it: the question on a line, then "- [1] (Recommended) scratch.md" per choice.
+ */
+export function parseAskQuestion(text: string, input?: any): { question: string; options: { label: string; answer: string }[] } {
+	const opt = (label: string) => {
+		const l = clip1(label, 200);
+		return { label: l, answer: l.replace(/^\((recommended)\)\s*/i, "") };
+	};
+	const q0 = Array.isArray(input?.questions) ? input.questions[0] : input;
+	const raw = Array.isArray(q0?.options) ? q0.options : undefined;
+	if (raw?.length) {
+		const options = raw.map((x: any) => (typeof x === "string" ? x : x?.label ?? x?.name ?? x?.value)).filter((x: unknown) => typeof x === "string" && x.trim()).slice(0, 20).map(opt);
+		if (options.length) return { question: clip1(q0?.question ?? q0?.title ?? "", 200), options };
+	}
+	const lines = String(text ?? "").split("\n");
+	const options: { label: string; answer: string }[] = [];
+	let question = "";
+	for (const line of lines) {
+		const m = /^\s*(?:[-*]\s*)?\[(\d+)\]\s*(.+?)\s*$/.exec(line);
+		if (m) {
+			if (options.length < 20) options.push(opt(m[2]));
+		} else if (!options.length && line.trim()) question = line.trim();
+	}
+	return { question: clip1(question, 200), options };
+}
+
+/** The user's answer to an ask_question: a choice, or their own words; undefined if dismissed. */
+async function pickAnswer(ui: any, q: ReturnType<typeof parseAskQuestion>, signal?: AbortSignal): Promise<string | undefined> {
+	const labels = [...q.options.map((o) => o.label), OWN_ANSWER];
+	const title = `Antigravity asks: ${q.question || "pick one"}`;
+	try {
+		const pick = await ui.select(title, labels, { signal });
+		if (pick === undefined) return undefined;
+		if (pick === OWN_ANSWER) {
+			const own = await ui.input?.(title, "", { signal });
+			return typeof own === "string" && own.trim() ? own.trim() : undefined;
+		}
+		return q.options[labels.indexOf(pick)]?.answer;
+	} catch {
+		return undefined;
+	}
+}
 const CATCH_UP_MAX = 40_000;
 /** pi's summarization prompt (core/compaction/utils.js SUMMARIZATION_SYSTEM_PROMPT) starts so. */
 const PI_SUMMARY_PROMPT = "You are a context summarization assistant";
@@ -264,6 +328,13 @@ class Answer {
 		const prev = i >= 0 ? String(this.msg.content[i].thinking) : "";
 		this.thinking(`${prev && !prev.endsWith("\n") ? "\n" : ""}${line}\n`);
 	}
+	/** Before the answer to a follow-up prompt: the text so far ends in a blank line. */
+	gap() {
+		const last = [...this.msg.content].reverse().find((b: any) => b.type === "text");
+		if (!last?.text) return;
+		const t = String(last.text);
+		this.text(t.endsWith("\n\n") ? "" : t.endsWith("\n") ? "\n" : "\n\n");
+	}
 	finish(stopReason: string, errorMessage?: string) {
 		this.close();
 		this.msg.stopReason = stopReason;
@@ -469,6 +540,7 @@ export function createAntigravity(o: AntigravityOptions) {
 		const titles = new Map<string, string>();
 		let modeNoted = false;
 		let aborted = false;
+		let waiting = false;
 		const onAbort = () => {
 			aborted = true;
 			st!.agy?.cancel();
@@ -506,8 +578,13 @@ export function createAntigravity(o: AntigravityOptions) {
 			// aborted before the prompt went out: nothing reached agy, so there is no turn to cancel
 			if (aborted || signal?.aborted) return answer.finish("aborted", "Request was aborted");
 			answer.start();
+			// what this prompt's updates said: agy's last refused action with nothing after it, and
+			// an ask_question agy is waiting on (answered by the next prompt)
+			let refused: Decision | undefined;
+			let question: { id: string; text: string; input: any } | undefined;
 			st.sink = {
 				update: (u: any) => {
+					if (refused && ((u?.sessionUpdate === "agent_message_chunk" && String(u.content?.text ?? "").trim()) || u?.sessionUpdate === "tool_call")) refused = undefined;
 					void options.onProviderStreamEvent?.(u, model);
 					switch (u?.sessionUpdate) {
 						case "current_mode_update":
@@ -522,7 +599,10 @@ export function createAntigravity(o: AntigravityOptions) {
 							break;
 						}
 						case "agent_message_chunk":
-							if (u.content?.type === "text") answer.text(String(u.content.text ?? ""));
+							if (u.content?.type === "text") {
+								answer.text(String(u.content.text ?? ""));
+								if (question) question.text += String(u.content.text ?? "");
+							}
 							break;
 						case "agent_thought_chunk":
 							if (u.content?.type === "text") answer.thinking(String(u.content.text ?? ""));
@@ -532,12 +612,14 @@ export function createAntigravity(o: AntigravityOptions) {
 							titles.set(String(u.toolCallId), title);
 							answer.note(`→ ${title}`);
 							o.status?.(`Antigravity: ${title}`);
+							if (isAskQuestion(u)) question = { id: String(u.toolCallId), text: "", input: u.rawInput };
 							break;
 						}
 						case "tool_call_update": {
 							const title = u.title ? clip1(u.title) : titles.get(String(u.toolCallId)) ?? "a tool";
 							if (u.title) titles.set(String(u.toolCallId), title);
 							if (u.status === "failed") answer.note(`✗ ${title} failed`);
+							if (question?.id === String(u.toolCallId) && (u.status === "completed" || u.status === "failed")) question = undefined;
 							break;
 						}
 						case "plan":
@@ -550,29 +632,73 @@ export function createAntigravity(o: AntigravityOptions) {
 					const c = o.approvals?.() ?? { cwd: o.cwd(), hasUI: false, readonly: readonlySession(), mode: "allow" as const };
 					const d = await decide(method, params, { ...c, signal });
 					if (answer.msg.stopReason === "pending") answer.note(d.note); // the turn may have ended while a dialog was open
+					refused = d.refusedBy ? d : undefined;
 					return d.answer;
 				},
 			};
 			let response: any;
-			try {
-				dispatched = true;
-				const turn = agy.prompt(payload.prompt ?? plan.blocks);
-				response = await Promise.race([turn, abortSeen]);
-				if (response === ABORT) {
-					// session/cancel went out (onAbort): agy ends the turn with stopReason cancelled
-					let timer: NodeJS.Timeout | undefined;
-					response = await Promise.race([turn.catch(() => GONE), new Promise((r) => (timer = setTimeout(() => r(GONE), o.cancelWaitMs ?? CANCEL_WAIT_MS)))]);
-					clearTimeout(timer);
+			let blocks: unknown[] = payload.prompt ?? plan.blocks;
+			let continued = 0, answered = 0;
+			for (;;) {
+				refused = undefined;
+				question = undefined;
+				try {
+					dispatched = true;
+					const turn = agy.prompt(blocks);
+					response = await Promise.race([turn, abortSeen]);
+					if (response === ABORT) {
+						// session/cancel went out (onAbort): agy ends the turn with stopReason cancelled
+						let timer: NodeJS.Timeout | undefined;
+						response = await Promise.race([turn.catch(() => GONE), new Promise((r) => (timer = setTimeout(() => r(GONE), o.cancelWaitMs ?? CANCEL_WAIT_MS)))]);
+						clearTimeout(timer);
+					}
+				} catch (e) {
+					record(false);
+					if (aborted) return answer.finish("aborted", "Request was aborted");
+					return answer.finish("error", explain((e as Error).message));
 				}
-			} catch (e) {
-				record(false);
-				if (aborted) return answer.finish("aborted", "Request was aborted");
-				return answer.finish("error", explain((e as Error).message));
-			}
-			if (aborted) {
-				if (response === GONE) drop(st); // agy did not end the turn: its process goes
-				record(false);
-				return answer.finish("aborted", "Request was aborted");
+				if (aborted) {
+					if (response === GONE) drop(st); // agy did not end the turn: its process goes
+					record(false);
+					return answer.finish("aborted", "Request was aborted");
+				}
+				const stopped = response?.stopReason === "end_turn" || response?.stopReason === "cancelled";
+				// agy 1.5.18 ends its turn on a refused action (end_turn at once, or cancelled) and waits
+				// for the next prompt: it is asked to carry on without it, up to AUTO_CONTINUES times;
+				// never after the user's own no
+				if (refused && stopped) {
+					const r: Decision = refused;
+					if (r.refusedBy === "user") {
+						answer.note("Antigravity stopped: you declined that action");
+						response = { ...response, stopReason: "end_turn" };
+					} else if (continued < AUTO_CONTINUES) {
+						continued++;
+						answer.note(`↻ Deckhand asks Antigravity to carry on without it (${continued} of ${AUTO_CONTINUES})`);
+						answer.gap();
+						blocks = [{ type: "text", text: continueText(r.note) }];
+						continue;
+					} else {
+						answer.note(`Antigravity stopped after a refused action (Deckhand asked it to carry on ${AUTO_CONTINUES} times)`);
+						response = { ...response, stopReason: "end_turn" };
+					}
+				}
+				// an ask_question agy waits on: its choices in a picker, the pick sent as the next prompt
+				if (question && response?.stopReason === "end_turn" && answered < QUESTIONS_PER_TURN) {
+					const c = o.approvals?.();
+					const q = parseAskQuestion(question.text, question.input);
+					if (c?.hasUI && c.ui && q.options.length) {
+						const pick = await pickAnswer(c.ui, q, signal);
+						if (pick !== undefined && !signal?.aborted) {
+							answered++;
+							answer.note(`? ${clip1(q.question || "Antigravity asks", 80)} → ${clip1(pick, 80)}`);
+							answer.gap();
+							blocks = [{ type: "text", text: pick }];
+							continue;
+						}
+					}
+					waiting = true; // the user's next message is agy's answer
+				}
+				break;
 			}
 			answer.msg.usage = usageOf(response?.usage);
 			const reason = response?.stopReason;
@@ -588,7 +714,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			signal?.removeEventListener("abort", onAbort);
 			st.sink = undefined;
 			st.busy = false;
-			o.status?.(undefined);
+			o.status?.(waiting ? WAITING_STATUS : undefined);
 		}
 	}
 

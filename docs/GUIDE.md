@@ -310,6 +310,15 @@ A refusal is a line in the thinking, never a question. Where Deckhand would ask 
 print or JSON mode, or the `antigravity` tool used where there is no window to ask in), which is
 only for your `ask` rules and `ask` mode, the action is refused. When agy asks you a question, Deckhand shows
 its choices in a menu, or asks for the answer; without a window the question goes unanswered.
+agy sometimes asks in its answer instead (a numbered list of choices) and waits: Deckhand then
+shows those choices in a menu too, with **Type my own answer…**, and sends your pick to agy at
+once. Without a window, or if you close the menu, the status says **Antigravity is waiting for
+your answer**: your next message is the answer.
+
+agy stops its turn when Deckhand refuses an action. Deckhand then asks it to carry on without that
+action and to report what it did and didn't do. The rest of the answer follows in the same reply,
+and a line in the thinking says so. Deckhand asks at most 3 times per message, and never after you
+said no yourself or pressed Esc. Then the answer just says agy stopped.
 Each approval shows as one line in the thinking, for example `✓ ran: npm test`, `✓ allowed: edit
 app.ts`, `✓ you allowed: npm publish` or `✗ blocked by guardrails: rm -rf build`; secrets in a
 command are hidden. Stopping the turn (Esc) while Deckhand is asking dismisses the question and

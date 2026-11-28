@@ -33,7 +33,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { findAgy, NOT_FOUND, usableAgyPath } from "../../lib/acp.ts";
+import { spawn } from "node:child_process";
+import { findAgy, NOT_FOUND, SignInRequired, signalGroup, usableAgyPath } from "../../lib/acp.ts";
 import { Type } from "typebox";
 import { AgySession, agyLogout, agyVersion, probeModels } from "../../lib/agy.ts";
 import { APPROVAL_MODES, type ApprovalMode, isApprovalMode, readonlySession } from "../../lib/agy-approvals.ts";
@@ -54,7 +55,9 @@ import {
 	type Method,
 	methodLabel,
 	noteAgySeen,
-	noteModelCount,
+	cachedModels,
+	noteModelList,
+	noteModels,
 	notSignedIn,
 	prepareProfile,
 	profileOf,
@@ -79,6 +82,15 @@ const KILLERS: Set<() => void> = ((globalThis as any)[Symbol.for("deckhand.antig
 	});
 	return set;
 })());
+
+/**
+ * The background model listing after pi starts (refreshModels): `off` turns it off (the tests'
+ * helper, test/pi-rules.ts, does, so no test lists models unless it asks), `delayMs` is how long
+ * after session_start it waits, `last` is the running one. One object for the process.
+ */
+const PROBE: { off?: boolean; delayMs: number; last?: Promise<void> } = ((globalThis as any)[Symbol.for("deckhand.antigravity.probe")] ??= { delayMs: 3000 });
+/** A list this young (or a listing tried this recently, by any pi) is not asked for again at start. */
+export const MODELS_FRESH_MS = 10 * 60_000;
 
 const SUBCOMMANDS = ["status", "add", "login", "logout", "remove", "models", "approvals", "path"] as const;
 
@@ -122,7 +134,8 @@ export default function antigravity(pi: ExtensionAPI) {
 			explain: (m) => explainError(m, a),
 			launch: (key) => launchOf(accountNow(a.name) ?? a, key),
 			ledgerDir: path.join(profileOf(root, a).acpDir, "deckhand-sessions"),
-			onModels: (n) => noteModelCount(root, a.name, n),
+			onModels: (n, list, thinking) => noteModels(root, a.name, list, thinking, n),
+			initialModels: cachedModels(root, a.name),
 			onOpened: () => authenticated(a.name),
 			approvals: () => ({ cwd, hasUI: !!uiCtx?.hasUI, ui: uiCtx?.hasUI ? (uiCtx.ui as any) : undefined, readonly: readonlySession(), mode: approvalsOf(root, a.name) }),
 		});
@@ -143,6 +156,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		// agy processes end with pi: with the session (below), and at exit
 		const kill = () => {
 			for (const { ag } of live.values()) ag.killAll();
+			probeKill?.();
 		};
 		KILLERS.add(kill);
 
@@ -153,9 +167,13 @@ export default function antigravity(pi: ExtensionAPI) {
 			for (const { ag } of live.values()) ag.bind(registry);
 			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
 			await offerTool(ctx);
+			scheduleRefresh(ctx);
 		});
 
 		pi.on("session_shutdown", async () => {
+			clearTimeout(refreshTimer);
+			stopped = true;
+			probeKill?.();
 			KILLERS.delete(kill);
 			setStatus?.(undefined);
 			await Promise.all([...live.values()].map(({ ag }) => ag.closeAll()));
@@ -175,6 +193,68 @@ export default function antigravity(pi: ExtensionAPI) {
 			for (const { ag } of live.values()) ag.bind(registry);
 			setStatus = ctx.hasUI ? (t) => ctx.ui.setStatus("antigravity", t) : undefined;
 			void offerTool(ctx);
+			scheduleRefresh(ctx);
+		}
+	};
+
+	/**
+	 * Once after pi starts, in the background: each account whose cached list is older than
+	 * MODELS_FRESH_MS (or that was never listed) is listed again, one at a time, and its provider
+	 * gets the models if they changed. Never a sign-in: no link is taken (a link fails the listing)
+	 * and a Google account gets SSH_CONNECTION, so agy says it has no sign-in instead of opening a
+	 * browser. No sign-in keeps the cached models and marks the account (the status says to sign
+	 * in); any other failure changes nothing. An API-key account without its key is left out.
+	 */
+	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+	let refreshed = false;
+	let stopped = false;
+	let probeKill: (() => void) | undefined;
+	const scheduleRefresh = (ctx: ExtensionContext) => {
+		if (refreshed || PROBE.off) return;
+		refreshed = true;
+		refreshTimer = setTimeout(() => {
+			PROBE.last = refreshModels(ctx).catch(() => {});
+		}, PROBE.delayMs);
+		refreshTimer.unref?.();
+	};
+	const refreshModels = async (ctx: ExtensionContext) => {
+		for (const a of accountsNow()) {
+			if (stopped || !agyPath) return;
+			const ag = live.get(a.name)?.ag;
+			if (!ag) continue;
+			const c = cachedModels(root, a.name);
+			if (c && Date.now() - Math.max(c.at, c.triedAt ?? 0) < MODELS_FRESH_MS) continue;
+			const key = await keyOf(ctx, a);
+			if (usesKey(a) && !key) continue;
+			let how: ReturnType<typeof launchOf>;
+			try {
+				how = launchOf(a, key);
+			} catch {
+				continue; // a folder used in place that is gone
+			}
+			noteModelList(root, a.name, (x) => ({ ...x, triedAt: Date.now() }));
+			const env = usesKey(a) ? how.env : { ...how.env, SSH_CONNECTION: how.env.SSH_CONNECTION || "127.0.0.1 0 127.0.0.1 0" };
+			let s: AgySession | undefined;
+			try {
+				// its process group is ended with pi's (the exit listener below), even while it opens
+				const spawnImpl = ((cmd: string, args: string[], opts: any) => {
+					const child = spawn(cmd, args, opts);
+					probeKill = () => signalGroup(child.pid, "SIGTERM");
+					return child;
+				}) as typeof spawn;
+				s = await AgySession.open({ agyPath, cwd, ...how, env, spawnImpl });
+				const r = { models: s.models, thinking: s.thinkingLevels, version: s.agentVersion };
+				if (stopped) return;
+				authenticated(a.name);
+				version = r.version || version;
+				// setModels tells onModels (noteModels: the list, its count, no longer signed out)
+				await (live.get(a.name)?.ag ?? ag).setModels(r.models, r.thinking);
+			} catch (e) {
+				if (e instanceof SignInRequired) noteModelList(root, a.name, (x) => ({ ...x, signedOut: true }));
+			} finally {
+				await s?.close().catch(() => {});
+				probeKill = undefined;
+			}
 		}
 	};
 
@@ -256,7 +336,7 @@ export default function antigravity(pi: ExtensionAPI) {
 			authenticated(a.name);
 			version = r.version || version;
 			noteAgySeen(root, agyPath!, version);
-			noteModelCount(root, a.name, modelList(r.models, r.thinking).length - 1);
+			noteModels(root, a.name, r.models, r.thinking, modelList(r.models, r.thinking).length - 1);
 			const ag = live.get(a.name)?.ag;
 			if (ag) await ag.setModels(r.models, r.thinking);
 			return `${r.models.length} model${r.models.length === 1 ? "" : "s"} of the Antigravity account "${a.name}" ${ag ? "in /model" : "in /model after pi's next start or /reload"} (provider ${providerIdOf(a.name)})`;
@@ -285,7 +365,7 @@ export default function antigravity(pi: ExtensionAPI) {
 			else {
 				// a hint only: agy is asked whenever the account is used, and says when it has no sign-in
 				const hint = signInHint(root, a);
-				state = hint === "file" ? "signed in (in its profile)" : hint === "keychain" ? "signed in (system keychain, not checked)" : `sign-in unknown until agy is used (${signInCommand(a)} to sign in)`;
+				state = cachedModels(root, a.name)?.signedOut ? `sign in: ${signInCommand(a)}` : hint === "file" ? "signed in (in its profile)" : hint === "keychain" ? "signed in (system keychain, not checked)" : `sign-in unknown until agy is used (${signInCommand(a)} to sign in)`;
 			}
 			const n = (ag?.models.length ?? 1) - 1;
 			const label = a.label && a.label !== a.name ? ` (${a.label})` : "";

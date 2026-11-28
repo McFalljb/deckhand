@@ -22,6 +22,10 @@
 // node --test never runs pi; this is what the tests load our extensions into.
 import os from "node:os";
 
+// extensions/antigravity's background model listing after session_start: off in every test that
+// loads the extension here, unless the test turns it on (and sets its delay)
+((globalThis as any)[Symbol.for("deckhand.antigravity.probe")] ??= { delayMs: 3000 }).off = true;
+
 type Ext = { path: string; tools: Map<string, any>; commands: Map<string, any>; flags: Map<string, any>; handlers: Map<string, any[]>; providers: any[]; unregistered: string[] };
 
 export function piRules() {

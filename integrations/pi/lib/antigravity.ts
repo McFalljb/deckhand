@@ -322,8 +322,10 @@ export interface AntigravityOptions {
 	 * folder, PI_KIT_READONLY, `allow`.
 	 */
 	approvals?: () => Omit<ApprovalContext, "signal">;
-	/** Told the account's model count (agy's models, without `default`) whenever a list with models arrives. */
-	onModels?: (count: number) => void;
+	/** Told agy's models, its thinking levels and their count (without `default`) whenever a list with models arrives. */
+	onModels?: (count: number, models: AgyModel[], thinking: string[]) => void;
+	/** The models /model shows until agy lists them (the account's cached list: agy-accounts cachedModels). */
+	initialModels?: { models: AgyModel[]; thinking: string[] };
 	/** agy opened a session for this account (it authenticated): the account's sign-in is known to work. */
 	onOpened?: () => void;
 }
@@ -343,7 +345,7 @@ interface SessionState {
 export function createAntigravity(o: AntigravityOptions) {
 	const pid = o.providerId ?? PROVIDER_ID, account = o.account ?? "default";
 	const explain = o.explain ?? ((m: string) => m);
-	let models: PiModel[] = modelList([], [], pid, account);
+	let models: PiModel[] = modelList(o.initialModels?.models ?? [], o.initialModels?.thinking ?? [], pid, account);
 	let registry: Registry | undefined;
 	const sessions = new Map<string, SessionState>();
 	const ledger: Ledger | undefined = o.ledgerDir ? fileLedger(o.ledgerDir) : undefined;
@@ -351,7 +353,7 @@ export function createAntigravity(o: AntigravityOptions) {
 
 	const setModels = async (list: AgyModel[], thinking: string[]) => {
 		const next = modelList(list, thinking, pid, account);
-		if (next.length > 1) o.onModels?.(next.length - 1);
+		if (next.length > 1) o.onModels?.(next.length - 1, list, thinking);
 		if (JSON.stringify(next) === JSON.stringify(models)) return false;
 		models = next;
 		// pi reads getModels() again when it recomposes the provider (ModelRuntime.refresh)

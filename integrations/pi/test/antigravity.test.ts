@@ -2114,3 +2114,147 @@ test("a folder used in place that is gone: never made again; login and turns say
 		assert.equal(f.read().filter((m) => m.argv).length, 0);
 	});
 });
+
+// ---- models at pi's start: the cached list at once, a background listing after ----
+
+const PROBE = (globalThis as any)[Symbol.for("deckhand.antigravity.probe")];
+/** Runs `f` with the background listing on (no delay); restores it off after. */
+async function withProbe<T>(f: () => Promise<T>): Promise<T> {
+	const was = { ...PROBE };
+	Object.assign(PROBE, { off: false, delayMs: 0, last: undefined });
+	try {
+		return await f();
+	} finally {
+		Object.assign(PROBE, was);
+	}
+}
+const settled = async () => {
+	for (let i = 0; i < 50 && !PROBE.last; i++) await new Promise((r) => setTimeout(r, 10));
+	await PROBE.last;
+};
+const OLD_LIST = { models: [{ id: "gemini-old", name: "Gemini Old" }], thinking: ["low", "high"] };
+const modelIds = (pi: any, id = "antigravity") => prov(pi, id).getModels().map((m: any) => m.id);
+const spawned = (f: ReturnType<typeof fake>) => f.read().filter((m) => m.argv);
+/** A UI that records any dialog (a background listing must not open one). */
+const watchDialogs = (pi: any) => {
+	const asked: string[] = [];
+	for (const k of ["confirm", "select", "input", "notify"]) pi.ctx.ui[k] = async (...x: any[]) => void asked.push(`${k}: ${x[0]}`);
+	return asked;
+};
+
+test("models at start: the cached list is in /model when the provider registers, with no agy started; a list under 10 minutes old is not asked for again", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	mkdirSync(a.root, { recursive: true });
+	writeFileSync(path.join(a.root, "agy-model-lists.json"), JSON.stringify({ default: { ...OLD_LIST, at: Date.now() - 60_000 } }));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		assert.deepEqual(modelIds(pi), ["default", "gemini-old"], "from the cache, before session_start");
+		assert.equal(prov(pi, "antigravity").getModels()[1].reasoning, true, "its thinking levels too");
+		await pi.start();
+		assert.deepEqual(spawned(f), [], "background listing off in tests: nothing started");
+		await withProbe(async () => {
+			const p2 = await loadExtension();
+			await p2.start();
+			await settled();
+			assert.deepEqual(spawned(f), [], "fresh: not listed again");
+			assert.deepEqual(modelIds(p2), ["default", "gemini-old"]);
+		});
+	});
+});
+
+test("models at start: an old list, and an account never listed, are listed once in the background (one agy at a time, never a sign-in); the provider and the cache get agy's models", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	mkdirSync(a.root, { recursive: true });
+	const own = mkdtempSync(path.join(TMP_ROOT, "never-"));
+	writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ accounts: [{ name: "personal", method: "oauth-personal", dir: own, source: "added" }] }));
+	const lists = path.join(a.root, "agy-model-lists.json");
+	writeFileSync(lists, JSON.stringify({ default: { ...OLD_LIST, at: Date.now() - 11 * 60_000 } }));
+	signIn(a.root);
+	mkdirSync(path.join(own, "antigravity-acp"), { recursive: true });
+	writeFileSync(path.join(own, "antigravity-acp", "acp_token.json"), "{}");
+	await withEnv(a.env, async () => {
+		await withProbe(async () => {
+			const pi = await loadExtension();
+			const asked = watchDialogs(pi);
+			assert.deepEqual(modelIds(pi), ["default", "gemini-old"]);
+			assert.deepEqual(modelIds(pi, "antigravity-personal"), ["default"], "never listed: none yet");
+			await pi.start();
+			await settled();
+			assert.deepEqual(modelIds(pi), ["default", "gemini-3.8-pro", "gemini-3.8-flash"], "updated in place");
+			assert.deepEqual(modelIds(pi, "antigravity-personal"), ["default", "gemini-3.8-pro", "gemini-3.8-flash"]);
+			const runs = spawned(f);
+			assert.equal(runs.length, 2, "once per account");
+			for (const r of runs) assert.ok(r.env.SSH_CONNECTION, "agy says it has no sign-in rather than opening a browser");
+			assert.deepEqual(asked, [], "nothing shown");
+			const c = readJson(lists);
+			assert.deepEqual(c.default.models.map((m: any) => m.id), ["gemini-3.8-pro", "gemini-3.8-flash"]);
+			assert.equal(c.default.models[0].description, "Most capable");
+			assert.deepEqual(c.default.thinking, ["low", "high"]);
+			assert.ok(Date.now() - c.personal.at < 60_000 && c.personal.triedAt <= c.personal.at);
+			assert.equal(statSync(lists).mode & 0o777, 0o600);
+			assert.equal(readJson(path.join(a.root, "agy-models.json")).personal.count, 2, "Deckhand's count too");
+			// a second pi right after: both lists fresh, nothing started
+			const p2 = await loadExtension();
+			await p2.start();
+			PROBE.last = undefined;
+			await settled();
+			assert.equal(spawned(f).length, 2);
+			assert.deepEqual(modelIds(p2, "antigravity-personal"), ["default", "gemini-3.8-pro", "gemini-3.8-flash"], "from the cache");
+		});
+	});
+});
+
+test("models at start: no sign-in in the background listing keeps the cached models, opens nothing, and the status says to sign in; a later listing clears it", async () => {
+	const f = fake({ FAKE_AGY_SIGNED_OUT: "1" });
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log, FAKE_AGY_SIGNED_OUT: "1" });
+	mkdirSync(a.root, { recursive: true });
+	const lists = path.join(a.root, "agy-model-lists.json");
+	writeFileSync(lists, JSON.stringify({ default: { ...OLD_LIST, at: 1 } }));
+	await withEnv(a.env, async () => {
+		await withProbe(async () => {
+			const pi = await loadExtension();
+			const asked = watchDialogs(pi);
+			await pi.start();
+			await settled();
+			assert.equal(spawned(f).length, 1, "the keychain account was asked");
+			assert.deepEqual(asked, [], "no link, no dialog, no notice");
+			assert.deepEqual(modelIds(pi), ["default", "gemini-old"], "the cached models kept");
+			const c = readJson(lists).default;
+			assert.equal(c.signedOut, true);
+			assert.ok(c.triedAt > 1, "tried: another pi waits 10 minutes");
+			const { ctx, notes } = cmdCtx(pi);
+			await run(pi, "antigravity", "status", ctx);
+			assert.match(notes.at(-1)!, /- default → antigravity · Google account · sign in: \/antigravity login · 1 models/);
+		});
+		// signed in again: the next listing (here /antigravity models) clears the mark
+		delete process.env.FAKE_AGY_SIGNED_OUT;
+		signIn(a.root);
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx, notes } = cmdCtx(pi);
+		await run(pi, "antigravity", "models", ctx);
+		assert.equal(readJson(lists).default.signedOut, undefined);
+		await run(pi, "antigravity", "status", ctx);
+		assert.doesNotMatch(notes.at(-1)!, /sign in: /);
+	});
+});
+
+test("models at start: a cache file that is not a list is ignored; an API-key account without its key is not listed", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	mkdirSync(a.root, { recursive: true });
+	writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ accounts: [{ name: "key", method: "gemini-api-key", source: "added" }] }));
+	writeFileSync(path.join(a.root, "agy-model-lists.json"), JSON.stringify({ default: { models: [{ id: 7 }, "x", { id: "ok", name: "OK" }], thinking: [1], at: Date.now() }, key: "nonsense" }));
+	await withEnv(a.env, async () => {
+		await withProbe(async () => {
+			const pi = await loadExtension();
+			assert.deepEqual(modelIds(pi), ["default", "ok"]);
+			assert.equal(prov(pi, "antigravity").getModels()[1].reasoning, false);
+			await pi.start();
+			await settled();
+			assert.deepEqual(spawned(f), [], "default fresh, key without its key");
+		});
+	});
+});

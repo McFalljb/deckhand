@@ -258,7 +258,10 @@ Deckhand also finds the agy profiles you already have and lists them in Settings
 - **`/antigravity remove <name>`** removes an account, its profile and its history, after asking
   (without a window to ask in, add `--yes`). The default account stays. An account whose folder
   Deckhand found or you added is only taken off the list: its folder is never deleted.
-- **`/antigravity models <name>`** lists an account's models again.
+- **`/antigravity models <name>`** lists an account's models again. You rarely need it: `/model`
+  shows each account's models from the last list as soon as pi starts, and a list over 10 minutes
+  old is refreshed quietly in the background. An account found signed out there keeps its models,
+  and `/antigravity status` says `sign in: /antigravity login <name>`.
 - **`/antigravity approvals ask [name]`** makes Deckhand ask you before every action of that
   account's agy; **`/antigravity approvals allow [name]`** goes back to the default.
   **`/antigravity approvals`** alone shows each account's setting.

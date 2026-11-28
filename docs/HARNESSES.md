@@ -327,7 +327,13 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   to agy's stdin as one line; agy stores the credential.
 - **Models**: `<provider>/default` (agy's own choice) always; the account's from a session's
   `model` option (a throwaway session on `/antigravity models` and after sign-in; every real
-  session too), in memory only.
+  session too). The last list of each account is cached in `agy-model-lists.json` (ids, names,
+  thinking levels, when; 0600, pi's only) and is in `/model` as soon as pi starts. A few seconds
+  after `session_start`, an account whose list is over 10 minutes old (or that was never listed,
+  or was tried that recently by any pi) is listed again in the background, one account at a time,
+  never as a sign-in: no link is taken and a Google account gets `SSH_CONNECTION`, so agy says it
+  has no sign-in. Then the cached models stay and the account is marked; the status says
+  `sign in: /antigravity login <name>` until a listing or session works again.
 - **Turns** (`lib/antigravity.ts`): one agy process and session per pi session and account
   (`options.sessionId`); its id is each answer's `responseId`, also on an answer that failed before
   its prompt. Only the user messages after the last answer are sent. An agy session is picked up

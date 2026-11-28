@@ -285,6 +285,71 @@ export function noteModelCount(root: string, name: string, count: number) {
 	} catch {}
 }
 
+/**
+ * Each account's last model list, for /model at pi's start before agy is asked again:
+ * `agy-model-lists.json` {<name>: {models [{id, name, description?}], thinking [ids], at (ms, when
+ * agy listed them), triedAt? (ms, a background listing started), signedOut? (the background listing
+ * found no sign-in)}} beside accounts.json. pi's alone (Deckhand reads agy-models.json's counts).
+ * A cache like that one: no lock, last writer wins, other names kept, 0600, temp file then rename;
+ * model names only, nothing secret. What does not look like a list is ignored.
+ */
+export interface ModelCache {
+	models: { id: string; name: string; description?: string }[];
+	thinking: string[];
+	at: number;
+	triedAt?: number;
+	signedOut?: boolean;
+}
+const MODEL_LISTS = "agy-model-lists.json";
+const MODEL_LISTS_MAX = 512 * 1024;
+const str = (v: unknown, max = 2000): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
+
+function readModelLists(root: string): Record<string, unknown> {
+	try {
+		const file = path.join(root, MODEL_LISTS);
+		if (fs.statSync(file).size > MODEL_LISTS_MAX) return {};
+		const raw = JSON.parse(fs.readFileSync(file, "utf8"));
+		return isObj(raw) ? raw : {};
+	} catch {
+		return {};
+	}
+}
+
+/** The account's cached model list, or undefined. */
+export function cachedModels(root: string, name: string): ModelCache | undefined {
+	const e = readModelLists(root)[name];
+	if (!validName(name) || !isObj(e)) return undefined;
+	const models = Array.isArray(e.models)
+		? e.models
+				.filter((m: any) => isObj(m) && str(m.id, 200) && str(m.name, 200))
+				.slice(0, 200)
+				.map((m: any) => ({ id: m.id, name: m.name, ...(str(m.description) ? { description: m.description } : {}) }))
+		: [];
+	const thinking = Array.isArray(e.thinking) ? e.thinking.filter((t: unknown) => str(t, 100)).slice(0, 20) : [];
+	const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
+	return { models, thinking, at: num(e.at) ?? 0, ...(num(e.triedAt) !== undefined ? { triedAt: num(e.triedAt) } : {}), ...(e.signedOut === true ? { signedOut: true } : {}) };
+}
+
+/** Changes the account's cached model list (`change` gets what is there, or an empty one). */
+export function noteModelList(root: string, name: string, change: (c: ModelCache) => ModelCache) {
+	if (!validName(name)) return;
+	try {
+		const all = readModelLists(root);
+		all[name] = change(cachedModels(root, name) ?? { models: [], thinking: [], at: 0 });
+		fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+		const file = path.join(root, MODEL_LISTS);
+		const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+		fs.writeFileSync(tmp, `${JSON.stringify(all)}\n`, { mode: 0o600 });
+		fs.renameSync(tmp, file);
+	} catch {}
+}
+
+/** agy listed the account's models (a session, a listing): the list, its count for Deckhand, and the account is signed in. */
+export function noteModels(root: string, name: string, models: ModelCache["models"], thinking: string[], count: number) {
+	noteModelCount(root, name, count);
+	noteModelList(root, name, (c) => ({ models: models.map((m) => ({ id: m.id, name: m.name, ...(m.description ? { description: m.description } : {}) })), thinking: [...thinking], at: Date.now(), ...(c.triedAt ? { triedAt: c.triedAt } : {}) }));
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**

@@ -114,6 +114,8 @@ agy_accounts_found_by_stat :: proc(t: ^testing.T) {
 	ag_profile(fmt.tprintf("%s/.config/gemini-lab", h))
 	os.make_directory_all(fmt.tprintf("%s/.gemini-cli-only", h)) // Gemini CLI's: no agy marks
 	ag_write(fmt.tprintf("%s/.gemini-cli-only/oauth_creds.json", h), "{}")
+	// the data folder there already, open to others (made under umask 022): tightened when written
+	posix.chmod(strings.clone_to_cstring(env.root, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IXGRP, .IROTH, .IXOTH})
 	core.agy_accounts_refresh()
 	accts := core.agy_accounts()
 	testing.expect_value(t, len(accts), 4)
@@ -132,7 +134,7 @@ agy_accounts_found_by_stat :: proc(t: ^testing.T) {
 	testing.expect_value(t, e["source"].(json.String) or_else "", "found")
 	testing.expect_value(t, e["storage"].(json.String) or_else "", "file")
 	testing.expect_value(t, ag_entry(env, "gemini")["storage"].(json.String) or_else "", "file")
-	// the file is 0600 in a 0700 folder
+	// the file is 0600 in a 0700 folder, whatever the umask and the folder's mode before
 	k, st := core.path_stat(fmt.tprintf("%s/accounts.json", env.root))
 	testing.expect(t, k == .File && st.mode == 0o600, "accounts.json 0600")
 	_, rs := core.path_stat(env.root)

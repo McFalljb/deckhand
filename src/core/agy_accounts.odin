@@ -367,6 +367,17 @@ file_read :: proc(path: string) -> (o: json.Object, ok: bool) {
 	return
 }
 
+// Deckhand's antigravity folder (profiles with sign-ins in it) made 0700 when it is open to
+// others: made by an older build or under umask 022 before the core wrote it. Never a link or
+// another user's folder (lstat, the owner).
+@(private = "file")
+agy_root_private :: proc(root: string) {
+	c := strings.clone_to_cstring(root, context.temp_allocator)
+	st: posix.stat_t
+	if posix.lstat(c, &st) != .OK || !posix.S_ISDIR(st.st_mode) || st.st_uid != posix.getuid() do return
+	if st.st_mode & (posix.S_IRWXG | posix.S_IRWXO) != {} do posix.chmod(c, posix.S_IRWXU)
+}
+
 // Changes accounts.json under the lock, reading it again inside: change edits the object (false:
 // nothing to write). "" = done (or nothing to do); else why not. Never waits long: the core's
 // main thread (a pi holding the lock for longer: "try again").
@@ -375,6 +386,7 @@ agy_accounts_change :: proc(change: proc(o: ^json.Object, data: rawptr) -> bool,
 	file := agy_accounts_file()
 	if root == "" || file == "" do return "no data folder"
 	os.make_directory_all(root, {.Read_User, .Write_User, .Execute_User})
+	agy_root_private(root)
 	lock := strings.concatenate({file, ".lock"}, context.temp_allocator)
 	got := false
 	for i in 0 ..< 10 {

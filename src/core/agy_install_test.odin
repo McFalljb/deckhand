@@ -210,6 +210,11 @@ agy_signature_answers :: proc(t: ^testing.T) {
 // The real checks refuse what is not Google's: unsigned, ad-hoc signed, signed by Apple.
 @(test)
 agy_real_signature_refuses :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin {
+		// no codesign or spctl: the check refuses whatever it is given
+		testing.expect_value(t, agy_sign_check("/bin/true"), "Install agy is for macOS only")
+		return
+	}
 	root := ai_dir("sig")
 	defer os.remove_all(root)
 	script := upath(root, "script")
@@ -405,6 +410,18 @@ agy_offer_rules :: proc(t: ^testing.T) {
 	defer agy_test_dir = saved
 	row := 0
 	for r, i in HARNESS_MANIFEST do if r.id == "antigravity" do row = i
+	when ODIN_OS != .Darwin {
+		// Linux: the installer is macOS-only (Google's signature, codesign, spctl): never offered,
+		// whatever the checklist says, and the row has no button
+		agy_test_dir = upath(root, "bin")
+		for st in ([]Harness_Item_State{.Missing, .Ok, .Too_Old}) {
+			o, note := agy_install_offer({row = row, state = st, version = "1.5.0", where_ = upath(agy_test_dir, "agy")})
+			testing.expectf(t, o == .None && note == "", "%v: %v %q", st, o, note)
+			button, _ := agy_settings_row({row = row, state = st, version = "1.5.0"})
+			testing.expect_value(t, button, "")
+		}
+		return
+	}
 	agy_test_dir = ""
 	o, _ := agy_install_offer({row = row, state = .Missing})
 	testing.expect_value(t, o, Agy_Offer.None) // no folder (test mode without its fixture): nothing

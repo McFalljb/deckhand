@@ -439,7 +439,7 @@ def probe(argv):
     cfg = config_dir()
     fake = read_json(os.path.join(cfg, "fake-usage.json"), {}) or {}
     held = [n for n in (".credentials.json", ".claude.json") if held_open(os.path.join(cfg, n))]
-    log_to({"probe_start": argv, "config_dir": cfg, "probe_credentials_open": held, "env": {k: os.environ.get(k, "") for k in ("ENABLE_CLAUDEAI_MCP_SERVERS", "CLAUDE_CODE_AUTO_CONNECT_IDE")}})
+    log_to({"probe_start": argv, "config_dir": cfg, "probe_credentials_open": held, "env": {k: os.environ.get(k, "") for k in ("ENABLE_CLAUDEAI_MCP_SERVERS", "CLAUDE_CODE_AUTO_CONNECT_IDE", "DISABLE_AUTOUPDATER")}})
     if fake.get("startup_ms"):
         time.sleep(fake["startup_ms"] / 1000)
     print("not json: a login profile's output", flush=True)

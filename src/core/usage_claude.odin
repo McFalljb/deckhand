@@ -33,6 +33,7 @@ import "core:fmt"
 import "core:math"
 import "core:os"
 import "core:strings"
+import "core:sys/posix"
 import "core:time"
 import jg "../jsonguard"
 
@@ -74,27 +75,77 @@ Usage_Wrap :: enum u8 {
 	Managed, // managed settings set a status line, or allow managed hooks only: they win
 	Hooks_Off, // disableAllHooks: Claude Code runs no status line
 	Own_Settings, // the user's own --settings flag sets a status line or names a file: left alone
+	Bad_Sources, // a --setting-sources value Claude Code would refuse: left alone
+}
+
+// The settings files Claude Code reads for a tab (--setting-sources: user, project, local; all
+// when it is not given). Managed settings and --settings are read whatever it says.
+Usage_Setting_Source :: enum u8 {Local, Project, User}
+Usage_Sources :: bit_set[Usage_Setting_Source]
+USAGE_SOURCES_ALL :: Usage_Sources{.Local, .Project, .User}
+
+// The last --setting-sources (or --setting-sources=) of a tab's flags: a comma-separated list of
+// user, project and local (spaces around each allowed, "" none). ok false: one Claude Code would
+// refuse (another word, or the flag without its value).
+usage_setting_sources :: proc(args: []string) -> (src: Usage_Sources, ok: bool) {
+	src, ok = USAGE_SOURCES_ALL, true
+	value, given := "", false
+	for a, i in args {
+		if a == "--setting-sources" {
+			if i + 1 >= len(args) do return {}, false
+			value, given = args[i + 1], true
+		} else if strings.has_prefix(a, "--setting-sources=") {
+			value, given = a[len("--setting-sources="):], true
+		}
+	}
+	if !given do return
+	src = {}
+	if strings.trim_space(value) == "" do return
+	for part in strings.split(value, ",", context.temp_allocator) {
+		switch strings.trim_space(part) {
+		case "user":    src += {.User}
+		case "project": src += {.Project}
+		case "local":   src += {.Local}
+		case:           return {}, false
+		}
+	}
+	return
 }
 
 @(private = "file")
 Usage_Tab :: struct {
-	dir:  string, // heap: its account's config folder
-	cwd:  string, // heap: where it started (its project's settings)
-	wrap: Usage_Wrap,
+	dir:     string, // heap: its account's config folder
+	cwd:     string, // heap: where it started (its project's settings)
+	wrap:    Usage_Wrap,
+	sources: Usage_Sources, // the settings files its flags let Claude Code read
+	last:    Usage_Live, // its last report's numbers (spend: heap), applied or not
+	has_last: bool,
+}
+
+// Whether two reports say the same numbers.
+@(private = "file")
+usage_live_same :: proc(a, b: Usage_Live) -> bool {
+	if a.n != b.n || a.spend != b.spend do return false
+	for i in 0 ..< a.n {
+		x, y := a.windows[i], b.windows[i]
+		if x.used_percent != y.used_percent || x.resets_at != y.resets_at || x.window_mins != y.window_mins do return false
+	}
+	return true
 }
 
 @(private = "file")
 usage_tabs: map[u64]Usage_Tab
 
 // A Claude tab started (claude_start): its account, folder and how its status line was set.
-usage_claude_tab_started :: proc(tab_id: u64, dir, cwd: string, wrap: Usage_Wrap) {
+usage_claude_tab_started :: proc(tab_id: u64, dir, cwd: string, wrap: Usage_Wrap, sources: Usage_Sources) {
 	heap := runtime.heap_allocator()
 	if usage_tabs == nil do usage_tabs = make(map[u64]Usage_Tab, heap)
 	if old, has := usage_tabs[tab_id]; has {
 		delete(old.dir, heap)
 		delete(old.cwd, heap)
+		delete(old.last.spend, heap)
 	}
-	usage_tabs[tab_id] = {strings.clone(dir, heap), strings.clone(cwd, heap), wrap}
+	usage_tabs[tab_id] = {dir = strings.clone(dir, heap), cwd = strings.clone(cwd, heap), wrap = wrap, sources = sources}
 }
 
 // The tabs gone since (usage_tick, once a second).
@@ -109,6 +160,7 @@ usage_claude_tabs_tidy :: proc() {
 		t := usage_tabs[id]
 		delete(t.dir, heap)
 		delete(t.cwd, heap)
+		delete(t.last.spend, heap)
 		delete_key(&usage_tabs, id)
 	}
 }
@@ -119,6 +171,7 @@ when TEST_HOOKS {
 		for _, t in usage_tabs {
 			delete(t.dir, heap)
 			delete(t.cwd, heap)
+			delete(t.last.spend, heap)
 		}
 		clear(&usage_tabs)
 	}
@@ -138,7 +191,7 @@ usage_claude_live_note :: proc(dir: string) -> string {
 		switch t.wrap {
 		case .Managed:      worst = .Managed
 		case .Hooks_Off:    if worst != .Managed do worst = .Hooks_Off
-		case .Own_Settings: if worst == .Wrapped do worst = .Own_Settings
+		case .Own_Settings, .Bad_Sources: if worst == .Wrapped do worst = t.wrap
 		case .Wrapped, .Off, .No_Cli:
 		}
 	}
@@ -146,6 +199,7 @@ usage_claude_live_note :: proc(dir: string) -> string {
 	case .Managed:      return "managed status line: no live numbers from its tabs"
 	case .Hooks_Off:    return "status line off (disableAllHooks): a tab sends no live numbers"
 	case .Own_Settings: return "a tab's own --settings: its status line is not wrapped"
+	case .Bad_Sources:  return "a tab's --setting-sources could not be read: its status line is not wrapped"
 	case .Wrapped, .Off, .No_Cli:
 	}
 	return ""
@@ -157,14 +211,27 @@ usage_claude_live_note :: proc(dir: string) -> string {
 SETTINGS_FILE_MAX :: 1 << 20 // a settings file larger than this is not looked into
 
 // A settings file's top-level object (temp): a regular file (never a FIFO or a device: a read
-// would block) of at most SETTINGS_FILE_MAX, strict JSON. nil: none, or not that.
+// would block) of at most SETTINGS_FILE_MAX, strict JSON. nil: none, or not that. Opened
+// non-blocking and checked once open (fstat), so nothing swapped in after a check is waited on;
+// a link is followed (a dotfiles manager's settings.json is one).
 usage_settings_object :: proc(path: string) -> json.Object {
 	if path == "" do return nil
-	fi, err := os.stat(path, context.temp_allocator)
-	if err != nil || fi.type != .Regular || fi.size > SETTINGS_FILE_MAX do return nil
-	data, rerr := os.read_entire_file(path, context.temp_allocator)
-	if rerr != nil do return nil
-	o, _ := usage_settings_parse(string(data))
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.NONBLOCK, .CLOEXEC})
+	if fd < 0 do return nil
+	defer posix.close(fd)
+	st: posix.stat_t
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) || i64(st.st_size) > SETTINGS_FILE_MAX do return nil
+	buf := make([]u8, int(st.st_size) + 1, context.temp_allocator) // one more: a file grown since is too big
+	n := 0
+	for n < len(buf) {
+		room := len(buf) - n
+		got := posix.read(fd, raw_data(buf[n:]), uint(room))
+		if got < 0 && posix.errno() == .EINTR do continue
+		if got <= 0 do break
+		n += int(got)
+	}
+	if n > SETTINGS_FILE_MAX || n == len(buf) do return nil
+	o, _ := usage_settings_parse(string(buf[:n]))
 	return o
 }
 
@@ -195,16 +262,17 @@ usage_managed_objects :: proc() -> []json.Object {
 	return out[:]
 }
 
-// The settings files of a tab, highest first: local, project, then the account's user settings.
+// The settings files of a tab, highest first: local, project, then the account's user settings;
+// "" for one its --setting-sources leaves out.
 @(private = "file")
-usage_settings_paths :: proc(dir, cwd: string) -> [3]string {
+usage_settings_paths :: proc(dir, cwd: string, sources: Usage_Sources) -> [3]string {
 	p: [3]string
 	if cwd != "" && strings.has_prefix(cwd, "/") {
 		base := strings.trim_right(cwd, "/")
-		p[0] = strings.concatenate({base, "/.claude/settings.local.json"}, context.temp_allocator)
-		p[1] = strings.concatenate({base, "/.claude/settings.json"}, context.temp_allocator)
+		if .Local in sources do p[0] = strings.concatenate({base, "/.claude/settings.local.json"}, context.temp_allocator)
+		if .Project in sources do p[1] = strings.concatenate({base, "/.claude/settings.json"}, context.temp_allocator)
 	}
-	if dir != "" do p[2] = strings.concatenate({strings.trim_right(dir, "/"), "/settings.json"}, context.temp_allocator)
+	if dir != "" && .User in sources do p[2] = strings.concatenate({strings.trim_right(dir, "/"), "/settings.json"}, context.temp_allocator)
 	return p
 }
 
@@ -217,9 +285,8 @@ Usage_Status_Line :: struct {
 }
 
 @(private = "file")
-usage_status_line_of :: proc(o: json.Object) -> (sl: Usage_Status_Line, ok: bool) {
-	x, is := o["statusLine"].(json.Object)
-	if !is do return
+usage_status_line_of :: proc(x: json.Object) -> (sl: Usage_Status_Line, ok: bool) {
+	if x == nil do return
 	if string(x["type"].(json.String) or_else "") != "command" do return
 	sl.command = string(x["command"].(json.String) or_else "")
 	if strings.trim_space(sl.command) == "" do return {}, false
@@ -236,39 +303,58 @@ usage_status_line_of :: proc(o: json.Object) -> (sl: Usage_Status_Line, ok: bool
 	return sl, true
 }
 
-// Deckhand's own status line (a user who copied it into their settings): never run again.
+// Deckhand's own status line, exactly as injected (this build's CLI, quoted, then " statusline":
+// a user who copied it into their settings): never run again. Another command naming deckhand
+// is the user's (DECKHAND_STATUSLINE_DEPTH stops one that runs this again).
 @(private = "file")
 usage_status_line_ours :: proc(cmd: string) -> bool {
-	c := strings.trim_space(cmd)
-	return strings.has_suffix(c, " statusline") && (strings.contains(c, "deckhand") || strings.contains(c, "DECKHAND_CLI"))
+	cli := claude_cli_path()
+	return cli != "" && strings.trim_space(cmd) == strings.concatenate({sh_quote(cli), " statusline"}, context.temp_allocator)
 }
 
-// The user's own status line for an account and a project folder: local, then project, then the
-// account's user settings, the first that sets one (Claude Code's order below its flags and
-// managed settings). ok false: none.
-usage_claude_user_statusline :: proc(dir, cwd: string) -> (sl: Usage_Status_Line, ok: bool) {
-	for p in usage_settings_paths(dir, cwd) {
-		o := usage_settings_object(p)
+// The user's own status line for an account and a project folder: statusLine merged as Claude
+// Code merges settings (the account's user settings, then the project's, then local, each key
+// over the one before; only the files sources lets it read), below its flags and managed
+// settings. ok false: none (or not a command).
+usage_claude_user_statusline :: proc(dir, cwd: string, sources := USAGE_SOURCES_ALL) -> (sl: Usage_Status_Line, ok: bool) {
+	paths := usage_settings_paths(dir, cwd, sources)
+	merged: json.Object
+	for i := len(paths) - 1; i >= 0; i -= 1 {
+		o := usage_settings_object(paths[i])
 		if o == nil do continue
-		if _, has := o["statusLine"]; !has do continue
-		sl, ok = usage_status_line_of(o)
-		if ok && usage_status_line_ours(sl.command) do return {}, false
-		return
+		x, is := o["statusLine"].(json.Object)
+		if !is do continue
+		if merged == nil do merged = make(json.Object, context.temp_allocator)
+		for k, v in x do merged[k] = v
 	}
-	return {}, false
+	sl, ok = usage_status_line_of(merged)
+	if ok && usage_status_line_ours(sl.command) do return {}, false
+	return
+}
+
+// The environment a wrapped tab gets for its own status line, which `deckhand statusline` runs
+// only when Deckhand does not answer (a core restart or handover, a slow answer, the account
+// removed): DECKHAND_STATUSLINE_USER=<command>, as resolved at this start ("" = none). Nothing
+// new is trusted: the command is the user's own settings', which Claude Code would run itself,
+// and only Claude Code's status line run (its process's environment, set here) reads it.
+usage_claude_fallback_env :: proc(dir, cwd: string, sources: Usage_Sources, wrap: Usage_Wrap) -> string {
+	if wrap != .Wrapped do return ""
+	sl, ok := usage_claude_user_statusline(dir, cwd, sources)
+	if !ok || strings.contains_rune(sl.command, 0) do return ""
+	return strings.concatenate({"DECKHAND_STATUSLINE_USER=", sl.command}, context.temp_allocator)
 }
 
 // disableAllHooks as Claude Code would take it: managed first, then the flag's settings (given),
 // then local, project and user; the first that says it decides.
 @(private = "file")
-usage_hooks_off :: proc(managed: []json.Object, flag: json.Object, dir, cwd: string) -> bool {
+usage_hooks_off :: proc(managed: []json.Object, flag: json.Object, dir, cwd: string, sources: Usage_Sources) -> bool {
 	say :: proc(o: json.Object) -> (off, said: bool) {
 		b, is := o["disableAllHooks"].(json.Boolean)
 		return bool(b), is
 	}
 	for o in managed do if off, said := say(o); said && off do return true
 	if flag != nil do if off, said := say(flag); said do return off
-	for p in usage_settings_paths(dir, cwd) {
+	for p in usage_settings_paths(dir, cwd, sources) {
 		o := usage_settings_object(p)
 		if o == nil do continue
 		if off, said := say(o); said do return off
@@ -290,6 +376,8 @@ usage_claude_inject :: proc(args: []string, cli, dir, cwd: string) -> (insert: [
 	out_args = args
 	if !usage_claude_statusline_on() do return nil, args, .Off
 	if cli == "" do return nil, args, .No_Cli
+	sources, sok := usage_setting_sources(args)
+	if !sok do return nil, args, .Bad_Sources
 	managed := usage_managed_objects()
 	for o in managed {
 		if _, has := o["statusLine"]; has do return nil, args, .Managed
@@ -314,8 +402,8 @@ usage_claude_inject :: proc(args: []string, cli, dir, cwd: string) -> (insert: [
 		if !is_obj do return nil, args, .Own_Settings
 		if _, has := flag["statusLine"]; has do return nil, args, .Own_Settings
 	}
-	if usage_hooks_off(managed, flag, dir, cwd) do return nil, args, .Hooks_Off
-	ours := usage_claude_settings_json(cli, dir, cwd)
+	if usage_hooks_off(managed, flag, dir, cwd, sources) do return nil, args, .Hooks_Off
+	ours := usage_claude_settings_json(cli, dir, cwd, sources)
 	if at < 0 {
 		insert = make([]string, 2, context.temp_allocator)
 		insert[0], insert[1] = "--settings", ours
@@ -334,11 +422,11 @@ usage_claude_inject :: proc(args: []string, cli, dir, cwd: string) -> (insert: [
 
 // The settings a wrapped tab gets: {"statusLine":{"type":"command","command":"'<cli>' statusline",
 // …the user's padding, refreshInterval, hideVimModeIndicator}}. Temp.
-usage_claude_settings_json :: proc(cli, dir, cwd: string) -> string {
+usage_claude_settings_json :: proc(cli, dir, cwd: string, sources := USAGE_SOURCES_ALL) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, `{"statusLine":{"type":"command","command":`)
 	json_quote(&b, strings.concatenate({sh_quote(cli), " statusline"}, context.temp_allocator))
-	if sl, ok := usage_claude_user_statusline(dir, cwd); ok {
+	if sl, ok := usage_claude_user_statusline(dir, cwd, sources); ok {
 		if p, has := sl.padding.?; has do fmt.sbprintf(&b, `,"padding":%d`, i64(clamp(p, -1000, 1000)))
 		if r, has := sl.refresh.?; has && r >= 1 do fmt.sbprintf(&b, `,"refreshInterval":%d`, i64(min(r, 86400)))
 		if h, has := sl.hide_vim.?; has do fmt.sbprintf(&b, `,"hideVimModeIndicator":%v`, h)
@@ -400,19 +488,36 @@ usage_claude_live_of :: proc(c: Claude_Usage_Report) -> Usage_Live {
 // claude.usage (run_command): the tab's own report (caller_may), of a Claude Code tab whose
 // account is configured.
 usage_claude_report_apply :: proc(c: Claude_Usage_Report) -> (Result, bool) {
-	s, _, ct := claude_tab_of(c.tab_id)
+	s, tab, ct := claude_tab_of(c.tab_id)
 	if ct == nil || harness_is_codex(ct.harness) do return fail("no such Claude tab"), false
 	if !claude_account_known(ct.account, .Claude) do return fail("this tab's account is no longer configured"), false
 	dir := claude_account_dir(ct.account, .Claude)
-	cwd := ""
-	if t, has := usage_tabs[c.tab_id]; has do cwd = t.cwd
-	else if s != nil do cwd = s.cwd // a tab started by an earlier core
-	if usage_claude_statusline_on() {
-		label := ""
-		for a in claude_accounts(.Claude) do if a.dir == dir do label = a.label
-		usage_claude_live(dir, label, usage_claude_live_of(c))
+	if _, has := usage_tabs[c.tab_id]; !has {
+		// a tab started by an earlier core: its folder as claude_start picks it (its own, a
+		// worktree or a subfolder, while it is one; else its session's), its saved flags' sources
+		// (an agent's start had none: all of them)
+		cwd := tab.cwd != "" && os.is_dir(tab.cwd) ? tab.cwd : (s != nil ? s.cwd : "")
+		src, sok := usage_setting_sources(ct.args)
+		usage_claude_tab_started(c.tab_id, dir, cwd, sok ? .Wrapped : .Bad_Sources, sok ? src : {})
 	}
-	sl, ok := usage_claude_user_statusline(dir, cwd)
+	t := &usage_tabs[c.tab_id]
+	cwd, sources := t.cwd, t.sources
+	// only a tab's new numbers: its footer re-sends the same at each redraw and refreshInterval,
+	// and an idle tab's never hide newer ones (usage_claude_live)
+	live := usage_claude_live_of(c)
+	if !t.has_last || !usage_live_same(t.last, live) {
+		heap := runtime.heap_allocator()
+		delete(t.last.spend, heap)
+		t.last = live
+		t.last.spend = strings.clone(live.spend, heap)
+		t.has_last = true
+		if usage_claude_statusline_on() {
+			label := ""
+			for a in claude_accounts(.Claude) do if a.dir == dir do label = a.label
+			usage_claude_live(dir, label, live)
+		}
+	}
+	sl, ok := usage_claude_user_statusline(dir, cwd, sources)
 	if !ok do return {ok = true, data = "{}"}, false
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, `{"command":`)
@@ -450,7 +555,8 @@ usage_claude_script :: proc(dir: string) -> string {
 	for e in claude_account_env(account, .Claude) do if strings.has_prefix(e, "DECKHAND_CLAUDE_ACCOUNT=") {
 		fmt.sbprintf(&b, "DECKHAND_CLAUDE_ACCOUNT=%s; ", sh_quote(e[len("DECKHAND_CLAUDE_ACCOUNT="):]))
 	}
-	strings.write_string(&b, "ENABLE_CLAUDEAI_MCP_SERVERS=false; CLAUDE_CODE_AUTO_CONNECT_IDE=0; CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1; export ENABLE_CLAUDEAI_MCP_SERVERS CLAUDE_CODE_AUTO_CONNECT_IDE CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL; ")
+	// no update of Claude Code itself, nor the official marketplace installed, from a read
+	strings.write_string(&b, "ENABLE_CLAUDEAI_MCP_SERVERS=false; CLAUDE_CODE_AUTO_CONNECT_IDE=0; CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1; DISABLE_AUTOUPDATER=1; CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1; export ENABLE_CLAUDEAI_MCP_SERVERS CLAUDE_CODE_AUTO_CONNECT_IDE CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL DISABLE_AUTOUPDATER CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL; ")
 	strings.write_string(&b, CLAUDE_ACCOUNT_SH)
 	cmd := ""
 	when TEST_HOOKS {

@@ -824,15 +824,21 @@ agents › Claude Code (both on by default; only you can change them):
   line, so the row stays current while you work. Deckhand starts the tab with its own status line
   (`deckhand statusline`, through `--settings`); that command sends Deckhand only those numbers,
   never the conversation, its folder, its session name or anything else Claude Code gives it,
-  then runs **your own status line** (from the project's `.claude/settings.local.json`, then
-  `.claude/settings.json`, then the account's `settings.json`) with the same input and prints its
-  output unchanged, with its padding and refresh interval; with none of yours the status line
-  stays empty. If your own `--settings` flags are inline JSON, Deckhand's status line is added to
-  them; a `--settings` file, or flags that set a status line, leave the tab unwrapped. The row
-  says when a running tab can't send numbers: *managed status line* (your organisation's managed
-  settings set the status line, or allow only managed hooks: theirs wins), *status line off
-  (disableAllHooks)*, or *a tab's own --settings*. Turning it off applies to tabs started or
-  restarted after.
+  then runs **your own status line** (its `statusLine` merged as Claude Code merges it: the
+  account's `settings.json`, then the project's `.claude/settings.json`, then
+  `.claude/settings.local.json`, each setting over the one before, and only the files your
+  `--setting-sources` lets Claude Code read) with the same input and prints its output unchanged,
+  with its padding and refresh interval; with none of yours the status line stays empty. While
+  Deckhand can't answer (it is restarting or being updated, or the account was removed) the tab
+  runs your status line as it was when the tab started, so the footer doesn't go blank. If your
+  own `--settings` flags are inline JSON, Deckhand's status line is added to them; a `--settings`
+  file, or flags that set a status line, leave the tab unwrapped. The row says when a running tab
+  can't send numbers: *managed status line* (your organisation's managed settings set the status
+  line, or allow only managed hooks: theirs wins), *status line off (disableAllHooks)*, *a tab's
+  own --settings*, or *a tab's --setting-sources could not be read*. A tab that sends the same
+  numbers again (an idle tab redrawing) changes nothing, and within one 5-hour or weekly window a
+  percent never goes down, so an idle tab's older numbers never hide newer ones. Turning it off
+  applies to tabs started or restarted after.
 - **Check Claude usage in the background (starts claude briefly)**: while the section is shown,
   every 5 minutes (and with **Refresh usage**), for an account none of whose tabs gave numbers in
   the last 5 minutes, Deckhand starts `claude` headless with that account's `CLAUDE_CONFIG_DIR`

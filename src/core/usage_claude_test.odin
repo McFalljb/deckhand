@@ -10,7 +10,9 @@ package core
 import "base:runtime"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 
 when TEST_HOOKS {
@@ -57,6 +59,37 @@ uc_done :: proc() {
 	claude_accounts_gen += 1
 	usage_reset_for_test()
 	usage_test_now = 0
+	uc_tabs_done()
+}
+
+// A Claude tab in an open session, as a core restarted under it sees one (nothing started, no
+// usage_claude_tab_started): the session's folder, the tab's own folder ("" = the session's) and
+// flags. Its id. uc_done drops the sessions.
+@(private = "file")
+uc_tab :: proc(session_cwd, tab_cwd: string, args: []string = nil) -> u64 {
+	heap := runtime.heap_allocator()
+	context.allocator = heap
+	s := Open_Session{id = new_id(), pi_session_id = strings.clone("s-usage", heap), cwd = strings.clone(session_cwd, heap)}
+	tab := Tab{id = new_id(), title = strings.clone("Claude", heap), status = .Running, kind = Claude_Tab{harness = .Claude, args = slice.clone(args)}}
+	if tab_cwd != "" do tab.cwd = strings.clone(tab_cwd, heap)
+	append(&s.tabs, tab)
+	s.active_tab = tab.id
+	append(&state.open_sessions, s)
+	return tab.id
+}
+
+@(private = "file")
+uc_tabs_done :: proc() {
+	for &s in state.open_sessions do delete(s.tabs) // the strings: a test's few bytes
+	clear(&state.open_sessions)
+}
+
+// A claude.usage report of a 5h and a 7d percent (their reset times; -1: not said).
+@(private = "file")
+uc_report :: proc(tab: u64, p5: f64, r5: i64, p7: f64 = -1, r7: i64 = 0) -> (Result, bool) {
+	r, ch := usage_claude_report_apply({tab_id = tab, five_hour = p5, five_hour_resets = r5, seven_day = p7, seven_day_resets = r7, spend = -1, spend_used_usd = -1, spend_limit_usd = -1})
+	usage_publish_for_test()
+	return r, ch
 }
 
 @(private = "file")
@@ -122,7 +155,7 @@ usage_claude_report_is_the_tabs_own :: proc(t: ^testing.T) {
 
 // Live numbers and a background read merge: the background read's model windows join the live
 // main windows; live numbers that came while the read ran are kept over its main windows; an older
-// live read gives way to it. The same live numbers again within USAGE_LIVE_SAME change nothing.
+// live read gives way to it. (A tab's repeats: usage_claude_idle_tab_never_hides_newer.)
 @(test)
 usage_claude_live_and_background :: proc(t: ^testing.T) {
 	def := uc_reset()
@@ -161,11 +194,6 @@ usage_claude_live_and_background :: proc(t: ^testing.T) {
 	testing.expect_value(t, e.windows[0].used_percent, 45.0)
 	testing.expect_value(t, e.windows[2].name, "Opus")
 	testing.expect(t, strings.contains(usage_tip(e^, UC_NOW + 60), "model limits: background check"), usage_tip(e^, UC_NOW + 60))
-	// the same again soon after: nothing changes (its read time either)
-	usage_test_now = UC_NOW + 70
-	usage_claude_live(def, "", usage_claude_live_of({five_hour = 45, seven_day = 11, spend = -1, spend_used_usd = -1, spend_limit_usd = -1}))
-	usage_publish_for_test()
-	testing.expect_value(t, uc_entry(key).read_at, UC_NOW + 60)
 	// a background read that began after the last live numbers: its main windows win
 	usage_test_now = UC_NOW + 1000
 	bg2 := Usage_Read{status = .Ok, windows = make([dynamic]Usage_Window, context.temp_allocator)}
@@ -337,8 +365,10 @@ usage_claude_user_statusline_order :: proc(t: ^testing.T) {
 	uc_write(fmt.tprintf("%s/.claude/settings.local.json", proj), `{"statusLine":{"type":"static","command":"x"}}`)
 	_, ok = usage_claude_user_statusline(def, proj)
 	testing.expect(t, !ok)
+	claude_cli_override = "/Applications/Deckhand.app/Contents/MacOS/deckhand-cli"
 	uc_write(fmt.tprintf("%s/.claude/settings.local.json", proj), `{"statusLine":{"type":"command","command":"'/Applications/Deckhand.app/Contents/MacOS/deckhand-cli' statusline"}}`)
 	_, ok = usage_claude_user_statusline(def, proj)
+	claude_cli_override = ""
 	testing.expect(t, !ok)
 	// a file that is not JSON is skipped
 	uc_write(fmt.tprintf("%s/.claude/settings.local.json", proj), `{not json`)
@@ -402,11 +432,11 @@ usage_claude_settings_injected :: proc(t: ^testing.T) {
 	_, _, wrap = usage_claude_inject(nil, cli, def, proj)
 	testing.expect_value(t, wrap, Usage_Wrap.Managed)
 	// the row says why a running tab sends nothing
-	usage_claude_tab_started(41, def, proj, .Managed)
+	usage_claude_tab_started(41, def, proj, .Managed, USAGE_SOURCES_ALL)
 	testing.expect_value(t, usage_claude_live_note(def), "managed status line: no live numbers from its tabs")
-	usage_claude_tab_started(41, def, proj, .Hooks_Off)
+	usage_claude_tab_started(41, def, proj, .Hooks_Off, USAGE_SOURCES_ALL)
 	testing.expect(t, strings.contains(usage_claude_live_note(def), "disableAllHooks"))
-	usage_claude_tab_started(41, def, proj, .Wrapped)
+	usage_claude_tab_started(41, def, proj, .Wrapped, USAGE_SOURCES_ALL)
 	testing.expect_value(t, usage_claude_live_note(def), "")
 }
 
@@ -453,6 +483,204 @@ usage_claude_exchange_with_a_stand_in :: proc(t: ^testing.T) {
 	defer usage_read_free(r2)
 	testing.expect_value(t, r2.status, Usage_Status.Error)
 	testing.expect(t, strings.contains(r2.error, "ended"), r2.error)
+}
+
+
+// Review 1 #1: --setting-sources (Claude Code 2.1.332: a comma-separated list of user, project,
+// local) leaves out the files it does not name, for the user's status line and disableAllHooks;
+// one that does not parse leaves the tab unwrapped (Claude Code would refuse to start).
+@(test)
+usage_claude_setting_sources :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	proj := uc_dir("srcs")
+	uc_write(fmt.tprintf("%s/.claude/settings.json", proj), `{"statusLine":{"type":"command","command":"project-line"}}`)
+	src, ok := usage_setting_sources({"--model", "x", "--setting-sources", "user"})
+	testing.expect(t, ok)
+	testing.expect_value(t, src, Usage_Sources{.User})
+	_, has := usage_claude_user_statusline(def, proj, src)
+	testing.expect(t, !has, "a project status line with --setting-sources user")
+	// a tab's report answers with no command either (its flags read where it started)
+	id := uc_tab(proj, "", {"--setting-sources", "user"})
+	r, _ := uc_report(id, 10, 0)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, r.data, "{}")
+	// both forms, the last one counting, spaces and an empty list
+	src, ok = usage_setting_sources({"--setting-sources", "user", "--setting-sources=project, local"})
+	testing.expect(t, ok)
+	testing.expect_value(t, src, Usage_Sources{.Project, .Local})
+	src, ok = usage_setting_sources({"--setting-sources", ""})
+	testing.expect(t, ok)
+	testing.expect_value(t, src, Usage_Sources{})
+	src, ok = usage_setting_sources(nil)
+	testing.expect(t, ok)
+	testing.expect_value(t, src, USAGE_SOURCES_ALL)
+	// project and local left out: their disableAllHooks does not count
+	uc_write(fmt.tprintf("%s/.claude/settings.local.json", proj), `{"disableAllHooks":true}`)
+	_, _, wrap := usage_claude_inject({"--setting-sources", "user"}, "/x/cli", def, proj)
+	testing.expect_value(t, wrap, Usage_Wrap.Wrapped)
+	_, _, wrap = usage_claude_inject(nil, "/x/cli", def, proj)
+	testing.expect_value(t, wrap, Usage_Wrap.Hooks_Off)
+	// the user's padding not copied when user is left out
+	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"u","padding":4}}`)
+	insert, _, _ := usage_claude_inject({"--setting-sources=project"}, "/x/cli", def, proj)
+	testing.expect(t, len(insert) == 2 && !strings.contains(insert[1], "padding"), insert[1] if len(insert) == 2 else "")
+	// not a list Claude Code takes: unwrapped, and said
+	for bad in ([][]string{{"--setting-sources", "user,bogus"}, {"--setting-sources"}, {"--setting-sources=user;project"}}) {
+		_, ok = usage_setting_sources(bad)
+		testing.expectf(t, !ok, "%v parsed", bad)
+		ins, a, w := usage_claude_inject(bad, "/x/cli", def, proj)
+		testing.expectf(t, w == .Bad_Sources && len(ins) == 0 && len(a) == len(bad), "%v: %v", bad, w)
+	}
+	usage_claude_tab_started(77, def, proj, .Bad_Sources, {})
+	testing.expect(t, strings.contains(usage_claude_live_note(def), "--setting-sources"), usage_claude_live_note(def))
+}
+
+// Review 1 #2: a tab a restarted core did not start reads its project settings where it runs:
+// its own folder (a worktree, a subfolder) when that is a folder, else its session's.
+@(test)
+usage_claude_report_folder_after_restart :: proc(t: ^testing.T) {
+	uc_reset()
+	defer uc_done()
+	proj := uc_dir("restart")
+	wt := fmt.tprintf("%s/wt", proj)
+	uc_write(fmt.tprintf("%s/.claude/settings.json", wt), `{"statusLine":{"type":"command","command":"wt-line"}}`)
+	id := uc_tab(proj, wt)
+	r, _ := uc_report(id, 10, 0)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, r.data, `{"command":"wt-line"}`)
+	gone := uc_tab(wt, fmt.tprintf("%s/gone", proj)) // its folder removed: the session's
+	r, _ = uc_report(gone, 10, 0)
+	testing.expect_value(t, r.data, `{"command":"wt-line"}`)
+}
+
+// Review 1 #3: an idle tab (its refreshInterval re-sends the same numbers) never hides newer ones:
+// a repeat of a tab's own last numbers changes nothing (nor the read time, so the background
+// check falls due), and within one window (the same reset time) a percent never goes down.
+@(test)
+usage_claude_idle_tab_never_hides_newer :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	f := Window_Facts{usage_visible = true}
+	usage_test_facts = &f
+	defer usage_test_facts = nil
+	key := usage_claude_key(def)
+	R := UC_NOW + 3 * 3600
+	id := uc_tab(uc_dir("idle"), "")
+	uc_report(id, 40, R)
+	testing.expect_value(t, uc_entry(key).windows[0].used_percent, 40.0)
+	// minutes later the tab re-sends the same: the read time stays, so the background check is due
+	usage_test_now = UC_NOW + USAGE_POLL_EVERY + 10
+	uc_report(id, 40, R)
+	testing.expect_value(t, uc_entry(key).read_at, UC_NOW)
+	usage_tick()
+	next, _ := usage_next_at_for_test(def, .Claude)
+	testing.expect_value(t, next, usage_test_now + USAGE_POLL_EVERY) // tried now
+	// it found 90% (used elsewhere: another terminal, another Mac)
+	bg := Usage_Read{status = .Ok, windows = make([dynamic]Usage_Window, context.temp_allocator)}
+	append(&bg.windows, Usage_Window{used_percent = 90, window_mins = 300, resets_at = R})
+	usage_apply_for_test(def, bg, .Claude)
+	testing.expect_value(t, uc_entry(key).windows[0].used_percent, 90.0)
+	// the idle tab's repeat does not bring back 40%, nor does a newer but lower one in that window
+	usage_test_now += 30
+	uc_report(id, 40, R)
+	testing.expect_value(t, uc_entry(key).windows[0].used_percent, 90.0)
+	uc_report(id, 41, R)
+	testing.expect_value(t, uc_entry(key).windows[0].used_percent, 90.0)
+	// a new window (its reset time moved on) starts low
+	uc_report(id, 5, R + 5 * 3600)
+	testing.expect_value(t, uc_entry(key).windows[0].used_percent, 5.0)
+}
+
+// Review 1 #3: two tabs of one account whose status lines disagree (one idle with old numbers)
+// do not flip the row back and forth.
+@(test)
+usage_claude_two_tabs_no_flip_flop :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	key := usage_claude_key(def)
+	R := UC_NOW + 3 * 3600
+	proj := uc_dir("flip")
+	a, b := uc_tab(proj, ""), uc_tab(proj, "")
+	uc_report(a, 40, R)
+	usage_test_now += 1
+	uc_report(b, 45, R)
+	for i in 0 ..< 4 {
+		usage_test_now += 40
+		uc_report(a, 40, R)
+		testing.expectf(t, uc_entry(key).windows[0].used_percent == 45, "round %d: %v after a's repeat", i, uc_entry(key).windows[0].used_percent)
+		usage_test_now += 1
+		uc_report(b, 45, R)
+		testing.expect_value(t, uc_entry(key).windows[0].used_percent, 45.0)
+	}
+	uc_report(a, 42, R) // a's own numbers moved, still below b's in this window
+	testing.expect_value(t, uc_entry(key).windows[0].used_percent, 45.0)
+}
+
+// Review 1 polish: statusLine merged across the files Claude Code reads (user, then project,
+// then local, each key over the one before), so a local {"padding":2} keeps the user's command.
+@(test)
+usage_claude_statusline_merged :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	proj := uc_dir("merge")
+	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"user-line","padding":1,"refreshInterval":9}}`)
+	uc_write(fmt.tprintf("%s/.claude/settings.local.json", proj), `{"statusLine":{"padding":2}}`)
+	sl, ok := usage_claude_user_statusline(def, proj)
+	testing.expect(t, ok)
+	testing.expect_value(t, sl.command, "user-line")
+	testing.expect_value(t, sl.padding.? or_else -9, 2.0)
+	testing.expect_value(t, sl.refresh.? or_else -9, 9.0)
+	// left out by --setting-sources: the user's alone
+	sl, ok = usage_claude_user_statusline(def, proj, {.User})
+	testing.expect_value(t, sl.padding.? or_else -9, 1.0)
+}
+
+// Review 1 polish: only Deckhand's own command (this build's CLI, quoted as injected) is skipped;
+// another "deckhand … statusline" of the user's is theirs.
+@(test)
+usage_claude_ours_exactly :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	claude_cli_override = "/Apps/Deckhand.app/Contents/MacOS/deckhand-cli"
+	defer claude_cli_override = ""
+	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"  '/Apps/Deckhand.app/Contents/MacOS/deckhand-cli' statusline "}}`)
+	_, ok := usage_claude_user_statusline(def, "")
+	testing.expect(t, !ok, "ours")
+	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"~/bin/deckhand-wrapper statusline"}}`)
+	sl, sok := usage_claude_user_statusline(def, "")
+	testing.expect(t, sok)
+	testing.expect_value(t, sl.command, "~/bin/deckhand-wrapper statusline")
+}
+
+// Review 1 polish: the user's command for a wrapped tab's environment, which the CLI runs when
+// Deckhand does not answer (a restart, a handover); none when not wrapped or none is set.
+@(test)
+usage_claude_fallback_command :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	testing.expect_value(t, usage_claude_fallback_env(def, "", USAGE_SOURCES_ALL, .Wrapped), "")
+	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"my-line --x"}}`)
+	testing.expect_value(t, usage_claude_fallback_env(def, "", USAGE_SOURCES_ALL, .Wrapped), "DECKHAND_STATUSLINE_USER=my-line --x")
+	testing.expect_value(t, usage_claude_fallback_env(def, "", {.Project}, .Wrapped), "")
+	for w in ([]Usage_Wrap{.Off, .Managed, .Hooks_Off, .Own_Settings, .Bad_Sources, .No_Cli}) do testing.expect_value(t, usage_claude_fallback_env(def, "", USAGE_SOURCES_ALL, w), "")
+	// the background read's environment: no auto-update or marketplace install either
+	s := usage_claude_script(def)
+	defer delete(s)
+	testing.expect(t, strings.contains(s, "DISABLE_AUTOUPDATER=1"), s)
+	testing.expect(t, strings.contains(s, "CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1"), s)
+}
+
+// Review 1 polish: a settings file that is a FIFO is never waited on (opened non-blocking, then
+// checked).
+@(test)
+usage_claude_settings_fifo :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	path := fmt.tprintf("%s/settings.json", def)
+	os.remove(path)
+	testing.expect(t, posix.mkfifo(strings.clone_to_cstring(path, context.temp_allocator), {.IRUSR, .IWUSR}) == .OK)
+	testing.expect(t, usage_settings_object(path) == nil)
 }
 
 }

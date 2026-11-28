@@ -882,8 +882,10 @@ usage_main_full :: proc(ws: []Usage_Window) -> bool {
 
 // A Claude tab's status line numbers (claude.usage; usage_claude.odin checked them) into its
 // account's record: its main windows (5h, 7d) and spend replace the last ones; the model windows
-// of a background read stay. The same numbers again within USAGE_LIVE_SAME change nothing (the
-// status line runs at every redraw of Claude's footer).
+// of a background read stay. Within one window (the same length and reset time) a percent never
+// goes down: one tab's older numbers (another tab of the account, an idle one, a background read
+// newer than them) never hide newer ones. A tab's repeats of its own last numbers never get here
+// (usage_claude_report_apply), so they leave read_at as it was and the background check falls due.
 usage_claude_live :: proc(dir: string, label: string, live_in: Usage_Live) {
 	live := live_in
 	context.allocator = runtime.heap_allocator() // the records outlive any caller's allocator
@@ -892,18 +894,14 @@ usage_claude_live :: proc(dir: string, label: string, live_in: Usage_Live) {
 	r := record_of(usage_claude_key(dir))
 	if r == nil do r = usage_record_new({.Claude, dir, label})
 	now := usage_now()
-	same := r.status == .Ok && r.via == .Status_Line && now - r.read_at < USAGE_LIVE_SAME && r.credits == (live.spend != "" ? live.spend : r.credits)
-	if same {
-		k := 0
-		for w in r.windows do if w.name == "" {
-			if k >= live.n || w.used_percent != live.windows[k].used_percent || w.resets_at != live.windows[k].resets_at || w.window_mins != live.windows[k].window_mins do same = false
-			k += 1
-		}
-		if k != live.n do same = false
-	}
-	if same do return
 	ws := make([dynamic]Usage_Window, 0, USAGE_WINDOWS_MAX, heap)
-	for w in live.windows[:live.n] do append(&ws, Usage_Window{name = "", used_percent = usage_clamp_percent(w.used_percent), window_mins = w.window_mins, resets_at = w.resets_at})
+	for w in live.windows[:live.n] {
+		pct := usage_clamp_percent(w.used_percent)
+		if r.status == .Ok && w.resets_at > 0 do for old in r.windows do if old.name == "" && old.window_mins == w.window_mins && abs(old.resets_at - w.resets_at) <= USAGE_SAME_RESET {
+			pct = max(pct, old.used_percent) // the same window: never lower
+		}
+		append(&ws, Usage_Window{name = "", used_percent = pct, window_mins = w.window_mins, resets_at = w.resets_at})
+	}
 	for w in r.windows {
 		if w.name != "" && len(ws) < USAGE_WINDOWS_MAX do append(&ws, w) // moved
 		else do delete(w.name, heap)
@@ -926,7 +924,7 @@ usage_claude_live :: proc(dir: string, label: string, live_in: Usage_Live) {
 	usage.gen += 1
 }
 
-USAGE_LIVE_SAME :: 30 // s: the same live numbers again within this change nothing
+USAGE_SAME_RESET :: 60 // s: two reset times this close are one window's (the status line's and get_usage's are rounded apart)
 
 // ---- saved (workspace.json "usage": numbers and labels; persist.odin) ----
 

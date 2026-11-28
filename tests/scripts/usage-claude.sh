@@ -83,7 +83,7 @@ want = {f"{home}/.claude", f"{home}/claude-work", f"{home}/claude-key"}
 check(want <= dirs, f"a background read of every folder ({sorted(dirs)})")
 check(all(not r["probe_credentials_open"] for r in starts), "nobody held .credentials.json or .claude.json open while claude ran")
 check(all("--no-session-persistence" in r["probe_start"] and "--strict-mcp-config" in r["probe_start"] and '{"disableAllHooks":true}' in r["probe_start"] for r in starts), "print mode without hooks, MCP servers or a saved session")
-check(all(r["env"]["ENABLE_CLAUDEAI_MCP_SERVERS"] == "false" for r in starts), "claude.ai's MCP servers off")
+check(all(r["env"]["ENABLE_CLAUDEAI_MCP_SERVERS"] == "false" and r["env"]["DISABLE_AUTOUPDATER"] == "1" for r in starts), "claude.ai's MCP servers and the auto-updater off")
 probes = [r["probe"] for r in rows if "probe" in r]
 check(set(probes) == {"initialize", "get_usage"}, f"only initialize and get_usage ({sorted(set(probes))})")
 check(all(r["request"].get("skip_behaviors") is True for r in rows if r.get("probe") == "get_usage"), "get_usage skips the transcript scan")

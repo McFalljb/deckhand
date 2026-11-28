@@ -381,12 +381,25 @@ window_door_tick :: proc() {
 	sync.unlock(&door.mu)
 	heap := runtime.heap_allocator()
 	now := time.to_unix_seconds(time.now())
-	for a, i in got {
+	// the newest one attaches, except that a browser's own connect (no "take") never beats a window
+	// in the same batch (core_attach_window_sock's rule, for arrivals in one turn): the winner goes
+	// first, so a browser that lost to a window is told the window has the view (View here)
+	win := len(got) - 1
+	for a in got do if !a.hub && !a.web {
+		for i := len(got) - 1; i >= 0; i -= 1 do if !got[i].web || got[i].take {win = i; break}
+		break
+	}
+	order := make([dynamic]int, 0, len(got), context.temp_allocator)
+	append(&order, win)
+	for i in 0 ..< len(got) do if i != win do append(&order, i)
+	for i in order {
+		a := got[i]
 		// a browser checked on its connection's thread: revoked or expired since, it is not attached.
 		// Checked and attached as one step (web_device_hold): an unpair waits, then kicks it.
 		live := true
 		if a.web do live = web_device_hold(a.device, now)
-		attached := live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device, a.take, a.hello_id)
+		attached := live && i == win && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device, a.take, a.hello_id)
+		if live && !attached && a.web && !a.take && i != win && window_link_is_window() do web_viewing_elsewhere(a.fd, a.hello_id, a.from)
 		if a.web do web_device_release()
 		if attached {
 			if a.web do rescan_when_active() // a browser shows sessions started outside Deckhand too (commands.odin)

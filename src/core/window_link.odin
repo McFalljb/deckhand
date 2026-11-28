@@ -1407,8 +1407,7 @@ web_taken_json :: proc(by, name: string) -> string {
 // this Mac's window is attached: it is not attached, the window keeps the view. It gets its hello's
 // result (a page from an older core sees the new core's id and loads again) and web.taken by the
 // window, the "Your Mac is showing these sessions" screen with View here (a hello with "take").
-// fd is the core's end of its relay's socketpair; the caller closes it.
-@(private = "file")
+// fd is the core's end of its relay's socketpair; the caller closes it. Main thread.
 web_viewing_elsewhere :: proc(fd: Sock_Fd, hello_id, name: string) {
 	log_ln("Deckhand: a browser connected while the window is attached: it views elsewhere until its user takes the view")
 	out := make([dynamic]u8, context.temp_allocator)

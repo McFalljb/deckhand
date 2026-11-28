@@ -497,7 +497,8 @@ client_ask_default :: proc(title, text, yes, no: string) -> bool {
 // One question per displacement: the alert's modal loop runs the window's timer, and so this proc
 // again. So viewed_from is taken before the question and `asking` makes those turns do nothing:
 // no second question, and no dial before the user answers.
-client_core_tick :: proc() {
+client_core_tick :: proc(at: time.Tick = {}) {
+	now := at == {} ? time.tick_now() : at
 	if !client.lost || core.app_quitting || client.gave_up || client.asking do return
 	if client.viewed_from != "" {
 		if core.autotest_active do return // test mode never shows the modal: the scene's log says it
@@ -515,12 +516,19 @@ client_core_tick :: proc() {
 		}
 		client.reconnects_since, client.reconnects = {}, 0
 	}
-	if !reconnect_allowed(&client.reconnects_since, &client.reconnects, time.tick_now()) {
+	if !reconnect_allowed(&client.reconnects_since, &client.reconnects, now) {
 		client_core_give_up(fmt.tprintf("its background core stopped more than %d times in a minute", RECONNECTS_MAX))
 		return
 	}
-	if why := client_core_reconnect(); why != "" do client_core_give_up(why)
+	if why, _ := client_reconnect_try(); why != "" do client_core_give_up(why)
 }
+
+// One reconnect attempt (client_core_reconnect; tests swap it): why it failed ("" = attached
+// again), and final: no core answered on core.sock at all (the dial waited CORE_START_WAIT).
+client_reconnect_try: proc() -> (why: string, final: bool) = proc() -> (string, bool) {return client_core_reconnect(), false}
+
+// The give-up's alert (tests swap it).
+client_alert: proc(title, text, button: string) = proc(title, text, button: string) {platform_alert(title, text, button)}
 
 // At most RECONNECTS_MAX reconnects in any RECONNECTS_PER window that starts at the first one.
 reconnect_allowed :: proc(since: ^time.Tick, count: ^int, now: time.Tick) -> bool {
@@ -539,7 +547,7 @@ client_core_give_up :: proc(why: string) {
 	client.gave_up = true
 	fmt.eprintln("Deckhand: cannot reconnect to the background core:", why)
 	if core.autotest_active do fmt.println("[autotest] core: gave up:", why)
-	else do platform_alert("Deckhand lost its background core", fmt.tprintf("Deckhand can't reach its background core: %s. Files with unsaved changes stay open so you can save them; then quit and open Deckhand again.", why), "OK")
+	else do client_alert("Deckhand lost its background core", fmt.tprintf("Deckhand can't reach its background core: %s. Files with unsaved changes stay open so you can save them; then quit and open Deckhand again.", why), "OK")
 	app_request_quit()
 }
 
@@ -655,3 +663,9 @@ client_core_offer_previous :: proc() -> bool {
 	_, ok = core.holder_supervise_ask(run, "use_previous")
 	return ok
 }
+
+// The retry state of an outage starts over (a reconnect worked, Take Back, tests).
+client_outage_reset :: proc() {}
+
+// The link ended (client_core_lost): why, as the window's log and a give-up's alert say it.
+client_core_lost_why :: proc(why: string) {}

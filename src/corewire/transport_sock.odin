@@ -299,6 +299,21 @@ sock_reason :: proc(t: ^Sock_Transport) -> Close_Reason {
 	return t.reason
 }
 
+// A close reason in words, for logs and alerts (who ended the link, and why).
+sock_reason_text :: proc(r: Close_Reason) -> string {
+	switch r {
+	case .None:         return "still open"
+	case .Local:        return "closed by this side"
+	case .Peer_Closed:  return "closed by the other side"
+	case .Too_Large:    return "closed by this side: a frame over the size limit came"
+	case .Truncated:    return "closed by the other side in the middle of a frame"
+	case .Peer_Changed: return "closed by this side: the process behind the socket was not the one checked at connect"
+	case .Overflow:     return "closed by this side: the other side stopped reading and too much was queued"
+	case .Io_Error:     return "a read or write failed"
+	}
+	return "unknown"
+}
+
 // Waits up to ms for the fd to be readable, or writable while bytes are queued (simple owners and
 // the tests; the app polls the fd itself).
 sock_wait :: proc(t: ^Sock_Transport, ms: int) -> bool {

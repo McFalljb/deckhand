@@ -472,7 +472,7 @@ client_core_lost :: proc() {
 	if client.lost do return
 	client.lost = true
 	if client.handing_over do return // client_core_handover dials the new core
-	client_core_lost_why(fmt.tprintf("the connection ended: %s", client_link_end_text()))
+	client_core_lost_why(fmt.tprintf("the background core's connection ended: %s", client_link_end_text()))
 	if core.autotest_active do fmt.println("[autotest] core: connection ended")
 	if core.app_quitting do app_request_quit()
 }
@@ -604,7 +604,7 @@ client_outage_reset :: proc() {
 // The link ended (client_core_lost): why, as the window's log and a give-up's alert say it. The
 // first reason of an outage is kept (the later ones are its attempts').
 client_core_lost_why :: proc(why: string) {
-	wlog("the background core's", why)
+	wlog(why)
 	if client.lost_why == "" do client.lost_why = strings.clone(why, runtime.heap_allocator())
 }
 

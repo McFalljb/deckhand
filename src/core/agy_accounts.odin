@@ -1090,6 +1090,9 @@ agy_account_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 		a, err := agy_account_resolve(c.account)
 		if err != "" do return fail(err), false
 		if a.source == .Default do return fail("the default account stays (Deckhand's own profile): sign it out in a pi tab with /antigravity logout"), false
+		// the keychain's account (the shared rule, accounts_make): removed here, its keychain sign-in
+		// would pass to the next keychain account. A pi tab's remove signs it out first.
+		if a.keyring do return fail(agy_keyring_remove_hint(a.name)), false
 		// the folder is never deleted: it is remembered as removed (and stays guarded while it holds agy's files)
 		ed := Edit{remove = true, name = a.name, dir = path_kind(a.dir) == .Dir ? a.dir : ""}
 		return run(&ed)
@@ -1148,12 +1151,26 @@ default_holds_keyring_raw :: proc(list: json.Array) -> bool {
 	return method == "oauth-personal" && storage != "file" && !default_signed_in_file()
 }
 
+// Why the keychain's account is not removed here (Remove_Antigravity_Account, its Settings row).
+agy_keyring_remove_hint :: proc(name: string) -> string {
+	return fmt.tprintf("Remove it from a pi tab with /antigravity remove %s: that signs its keychain sign-in out first.", name)
+}
+
+// Whether the account named so (not the default) holds the macOS keychain: not removed here.
+agy_account_holds_keyring :: proc(name: string) -> bool {
+	for a in agy_accounts() do if a.name == name do return a.keyring && a.source != .Default
+	return false
+}
+
 // An account's state in plain words (its Settings row; the setup step).
 agy_account_detail :: proc(a: Agy_Account) -> string {
 	how := ""
 	switch a.sign_in {
 	case .Yes:      how = "signed in"
-	case .No:       how = a.method == "oauth-personal" ? fmt.tprintf("no sign-in of its own (/antigravity login %s in a pi tab)", a.name) : fmt.tprintf("sign-in unknown until agy is used (/antigravity login %s in a pi tab to sign in)", a.name)
+	case .No:
+		def := agy_default_home()
+		own := a.dir == def || fs_real(a.dir) == fs_real(def)
+		how = a.method != "oauth-personal" ? fmt.tprintf("sign-in unknown until agy is used (/antigravity login %s in a pi tab to sign in)", a.name) : own ? fmt.tprintf("no sign-in of its own (/antigravity login %s in a pi tab writes a sign-in file into %s, which agy outside Deckhand then uses too)", a.name, fs_display(a.dir)) : fmt.tprintf("no sign-in of its own (/antigravity login %s in a pi tab)", a.name)
 	case .Keychain: how = "signed in through the system keychain (not checked)"
 	case .Key:      how = fmt.tprintf("API key in pi (/login %s)", a.name == "default" ? "antigravity" : strings.concatenate({"antigravity-", a.name}, context.temp_allocator))
 	case .Adc:      how = "Application Default Credentials"
@@ -1164,6 +1181,7 @@ agy_account_detail :: proc(a: Agy_Account) -> string {
 	if a.models >= 0 do fmt.sbprintf(&b, " · %d model%s", a.models, a.models == 1 ? "" : "s")
 	fmt.sbprintf(&b, " · %s", fs_display(a.dir))
 	if a.chosen do strings.write_string(&b, " · default")
+	if a.keyring && a.source != .Default do fmt.sbprintf(&b, " · %s", agy_keyring_remove_hint(a.name))
 	return strings.to_string(b)
 }
 
@@ -1184,7 +1202,7 @@ agy_settings_rows :: proc(out: ^[dynamic]Settings_File_Row) {
 	if !agy_accounts_shown() do return
 	accts := agy_accounts()
 	if len(accts) > 1 {
-		for a in accts do append(out, Settings_File_Row{group = "agy-accounts", label = a.label, detail = agy_account_detail(a), path = strings.concatenate({AGY_ACCOUNT_ROW, a.name}, context.temp_allocator), button = "Rename…", remove = a.source != .Default, make_default = !a.chosen})
+		for a in accts do append(out, Settings_File_Row{group = "agy-accounts", label = a.label, detail = agy_account_detail(a), path = strings.concatenate({AGY_ACCOUNT_ROW, a.name}, context.temp_allocator), button = "Rename…", remove = a.source != .Default && !a.keyring, make_default = !a.chosen})
 		append(out, Settings_File_Row{group = "agy-accounts", label = "Add account…", detail = "an agy profile folder (its --gemini-dir), used in place", path = AGY_ACCOUNT_ADD_ROW, button = "Add…"})
 		append(out, Settings_File_Row{group = "agy-accounts", label = "Scan again", detail = "look for agy profiles in ~/.gemini*, ~/.config/gemini*", path = AGY_ACCOUNT_SCAN_ROW, button = "Scan"})
 	} else {

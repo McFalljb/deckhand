@@ -71,6 +71,7 @@ import {
 	storedAgyPath,
 	usesKey,
 	validName,
+	keychainHolder,
 } from "../../lib/agy-accounts.ts";
 import { agyLogin } from "../../lib/agy-login.ts";
 import { createAntigravity, modelList, type Registry, SUMMARY_TEXT } from "../../lib/antigravity.ts";
@@ -470,16 +471,17 @@ export default function antigravity(pi: ExtensionAPI) {
 	};
 	const usesKeyOrBrowser = (a: Account) => usesKey(a) || a.method === "oauth-personal" || a.method === "oauth-business";
 
-	const remove = async (ctx: ExtensionContext, name?: string, yes = false) => {
+	const remove = async (ctx: ExtensionContext, name?: string, flag?: string) => {
+		const force = flag === "--force", yes = force || flag === "--yes";
 		const a = name ? accountOf(name) : undefined;
 		if (!name || !a) return fail(ctx, `No Antigravity account "${name ?? ""}": /antigravity remove <name>`);
 		if (a.name === "default") return fail(ctx, `The default account stays: /antigravity logout signs it out, /antigravity add default changes its sign-in method`);
 		const p = profileOf(root, a);
 		// a folder used in place is the user's own: only the entry goes (no sign-out, nothing deleted)
-		const what = p.inPlace ? `its folder ${p.geminiHome} stays as it is, with its sign-in` : `its profile with its saved sign-in and history (${p.geminiHome})`;
+		const what = p.inPlace ? (a.keyring ? `its folder ${p.geminiHome} stays, but its macOS keychain sign-in is signed out, for agy outside Deckhand too` : `its folder ${p.geminiHome} stays as it is, with its sign-in`) : `its profile with its saved sign-in and history (${p.geminiHome})`;
 		// the keychain account's sign-in is not in its folder: signed out of the keychain first, so
 		// the account that holds the keychain next does not inherit it
-		const kc = a.keyring ? " Its sign-in in the macOS keychain is signed out first." : "";
+		const kc = a.keyring && !p.inPlace ? " Its sign-in in the macOS keychain is signed out first." : a.keyring && !ctx.hasUI ? " Its macOS keychain sign-in is signed out first, for agy outside Deckhand too." : "";
 		if (!ctx.hasUI && !yes) return ctx.ui.notify(`${p.inPlace ? `Removing the Antigravity account "${a.name}" removes it from Deckhand (its folder ${p.geminiHome} stays).` : `Removing the Antigravity account "${a.name}" deletes its profile and history.`}${kc} Run /antigravity remove ${a.name} --yes`, "warning");
 		if (ctx.hasUI && !yes && !(await ctx.ui.confirm(`Remove the Antigravity account "${a.name}"?`, `Its provider ${providerIdOf(a.name)} goes, and ${what}.${kc}`))) return;
 		let keychain = "";
@@ -489,7 +491,12 @@ export default function antigravity(pi: ExtensionAPI) {
 				await agyLogout({ agyPath, cwd, ...launchOf(a, undefined) });
 				keychain = "; signed out of the macOS keychain";
 			} catch (e) {
-				keychain = `; its sign-in stays in the macOS keychain (agy's sign-out failed: ${(e as Error).message}), where agy outside Deckhand and the next keychain account still find it`;
+				// kept: removed, its keychain sign-in would pass to the next keychain account
+				const err = (e as Error).message;
+				const next = keychainHolder(root, accountsNow().filter((x) => x.name !== a.name))?.name;
+				const heir = next ? `${next} would then use that keychain sign-in` : "agy outside Deckhand keeps using that keychain sign-in";
+				if (!force) return fail(ctx, `The Antigravity account "${a.name}" is kept: agy could not sign its macOS keychain sign-in out (${err}). Try again, or /antigravity remove ${a.name} --force to remove it anyway: ${heir}`);
+				keychain = `; its sign-in stays in the macOS keychain (agy's sign-out failed: ${err}): ${next ? `${next} now uses it, and so does agy outside Deckhand` : "agy outside Deckhand still uses it"}`;
 			}
 		}
 		try {
@@ -655,7 +662,7 @@ export default function antigravity(pi: ExtensionAPI) {
 				case "logout":
 					return logout(ctx, name);
 				case "remove":
-					return remove(ctx, name, method === "--yes");
+					return remove(ctx, name, method);
 				case "models":
 					return models(ctx, name);
 				case "approvals":

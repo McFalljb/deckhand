@@ -5,7 +5,7 @@
 // stores a token. The link and the code are checked as t3code checks them
 // (antigravityAuthSupport.ts parseAntigravityAuthorizationUrl, antigravityLoginResponse).
 import { type ChildProcess, spawn } from "node:child_process";
-import { agyEnv, endChild, endRun, markRun, reapGroup, SIGN_IN_PREFIX, signalGroup, spawnEnv } from "./acp.ts";
+import { scrubbedEnv, endChild, endRun, markRun, reapGroup, SIGN_IN_PREFIX, signalGroup, spawnEnv } from "./acp.ts";
 
 const MAX_URL = 16_384;
 /** Where `agy acp --login` sends Google; the page there shows the code. */
@@ -79,7 +79,7 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 	let child: ChildProcess;
 	const runDir = o.makeRunDir?.();
 	try {
-		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: spawnEnv(o.env ?? agyEnv(), runDir), stdio: ["pipe", "pipe", "pipe"], detached: true });
+		child = (o.spawnImpl ?? spawn)(o.agyPath, o.args ?? ["acp", "--login"], { cwd: o.cwd, env: spawnEnv(o.env ?? scrubbedEnv(), runDir), stdio: ["pipe", "pipe", "pipe"], detached: true });
 	} catch (e) {
 		endRun(runDir);
 		return { ok: false, error: `Antigravity (agy) could not start: ${(e as Error).message}` };

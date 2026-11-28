@@ -11,7 +11,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, NOT_FOUND, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, agyVersion, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
-import { agyEnvFor, claimListing, dataRoot, linkUserConfig, loadAccounts, PLANS_URL, profileOf, storedAccounts, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
+import { agyEnvFor, claimListing, dataRoot, linkUserConfig, loadAccounts, PLANS_URL, profileOf, riderReason, storedAccounts, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
 import { fileLedger } from "../lib/agy-ledger.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
 import { createAntigravity, planTurn, RETRY_NOTE, SUMMARY_TEXT } from "../lib/antigravity.ts";
@@ -2315,7 +2315,11 @@ test("removing the keychain account signs it out of the keychain first (said in 
 			assert.equal(start.env.AGY_CLI_FORCE_FILE_TOKEN_STORAGE, undefined, "in keychain mode");
 			if (failing) {
 				assert.ok(existsSync(kc));
-				assert.match(notes.at(-1)!, /^Removed the Antigravity account "kc"; its sign-in stays in the macOS keychain \(agy's sign-out failed: .*logout failed.*\), where agy outside Deckhand and the next keychain account still find it/);
+				assert.match(notes.at(-1)!, /^The Antigravity account "kc" is kept: agy could not sign its macOS keychain sign-in out \(.*logout failed.*\)\. Try again, or \/antigravity remove kc --force to remove it anyway: default would then use that keychain sign-in/);
+				assert.ok(JSON.parse(readFileSync(path.join(a.root, "accounts.json"), "utf8")).accounts.some((x: any) => x.name === "kc"), "the entry stays");
+				await run(pi, "antigravity", "remove kc --force", ctx);
+				assert.match(notes.at(-1)!, /^Removed the Antigravity account "kc"; its sign-in stays in the macOS keychain \(agy's sign-out failed: .*\): default now uses it, and so does agy outside Deckhand/);
+				assert.ok(!JSON.parse(readFileSync(path.join(a.root, "accounts.json"), "utf8")).accounts.some((x: any) => x.name === "kc"));
 			} else {
 				assert.ok(!existsSync(kc), "the keychain entry signed out");
 				assert.match(notes.at(-1)!, /^Removed the Antigravity account "kc"; signed out of the macOS keychain/);
@@ -2393,4 +2397,59 @@ test("a background listing is claimed under a lock: one pi of several lists an a
 	rmSync(path.join(root, "agy-model-lists.json.lock"));
 	assert.equal(claimListing(root, "work", 60_000), true);
 	assert.deepEqual(readdirSync(root).filter((f) => f.includes(".tmp-")), [], "no temp file left");
+});
+
+test("removing a keychain account used in place: the confirm says its folder stays but its keychain sign-in is signed out", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	const own = mkdtempSync(path.join(TMP_ROOT, "users-gemini-kc-"));
+	writeFileSync(path.join(a.home, ".fake-agy-keychain"), "{}");
+	mkdirSync(a.root, { recursive: true });
+	writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ accounts: [{ name: "kc", method: "oauth-personal", storage: "keyring", dir: own, source: "added" }] }));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const asked: string[] = [];
+		const { ctx } = cmdCtx(pi);
+		ctx.ui.confirm = async (_t: string, body: string) => (asked.push(body), false);
+		await run(pi, "antigravity", "remove kc", ctx);
+		assert.match(asked[0], /its folder .* stays, but its macOS keychain sign-in is signed out, for agy outside Deckhand too\.$/);
+		assert.doesNotMatch(asked[0], /with its sign-in/);
+	});
+});
+
+test("agy's own ~/.gemini as a file account beside the keychain's default: the refusal says a sign-in there is what agy outside Deckhand then uses", async () => {
+	const a = accountsEnv();
+	mkdirSync(a.root, { recursive: true });
+	const gem = path.join(a.home, ".gemini");
+	writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ accounts: [{ name: "gemini", method: "oauth-personal", storage: "file", dir: gem, source: "found" }] }));
+	await withEnv(a.env, async () => {
+		const g = loadAccounts(a.root).find((x) => x.name === "gemini")!;
+		assert.equal(riderReason(a.root, g), `Antigravity account "gemini" has no sign-in of its own (it would run as default's). Run /antigravity login gemini: that writes a sign-in file into ${gem}, which agy outside Deckhand then uses too.`);
+	});
+});
+
+test("secret-looking names (any case) are never handed to agy; the fallback environment (no account's) is scrubbed the same way", async () => {
+	const { secretEnvName } = await import("../lib/agy-accounts.ts");
+	const { scrubbedEnv } = await import("../lib/acp.ts");
+	for (const k of ["AWS_SECRET_ACCESS_KEY", "MINIO_ACCESS_KEY", "R2_ACCESS_KEY_ID", "X_AUTH_TOKEN", "TWILIO_AUTH_TOKEN_2", "ngrok_authtoken", "NGROKAUTHTOKEN", "SENTRY_DSN", "DATABASE_URL", "SESSION_COOKIE", "SSH_PRIVATE_KEY", "openai_api_key"])
+		assert.equal(secretEnvName(k), true, k);
+	for (const k of ["PATH", "HOME", "SSH_AUTH_SOCK", "LANG", "HTTPS_PROXY", "TERM", "DSN_HOST_NAME"]) assert.equal(secretEnvName(k), false, k);
+	const env = scrubbedEnv({ PATH: "/bin", HOME: "/h", SENTRY_DSN: "x", OPENAI_API_KEY: "x", GOOGLE_APPLICATION_CREDENTIALS: "x", GEMINI_API_KEY: "x", DECKHAND_SOCK: "x", CLOUDSDK_CONFIG: "x" });
+	assert.deepEqual(Object.keys(env).sort(), ["HOME", "PATH"]);
+	const src = ["acp.ts", "agy.ts", "agy-login.ts"].map((f) => readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), "..", "lib", f), "utf8")).join("\n");
+	assert.doesNotMatch(src, /\?\? agyEnv\(\)/, "no fallback to the unscrubbed environment");
+});
+
+test("a saved sign-in is a regular file, as the core's agy_signed_in_file: a folder by that name is none", async () => {
+	const { hasSavedLogin } = await import("../lib/agy-accounts.ts");
+	const a = accountsEnv();
+	await withEnv(a.env, async () => {
+		const p = profileOf(a.root, { name: "work", method: "oauth-personal" } as any);
+		mkdirSync(path.join(p.acpDir, "acp_token.json"), { recursive: true });
+		assert.equal(hasSavedLogin(p), false);
+		rmSync(path.join(p.acpDir, "acp_token.json"), { recursive: true });
+		writeFileSync(path.join(p.acpDir, "acp_token.json"), "{}");
+		assert.equal(hasSavedLogin(p), true);
+	});
 });

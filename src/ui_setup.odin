@@ -261,7 +261,7 @@ setup_account_set_label :: proc(i: int, label: string) {
 	list := acct_list()
 	if i < 0 || i >= len(list^) do return
 	l := core.cut_utf8(strings.trim_space(core.one_line(label, context.temp_allocator)), core.CLAUDE_ACCOUNT_LABEL_MAX)
-	if l == "" && agy_step() do l = list^[i].fixed ? "Default" : core.agy_label_of(list^[i].dir)
+	if l == "" && agy_step() do l = list^[i].fixed && !core.agy_account_holds_keyring(list^[i].name) ? "Default" : core.agy_label_of(list^[i].dir)
 	if l == "" do l = list^[i].fixed ? "Claude" : core.claude_account_label_of(list^[i].dir, .Claude)
 	set_str(&list^[i].label, l)
 	u.touched = true
@@ -302,7 +302,7 @@ setup_agy_accounts_begin :: proc() {
 	u.agy_default = 0
 	core.agy_accounts_refresh()
 	for a in core.agy_accounts() {
-		append(&u.agy_accounts, core.Setup_Account{dir = strings.clone(a.dir), label = strings.clone(a.label), orig_label = strings.clone(a.label), name = strings.clone(a.name), keep = true, was_kept = true, fixed = a.source == .Default, marked = a.source == .Default || a.source == .Profile || core.agy_profile_marked(a.dir)})
+		append(&u.agy_accounts, core.Setup_Account{dir = strings.clone(a.dir), label = strings.clone(a.label), orig_label = strings.clone(a.label), name = strings.clone(a.name), keep = true, was_kept = true, fixed = a.source == .Default || (a.keyring && a.source != .Default), marked = a.source == .Default || a.source == .Profile || core.agy_profile_marked(a.dir)})
 		if a.chosen do u.agy_default = len(u.agy_accounts) - 1
 	}
 	for d in core.agy_removed_dirs() {
@@ -611,6 +611,7 @@ accounts_body :: proc(w: f32) {
 				at := core.fs_display(a.dir)
 				if agy {
 					if !a.marked do at = fmt.tprintf("%s · no agy files yet", at)
+					else if a.fixed && core.agy_account_holds_keyring(a.name) do at = fmt.tprintf("%s · holds the macOS keychain sign-in: remove it from a pi tab (/antigravity remove %s)", at, a.name)
 					else if a.fixed do at = fmt.tprintf("%s · Deckhand's own profile", at)
 				} else if !a.marked do at = fmt.tprintf("%s · no Claude Code files yet", at)
 				else if a.fixed do at = fmt.tprintf("%s · what `claude` uses in your shell", at)
@@ -752,6 +753,7 @@ setup_tip :: proc(h: Hit_Setup) -> (string, string) {
 	case .Choose_Chats: return "Pick the folder chats run in", ""
 	case .Option:       return "", "↑↓"
 	case .Acct_Keep:
+		if h.index >= 0 && h.index < len(acct_list()^) && agy_step() && acct_list()^[h.index].fixed && core.agy_account_holds_keyring(acct_list()^[h.index].name) do return core.agy_keyring_remove_hint(acct_list()^[h.index].name), ""
 		if h.index >= 0 && h.index < len(acct_list()^) && acct_list()^[h.index].fixed do return agy_step() ? "Deckhand's own Antigravity profile: always offered" : "The account `claude` uses in your shell: always offered", ""
 		return "Offer this account in Deckhand (unticked: left out; its folder is not touched)", ""
 	case .Acct_Label:   return "Rename (its name in Deckhand only)", "Enter"

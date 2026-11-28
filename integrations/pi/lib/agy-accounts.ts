@@ -197,7 +197,10 @@ export function keychainHolder(root: string, ordered: Account[]): Account | unde
 export function riderReason(root: string, a: Account, all: Account[] = loadAccounts(root)): string | undefined {
 	if (a.method !== "oauth-personal" || a.keyring || hasSavedLogin(profileOf(root, a))) return undefined;
 	const h = all.find((x) => x.keyring);
-	return `Antigravity account "${a.name}" has no sign-in of its own (it would run as ${h ? `${h.name}'s` : "the macOS keychain's sign-in"}). Run ${signInCommand(a)}.`;
+	// agy's own profile: a sign-in file there is what agy outside Deckhand reads first
+	const p = profileOf(root, a);
+	const own = p.inPlace && path.resolve(p.geminiHome) === path.resolve(os.homedir(), ".gemini") ? `: that writes a sign-in file into ${p.geminiHome}, which agy outside Deckhand then uses too` : "";
+	return `Antigravity account "${a.name}" has no sign-in of its own (it would run as ${h ? `${h.name}'s` : "the macOS keychain's sign-in"}). Run ${signInCommand(a)}${own}.`;
 }
 
 /** agy's path as the user set it (`/antigravity path`), unchecked; undefined when not set. */
@@ -596,7 +599,14 @@ export function runDir(p: Profile): string {
 export const agyArgs = (p: Profile, login = false) => ["acp", "--gemini-dir", p.geminiHome, "--app-data-dir", "antigravity-acp", ...(login ? ["--login"] : [])];
 
 /** Whether agy keeps a saved Google sign-in in the profile (its file storage: the file is only stat'ed, never read). A display hint only: agy also reads the keychain. */
-export const hasSavedLogin = (p: Profile) => fs.existsSync(path.join(p.acpDir, "acp_token.json"));
+/** A saved sign-in: a regular file (a link to one too), as the core's agy_signed_in_file. */
+export const hasSavedLogin = (p: Profile) => {
+	try {
+		return fs.statSync(path.join(p.acpDir, "acp_token.json"), { throwIfNoEntry: false })?.isFile() === true;
+	} catch {
+		return false; // not a folder on the way, no access: no sign-in Deckhand can see
+	}
+};
 
 /**
  * Whether a Google account is known to be signed in: its saved sign-in by stat, or, for the keyring
@@ -675,40 +685,8 @@ export function linkUserConfig(profile: string, userGemini: string) {
 	}
 }
 
-/** Variables that pick agy's credential or profile, or change how it starts: never passed through (t3code removedEnvironmentKeys). */
-export const REMOVED_ENV = new Set([
-	"GEMINI_API_KEY",
-	"GOOGLE_API_KEY",
-	"GOOGLE_APPLICATION_CREDENTIALS",
-	"GOOGLE_CLOUD_PROJECT",
-	"GOOGLE_CLOUD_LOCATION",
-	"GOOGLE_CLOUD_QUOTA_PROJECT",
-	"GOOGLE_GENAI_USE_VERTEXAI",
-	"GCLOUD_PROJECT",
-	"CLOUDSDK_CORE_PROJECT",
-	"AGY_ACP_CCPA_PROJECT",
-	"AGY_ACP_ENABLE_OAUTH",
-	"GEMINI_HOME",
-	"AGY_ACP_FORCE_FILE_STORAGE",
-	"AGY_CLI_FORCE_FILE_TOKEN_STORAGE",
-	"AGY_CLI_DISABLE_AUTO_UPDATE",
-	"BROWSER",
-	"PYTHONUNBUFFERED",
-	"ELECTRON_RUN_AS_NODE",
-	"CHROME_CRASHPAD_PIPE_NAME",
-]);
-
-/**
- * A variable that may hold another service's secret (pi's provider keys, cloud and forge tokens):
- * never handed to agy, whose shell tools run with it. Matched case-insensitively by name.
- */
-export const secretEnvName = (name: string) => {
-	const K = name.toUpperCase();
-	return (
-		/(^|_)(API_?KEYS?|KEYS?|TOKENS?|SECRETS?|PASSWORD|PASSWD|PASS|CREDENTIALS?|AUTH)$/.test(K) ||
-		/^(AWS|AZURE|OPENAI|ANTHROPIC|GITHUB|GH|GITLAB|HF|HUGGINGFACE|MISTRAL|GROQ|XAI|OPENROUTER|DEEPSEEK|COHERE|CEREBRAS|ZAI|TOGETHER|FIREWORKS|PERPLEXITY|COPILOT|VERCEL|CLOUDFLARE|PI)_/.test(K)
-	);
-};
+export { REMOVED_ENV, secretEnvName } from "./acp.ts";
+import { REMOVED_ENV, secretEnvName } from "./acp.ts";
 
 /**
  * agy's environment for an account (t3code antigravityEnvironment): pi's, without REMOVED_ENV

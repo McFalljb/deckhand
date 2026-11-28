@@ -221,10 +221,26 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   "authenticated via keyring". So at most one account uses the keychain, signing in and running
   in keychain mode: the first `storage: "keyring"` entry, else the default account (a Google
   account not marked `storage: "file"`), else agy's own default profile found without a file
-  sign-in. Every other account runs and signs in in file mode. A Google account in file mode with
-  no file of its own that agy authenticates (so from the keychain) is recorded as
-  `storage: "keyring"` when no account holds the keychain (`noteKeychainSignIn`). Unverified: whether
-  a second account's own file sign-in takes precedence over the keychain's once both exist. **The guard** (`agy_credential`, in `settings_credential`): any `acp_token.json`; all of
+  sign-in. The rule is one, `keychainHolder` in `lib/agy-accounts.ts` and the core's
+  `default_holds_keyring` with `accounts_make`: the first Google entry marked
+  `storage: "keyring"` with no sign-in file of its own holds the keychain; with none marked, the
+  default (a Google account not marked `"file"`, with no file of its own); a scan marks agy's own
+  `~/.gemini` found without a file sign-in `"keyring"` only while nothing holds it, else
+  `"file"`. Every other account runs and signs in in file mode, and a Google account in file mode
+  with no file of its own is refused (it would run as the holder's sign-in: `riderReason`); for
+  `~/.gemini` the refusal (and its Settings row) says that `/antigravity login <name>` writes a
+  sign-in file into it, which agy outside Deckhand then uses too. The holder is not removed from
+  Settings (its row says why, `agy_keyring_remove_hint`): removed there, its keychain sign-in
+  would pass to the next holder. `/antigravity remove` signs it out of the keychain first and
+  keeps the entry when that fails (`--force` removes it anyway and names the account that now
+  uses the keychain sign-in). Checked against agy 1.5.18 (a throwaway profile, no sign-in
+  completed): in forced file mode `agy acp --login` prints a Google sign-in link and asks for the
+  code, writing no `acp_token.json` until one is entered, so a file account can sign in while
+  the keychain holds another's. Unverified (needs a real second sign-in): that a profile's own
+  `acp_token.json` is read before the keychain once both exist; the rider refusal and the
+  holder rule rest on it. Not handled: two entries marked `"keyring"` after a hand edit (the
+  first wins, the other is a rider), and re-adding `default` under another method and then Google
+  again drops its `storage`. **The guard** (`agy_credential`, in `settings_credential`): any `acp_token.json`; all of
   `profiles/`; in every listed, found or removed-but-marked profile and any folder holding agy's
   marks, everything but `GEMINI.md`, `AGENTS.md`, `config/skills/`, `config/skills.json` and
   `antigravity-cli/skills/`; the sign-in files' hard links; the profiles are credential places for
@@ -311,12 +327,25 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
     user's config in it (`GEMINI.md`, `AGENTS.md`, skills), a profile nested in that config
     included. `tests/credential-paths/cases.json` is read by both sides' tests. Not repeated: the
     core's hard links, and Claude or Codex accounts that only Deckhand's own lists name. A search
-    in, or a read of a folder (not a file) in, pi's agent dir, a Codex home, an agy profile or a
-    `.ssh` is rejected too (`credentialFolder`). In a command, quotes and backslashes inside a word
-    are dropped, `$HOME`/`${HOME}`/`~` expanded, and a glob in a folder that holds credentials
-    counts; a path relative to a folder the command moves to (`cd ~/.pi/agent && cat auth.json`)
-    is not seen (best effort). A command Deckhand cannot read is checked against guardrails' block
-    rules by its title and input. After Esc every request is `cancelled`. The approvals mode is
+    in, or a read of a folder (not a file) in, a Codex home, an agy profile, a `.ssh`, or pi's
+    agent dir at its top, in `intercom/` and in a secret folder, is rejected too
+    (`credentialFolder`); in the agent dir's other folders (`extensions/`, `sessions/`) each file
+    is judged by its name. A search whose root lies above pi's agent dir, a Codex home,
+    Deckhand's antigravity folder, an agy profile or `~/.ssh` is rejected naming it ("would
+    search pi's credential folder ~/.pi/agent": `credentialFolderBelow`). Path fields are read in
+    `rawInput` and one level down (objects and arrays: `{ args: { AbsolutePath } }`,
+    `files: [{ path }]`); a read-only session rejects a request with a path it cannot read. In a
+    command, quotes and backslashes inside a word are dropped, `$'…'` decoded, braces expanded
+    (`{auth,x}.json`), `$HOME`/`${HOME}`/`~`/`~<this user>` expanded, and a glob in a folder that
+    holds credentials counts. A command Deckhand cannot read is checked by its title and every
+    string of its input, nested, for credentials (as a command line) and against guardrails'
+    block rules. Best effort, not seen: a path relative to a folder the command moves to
+    (`cd ~/.pi/agent && cat auth.json`) or to `$PWD`, a variable, a script; a command-line search
+    above a credential folder (`grep -r token ~`: only a `search` request's root is checked).
+    `.ssh` is guarded as a folder (a listing, a search, a glob), not file by file: `~/.ssh/id_rsa`
+    read by name outside pi's agent dir is not a credential path, as in the core. Usage is not
+    summed for a turn that ends early (an error before agy's answer). `credentialsInCommand`
+    works out the credential folders again for each word. After Esc every request is `cancelled`. The approvals mode is
     pi-only (`/antigravity approvals`), not a Settings row;
   - `switch_mode`: rejected;
   - a command (kind `execute`, or rawInput `CommandLine`/`command_line`/`commandLine`/`command`, as

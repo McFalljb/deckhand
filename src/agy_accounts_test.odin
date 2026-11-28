@@ -435,7 +435,7 @@ agy_accounts_settings_rows :: proc(t: ^testing.T) {
 	s := strings.to_string(b)
 	testing.expectf(t, len(got) == 5, "three accounts, Add, Scan:\n%s", s)
 	testing.expectf(t, strings.contains(s, "Default|Google account · signed in through the system keychain (not checked) ·"), "%s", s)
-	testing.expectf(t, strings.contains(s, "Gemini|Google account · no sign-in of its own (/antigravity login gemini in a pi tab) · ~/.gemini|Rename…|truetrue"), "%s", s)
+	testing.expectf(t, strings.contains(s, "Gemini|Google account · no sign-in of its own (/antigravity login gemini in a pi tab writes a sign-in file into ~/.gemini, which agy outside Deckhand then uses too) · ~/.gemini|Rename…|truetrue"), "%s", s)
 	testing.expectf(t, strings.contains(s, "Work|Google account · signed in · 7 models · ~/.gemini-work|Rename…|truetrue"), "%s", s)
 	testing.expectf(t, strings.contains(s, "Add account…|") && strings.contains(s, "Scan again|"), "%s", s)
 	for r in got do if r.label == "Default" do testing.expect(t, !r.remove && !r.make_default, "the default: not removed, chosen")
@@ -526,4 +526,41 @@ agy_accounts_credential_paths_fixture :: proc(t: ^testing.T) {
 		want := bool(c["credential"].(json.Boolean))
 		testing.expectf(t, core.settings_credential(p) == want, "%s: %v, want %v", string(c["path"].(json.String)), !want, want)
 	}
+}
+
+// The account that holds the macOS keychain is not removed from Deckhand: removed, its keychain
+// sign-in would pass to the next keychain account (default). The pi tab's /antigravity remove
+// signs it out first. Its Settings row says so instead of offering Remove. agy's own ~/.gemini
+// with no sign-in of its own says what a sign-in there means for agy outside Deckhand.
+@(test)
+agy_accounts_keyring_holder_not_removed :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	env := ag_reset()
+	defer ag_done(env)
+	ag_write(fmt.tprintf("%s/accounts.json", env.root), `{"accounts":[{"name":"kc","method":"oauth-personal","storage":"keyring"}]}`)
+	core.agy_accounts_refresh()
+	kc, ok := ag_find("kc")
+	testing.expect(t, ok && kc.keyring, "kc holds the keychain")
+	r := core.run_command(core.Remove_Antigravity_Account{account = "kc"}, AG_UI)
+	testing.expect(t, !r.ok && strings.contains(r.error, "/antigravity remove kc: that signs its keychain sign-in out first"), r.error)
+	_, still := ag_find("kc")
+	testing.expect(t, still, "kept")
+	rows: [dynamic]core.Settings_File_Row
+	core.agy_settings_rows(&rows)
+	found := false
+	for row in rows do if strings.has_suffix(row.path, ":kc") {
+		found = true
+		testing.expect(t, !row.remove, "no Remove button")
+		testing.expectf(t, strings.contains(row.detail, "/antigravity remove kc"), "the reason: %s", row.detail)
+	}
+	testing.expect(t, found)
+	// agy's own ~/.gemini as a file account beside the keychain's default
+	os.remove(fmt.tprintf("%s/accounts.json", env.root))
+	gem := fmt.tprintf("%s/.gemini", env.home)
+	ag_profile(gem, signed = false)
+	ag_write(fmt.tprintf("%s/accounts.json", env.root), fmt.tprintf(`{{"accounts":[{{"name":"gemini","method":"oauth-personal","storage":"file","dir":%q,"source":"found"}}]}}`, gem))
+	core.agy_accounts_refresh()
+	g, gok := ag_find("gemini")
+	testing.expect(t, gok && !g.keyring && g.sign_in == .No)
+	testing.expectf(t, strings.contains(core.agy_account_detail(g), "writes a sign-in file into ~/.gemini, which agy outside Deckhand then uses too"), "%s", core.agy_account_detail(g))
 }

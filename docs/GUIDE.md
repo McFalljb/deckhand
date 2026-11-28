@@ -254,13 +254,18 @@ Deckhand also finds the agy profiles you already have and lists them in Settings
   antigravity-<name>`** instead: pi asks for the key without showing it and keeps it in its own
   credential store, as it does every API key; it is never written to Deckhand's files.
 - **`/antigravity logout <name>`** signs out (agy forgets the saved sign-in; the history stays).
-  Google accounts with no sign-in of their own share the macOS keychain sign-in. Signing out the
-  account that holds it signs them all out, so Deckhand names them and asks first (without a
-  window, add `--yes`). `/antigravity login <name>` gives an account its own sign-in.
+  One Google account holds the macOS keychain sign-in, which agy outside Deckhand uses too:
+  signing it out signs that out. Another Google account with no sign-in of its own is not used
+  until `/antigravity login <name>` gives it one (for agy's own `~/.gemini`, that sign-in file is
+  what agy outside Deckhand then uses too).
   For an API key, `/logout` and pick the account's provider.
 - **`/antigravity remove <name>`** removes an account, its profile and its history, after asking
   (without a window to ask in, add `--yes`). The default account stays. An account whose folder
-  Deckhand found or you added is only taken off the list: its folder is never deleted.
+  Deckhand found or you added is only taken off the list: its folder is never deleted. The
+  account that holds the macOS keychain sign-in is signed out of the keychain first; if agy
+  cannot sign it out, the account stays, and `--force` removes it anyway (the next account to use
+  the keychain then has that sign-in). Settings does not remove that account: its row says to use
+  `/antigravity remove` in a pi tab.
 - **`/antigravity models <name>`** lists an account's models again. You rarely need it: `/model`
   shows each account's models from the last list as soon as pi starts, and a list over 10 minutes
   old is refreshed quietly in the background. An account found signed out there keeps its models,

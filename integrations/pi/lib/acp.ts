@@ -78,6 +78,58 @@ export function agyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv 
 	return Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("DECKHAND_")));
 }
 
+/** Variables that pick agy's credential or profile, or change how it starts: never passed through (t3code removedEnvironmentKeys). */
+export const REMOVED_ENV = new Set([
+	"GEMINI_API_KEY",
+	"GOOGLE_API_KEY",
+	"GOOGLE_APPLICATION_CREDENTIALS",
+	"GOOGLE_CLOUD_PROJECT",
+	"GOOGLE_CLOUD_LOCATION",
+	"GOOGLE_CLOUD_QUOTA_PROJECT",
+	"GOOGLE_GENAI_USE_VERTEXAI",
+	"GCLOUD_PROJECT",
+	"CLOUDSDK_CORE_PROJECT",
+	"AGY_ACP_CCPA_PROJECT",
+	"AGY_ACP_ENABLE_OAUTH",
+	"GEMINI_HOME",
+	"AGY_ACP_FORCE_FILE_STORAGE",
+	"AGY_CLI_FORCE_FILE_TOKEN_STORAGE",
+	"AGY_CLI_DISABLE_AUTO_UPDATE",
+	"BROWSER",
+	"PYTHONUNBUFFERED",
+	"ELECTRON_RUN_AS_NODE",
+	"CHROME_CRASHPAD_PIPE_NAME",
+]);
+
+/**
+ * A variable that may hold another service's secret (pi's provider keys, cloud and forge tokens):
+ * never handed to agy, whose shell tools run with it. Matched case-insensitively by name.
+ */
+export const secretEnvName = (name: string) => {
+	const K = name.toUpperCase();
+	return (
+		/(^|_)(API_?KEYS?|KEYS?|TOKENS?|SECRETS?|PASSWORD|PASSWD|PASS|CREDENTIALS?|AUTH|DSN|COOKIES?|PRIVATE_KEY)$/.test(K) ||
+		/_ACCESS_KEY|_AUTH_TOKEN|AUTHTOKEN/.test(K) ||
+		K === "DATABASE_URL" ||
+		/^(AWS|AZURE|OPENAI|ANTHROPIC|GITHUB|GH|GITLAB|HF|HUGGINGFACE|MISTRAL|GROQ|XAI|OPENROUTER|DEEPSEEK|COHERE|CEREBRAS|ZAI|TOGETHER|FIREWORKS|PERPLEXITY|COPILOT|VERCEL|CLOUDFLARE|PI)_/.test(K)
+	);
+};
+
+/**
+ * pi's environment with nothing in it for agy to pick a sign-in by or to leak (REMOVED_ENV, any
+ * GOOGLE_* and gcloud's, Deckhand's own, anything secretEnvName takes for a secret): what an agy
+ * started without an account's environment (agyEnvFor) gets.
+ */
+export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv { // env-read-ok: agy's environment is pi's, filtered
+	const out: NodeJS.ProcessEnv = {};
+	for (const [k, v] of Object.entries(env)) {
+		const K = k.toUpperCase();
+		if (REMOVED_ENV.has(K) || K.startsWith("GOOGLE_") || K.startsWith("DECKHAND_") || K === "CLOUDSDK_CONFIG" || K.startsWith("CLOUDSDK_AUTH_") || secretEnvName(K)) continue;
+		out[k] = v;
+	}
+	return out;
+}
+
 /**
  * The environment every agy Deckhand starts runs with: `env`, with its run folder as TMPDIR and
  * agy's self-update off (agy updates itself during interactive runs; Deckhand never lets it, a
@@ -262,7 +314,7 @@ export class AcpConnection {
 
 	start(): void {
 		const runDir = this.opts.makeRunDir?.();
-		const env = this.opts.env ?? agyEnv();
+		const env = this.opts.env ?? scrubbedEnv();
 		let child: ChildProcess;
 		try {
 			child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: spawnEnv(env, runDir), stdio: ["pipe", "pipe", "pipe"], detached: true });

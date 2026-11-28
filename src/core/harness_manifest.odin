@@ -17,6 +17,7 @@ package core
 //
 // Rows and their sources are listed in docs/HARNESSES.md §6.
 
+import "base:runtime"
 import "core:encoding/json"
 import jg "../jsonguard"
 import "core:fmt"
@@ -667,12 +668,17 @@ harness_checklist_refresh :: proc(full := false, bump := true) {
 	}
 	f := harness_facts_probe != nil ? harness_facts_probe() : harness_facts_now()
 	items_asking = harness_facts_probe == nil && harness_lookup_asking()
-	for s in items_strings do delete(s)
+	// the cache is the core's, on the heap: never the caller's allocator (a request's, a test's),
+	// which a later refresh would free with another
+	heap := runtime.heap_allocator()
+	if items_strings.allocator.procedure != heap.procedure do items_strings = make([dynamic]string, heap) // (left by an older caller: not ours to free)
+	if harness_items.allocator.procedure != heap.procedure do harness_items = make([dynamic]Harness_Item, heap)
+	for s in items_strings do delete(s, heap)
 	clear(&items_strings)
 	clear(&harness_items)
 	keep :: proc(s: string) -> string {
 		if s == "" do return ""
-		c := strings.clone(s)
+		c := strings.clone(s, runtime.heap_allocator())
 		append(&items_strings, c)
 		return c
 	}

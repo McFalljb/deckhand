@@ -37,8 +37,12 @@ int dh_fsw_set(const char **paths, int n, dh_fsw_cb cb) {
 			CFRelease(s);
 		}
 	}
+	// No kFSEventStreamCreateFlagWatchRoot: it opens a descriptor on every part of every watched
+	// path (about a dozen per folder), so 20-odd project folders ran launchd's soft limit of 256 out
+	// and the stream failed (EMFILE). A watched folder that moves or goes is seen by the window's
+	// stat of each one instead (editor_watch.odin's watch_roots_check), as kFSEventStreamEventFlagRootChanged.
 	stream = FSEventStreamCreate(NULL, on_events, NULL, list, kFSEventStreamEventIdSinceNow, 0.05,
-		kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagWatchRoot);
+		kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer);
 	CFRelease(list);
 	if (!stream) return 1;
 	FSEventStreamSetDispatchQueue(stream, queue);

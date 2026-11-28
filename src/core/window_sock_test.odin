@@ -116,6 +116,24 @@ window_request_bound_over_the_socket :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "answered in time: opened")
 }
 
+// A browser that connects on its own (a page load, a reconnect: its hello has no "take") while
+// this Mac's window is attached does not take the view from it: the window stays attached.
+@(test)
+web_hello_without_take_leaves_the_window :: proc(t: ^testing.T) {
+	win: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &win) == .OK)
+	defer posix.close(win[1])
+	testing.expect(t, core_attach_window_sock(win[0], nil, trust.peer_read(win[0])))
+	defer core_detach_window()
+	web: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web) == .OK)
+	defer posix.close(web[1])
+	attached := core_attach_window_sock(web[0], nil, {}, from = "Phone", web = true, web_device = "dev1")
+	if !attached do posix.close(web[0])
+	testing.expect(t, !attached, "not attached")
+	testing.expect(t, window_link_is_window(), "the window stays attached")
+}
+
 @(private = "file")
 thread_start_answer :: proc(a: rawptr) -> ^thread.Thread {
 	return thread.create_and_start_with_data(a, proc(data: rawptr) {

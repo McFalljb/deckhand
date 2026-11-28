@@ -77,7 +77,9 @@ test("no bundled extension registers a tool or flag while loading (pi would refu
 	symlinkSync(path.join(ROOT, "test/fake-agy.mjs"), path.join(bin, "agy"));
 	assertTempData();
 	try {
-		for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}, { PATH: bin }])
+		// the stand-in agy first on PATH in every case: a test never finds (or starts) the real one
+		const PATH = `${bin}:/usr/bin:/bin`;
+		for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", PATH }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c", PATH }, { PATH }, { PATH: bin }])
 			for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"])
 				await withEnv(env, async () => {
 					const pi = piRules();
@@ -179,7 +181,9 @@ test("loadedTools, loadedCommands: who else provides a name; nothing when pi can
 });
 
 test("overlap: ours next to pi-kit's own extensions (shell, guardrails, notes, desk, desk-browser, desk-bridge), pi starts", { skip: noKit }, async () => {
-	await withEnv({ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, async () => {
+	const bin = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-bin-"));
+	symlinkSync(path.join(ROOT, "test/fake-agy.mjs"), path.join(bin, "agy"));
+	await withEnv({ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", PATH: `${bin}:/usr/bin:/bin` }, async () => {
 		const pi = piRules();
 		for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"]) await pi.load(ourPath(name), await ours(name));
 		// (pi-kit's sidebar registers only /sidebar, a name Deckhand does not use; it needs more of pi-tui than the stub)

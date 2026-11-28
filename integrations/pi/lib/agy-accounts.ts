@@ -104,6 +104,18 @@ export function dataRoot(env: NodeJS.ProcessEnv = process.env, platform = proces
 
 const accountsFile = (root: string) => path.join(root, "accounts.json");
 
+/** `text` into `file` (0600) by a temp file and a rename; a failed write or rename leaves no temp file. Throws as fs does. */
+function writeAtomic(file: string, text: string) {
+	const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+	try {
+		fs.writeFileSync(tmp, text, { mode: 0o600 });
+		fs.renameSync(tmp, file);
+	} catch (e) {
+		fs.rmSync(tmp, { force: true });
+		throw e;
+	}
+}
+
 const isObj = (x: unknown): x is Record<string, any> => !!x && typeof x === "object" && !Array.isArray(x);
 
 /** accounts.json as it is (an object; {} when missing or not JSON). */
@@ -284,9 +296,7 @@ export function noteAgySeen(root: string, agyPath: string, version: string) {
 			if (fs.readFileSync(file, "utf8").trim() === body) return;
 		} catch {}
 		fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-		const tmp = `${file}.tmp-${process.pid}`;
-		fs.writeFileSync(tmp, `${body}\n`, { mode: 0o600 });
-		fs.renameSync(tmp, file);
+		writeAtomic(file, `${body}\n`);
 	} catch {}
 }
 
@@ -308,9 +318,7 @@ export function noteModelCount(root: string, name: string, count: number) {
 		if (isObj(all[name]) && all[name].count === count) return;
 		all[name] = { count, at: Math.floor(Date.now() / 1000) };
 		fs.mkdirSync(root, { recursive: true, mode: 0o700 });
-		const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-		fs.writeFileSync(tmp, `${JSON.stringify(all)}\n`, { mode: 0o600 });
-		fs.renameSync(tmp, file);
+		writeAtomic(file, `${JSON.stringify(all)}\n`);
 	} catch {}
 }
 
@@ -367,10 +375,33 @@ export function noteModelList(root: string, name: string, change: (c: ModelCache
 		all[name] = change(cachedModels(root, name) ?? { models: [], thinking: [], at: 0 });
 		fs.mkdirSync(root, { recursive: true, mode: 0o700 });
 		const file = path.join(root, MODEL_LISTS);
-		const tmp = `${file}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-		fs.writeFileSync(tmp, `${JSON.stringify(all)}\n`, { mode: 0o600 });
-		fs.renameSync(tmp, file);
+		writeAtomic(file, `${JSON.stringify(all)}\n`);
 	} catch {}
+}
+
+/**
+ * Claims the account's background listing for this process: under `agy-model-lists.json.lock`
+ * (agy-lock.ts; one whose process is gone is taken over), the cache is read again and, unless a
+ * list or a try is younger than `freshMs`, a try is recorded. False: fresh, tried by another pi
+ * meanwhile, or the lock held (another pi is claiming): not listed here.
+ */
+export function claimListing(root: string, name: string, freshMs: number): boolean {
+	if (!validName(name)) return false;
+	try {
+		fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+	} catch {
+		return false;
+	}
+	const lock = path.join(root, `${MODEL_LISTS}.lock`);
+	if (!tryLock(lock, (seen) => !alive(seen.pid!))) return false;
+	try {
+		const c = cachedModels(root, name);
+		if (c && Date.now() - Math.max(c.at, c.triedAt ?? 0) < freshMs) return false;
+		noteModelList(root, name, (x) => ({ ...x, triedAt: Date.now() }));
+		return true;
+	} finally {
+		unlock(lock);
+	}
 }
 
 /** agy listed the account's models (a session, a listing): the list, its count for Deckhand, and the account is signed in. */

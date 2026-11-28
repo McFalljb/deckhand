@@ -355,7 +355,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   or was tried that recently by any pi) is listed again in the background, one account at a time,
   never as a sign-in: no link is taken and a Google account gets `SSH_CONNECTION`, so agy says it
   has no sign-in. Then the cached models stay and the account is marked; the status says
-  `sign in: /antigravity login <name>` until a listing or session works again.
+  `sign in: /antigravity login <name>` until a listing or session works again. Known, not fixed:
+  each listing is a throwaway session, so it leaves a conversation in agy's own history; a Google
+  sign-in's pasted code is on screen as typed (agy's code is single-use and short-lived).
 - **Turns** (`lib/antigravity.ts`): one agy process and session per pi session and account
   (`options.sessionId`); its id is each answer's `responseId`, also on an answer that failed before
   its prompt. Only the user messages after the last answer are sent. An agy session is picked up

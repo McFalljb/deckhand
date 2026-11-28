@@ -56,6 +56,7 @@ import {
 	methodLabel,
 	noteAgySeen,
 	cachedModels,
+	claimListing,
 	noteModelList,
 	noteModels,
 	notSignedIn,
@@ -88,7 +89,7 @@ const KILLERS: Set<() => void> = ((globalThis as any)[Symbol.for("deckhand.antig
  * helper, test/pi-rules.ts, does, so no test lists models unless it asks), `delayMs` is how long
  * after session_start it waits, `last` is the running one. One object for the process.
  */
-const PROBE: { off?: boolean; delayMs: number; last?: Promise<void> } = ((globalThis as any)[Symbol.for("deckhand.antigravity.probe")] ??= { delayMs: 3000 });
+const PROBE: { off?: boolean; delayMs: number; jitterMs?: number; last?: Promise<void> } = ((globalThis as any)[Symbol.for("deckhand.antigravity.probe")] ??= { delayMs: 3000 });
 /** A list this young (or a listing tried this recently, by any pi) is not asked for again at start. */
 export const MODELS_FRESH_MS = 10 * 60_000;
 
@@ -219,9 +220,10 @@ export default function antigravity(pi: ExtensionAPI) {
 	const scheduleRefresh = (ctx: ExtensionContext) => {
 		if (refreshed || PROBE.off) return;
 		refreshed = true;
+		// a random part (0-5 s) so tabs that start together do not all list at once
 		refreshTimer = setTimeout(() => {
 			PROBE.last = refreshModels(ctx).catch(() => {});
-		}, PROBE.delayMs);
+		}, PROBE.delayMs + Math.random() * (PROBE.jitterMs ?? 5000));
 		refreshTimer.unref?.();
 	};
 	const refreshModels = async (ctx: ExtensionContext) => {
@@ -232,14 +234,16 @@ export default function antigravity(pi: ExtensionAPI) {
 			const c = cachedModels(root, a.name);
 			if (c && Date.now() - Math.max(c.at, c.triedAt ?? 0) < MODELS_FRESH_MS) continue;
 			const key = await keyOf(ctx, a);
+			if (stopped) return;
 			if (usesKey(a) && !key) continue;
 			let how: ReturnType<typeof launchOf>;
 			try {
 				how = launchOf(a, key);
 			} catch {
-				continue; // a folder used in place that is gone
+				continue; // a folder used in place that is gone, an account with no sign-in of its own
 			}
-			noteModelList(root, a.name, (x) => ({ ...x, triedAt: Date.now() }));
+			// checked and claimed under a lock: of the tabs that start together, one lists
+			if (!claimListing(root, a.name, MODELS_FRESH_MS)) continue;
 			const env = usesKey(a) ? how.env : { ...how.env, SSH_CONNECTION: how.env.SSH_CONNECTION || "127.0.0.1 0 127.0.0.1 0" };
 			let s: AgySession | undefined;
 			try {
@@ -249,6 +253,7 @@ export default function antigravity(pi: ExtensionAPI) {
 					probeKill = () => signalGroup(child.pid, "SIGTERM");
 					return child;
 				}) as typeof spawn;
+				if (stopped) return;
 				s = await AgySession.open({ agyPath, cwd, ...how, env, spawnImpl });
 				const r = { models: s.models, thinking: s.thinkingLevels, version: s.agentVersion };
 				if (stopped) return;

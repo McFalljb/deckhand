@@ -5,7 +5,7 @@
 // stores a token. The link and the code are checked as t3code checks them
 // (antigravityAuthSupport.ts parseAntigravityAuthorizationUrl, antigravityLoginResponse).
 import { type ChildProcess, spawn } from "node:child_process";
-import { agyEnv, endChild, endRun, markRun, reapGroup, SIGN_IN_PREFIX, spawnEnv } from "./acp.ts";
+import { agyEnv, endChild, endRun, markRun, reapGroup, SIGN_IN_PREFIX, signalGroup, spawnEnv } from "./acp.ts";
 
 const MAX_URL = 16_384;
 /** Where `agy acp --login` sends Google; the page there shows the code. */
@@ -135,7 +135,8 @@ export async function agyLogin(o: LoginOptions): Promise<LoginResult> {
 		return { ok: false, error: "That is not a code from the Antigravity sign-in page: sign in again (/antigravity login [name])" };
 	}
 	child.stdin!.write(`${line}\n`);
-	const timer = setTimeout(() => child.kill("SIGTERM"), o.finishTimeoutMs ?? 120_000);
+	// its whole process group, as every other end of agy (what it started goes too)
+	const timer = setTimeout(() => signalGroup(child.pid, "SIGTERM"), o.finishTimeoutMs ?? 120_000);
 	const code = await exited;
 	clearTimeout(timer);
 	return code === 0 ? { ok: true } : { ok: false, error: "Antigravity could not finish the Google sign-in: sign in again (/antigravity login [name])" };

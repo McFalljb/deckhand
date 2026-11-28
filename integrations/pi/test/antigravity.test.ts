@@ -11,7 +11,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { AcpConnection, agyEnv, agyTooOld, answerAgentRequest, CLIENT_INFO, findAgy, initializeParams, NOT_FOUND, parseAgyVersion, SignInRequired, signInLink } from "../lib/acp.ts";
 import { AgySession, agyVersion, modelsOf, probeModels, SIGN_IN_HINT } from "../lib/agy.ts";
-import { agyEnvFor, dataRoot, linkUserConfig, loadAccounts, PLANS_URL, profileOf, storedAccounts, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
+import { agyEnvFor, claimListing, dataRoot, linkUserConfig, loadAccounts, PLANS_URL, profileOf, storedAccounts, sweepRunDirs, updateAccounts } from "../lib/agy-accounts.ts";
 import { fileLedger } from "../lib/agy-ledger.ts";
 import { agyLogin, CODE_REDIRECT_URI, linkInLine, loginAnswer, parseSignInLink } from "../lib/agy-login.ts";
 import { createAntigravity, planTurn, RETRY_NOTE, SUMMARY_TEXT } from "../lib/antigravity.ts";
@@ -2151,7 +2151,7 @@ const PROBE = (globalThis as any)[Symbol.for("deckhand.antigravity.probe")];
 /** Runs `f` with the background listing on (no delay); restores it off after. */
 async function withProbe<T>(f: () => Promise<T>): Promise<T> {
 	const was = { ...PROBE };
-	Object.assign(PROBE, { off: false, delayMs: 0, last: undefined });
+	Object.assign(PROBE, { off: false, delayMs: 0, jitterMs: 0, last: undefined });
 	try {
 		return await f();
 	} finally {
@@ -2382,4 +2382,15 @@ test("the keychain account by the rule Deckhand's core follows too (tests/agy-ke
 		}
 		assert.equal(loadAccounts(root).find((a) => a.keyring)?.name ?? null, c.holder, c.name);
 	}
+});
+
+test("a background listing is claimed under a lock: one pi of several lists an account; a held lock or a fresh try means not here", () => {
+	const root = mkdtempSync(path.join(TMP_ROOT, "claim-"));
+	assert.equal(claimListing(root, "default", 60_000), true);
+	assert.equal(claimListing(root, "default", 60_000), false, "tried just now");
+	writeFileSync(path.join(root, "agy-model-lists.json.lock"), JSON.stringify({ pid: process.pid }));
+	assert.equal(claimListing(root, "work", 60_000), false, "another claim in progress");
+	rmSync(path.join(root, "agy-model-lists.json.lock"));
+	assert.equal(claimListing(root, "work", 60_000), true);
+	assert.deepEqual(readdirSync(root).filter((f) => f.includes(".tmp-")), [], "no temp file left");
 });

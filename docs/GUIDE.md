@@ -264,7 +264,10 @@ Deckhand also finds the agy profiles you already have and lists them in Settings
 - **`/antigravity models <name>`** lists an account's models again. You rarely need it: `/model`
   shows each account's models from the last list as soon as pi starts, and a list over 10 minutes
   old is refreshed quietly in the background. An account found signed out there keeps its models,
-  and `/antigravity status` says `sign in: /antigravity login <name>`.
+  and `/antigravity status` says `sign in: /antigravity login <name>`. Deckhand never starts a
+  sign-in by itself. But in a turn of the keychain account (or a Gemini Enterprise one), agy
+  itself may open a browser to sign in when it finds none. The other Google accounts, and every
+  background listing, are told there is no browser, so they never do.
 - **`/antigravity approvals ask [name]`** makes Deckhand ask you before every action of that
   account's agy; **`/antigravity approvals allow [name]`** goes back to the default.
   **`/antigravity approvals`** alone shows each account's setting.

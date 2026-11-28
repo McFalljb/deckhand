@@ -25,8 +25,11 @@ class FakeSocket {
 }
 const g = globalThis as any;
 g.WebSocket = FakeSocket;
-g.window = { setTimeout: (fn: () => void, ms: number) => (timers.push({ fn, ms }), timers.length), clearTimeout: () => {}, addEventListener: () => {} };
-g.document = { addEventListener: () => {}, visibilityState: "visible" };
+// the listeners the links added (each link's, in order): a test calls the ones its link added
+const listeners: { type: string; fn: () => void }[] = [];
+const listen = (type: string, fn: () => void) => listeners.push({ type, fn });
+g.window = { setTimeout: (fn: () => void, ms: number) => (timers.push({ fn, ms }), timers.length), clearTimeout: () => {}, addEventListener: listen };
+g.document = { addEventListener: listen, visibilityState: "visible" };
 g.location = { protocol: "http:", host: "127.0.0.1:1", reload: () => {} };
 g.localStorage = { getItem: () => "a".repeat(64), setItem: () => {}, removeItem: () => {} };
 g.fetch = async () => ({ ok: true, status: 200, json: async () => ({ paired: true }) });
@@ -144,4 +147,57 @@ test("take: only on the user's action", async () => {
   const paired = new Link({ up: () => {}, status: () => {} } as any);
   paired.start(true);
   assert.equal(helloOf(sockets.at(-1)!).take, true, "just paired");
+});
+
+// A View here that fails keeps saying "take" only for a while (TAKE_FOR, from the tap): a redial
+// soon after it still takes, but the back-off's later redials, the network coming back or the
+// phone waking an hour later never take the view without a tap; the page going hidden ends it.
+test("take: only soon after the tap, and not after the page was hidden", async () => {
+  const realNow = Date.now;
+  let now = 2_000_000;
+  Date.now = () => now;
+  try {
+    timers.length = 0;
+    const from = listeners.length;
+    const link = new Link({ up: () => {}, status: () => {} } as any);
+    const fire = (type: string) => listeners.slice(from).filter((l) => l.type === type).forEach((l) => l.fn());
+    link.start();
+    let ws = sockets.at(-1)!;
+    helloOf(ws);
+    deliver(ws, { type: "result", id: "hello", result: { ok: true, data: { core: "c1" } } });
+    deliver(ws, { type: "web.taken", by: "window", name: "" });
+    const fail = async (s: FakeSocket) => {
+      s.onclose!({ code: 1006 });
+      await new Promise((r) => setImmediate(r)); // refused before the hello: whoami, then the redial
+    };
+    // View here, the socket fails: a redial within the window still takes
+    link.takeBack();
+    await fail(sockets.at(-1)!);
+    now += 5000;
+    timers.at(-1)!.fn();
+    assert.equal(helloOf(sockets.at(-1)!).take, true, "a redial soon after the tap");
+    // it fails again, and the back-off's redial comes after the window: a plain hello
+    await fail(sockets.at(-1)!);
+    now += 20_000;
+    timers.at(-1)!.fn();
+    assert.equal(helloOf(sockets.at(-1)!).take, undefined, "a redial long after the tap");
+    // View here, it fails, the network comes back after the window: a plain hello
+    link.takeBack();
+    await fail(sockets.at(-1)!);
+    now += 25_000;
+    fire("online");
+    assert.equal(helloOf(sockets.at(-1)!).take, undefined, "online, long after the tap");
+    // View here, it fails, the page goes hidden and comes back at once: a plain hello
+    link.takeBack();
+    await fail(sockets.at(-1)!);
+    (globalThis as any).document.visibilityState = "hidden";
+    fire("visibilitychange");
+    now += 1000;
+    (globalThis as any).document.visibilityState = "visible";
+    fire("visibilitychange");
+    ws = sockets.at(-1)!;
+    assert.equal(helloOf(ws).take, undefined, "woken: never the tap's take");
+  } finally {
+    Date.now = realNow;
+  }
 });

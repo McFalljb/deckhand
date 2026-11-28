@@ -581,8 +581,11 @@ usage_claude_script :: proc(dir: string) -> string {
 		strings.write_string(&b, sh_quote(f))
 	}
 	strings.write_string(&b, "; ")
-	for e in claude_account_env(account, .Claude) do if strings.has_prefix(e, "DECKHAND_CLAUDE_ACCOUNT=") {
-		fmt.sbprintf(&b, "DECKHAND_CLAUDE_ACCOUNT=%s; ", sh_quote(e[len("DECKHAND_CLAUDE_ACCOUNT="):]))
+	// the account marker: claude_account_env's first entry, taken by place, not compared by name
+	// (an optimised build keeps a compared "DECKHAND_CLAUDE_" as a 16-byte piece, which
+	// scripts/check-release-build.sh cannot tell from a test hook's: DECKHAND_CLAUDE_CMD)
+	if env := claude_account_env(account, .Claude); len(env) > 0 {
+		if eq := strings.index_byte(env[0], '='); eq > 0 do fmt.sbprintf(&b, "DECKHAND_CLAUDE_ACCOUNT=%s; ", sh_quote(env[0][eq + 1:]))
 	}
 	// no update of Claude Code itself, nor the official marketplace installed, from a read
 	strings.write_string(&b, "ENABLE_CLAUDEAI_MCP_SERVERS=false; CLAUDE_CODE_AUTO_CONNECT_IDE=0; CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL=1; DISABLE_AUTOUPDATER=1; CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1; export ENABLE_CLAUDEAI_MCP_SERVERS CLAUDE_CODE_AUTO_CONNECT_IDE CLAUDE_CODE_IDE_SKIP_AUTO_INSTALL DISABLE_AUTOUPDATER CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL; ")

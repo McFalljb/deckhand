@@ -507,6 +507,18 @@ test("GEMINI_API_KEY, GOOGLE_* and BROWSER in pi's environment never reach agy: 
 		const e = agyEnvFor({ name: "default", method: "oauth-personal" }, profileOf(a.root, { name: "default" }), undefined, { Gemini_Api_Key: "x", google_cloud_location: "y", PATH: "/bin", DECKHAND_TOKEN: "t" });
 		assert.deepEqual(Object.keys(e).filter((k) => /gemini_api|google|deckhand/i.test(k)), [], "case-insensitively");
 		assert.equal(e.PATH, "/bin");
+		// other services' secrets (pi's provider keys, cloud and forge tokens) never reach agy, whose shell tools run with them
+		const secrets = { ANTHROPIC_API_KEY: "a", OPENAI_API_KEY: "o", openai_org: "o", GITHUB_TOKEN: "g", GH_TOKEN: "g", AWS_ACCESS_KEY_ID: "k", AWS_PROFILE: "p", AZURE_OPENAI_ENDPOINT: "z", NPM_TOKEN: "n", STRIPE_SECRET: "s", DB_PASSWORD: "p", MY_SERVICE_KEY: "k", PI_KIT_NOTES_DIR: "/n", Groq_Api_Key: "g" };
+		const kept = { PATH: "/bin", HOME: "/h", SSH_AUTH_SOCK: "/s", HTTPS_PROXY: "http://p", LANG: "en_US.UTF-8", LC_ALL: "C", TERM: "xterm" };
+		const e2 = agyEnvFor({ name: "default", method: "oauth-personal" }, profileOf(a.root, { name: "default" }), undefined, { ...secrets, ...kept });
+		for (const k of Object.keys(secrets)) assert.equal(e2[k], undefined, k);
+		for (const [k, v] of Object.entries(kept)) assert.equal(e2[k], v, k);
+		// what agy needs is added back: its own key for its own method, ADC for Agent Platform
+		assert.equal(agyEnvFor({ name: "k", method: "gemini-api-key" }, profileOf(a.root, { name: "k" }), "mine", secrets).GEMINI_API_KEY, "mine");
+		const adc = agyEnvFor({ name: "ap", method: "agent-platform", gcpProject: "p", gcpLocation: "l" }, profileOf(a.root, { name: "ap" }), undefined, { GOOGLE_APPLICATION_CREDENTIALS: "/adc.json", CLOUDSDK_AUTH_ACCESS_TOKEN_FILE: "/t", ...secrets });
+		assert.equal(adc.GOOGLE_APPLICATION_CREDENTIALS, "/adc.json");
+		assert.equal(adc.CLOUDSDK_AUTH_ACCESS_TOKEN_FILE, "/t");
+		assert.equal(adc.ANTHROPIC_API_KEY, undefined);
 	});
 });
 
@@ -575,12 +587,12 @@ test("an API-key account without a key, a signed-out account, SUBSCRIPTION_REQUI
 		await run(pi, "antigravity", "add biz oauth-personal", ctx);
 		const turn = (id: string, key?: string) => drive(prov(pi, id).streamSimple({ id: "default", provider: id, api: "antigravity-acp" }, { messages: [user("hi")] }, { sessionId: "s", ...(key ? { apiKey: key } : {}) }));
 		assert.equal((await turn("antigravity")).msg.errorMessage, 'Antigravity account "default" is not signed in: run /antigravity login');
-		assert.equal((await turn("antigravity-biz")).msg.errorMessage, 'Antigravity account "biz" is not signed in: run /antigravity login biz');
+		assert.equal((await turn("antigravity-biz")).msg.errorMessage, 'Antigravity account "biz" has no sign-in of its own (it would run as default\'s). Run /antigravity login biz.', "refused before agy starts");
 		await run(pi, "antigravity", "add k gemini-api-key", ctx);
 		await run(pi, "antigravity", "models k", ctx);
 		assert.equal(notes.at(-1), 'Antigravity account "k" is not signed in: run /login antigravity-k');
 		const homes = new Set(f.read().filter((m) => m.argv).map((m) => profArg(m)));
-		assert.deepEqual([...homes].sort(), [path.join(a.root, "profiles", "biz"), path.join(a.root, "profiles", "default")].sort(), "each failure stays on its own account");
+		assert.deepEqual([...homes], [path.join(a.root, "profiles", "default")], "each failure stays on its own account");
 	});
 	const s = fake({ FAKE_AGY_SUBSCRIPTION: "1" });
 	const b = accountsEnv({ FAKE_AGY_LOG: s.log, FAKE_AGY_SUBSCRIPTION: "1" });
@@ -726,7 +738,7 @@ test("polish: /antigravity remove without a UI needs --yes", async () => {
 		await run(pi, "antigravity", "add work oauth-personal", ctx);
 		const headless = { ...ctx, hasUI: false };
 		await run(pi, "antigravity", "remove work", headless);
-		assert.equal(notes.at(-1), 'Removing the Antigravity account "work" deletes its profile and history: run /antigravity remove work --yes');
+		assert.equal(notes.at(-1), 'Removing the Antigravity account "work" deletes its profile and history. Run /antigravity remove work --yes');
 		assert.ok(prov(pi, "antigravity-work") && !pi.extensions[0].unregistered.includes("antigravity-work"), "still there");
 		await run(pi, "antigravity", "remove work --yes", headless);
 		assert.deepEqual(pi.extensions[0].unregistered, ["antigravity-work"]);
@@ -1904,7 +1916,7 @@ test("the keyring account: only the first storage:keyring entry runs in keychain
 	mkdirSync(a.root, { recursive: true });
 	const file = path.join(a.root, "accounts.json");
 	writeFileSync(file, JSON.stringify({ accounts: [{ name: "gemini", method: "oauth-personal", dir: gemini, source: "found", storage: "keyring" }, { name: "second", method: "oauth-personal", storage: "keyring" }] }));
-	const [g, second] = storedAccounts(a.root);
+	const [, g, second] = loadAccounts(a.root);
 	assert.deepEqual([g.keyring, second.keyring], [true, undefined]);
 	assert.equal(loadAccounts(a.root)[0].keyring, undefined, "an entry holds the keychain: the default does not");
 	const e1 = agyEnvFor(g, profileOf(a.root, g), undefined, { PATH: "/bin", AGY_CLI_FORCE_FILE_TOKEN_STORAGE: "1" });
@@ -1993,34 +2005,48 @@ test("login and sessions get the same environment for every kind of account (key
 	for (const x of [k, ap]) assert.equal(agyEnvFor(x, profileOf(a.root, x), "key", {}).AGY_CLI_FORCE_FILE_TOKEN_STORAGE, "1", x.name);
 });
 
-test("a second account never takes the keychain: with the default holding it, a file account that agy signs in from the keychain stays a file account; a default marked file with no file of its own that agy signs in from the keychain becomes the keychain account", async () => {
+test("a Google account with no sign-in of its own is refused (turns, the tool, listings), never run as the keychain account's; its own login fixes it in one step", async () => {
 	const f = fake();
 	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
-	writeFileSync(path.join(a.home, ".fake-agy-keychain"), "{}");
+	writeFileSync(path.join(a.home, ".fake-agy-keychain"), "{}"); // default signed in, in the keychain
 	mkdirSync(a.root, { recursive: true });
 	const file = path.join(a.root, "accounts.json");
 	writeFileSync(file, JSON.stringify({ accounts: [{ name: "work", method: "oauth-personal" }] }));
 	const turnOn = async (pi: any, id: string) => drive(prov(pi, id).streamSimple({ id: "default", provider: id, api: "antigravity-acp" }, { messages: [user("hi")] }, { sessionId: `t-${id}-${Math.random()}` }));
+	const refusal = 'Antigravity account "work" has no sign-in of its own (it would run as default\'s). Run /antigravity login work.';
 	await withEnv(a.env, async () => {
 		const pi = await loadExtension();
 		await pi.start();
-		assert.equal((await turnOn(pi, "antigravity-work")).msg.stopReason, "stop", "agy reads the keychain for any profile");
-		await new Promise((r) => setTimeout(r, 100));
-		assert.deepEqual(readJson(file).accounts, [{ name: "work", method: "oauth-personal" }], "work does not take the default's keychain");
-		assert.equal(loadAccounts(a.root)[0].keyring, true, "the default holds it");
-	});
-	writeFileSync(file, JSON.stringify({ accounts: [{ name: "default", method: "oauth-personal", storage: "file" }, { name: "work", method: "oauth-personal" }] }));
-	await withEnv(a.env, async () => {
-		const pi = await loadExtension();
-		await pi.start();
-		assert.equal((await turnOn(pi, "antigravity")).msg.stopReason, "stop");
-		await new Promise((r) => setTimeout(r, 100));
-		assert.equal(readJson(file).accounts.find((x: any) => x.name === "default").storage, "keyring", "signed in from the keychain: recorded");
+		const r = await turnOn(pi, "antigravity-work");
+		assert.equal(r.msg.stopReason, "error");
+		assert.equal(r.msg.errorMessage, refusal);
+		assert.deepEqual(f.read().filter((m) => m.method === "authenticate"), [], "agy never started for work");
+		// the tool: work named is refused; unnamed, the default is used
+		const t = pi.extensions[0].tools.get("antigravity");
+		await assert.rejects(t.execute("p1", { task: "x", account: "work" }, undefined, () => {}, { ...pi.ctx, cwd: TMP_ROOT }), { message: refusal });
+		assert.match(t.parameters.properties.account.description, /Signed in when this tab started: default$/);
+		// listings and the status
+		const { ctx, notes } = cmdCtx(pi, { input: ["good-code"] });
+		await run(pi, "antigravity", "models work", ctx);
+		assert.equal(notes.at(-1), refusal);
+		await run(pi, "antigravity", "status", ctx);
+		assert.match(notes.at(-1)!, /- work → antigravity-work · Google account · no sign-in of its own \(it would run as default's\): \/antigravity login work/);
+		await run(pi, "antigravity", "logout work", ctx);
+		assert.equal(notes.at(-1), "The Antigravity account \"work\" has no sign-in of its own: nothing to sign out (the macOS keychain's sign-in is default's: /antigravity logout default)");
+		assert.deepEqual(f.read().filter((m) => m.method === "logout"), [], "agy not asked to sign out");
+		// its own sign-in: in its profile (file mode), then it runs as itself
+		await run(pi, "antigravity", "login work", ctx);
+		assert.ok(existsSync(path.join(a.root, "profiles", "work", "antigravity-acp", "acp_token.json")));
 		assert.equal((await turnOn(pi, "antigravity-work")).msg.stopReason, "stop");
-		await new Promise((r) => setTimeout(r, 100));
-		assert.equal(readJson(file).accounts.find((x: any) => x.name === "work").storage, undefined, "the keychain is taken: work stays a file account");
-		const turn = f.read().filter((m) => m.argv).at(-1);
-		assert.equal(turn.env.AGY_CLI_FORCE_FILE_TOKEN_STORAGE, "1");
+		assert.equal(f.read().filter((m) => m.authenticatedVia).at(-1).authenticatedVia, "file");
+		assert.deepEqual(readJson(file).accounts, [{ name: "work", method: "oauth-personal" }], "the keychain never moves");
+	});
+	// no account holds the keychain (a default marked file): refused as well
+	writeFileSync(file, JSON.stringify({ accounts: [{ name: "default", method: "oauth-personal", storage: "file" }] }));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		assert.equal((await turnOn(pi, "antigravity")).msg.errorMessage, "Antigravity account \"default\" has no sign-in of its own (it would run as the macOS keychain's sign-in). Run /antigravity login.");
 	});
 });
 
@@ -2072,7 +2098,7 @@ test("an account Deckhand adds while pi runs: in the status (its provider after 
 		writeFileSync(file, JSON.stringify({ accounts: [{ name: "picked", method: "oauth-personal", dir: own, source: "added", label: "Picked" }] }));
 		const { ctx, notes } = cmdCtx(pi, { input: ["good-code"] });
 		await run(pi, "antigravity", "status", ctx);
-		assert.match(notes.at(-1)!, /- picked \(Picked\) → antigravity-picked · Google account · folder .* · sign-in unknown until agy is used \(\/antigravity login picked to sign in\) · provider after pi's next start or \/reload/);
+		assert.match(notes.at(-1)!, /- picked \(Picked\) → antigravity-picked · Google account · folder .* · no sign-in of its own \(it would run as default's\): \/antigravity login picked · provider after pi's next start or \/reload/);
 		await run(pi, "antigravity", "login picked", ctx);
 		assert.equal(notes.at(-1), '2 models of the Antigravity account "picked" in /model after pi\'s next start or /reload (provider antigravity-picked)');
 		assert.deepEqual(pi.extensions[0].providers.map((p: any) => p.id), ["antigravity"], "no provider registered mid-session");
@@ -2110,12 +2136,12 @@ test("a folder used in place that is gone: never made again; login and turns say
 		await run(pi, "antigravity", "login", ctx);
 		assert.equal(notes.at(-1), `The folder of the Antigravity account "old" is not there: ${gone}`);
 		await run(pi, "antigravity", "status", ctx);
-		assert.match(notes.at(-1)!, /- old → antigravity-old · .* · sign-in unknown until agy is used \(\/antigravity login old to sign in\) · models not listed yet · the default account/);
+		assert.match(notes.at(-1)!, /- old → antigravity-old · .* · no sign-in of its own \(it would run as default's\): \/antigravity login old · models not listed yet · the default account/);
 		const r = await drive(prov(pi, "antigravity-old").streamSimple({ id: "default", provider: "antigravity-old", api: "antigravity-acp" }, { messages: [user("x")] }, { sessionId: "g1" }));
 		assert.equal(r.msg.stopReason, "error");
 		assert.match(r.msg.errorMessage, /is not there/);
 		assert.ok(!existsSync(gone), "never created");
-		assert.equal(f.read().filter((m) => m.argv).length, 0);
+		assert.equal(f.read().filter((m) => m.argv && profArg(m) === gone).length, 0, "never run in it (the default's dir is ignored: its own profile)");
 	});
 });
 
@@ -2263,44 +2289,97 @@ test("models at start: a cache file that is not a list is ignored; an API-key ac
 	});
 });
 
-test("logout of the keychain account: the accounts that share its sign-in are named and confirmed first (refused without a UI unless --yes); one with its own sign-in is not asked about", async () => {
+test("removing the keychain account signs it out of the keychain first (said in the confirm; --yes without a UI); a failed sign-out is said plainly", async () => {
+	for (const failing of [false, true]) {
+		const f = fake();
+		const a = accountsEnv({ FAKE_AGY_LOG: f.log, ...(failing ? { FAKE_AGY_LOGOUT_FAIL: "1" } : {}) });
+		const kc = path.join(a.home, ".fake-agy-keychain");
+		writeFileSync(kc, "{}");
+		mkdirSync(a.root, { recursive: true });
+		writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ accounts: [{ name: "kc", method: "oauth-personal", storage: "keyring" }] }));
+		await withEnv(a.env, async () => {
+			const pi = await loadExtension();
+			await pi.start();
+			const asked: string[] = [];
+			const { ctx, notes } = cmdCtx(pi);
+			ctx.ui.confirm = async (_t: string, body: string) => (asked.push(body), true);
+			ctx.hasUI = false;
+			await run(pi, "antigravity", "remove kc", ctx);
+			assert.equal(notes.at(-1), 'Removing the Antigravity account "kc" deletes its profile and history. Its sign-in in the macOS keychain is signed out first. Run /antigravity remove kc --yes');
+			ctx.hasUI = true;
+			await run(pi, "antigravity", "remove kc", ctx);
+			assert.match(asked[0], /Its sign-in in the macOS keychain is signed out first\.$/);
+			const out = f.read().filter((m) => m.method === "logout");
+			assert.equal(out.length, 1);
+			const start = f.read().filter((m) => m.argv).at(-1);
+			assert.equal(start.env.AGY_CLI_FORCE_FILE_TOKEN_STORAGE, undefined, "in keychain mode");
+			if (failing) {
+				assert.ok(existsSync(kc));
+				assert.match(notes.at(-1)!, /^Removed the Antigravity account "kc"; its sign-in stays in the macOS keychain \(agy's sign-out failed: .*logout failed.*\), where agy outside Deckhand and the next keychain account still find it/);
+			} else {
+				assert.ok(!existsSync(kc), "the keychain entry signed out");
+				assert.match(notes.at(-1)!, /^Removed the Antigravity account "kc"; signed out of the macOS keychain/);
+			}
+		});
+	}
+});
+
+test("an account removed elsewhere (Deckhand, another pi): its provider's turns fail and its profile is never made again", async () => {
 	const f = fake();
 	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
 	mkdirSync(a.root, { recursive: true });
-	const own = mkdtempSync(path.join(TMP_ROOT, "own-signin-"));
-	mkdirSync(path.join(own, "antigravity-acp"), { recursive: true });
-	writeFileSync(path.join(own, "antigravity-acp", "acp_token.json"), "{}");
-	writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ accounts: [{ name: "personal", method: "oauth-personal" }, { name: "solo", method: "oauth-personal", dir: own, source: "added" }, { name: "key", method: "gemini-api-key" }] }));
+	const file = path.join(a.root, "accounts.json");
+	writeFileSync(file, JSON.stringify({ accounts: [{ name: "work", method: "gemini-api-key" }] }));
 	await withEnv(a.env, async () => {
 		const pi = await loadExtension();
 		await pi.start();
-		const logouts = () => f.read().filter((m) => m.method === "logout").length;
-		const text = "This signs out default and personal (they share the macOS keychain sign-in). Use /antigravity login personal to give personal its own.";
-		// declined: nothing signed out
-		const asked: string[] = [];
-		const c1 = cmdCtx(pi);
-		c1.ctx.ui.confirm = async (_t: string, body: string) => (asked.push(body), false);
-		await run(pi, "antigravity", "logout", c1.ctx);
-		assert.deepEqual(asked, [text]);
-		assert.equal(logouts(), 0);
-		// no UI: refused with the same line, and how to go ahead
-		const c2 = cmdCtx(pi);
-		c2.ctx.hasUI = false;
-		await run(pi, "antigravity", "logout default", c2.ctx);
-		assert.equal(c2.notes.at(-1), `${text} To sign them all out, run /antigravity logout default --yes`);
-		assert.equal(logouts(), 0);
-		await run(pi, "antigravity", "logout default --yes", c2.ctx);
-		assert.equal(logouts(), 1);
-		assert.equal(c2.notes.at(-1), 'Signed out of Antigravity (account "default" and personal, which shared it, its sign-in in the system keychain, which agy outside Deckhand uses too); its history is kept');
-		// confirmed (a UI): signed out
-		const c3 = cmdCtx(pi);
-		await run(pi, "antigravity", "logout", c3.ctx);
-		assert.equal(logouts(), 2);
-		// a file account's own sign-out asks nothing
-		const c4 = cmdCtx(pi);
-		c4.ctx.ui.confirm = async () => assert.fail("not asked");
-		await run(pi, "antigravity", "logout solo", c4.ctx);
-		await run(pi, "antigravity", "logout personal", c4.ctx);
-		assert.equal(logouts(), 4);
+		writeFileSync(file, JSON.stringify({ accounts: [] }));
+		const r = await drive(prov(pi, "antigravity-work").streamSimple({ id: "default", provider: "antigravity-work", api: "antigravity-acp" }, { messages: [user("hi")] }, { sessionId: "gone", apiKey: "k" }));
+		assert.equal(r.msg.errorMessage, 'The Antigravity account "work" was removed');
+		assert.ok(!existsSync(path.join(a.root, "profiles", "work")));
+		assert.deepEqual(f.read().filter((m) => m.argv), []);
 	});
+});
+
+test("the keychain rule: an account with its own sign-in file runs, signs in and out in file mode even when marked keyring (agy reads the file first), and the keychain goes to the next one; only a Google account counts; the default never has a folder", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	mkdirSync(a.root, { recursive: true });
+	const file = path.join(a.root, "accounts.json");
+	const ownDir = (n: string) => path.join(a.root, "profiles", n, "antigravity-acp");
+	mkdirSync(ownDir("a"), { recursive: true });
+	writeFileSync(path.join(ownDir("a"), "acp_token.json"), "{}");
+	writeFileSync(file, JSON.stringify({ accounts: [{ name: "k", method: "gemini-api-key", storage: "keyring" }, { name: "a", method: "oauth-personal", storage: "keyring" }, { name: "b", method: "oauth-personal", storage: "keyring" }, { name: "default", method: "oauth-personal", dir: "/elsewhere" }] }));
+	const all = loadAccounts(a.root);
+	assert.deepEqual(all.map((x) => [x.name, !!x.keyring]), [["default", false], ["k", false], ["a", false], ["b", true]], "a has its own file; k is no Google account");
+	assert.equal(all[0].dir, undefined, "the default is Deckhand's own profile");
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const { ctx } = cmdCtx(pi, { input: ["good-code"] });
+		await run(pi, "antigravity", "login a", ctx);
+		assert.equal(f.read().filter((m) => m.loginStored).at(-1).loginStored, "file", "its new sign-in where agy reads it");
+		await drive(prov(pi, "antigravity-a").streamSimple({ id: "default", provider: "antigravity-a", api: "antigravity-acp" }, { messages: [user("hi")] }, { sessionId: "a1" }));
+		assert.equal(f.read().filter((m) => m.authenticatedVia).at(-1).authenticatedVia, "file");
+		// /antigravity add default <not Google>: its storage goes
+		await run(pi, "antigravity", "add default gemini-api-key", ctx);
+		assert.equal(readJson(file).accounts.find((x: any) => x.name === "default").storage, undefined);
+	});
+	writeFileSync(file, JSON.stringify({ accounts: [{ name: "default", method: "oauth-personal", storage: "keyring" }, { name: "x", method: "oauth-personal", storage: "keyring" }] }));
+	assert.deepEqual(loadAccounts(a.root).map((x) => !!x.keyring), [true, false], "two keyring entries: the default first, then the file's order");
+});
+
+
+test("the keychain account by the rule Deckhand's core follows too (tests/agy-keychain/holder.json, read by src/agy_accounts_test.odin as well)", () => {
+	const fx = JSON.parse(readFileSync(path.join(ROOT, "..", "..", "tests", "agy-keychain", "holder.json"), "utf8"));
+	assert.ok(fx.cases.length > 5);
+	for (const c of fx.cases) {
+		const root = mkdtempSync(path.join(TMP_ROOT, "kc-"));
+		writeFileSync(path.join(root, "accounts.json"), JSON.stringify({ accounts: c.accounts }));
+		for (const n of c.signed) {
+			mkdirSync(path.join(root, "profiles", n, "antigravity-acp"), { recursive: true });
+			writeFileSync(path.join(root, "profiles", n, "antigravity-acp", "acp_token.json"), "{}");
+		}
+		assert.equal(loadAccounts(root).find((a) => a.keyring)?.name ?? null, c.holder, c.name);
+	}
 });

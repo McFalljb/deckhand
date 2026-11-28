@@ -435,8 +435,54 @@ agy_accounts_settings_rows :: proc(t: ^testing.T) {
 	s := strings.to_string(b)
 	testing.expectf(t, len(got) == 5, "three accounts, Add, Scan:\n%s", s)
 	testing.expectf(t, strings.contains(s, "Default|Google account · signed in through the system keychain (not checked) ·"), "%s", s)
-	testing.expectf(t, strings.contains(s, "Gemini|Google account · sign-in unknown until agy is used (/antigravity login gemini in a pi tab to sign in) · ~/.gemini|Rename…|truetrue"), "%s", s)
+	testing.expectf(t, strings.contains(s, "Gemini|Google account · no sign-in of its own (/antigravity login gemini in a pi tab) · ~/.gemini|Rename…|truetrue"), "%s", s)
 	testing.expectf(t, strings.contains(s, "Work|Google account · signed in · 7 models · ~/.gemini-work|Rename…|truetrue"), "%s", s)
 	testing.expectf(t, strings.contains(s, "Add account…|") && strings.contains(s, "Scan again|"), "%s", s)
 	for r in got do if r.label == "Default" do testing.expect(t, !r.remove && !r.make_default, "the default: not removed, chosen")
+}
+
+// The keychain account by the rule pi's extension follows too: tests/agy-keychain/holder.json, which
+// integrations/pi/test/antigravity.test.ts reads as well.
+@(test)
+agy_accounts_keychain_holder_fixture :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	data, err := os.read_entire_file("tests/agy-keychain/holder.json", context.temp_allocator)
+	testing.expect(t, err == nil, "the fixture")
+	if err != nil do return
+	v, jerr := json.parse(data, allocator = context.temp_allocator)
+	testing.expect(t, jerr == nil)
+	cases := v.(json.Object)["cases"].(json.Array)
+	testing.expect(t, len(cases) > 5)
+	for cv in cases {
+		c := cv.(json.Object)
+		env := ag_reset()
+		accts, _ := json.marshal(c["accounts"], allocator = context.temp_allocator)
+		ag_write(fmt.tprintf("%s/accounts.json", env.root), fmt.tprintf(`{{"accounts":%s}}`, string(accts)))
+		for s in c["signed"].(json.Array) do ag_write(fmt.tprintf("%s/profiles/%s/antigravity-acp/acp_token.json", env.root, string(s.(json.String))), "{}")
+		want := ""
+		if h, ok := c["holder"].(json.String); ok do want = string(h)
+		got := ""
+		for a in core.agy_accounts() do if a.keyring do got = a.name
+		testing.expectf(t, got == want, "%s: holder %q, want %q", string(c["name"].(json.String)), got, want)
+		ag_done(env)
+	}
+}
+
+// A profile's own config (its skills) is not the profile's credential, but a profile nested in it
+// is still guarded: agy_credential keeps looking past a config entry.
+@(test)
+agy_accounts_nested_profile :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	env := ag_reset()
+	defer ag_done(env)
+	g := fmt.tprintf("%s/.gemini", env.home)
+	ag_profile(g, cli = true)
+	inner := fmt.tprintf("%s/config/skills/old-profile", g)
+	ag_profile(inner)
+	ag_write(fmt.tprintf("%s/antigravity-acp/settings.json", inner), "{}")
+	ag_write(fmt.tprintf("%s/config/skills/mine/SKILL.md", g), "# skill")
+	core.agy_accounts_refresh()
+	testing.expect(t, !core.agy_credential(fmt.tprintf("%s/config/skills/mine/SKILL.md", g)), "the user's skill")
+	testing.expect(t, core.agy_credential(fmt.tprintf("%s/antigravity-acp/settings.json", inner)), "a profile inside the skills folder")
+	testing.expect(t, core.agy_credential(fmt.tprintf("%s/antigravity-acp/conversation_summaries.db", inner)))
 }

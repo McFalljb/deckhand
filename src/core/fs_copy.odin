@@ -272,12 +272,13 @@ copy_credential_check :: proc(full, rel: string, is_dir, user, full_rule: bool, 
 	return ""
 }
 
-// Whether a folder is a credential place by what it holds (fs_credential_place's own test): one
-// holding Claude's sign-in or account file, a .codex folder holding auth.json.
+// Whether a folder is a credential place by what it holds (fs_credential_place's own test,
+// fs_credential_holder): one holding Claude's sign-in or account file, a .codex folder holding
+// auth.json, an agy profile by its marks (one no account names too, a backup of one).
 @(private = "file")
 copy_marked_folder :: proc(d: string) -> bool {
-	if claude_marked_folder(d) do return true
-	return strings.equal_fold(filepath.base(d), ".codex") && path_kind(strings.concatenate({d, "/auth.json"}, context.temp_allocator)) != .Missing
+	if strings.equal_fold(filepath.base(d), ".codex") && path_kind(strings.concatenate({d, "/auth.json"}, context.temp_allocator)) != .Missing do return true // a link too
+	return fs_credential_holder(d)
 }
 
 // settings_credential for an entry of the tree. full_rule: settings_credential itself (in or
@@ -293,6 +294,7 @@ copy_credential :: proc(full: string, full_rule: bool, ids: []Cred_Id, st: ^posi
 	base := strings.to_lower(filepath.base(full), context.temp_allocator)
 	if base == ".credentials.json" || base == ".claude.json" || strings.has_prefix(base, ".claude.json.") do return true
 	if base == "auth.json" && strings.equal_fold(filepath.base(filepath.dir(full)), ".codex") do return true
+	if base == "acp_token.json" do return true // agy's file sign-in, wherever it is (agy_credential)
 	return posix.S_ISREG(st.st_mode) && credential_inode(u64(st.st_dev), u64(st.st_ino), ids)
 }
 

@@ -41,8 +41,9 @@ package core
 //             path, size, mtime in seconds, version), so the checklist shows the version without
 //             running agy; the checklist is looked at again.
 //
-// Never: sudo, `agy install` (Google's installer runs it: it edits shell profiles), running agy,
-// writing outside ~/.local/bin and that data file, or accounts.json (the extension's).
+// Never: sudo, `agy install` (Google's installer runs it: it edits shell profiles), running agy, or
+// writing outside ~/.local/bin and that data file, but accounts.json's agyPath, set under its lock
+// when ~/.local/bin is not on the PATH tabs get (agy_accounts_set_path), so pi finds agy there.
 //
 // Test mode never downloads from Google: DECKHAND_TEST_AGY_RELEASE (file:///dir/: dir/manifests/
 // <platform>.json and dir/antigravity-cli/… in place of the two hosts) and DECKHAND_TEST_AGY_BIN_DIR

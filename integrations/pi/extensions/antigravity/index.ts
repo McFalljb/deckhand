@@ -63,7 +63,7 @@ import {
 	profileOf,
 	providerIdOf,
 	runDir,
-	noteKeychainSignIn,
+	riderReason,
 	signInHint,
 	updateAccounts,
 	signInCommand,
@@ -116,12 +116,20 @@ export default function antigravity(pi: ExtensionAPI) {
 	 * in the keychain, every other one in its profile (lib/agy-accounts.ts agyEnvFor).
 	 */
 	const launchOf = (a: Account, key: string | undefined, login = false) => {
-		const p = prepareProfile(root, a);
+		// a Google account with no sign-in of its own would run as the keychain account's: refused
+		// (its own sign-in, `login`, is what fixes it)
+		const p = prepareProfile(root, a); // a folder used in place that is gone: said first
+		const rider = login ? undefined : riderReason(root, a);
+		if (rider) throw new Error(rider);
 		// the process's own TMPDIR is made only when agy starts (and removed when it ends)
 		return { args: agyArgs(p, login), env: agyEnvFor(a, p, key), makeRunDir: () => runDir(p), authMethod: a.method, signInHint: notSignedIn(a) };
 	};
-	/** agy authenticated the account: a file-mode account with no file of its own used the keychain, recorded (noteKeychainSignIn). */
-	const authenticated = (name: string) => void noteKeychainSignIn(root, name).catch(() => {});
+	/** The account as accounts.json has it now; one removed there (by Deckhand, another pi) is not made again. */
+	const current = (name: string) => {
+		const a = accountNow(name);
+		if (!a) throw new Error(`The Antigravity account "${name}" was removed`);
+		return a;
+	};
 
 	const register = (a: Account) => {
 		const ag = createAntigravity({
@@ -132,11 +140,10 @@ export default function antigravity(pi: ExtensionAPI) {
 			account: a.name,
 			keyAuth: usesKey(a),
 			explain: (m) => explainError(m, a),
-			launch: (key) => launchOf(accountNow(a.name) ?? a, key),
+			launch: (key) => launchOf(current(a.name), key),
 			ledgerDir: path.join(profileOf(root, a).acpDir, "deckhand-sessions"),
 			onModels: (n, list, thinking) => noteModels(root, a.name, list, thinking, n),
 			initialModels: cachedModels(root, a.name),
-			onOpened: () => authenticated(a.name),
 			approvals: () => ({ cwd, hasUI: !!uiCtx?.hasUI, ui: uiCtx?.hasUI ? (uiCtx.ui as any) : undefined, readonly: readonlySession(), mode: approvalsOf(root, a.name) }),
 		});
 		ag.bind(registry);
@@ -245,7 +252,6 @@ export default function antigravity(pi: ExtensionAPI) {
 				s = await AgySession.open({ agyPath, cwd, ...how, env, spawnImpl });
 				const r = { models: s.models, thinking: s.thinkingLevels, version: s.agentVersion };
 				if (stopped) return;
-				authenticated(a.name);
 				version = r.version || version;
 				// setModels tells onModels (noteModels: the list, its count, no longer signed out)
 				await (live.get(a.name)?.ag ?? ag).setModels(r.models, r.thinking);
@@ -264,7 +270,8 @@ export default function antigravity(pi: ExtensionAPI) {
 	 */
 	const signedIn = async (ctx: ExtensionContext) => {
 		const out: Account[] = [];
-		for (const a of accountsNow()) if (!usesKey(a) || !!(await keyOf(ctx, a))) out.push(a);
+		const all = accountsNow();
+		for (const a of all) if (usesKey(a) ? !!(await keyOf(ctx, a)) : !riderReason(root, a, all)) out.push(a);
 		return out;
 	};
 
@@ -289,6 +296,9 @@ export default function antigravity(pi: ExtensionAPI) {
 				const now = await signedIn(c);
 				const def = defaultNameOf(root);
 				const a = p.account ? now.find((x) => x.name === p.account) : (now.find((x) => x.name === def) ?? now[0]);
+				const named = p.account ? accountNow(p.account) : undefined;
+				const rider = !a && named ? riderReason(root, named) : undefined;
+				if (rider) throw new Error(rider);
 				if (!a) throw new Error(p.account ? `No signed-in Antigravity account "${p.account}": signed in are ${now.map((x) => x.name).join(", ") || "none"}` : "No Antigravity account is signed in: /antigravity login");
 				const key = await keyOf(c, a);
 				const text = await delegate({
@@ -299,7 +309,6 @@ export default function antigravity(pi: ExtensionAPI) {
 					approvals: () => ({ cwd: c.cwd || cwd, hasUI: !!c.hasUI, ui: c.hasUI ? (c.ui as any) : undefined, readonly: readonlySession(), mode: approvalsOf(root, a.name) }),
 					open: async (onU, answer) => {
 						const s = await AgySession.open({ agyPath: agyPath!, cwd: c.cwd || cwd, ...launchOf(a, key), onUpdate: onU, answer });
-						authenticated(a.name);
 						return s;
 					},
 				});
@@ -333,7 +342,6 @@ export default function antigravity(pi: ExtensionAPI) {
 		if (usesKey(a) && !key) throw new Error(notSignedIn(a));
 		try {
 			const r = await probeModels({ agyPath, cwd, ...launchOf(a, key), ...(signIn ? { signIn } : {}) });
-			authenticated(a.name);
 			version = r.version || version;
 			noteAgySeen(root, agyPath!, version);
 			noteModels(root, a.name, r.models, r.thinking, modelList(r.models, r.thinking).length - 1);
@@ -365,7 +373,16 @@ export default function antigravity(pi: ExtensionAPI) {
 			else {
 				// a hint only: agy is asked whenever the account is used, and says when it has no sign-in
 				const hint = signInHint(root, a);
-				state = cachedModels(root, a.name)?.signedOut ? `sign in: ${signInCommand(a)}` : hint === "file" ? "signed in (in its profile)" : hint === "keychain" ? "signed in (system keychain, not checked)" : `sign-in unknown until agy is used (${signInCommand(a)} to sign in)`;
+				const rider = riderReason(root, a, list);
+				state = rider
+					? `no sign-in of its own (it would run as ${list.find((x) => x.keyring)?.name ?? "the keychain"}'s): ${signInCommand(a)}`
+					: cachedModels(root, a.name)?.signedOut
+						? `sign in: ${signInCommand(a)}`
+						: hint === "file"
+							? "signed in (in its profile)"
+							: hint === "keychain"
+								? "signed in (system keychain, not checked)"
+								: `sign-in unknown until agy is used (${signInCommand(a)} to sign in)`;
 			}
 			const n = (ag?.models.length ?? 1) - 1;
 			const label = a.label && a.label !== a.name ? ` (${a.label})` : "";
@@ -427,33 +444,25 @@ export default function antigravity(pi: ExtensionAPI) {
 		}
 	};
 
-	const logout = async (ctx: ExtensionContext, name?: string, yes = false) => {
+	const logout = async (ctx: ExtensionContext, name?: string) => {
 		const a = accountOf(name);
 		if (!a) return fail(ctx, `No Antigravity account "${name}"`);
-		// the keychain account's sign-out clears the one keychain entry, which every Google account
-		// without a sign-in of its own also signs in with: named first, confirmed (or --yes)
-		const shared = a.keyring ? keychainUsers(a) : [];
-		if (shared.length && !yes) {
-			const line = sharedSignOutText(a, shared);
-			if (!ctx.hasUI) return ctx.ui.notify(`${line} To sign them all out, run /antigravity logout ${a.name} --yes`, "warning");
-			if (!(await ctx.ui.confirm(`Sign out of Antigravity?`, line))) return;
+		// a Google account with no sign-in of its own has nothing to sign out: agy would sign the
+		// keychain account out instead
+		if (riderReason(root, a)) {
+			const h = accountsNow().find((x) => x.keyring);
+			return ctx.ui.notify(`The Antigravity account "${a.name}" has no sign-in of its own: nothing to sign out${h ? ` (the macOS keychain's sign-in is ${h.name}'s: /antigravity logout ${h.name})` : ""}`, "info");
 		}
 		await live.get(a.name)?.ag.closeAll();
-		for (const x of shared) await live.get(x.name)?.ag.closeAll();
 		if (usesKey(a)) return ctx.ui.notify(`Run /logout and pick ${providerIdOf(a.name)}: pi removes the stored key. The account and its history stay.`, "info");
 		if (!usesKeyOrBrowser(a)) return ctx.ui.notify(`The account "${a.name}" uses Application Default Credentials: nothing is saved to sign out of (gcloud auth application-default revoke)`, "info");
 		try {
 			await agyLogout({ agyPath, cwd, ...launchOf(a, undefined) });
-			ctx.ui.notify(`Signed out of Antigravity (account "${a.name}"${shared.length ? ` and ${listNames(shared)}, which shared it` : ""}${a.keyring ? ", its sign-in in the system keychain, which agy outside Deckhand uses too" : ""}); its history is kept`, "info");
+			ctx.ui.notify(`Signed out of Antigravity (account "${a.name}"${a.keyring ? ", its sign-in in the system keychain, which agy outside Deckhand uses too" : ""}); its history is kept`, "info");
 		} catch (e) {
 			fail(ctx, explainError((e as Error).message, a));
 		}
 	};
-	/** The other Google accounts with no sign-in of their own, so signed in from the keychain account's (agy reads its file, else the keychain). */
-	const keychainUsers = (k: Account) => accountsNow().filter((x) => x.name !== k.name && x.method === "oauth-personal" && !x.keyring && !hasSavedLogin(profileOf(root, x)));
-	const listNames = (l: Account[]) => (l.length === 1 ? l[0].name : `${l.slice(0, -1).map((x) => x.name).join(", ")} and ${l.at(-1)!.name}`);
-	const sharedSignOutText = (k: Account, l: Account[]) =>
-		`This signs out ${listNames([k, ...l])} (they share the macOS keychain sign-in). Use /antigravity login ${l[0].name} to give ${l.length === 1 ? l[0].name : "an account"} its own.`;
 	const usesKeyOrBrowser = (a: Account) => usesKey(a) || a.method === "oauth-personal" || a.method === "oauth-business";
 
 	const remove = async (ctx: ExtensionContext, name?: string, yes = false) => {
@@ -463,8 +472,21 @@ export default function antigravity(pi: ExtensionAPI) {
 		const p = profileOf(root, a);
 		// a folder used in place is the user's own: only the entry goes (no sign-out, nothing deleted)
 		const what = p.inPlace ? `its folder ${p.geminiHome} stays as it is, with its sign-in` : `its profile with its saved sign-in and history (${p.geminiHome})`;
-		if (!ctx.hasUI && !yes) return ctx.ui.notify(p.inPlace ? `Removing the Antigravity account "${a.name}" removes it from Deckhand (its folder ${p.geminiHome} stays): run /antigravity remove ${a.name} --yes` : `Removing the Antigravity account "${a.name}" deletes its profile and history: run /antigravity remove ${a.name} --yes`, "warning");
-		if (ctx.hasUI && !yes && !(await ctx.ui.confirm(`Remove the Antigravity account "${a.name}"?`, `Its provider ${providerIdOf(a.name)} goes, and ${what}.`))) return;
+		// the keychain account's sign-in is not in its folder: signed out of the keychain first, so
+		// the account that holds the keychain next does not inherit it
+		const kc = a.keyring ? " Its sign-in in the macOS keychain is signed out first." : "";
+		if (!ctx.hasUI && !yes) return ctx.ui.notify(`${p.inPlace ? `Removing the Antigravity account "${a.name}" removes it from Deckhand (its folder ${p.geminiHome} stays).` : `Removing the Antigravity account "${a.name}" deletes its profile and history.`}${kc} Run /antigravity remove ${a.name} --yes`, "warning");
+		if (ctx.hasUI && !yes && !(await ctx.ui.confirm(`Remove the Antigravity account "${a.name}"?`, `Its provider ${providerIdOf(a.name)} goes, and ${what}.${kc}`))) return;
+		let keychain = "";
+		if (a.keyring) {
+			await live.get(a.name)?.ag.closeAll();
+			try {
+				await agyLogout({ agyPath, cwd, ...launchOf(a, undefined) });
+				keychain = "; signed out of the macOS keychain";
+			} catch (e) {
+				keychain = `; its sign-in stays in the macOS keychain (agy's sign-out failed: ${(e as Error).message}), where agy outside Deckhand and the next keychain account still find it`;
+			}
+		}
 		try {
 			await updateAccounts(root, (accounts, rest) => ({
 				accounts: accounts.filter((x) => x.name !== a.name),
@@ -476,11 +498,11 @@ export default function antigravity(pi: ExtensionAPI) {
 		}
 		await live.get(a.name)?.ag.closeAll();
 		if (!p.inPlace) {
-			if (!usesKey(a) && hasSavedLogin(p)) await agyLogout({ agyPath, cwd, ...launchOf(a, undefined) }).catch(() => {});
+			if (!usesKey(a) && !a.keyring && hasSavedLogin(p)) await agyLogout({ agyPath, cwd, ...launchOf(a, undefined) }).catch(() => {});
 			fs.rmSync(p.geminiHome, { recursive: true, force: true });
 		}
 		if (live.delete(a.name)) pi.unregisterProvider(providerIdOf(a.name));
-		ctx.ui.notify(`Removed the Antigravity account "${a.name}"${p.inPlace ? `; its folder ${p.geminiHome} is kept` : ""}${usesKey(a) ? `; its key is still in pi's store: /logout and pick ${providerIdOf(a.name)}` : ""}`, "info");
+		ctx.ui.notify(`Removed the Antigravity account "${a.name}"${keychain}${p.inPlace ? `; its folder ${p.geminiHome} is kept` : ""}${usesKey(a) ? `; its key is still in pi's store: /logout and pick ${providerIdOf(a.name)}` : ""}`, "info");
 	};
 
 	const add = async (ctx: ExtensionContext, name?: string, methodArg?: string) => {
@@ -499,6 +521,7 @@ export default function antigravity(pi: ExtensionAPI) {
 		// `default` again: its method changes; its folder, label and the rest stay
 		const { gcpProject: _p, gcpLocation: _l, keyring: _k, ...kept } = existing ?? ({} as Partial<Account>);
 		const a: Account = { ...kept, name, method };
+		if (method !== "oauth-personal") delete a.storage; // only a Google account has a storage
 		if (method === "oauth-business" || method === "agent-platform") {
 			const optional = method === "agent-platform" ? " (empty: use an API key)" : "";
 			const project = ctx.hasUI ? (await ctx.ui.input(`GCP project${optional}`, ""))?.trim() : undefined;
@@ -625,7 +648,7 @@ export default function antigravity(pi: ExtensionAPI) {
 				case "login":
 					return login(ctx, name);
 				case "logout":
-					return name === "--yes" ? logout(ctx, undefined, true) : logout(ctx, name, method === "--yes");
+					return logout(ctx, name);
 				case "remove":
 					return remove(ctx, name, method === "--yes");
 				case "models":

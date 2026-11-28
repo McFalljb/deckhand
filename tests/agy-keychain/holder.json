@@ -1,0 +1,16 @@
+{
+  "about": "Which account holds agy's keychain sign-in, for the core (src/agy_accounts_test.odin) and pi (integrations/pi/test/antigravity.test.ts) alike: accounts.json's accounts, the accounts whose profile (<root>/profiles/<name>) has its own acp_token.json, and the keychain account (null: none).",
+  "cases": [
+    { "name": "no entries: the default", "accounts": [], "signed": [], "holder": "default" },
+    { "name": "a default marked file: none", "accounts": [{ "name": "default", "method": "oauth-personal", "storage": "file" }], "signed": [], "holder": null },
+    { "name": "a default with its own file: none", "accounts": [], "signed": ["default"], "holder": null },
+    { "name": "a marked entry", "accounts": [{ "name": "x", "method": "oauth-personal", "storage": "keyring" }], "signed": [], "holder": "x" },
+    { "name": "a marked entry with its own file: the next one", "accounts": [{ "name": "x", "method": "oauth-personal", "storage": "keyring" }, { "name": "y", "method": "oauth-personal", "storage": "keyring" }], "signed": ["x"], "holder": "y" },
+    { "name": "the only marked entry has its own file: none", "accounts": [{ "name": "x", "method": "oauth-personal", "storage": "keyring" }], "signed": ["x"], "holder": null },
+    { "name": "a marked entry that is no Google account: the default", "accounts": [{ "name": "k", "method": "gemini-api-key", "storage": "keyring" }], "signed": [], "holder": "default" },
+    { "name": "two marked: the default first", "accounts": [{ "name": "x", "method": "oauth-personal", "storage": "keyring" }, { "name": "default", "method": "oauth-personal", "storage": "keyring" }], "signed": [], "holder": "default" },
+    { "name": "two marked: the file's order", "accounts": [{ "name": "y", "method": "oauth-personal", "storage": "keyring" }, { "name": "x", "method": "oauth-personal", "storage": "keyring" }], "signed": [], "holder": "y" },
+    { "name": "a default with a dir: its own profile all the same", "accounts": [{ "name": "default", "method": "oauth-personal", "dir": "/nowhere/agy" }], "signed": [], "holder": "default" },
+    { "name": "a default that is no Google account: none", "accounts": [{ "name": "default", "method": "gemini-api-key" }], "signed": [], "holder": null }
+  ]
+}

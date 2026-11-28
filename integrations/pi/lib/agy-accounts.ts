@@ -134,7 +134,7 @@ function parseAccount(a: any): Account | undefined {
 	};
 }
 
-/** The accounts of a raw accounts.json (bad and repeated entries skipped; `keyring` on the first keyring entry). */
+/** The accounts of a raw accounts.json (bad and repeated entries skipped; `keyring` is loadAccounts'). */
 function accountsOfRaw(raw: Record<string, any>): Account[] {
 	const seen = new Set<string>();
 	const list: Account[] = [];
@@ -144,8 +144,6 @@ function accountsOfRaw(raw: Record<string, any>): Account[] {
 		seen.add(a.name);
 		list.push(a);
 	}
-	const k = list.find((a) => a.storage === "keyring"); // at most one: the first
-	if (k?.method === "oauth-personal") k.keyring = true; // only a Google account signs in to the keyring
 	return list;
 }
 
@@ -155,10 +153,39 @@ export const storedAccounts = (root: string): Account[] => accountsOfRaw(readRaw
 /** The accounts, `default` first (implicit: a Google account, until configured). */
 export function loadAccounts(root: string): Account[] {
 	const list = storedAccounts(root);
-	let def = list.find((a) => a.name === "default") ?? DEFAULT_ACCOUNT;
-	// no entry holds the keychain: the default Google account does (what agy does on this Mac), unless marked file
-	if (!list.some((a) => a.storage === "keyring") && def.method === "oauth-personal" && def.storage !== "file") def = { ...def, keyring: true };
-	return [def, ...list.filter((a) => a.name !== "default")];
+	// the default is always Deckhand's own profile (<root>/profiles/default), as the core has it
+	const { dir: _dir, ...def } = list.find((a) => a.name === "default") ?? DEFAULT_ACCOUNT;
+	const all: Account[] = [def, ...list.filter((a) => a.name !== "default")];
+	const h = keychainHolder(root, all);
+	return h ? all.map((a) => (a === h ? { ...a, keyring: true } : a)) : all;
+}
+
+/**
+ * The one account whose Google sign-in is agy's keychain entry (the core's agy_keychain_holder: the
+ * same rule). In order, `default` first then the file's: the first Google account (oauth-personal)
+ * with storage "keyring" and no sign-in file of its own; when no Google account has storage
+ * "keyring", the default, if it is a Google account not marked "file" with no file of its own;
+ * else none. An account with its own file always runs in file mode, since agy reads the file
+ * before the keychain.
+ */
+export function keychainHolder(root: string, ordered: Account[]): Account | undefined {
+	const google = (a: Account) => a.method === "oauth-personal";
+	const own = (a: Account) => hasSavedLogin(profileOf(root, a));
+	const marked = ordered.filter((a) => google(a) && a.storage === "keyring");
+	if (marked.length) return marked.find((a) => !own(a));
+	const d = ordered.find((a) => a.name === "default");
+	return d && google(d) && d.storage !== "file" && !own(d) ? d : undefined;
+}
+
+/**
+ * Why a Google account cannot be used, or undefined: one with no sign-in file of its own that is
+ * not the keychain account would run as the keychain's sign-in (agy falls back to it), which is
+ * another account's: refused (turns, the tool, listings) until it signs in itself.
+ */
+export function riderReason(root: string, a: Account, all: Account[] = loadAccounts(root)): string | undefined {
+	if (a.method !== "oauth-personal" || a.keyring || hasSavedLogin(profileOf(root, a))) return undefined;
+	const h = all.find((x) => x.keyring);
+	return `Antigravity account "${a.name}" has no sign-in of its own (it would run as ${h ? `${h.name}'s` : "the macOS keychain's sign-in"}). Run ${signInCommand(a)}.`;
 }
 
 /** agy's path as the user set it (`/antigravity path`), unchecked; undefined when not set. */
@@ -548,26 +575,7 @@ export const hasSavedLogin = (p: Profile) => fs.existsSync(path.join(p.acpDir, "
 export const savedSignIn = (root: string, a: Account) => !!a.keyring || hasSavedLogin(profileOf(root, a));
 
 /** What a stat tells of a Google account's sign-in, for the status: its file, the keychain (the keychain account), or unknown. */
-export const signInHint = (root: string, a: Account): "file" | "keychain" | "unknown" => (hasSavedLogin(profileOf(root, a)) ? "file" : a.keyring ? "keychain" : "unknown");
-
-/**
- * After agy authenticated an account: a Google account in file mode with no file of its own was
- * signed in from the keychain, so it is recorded as the keychain account (`storage: "keyring"`),
- * unless another account holds the keychain. Returns whether it changed accounts.json.
- */
-export async function noteKeychainSignIn(root: string, name: string): Promise<boolean> {
-	const a = loadAccounts(root).find((x) => x.name === name);
-	if (!a || a.method !== "oauth-personal" || a.keyring || hasSavedLogin(profileOf(root, a))) return false;
-	if (loadAccounts(root).some((x) => x.keyring)) return false;
-	let changed = false;
-	await updateAccounts(root, (accounts) => {
-		if (accounts.some((x) => x.storage === "keyring")) return {};
-		changed = true;
-		const mine = accounts.find((x) => x.name === name) ?? { ...a, keyring: undefined };
-		return { accounts: accounts.some((x) => x.name === name) ? accounts.map((x) => (x.name === name ? { ...x, storage: "keyring" as const } : x)) : [...accounts, { ...mine, storage: "keyring" as const }] };
-	});
-	return changed;
-}
+export const signInHint = (root: string, a: Account): "file" | "keychain" | "none" => (hasSavedLogin(profileOf(root, a)) ? "file" : a.keyring ? "keychain" : "none");
 
 /**
  * Makes the profile: its folders (0700), the method in settings.json (no credential), and links to
@@ -660,8 +668,21 @@ export const REMOVED_ENV = new Set([
 ]);
 
 /**
+ * A variable that may hold another service's secret (pi's provider keys, cloud and forge tokens):
+ * never handed to agy, whose shell tools run with it. Matched case-insensitively by name.
+ */
+export const secretEnvName = (name: string) => {
+	const K = name.toUpperCase();
+	return (
+		/(^|_)(API_?KEYS?|KEYS?|TOKENS?|SECRETS?|PASSWORD|PASSWD|PASS|CREDENTIALS?|AUTH)$/.test(K) ||
+		/^(AWS|AZURE|OPENAI|ANTHROPIC|GITHUB|GH|GITLAB|HF|HUGGINGFACE|MISTRAL|GROQ|XAI|OPENROUTER|DEEPSEEK|COHERE|CEREBRAS|ZAI|TOGETHER|FIREWORKS|PERPLEXITY|COPILOT|VERCEL|CLOUDFLARE|PI)_/.test(K)
+	);
+};
+
+/**
  * agy's environment for an account (t3code antigravityEnvironment): pi's, without REMOVED_ENV
- * (case-insensitively), any GOOGLE_* and Deckhand's own variables; then the profile, file storage,
+ * (case-insensitively), any GOOGLE_*, Deckhand's own variables and anything that looks like a
+ * secret (secretEnvName: SSH_AUTH_SOCK, proxies, locale, PATH and HOME stay); then file storage,
  * no self-update, its own TMPDIR, and the account's key when it has one. Every account but the
  * keychain one (`a.keyring`) runs in file mode, AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1 (the variable agy
  * 1.5.18 reads), so its sign-in goes into its own profile and never overwrites the shared keychain
@@ -681,7 +702,7 @@ export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, ba
 			if (adc) env[k] = v;
 			continue;
 		}
-		if (REMOVED_ENV.has(K) || K.startsWith("GOOGLE_") || K.startsWith("DECKHAND_")) continue;
+		if (REMOVED_ENV.has(K) || K.startsWith("GOOGLE_") || K.startsWith("DECKHAND_") || secretEnvName(K)) continue;
 		env[k] = v;
 	}
 	const key = apiKey?.trim();

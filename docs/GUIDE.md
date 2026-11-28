@@ -1331,9 +1331,13 @@ secret.
   Deckhand restarts. Its row says **signed in through the system keychain (not checked)**. Every
   other account signs in to its own profile. Deckhand never reads the keychain and never decides
   from a file whether you are signed in: agy is asked each time, and only when agy says there is
-  no sign-in are you asked to sign in. A row with no sign-in file says **sign-in unknown until
-  agy is used**. agy 1.5.18 also falls back to the keychain's sign-in for an account with none of
-  its own, so a second Google account uses your keychain account until you sign it in.
+  no sign-in are you asked to sign in. agy 1.5.18 falls back to the keychain's sign-in for an
+  account with none of its own, so a second Google account would run, and be billed, as your
+  keychain account. Deckhand refuses that: the row says **no sign-in of its own**, and pi says
+  `Antigravity account "work" has no sign-in of its own (it would run as default's). Run
+  /antigravity login work.` until you do. An account with its own sign-in file always uses it,
+  even if it once held the keychain. Removing the keychain account signs it out of the keychain
+  first.
 
 Every Antigravity profile, found, added or Deckhand's own, is kept out of the editor, Files,
 Settings' file lists and every agent: an agent cannot open, show, copy or list its sign-in or

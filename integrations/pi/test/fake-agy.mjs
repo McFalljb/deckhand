@@ -369,6 +369,7 @@ function serve() {
 				return bad(`unknown method ${m}`);
 			}
 			case "logout":
+				if (env.FAKE_AGY_LOGOUT_FAIL === "1") return send({ id, error: { code: -32603, message: "logout failed" } });
 				if (tokenFile) fs.rmSync(tokenFile, { force: true });
 				if (!fileMode) fs.rmSync(keychain, { force: true }); // keychain mode signs the shared entry out
 				return send({ id, result: {} });

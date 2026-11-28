@@ -40,10 +40,12 @@ package core
 // SSH_CONNECTION nor AGY_ACP_FORCE_FILE_STORAGE changes where it stores: tried against the real
 // agy). Deckhand never reads the keychain, so a keychain sign-in cannot be told from none, nor
 // one profile's from another's. Hence at most one account uses the keychain, signing in and
-// running in keychain mode: the first entry with storage "keyring", else the default account (a
-// Google account not marked "file"; lib/agy-accounts.ts loadAccounts), else agy's own default
-// profile when it is found without a file sign-in. Every other account runs and signs in in file
-// mode. A sign-in a stat does not see is "unknown", never "not signed in": agy says so when used.
+// running in keychain mode: in order, the default first, the first Google entry with storage
+// "keyring" and no sign-in file of its own; when no Google entry has storage "keyring", the default
+// (a Google account not marked "file", with no file of its own); else none (lib/agy-accounts.ts
+// keychainHolder: the same rule). A scan gives "keyring" to agy's own default profile found without
+// a file sign-in when none is marked. Every other account runs and signs in in file mode, and pi
+// refuses a Google one with no file of its own (it would run as the keychain account).
 //
 // The guard (agy_credential, settings_credential): every profile Deckhand knows or found, removed
 // ones while they hold agy's files, everything under <root>/profiles, any folder holding agy's
@@ -581,10 +583,11 @@ accounts_make :: proc() -> []Agy_Account {
 		if label == "" do label = e.dir != "" ? agy_label_of(e.dir) : e.name == "default" ? "Default" : agy_label_of(e.name)
 		for a in out do if strings.equal_fold(a.label, label) do label = e.name // two of one label: the later one by its name
 		a := Agy_Account{name = e.name, label = label, dir = dir, method = e.method, source = src, models = models_of(e.name)}
-		// the first entry with storage "keyring" holds the one keyring place (lib/agy-accounts.ts),
-		// which only a Google account uses
-		if e.storage == "keyring" && !keyring_taken^ {
-			a.keyring = e.method == "oauth-personal"
+		// the keychain account (agy_keychain rule, as lib/agy-accounts.ts keychainHolder): the first
+		// Google account, default first, with storage "keyring" and no sign-in file of its own (agy
+		// reads its file before the keychain: such an account runs in file mode)
+		if e.storage == "keyring" && e.method == "oauth-personal" && !keyring_taken^ && !agy_signed_in_file(dir) {
+			a.keyring = true
 			keyring_taken^ = true
 		}
 		a.missing = e.dir != "" && path_kind(dir) != .Dir
@@ -696,7 +699,7 @@ agy_accounts_sync :: proc() -> string {
 		d := e.dir != "" ? e.dir : strings.concatenate({profiles, "/", e.name}, context.temp_allocator)
 		append(&listed, d, fs_real(d))
 		append(&names, e.name)
-		if e.storage == "keyring" do keyring = true
+		if e.storage == "keyring" && e.method == "oauth-personal" do keyring = true
 		if e.source == "found" && e.dir != "" && path_kind(e.dir) != .Dir do append(&plan.drop, e.name)
 	}
 	for d in found_dirs {
@@ -745,7 +748,7 @@ agy_accounts_sync :: proc() -> string {
 				if !ok do continue
 				if str_of(e, "name") == a.name do continue next
 				if d := clean_abs(str_of(e, "dir")); d != "" && a.dir != "" && (d == a.dir || fs_real(d) == fs_real(a.dir)) do continue next
-				if str_of(e, "storage") == "keyring" do keyring = true
+				if str_of(e, "storage") == "keyring" && str_of(e, "method") == "oauth-personal" do keyring = true
 			}
 			if rm, rok := o^["removedDirs"].(json.Array); rok && a.dir != "" do for v in rm do if s, so := v.(json.String); so && clean_abs(string(s)) == a.dir do continue next
 			e := make(json.Object, context.temp_allocator)
@@ -875,11 +878,13 @@ agy_credential :: proc(p: string) -> bool {
 	for c in agy_profile_dirs() {
 		if home_or_above(c, homes) || !under(p, c) do continue
 		if c == profiles || c == fs_real(profiles) do return true // all of it
-		return !config_entry(p, c)
+		// the user's own config there: not the profile's, but it may hold another profile (a
+		// folder of skills that is one): kept looking
+		if !config_entry(p, c) do return true
 	}
 	for d := filepath.dir(p); !home_or_above(d, homes); d = filepath.dir(d) {
 		if user_home_dir(d) do continue
-		if agy_marked_cached(d) do return !config_entry(p, d)
+		if agy_marked_cached(d) && !config_entry(p, d) do return true
 	}
 	return false
 }
@@ -948,6 +953,9 @@ agy_account_resolve :: proc(name: string) -> (a: Agy_Account, err: string) {
 Edit :: struct {
 	name, label, dir, method, gcp_project, gcp_location, storage, source: string,
 	add, remove, rename, set_default, profile: bool,
+	// add: agy's own default profile with no file sign-in, the keychain account if none is by then
+	// (decided inside the lock); lost: the name was taken meanwhile (another writer)
+	keyring_candidate, lost: bool,
 }
 
 // Applies one edit inside the lock (agy_accounts_change).
@@ -962,7 +970,10 @@ apply_edit :: proc(o: ^json.Object, data: rawptr) -> bool {
 	}
 	switch {
 	case ed.add:
-		if find(list, ed.name) >= 0 do return false
+		if find(list, ed.name) >= 0 {
+			ed.lost = true
+			return false
+		}
 		e := make(json.Object, context.temp_allocator)
 		e["name"] = json.String(ed.name)
 		e["method"] = json.String(ed.method)
@@ -972,6 +983,7 @@ apply_edit :: proc(o: ^json.Object, data: rawptr) -> bool {
 			e["source"] = json.String("added")
 		}
 		if ed.storage != "" do e["storage"] = json.String(ed.storage)
+		if ed.keyring_candidate && !keyring_marked_raw(list) && !default_holds_keyring_raw(list) do e["storage"] = json.String("keyring")
 		if ed.gcp_project != "" do e["gcpProject"] = json.String(ed.gcp_project)
 		if ed.gcp_location != "" do e["gcpLocation"] = json.String(ed.gcp_location)
 		append(&list, json.Value(e))
@@ -1026,6 +1038,7 @@ apply_edit :: proc(o: ^json.Object, data: rawptr) -> bool {
 agy_account_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 	run :: proc(ed: ^Edit) -> (Result, bool) {
 		if why := agy_accounts_change(apply_edit, ed); why != "" do return fail(why), false
+		if ed.lost do return fail(fmt.tprintf("the account %s exists", ed.name)), false
 		return {ok = true}, true
 	}
 	defer if changed do agy_accounts_gen += 1
@@ -1053,10 +1066,9 @@ agy_account_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 			ed.name = strings.trim_space(c.name)
 			if ed.name == "" do ed.name = name_from(label != "" ? label : agy_label_of(d), taken[:])
 			// agy's own default profile with no file sign-in: the keyring account, while there is none
+			// (worked out again inside the lock, where another writer's change is seen)
 			def := agy_default_home()
-			keyring := false
-			for a in accts do if a.keyring do keyring = true
-			if !keyring && method == "oauth-personal" && (d == def || fs_real(d) == fs_real(def)) && !agy_signed_in_file(d) do ed.storage = "keyring"
+			ed.keyring_candidate = method == "oauth-personal" && (d == def || fs_real(d) == fs_real(def)) && !agy_signed_in_file(d)
 		} else {
 			ed.name = strings.trim_space(c.name)
 			if ed.name == "" do return fail("name (a new profile) or dir (an agy profile folder) is needed"), false
@@ -1094,16 +1106,31 @@ agy_account_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 
 // ---- what the lists show ----
 
-// Whether the default account holds the keychain: no entry has storage "keyring", and the default
-// (implicit until written) is a Google account not marked "file" (lib/agy-accounts.ts loadAccounts).
+// Whether the default account holds the keychain: no Google entry has storage "keyring", and the
+// default (implicit until written) is a Google account not marked "file" with no sign-in file of
+// its own (lib/agy-accounts.ts keychainHolder: the same rule).
 @(private = "file")
 default_holds_keyring :: proc(entries: []Entry) -> bool {
 	method, storage := "oauth-personal", ""
 	for e in entries {
-		if e.storage == "keyring" do return false
+		if e.storage == "keyring" && e.method == "oauth-personal" do return false
 		if e.name == "default" do method, storage = e.method, e.storage
 	}
-	return method == "oauth-personal" && storage != "file"
+	return method == "oauth-personal" && storage != "file" && !default_signed_in_file()
+}
+
+// Whether Deckhand's own default profile has a sign-in file (the default never has a dir).
+@(private = "file")
+default_signed_in_file :: proc() -> bool {
+	p := agy_profiles_root()
+	return p != "" && agy_signed_in_file(strings.concatenate({p, "/default"}, context.temp_allocator))
+}
+
+// Whether a raw list has a Google entry marked "keyring" (one holds, or none may be given it).
+@(private = "file")
+keyring_marked_raw :: proc(list: json.Array) -> bool {
+	for v in list do if e, ok := v.(json.Object); ok && str_of(e, "storage") == "keyring" && str_of(e, "method") == "oauth-personal" do return true
+	return false
 }
 
 // default_holds_keyring over accounts.json's raw list (inside the lock).
@@ -1113,10 +1140,10 @@ default_holds_keyring_raw :: proc(list: json.Array) -> bool {
 	for v in list {
 		e, ok := v.(json.Object)
 		if !ok do continue
-		if str_of(e, "storage") == "keyring" do return false
+		if str_of(e, "storage") == "keyring" && str_of(e, "method") == "oauth-personal" do return false
 		if str_of(e, "name") == "default" do method, storage = str_of(e, "method"), str_of(e, "storage")
 	}
-	return method == "oauth-personal" && storage != "file"
+	return method == "oauth-personal" && storage != "file" && !default_signed_in_file()
 }
 
 // An account's state in plain words (its Settings row; the setup step).
@@ -1124,7 +1151,7 @@ agy_account_detail :: proc(a: Agy_Account) -> string {
 	how := ""
 	switch a.sign_in {
 	case .Yes:      how = "signed in"
-	case .No:       how = fmt.tprintf("sign-in unknown until agy is used (/antigravity login %s in a pi tab to sign in)", a.name)
+	case .No:       how = a.method == "oauth-personal" ? fmt.tprintf("no sign-in of its own (/antigravity login %s in a pi tab)", a.name) : fmt.tprintf("sign-in unknown until agy is used (/antigravity login %s in a pi tab to sign in)", a.name)
 	case .Keychain: how = "signed in through the system keychain (not checked)"
 	case .Key:      how = fmt.tprintf("API key in pi (/login %s)", a.name == "default" ? "antigravity" : strings.concatenate({"antigravity-", a.name}, context.temp_allocator))
 	case .Adc:      how = "Application Default Credentials"

@@ -208,9 +208,10 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `PROFILE_MARKS` in `lib/agy-accounts.ts`). New ones are
   written in as `source: "found"` unless in `removedDirs`; a found one whose folder is gone is
   dropped. Unlisted folders under `profiles/` are listed too. Signed in by stat, a display hint
-  only (nothing is gated on it: agy is always asked, `authenticate`, and only its own answer means
-  "sign in"): the file sign-in; `Keychain` for the keyring account; `Key` for API-key methods (pi's
-  store); else `no`, shown as "sign-in unknown until agy is used". **Keyring or file** (tried
+  (agy is asked, `authenticate`, and only its own answer means "sign in"): the file sign-in;
+  `Keychain` for the keyring account; `Key` for API-key methods (pi's store); else `no`, shown for
+  a Google account as "no sign-in of its own" (pi refuses it: it would run as the keychain
+  account, `riderReason`), else as "sign-in unknown until agy is used". **Keyring or file** (tried
   against the real agy 1.5.18 on macOS with throwaway profiles, `authenticate` and the start of
   `--login`, no sign-in completed): agy signs in to one OS keychain entry shared by every profile
   unless `AGY_CLI_FORCE_FILE_TOKEN_STORAGE` is set ("Using file-based token storage because

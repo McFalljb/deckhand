@@ -157,6 +157,9 @@ function serve() {
 			s.mode = "auto";
 			s.drifted = true;
 			update(s.id, { sessionUpdate: "current_mode_update", currentModeId: "auto" });
+		} else if (what === "thinking") {
+			s.thinking = "low";
+			update(s.id, { sessionUpdate: "config_option_update", configOptions: configOptions(s) });
 		} else if (what === "model") {
 			s.model = "gemini-3.8-flash";
 			update(s.id, { sessionUpdate: "config_option_update", configOptions: configOptions(s) });
@@ -173,7 +176,7 @@ function serve() {
 		s.turns++;
 		const turn = { sessionId: s.id, id, cancelled: false, stubborn: /stubborn/.test(said) };
 		active = turn;
-		// agy changing its own mode or model: FAKE_AGY_DRIFT_DURING=mode (in turn 1, before its
+		// agy changing its own mode or model: FAKE_AGY_DRIFT_DURING=mode|thinking (in turn 1, before its
 		// answer), FAKE_AGY_DRIFT_BETWEEN=mode|model (just after turn 1 ended); FAKE_AGY_DRIFT_STICKY=1:
 		// a drifted mode cannot be set back
 		if (s.turns === 1 && env.FAKE_AGY_DRIFT_DURING) drift(s, env.FAKE_AGY_DRIFT_DURING);

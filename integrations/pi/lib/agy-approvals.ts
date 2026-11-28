@@ -37,7 +37,7 @@ import os from "node:os";
 import path from "node:path";
 import { type AgentAnswer, answerAgentRequest } from "./acp.ts";
 import { checkCommand as guardrailsCheck, commandVerdict, configPaths, loadRules, redact } from "./guardrails.ts";
-import { credentialFolder, credentialPath } from "./credential-paths.ts";
+import { credentialFolder, credentialFolderBelow, credentialPath } from "./credential-paths.ts";
 
 export type ApprovalMode = "allow" | "ask";
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["allow", "ask"];
@@ -89,7 +89,7 @@ const MUTATION_KINDS = new Set(["edit", "delete", "move"]);
 const COMMAND_FIELDS = ["CommandLine", "command_line", "commandLine", "command"] as const;
 const CWD_FIELDS = ["Cwd", "WorkingDirectory", "working_dir", "workingDir", "cwd"] as const;
 // agy's own tools name their file in these (t3code AntigravityChildWork, clientPolicy ACP_RAW_INPUT_PATH_KEYS)
-const PATH_FIELDS = ["path", "filePath", "file_path", "Path", "TargetFile", "AbsolutePath", "File", "DirectoryPath", "SearchPath", "SearchDirectory", "Url"] as const; // Url: a file:// one is a path (resolvePath), another scheme is ignored
+const PATH_FIELDS = ["path", "filePath", "file_path", "Path", "TargetFile", "AbsolutePath", "File", "DirectoryPath", "SearchPath", "SearchDirectory", "Url", "paths", "Paths", "files", "Files"] as const; // Url: a file:// one is a path (resolvePath), another scheme is ignored
 const MAX_PATHS = 256;
 
 const rec = (v: unknown): Record<string, any> | undefined => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : undefined);
@@ -150,8 +150,25 @@ export function pathsOf(toolCall: any): { paths: string[]; complete: boolean } {
 			if (e.path != null) want(e.path);
 			if (Array.isArray(e.changes)) for (const ch of e.changes) for (const k of ["path", "oldPath"]) if (rec(ch)?.[k] != null) want(rec(ch)![k]);
 		}
+	// a path field's value: a path, a list of them, or (`files: [{ path }]`) of objects with one
+	const field = (v: unknown, deep: boolean) => {
+		if (Array.isArray(v)) for (const x of v) rec(x) && deep ? fields(x, false) : want(x);
+		else if (rec(v) && deep) fields(v, false);
+		else want(v);
+	};
+	const fields = (o: Record<string, any>, deep: boolean) => {
+		for (const k of PATH_FIELDS) if (o[k] != null) field(o[k], deep);
+	};
 	const input = rec(toolCall?.rawInput);
-	if (input) for (const k of PATH_FIELDS) if (input[k] != null) want(input[k]);
+	if (input) {
+		fields(input, true);
+		// one level down: `{ args: { AbsolutePath } }`, `[{ path }]` under any other name
+		for (const [k, v] of Object.entries(input)) {
+			if ((PATH_FIELDS as readonly string[]).includes(k)) continue;
+			if (rec(v)) fields(v, false);
+			else if (Array.isArray(v)) for (const x of v) if (rec(x)) fields(x, false);
+		}
+	}
 	return { paths: [...out], complete: complete && out.size <= MAX_PATHS };
 }
 
@@ -172,7 +189,47 @@ export function resolvePath(p: string, cwd: string, home = os.homedir()): string
 	return path.resolve(cwd, s);
 }
 
-export { canonical, credentialFolder, credentialPath } from "./credential-paths.ts";
+export { canonical, credentialFolder, credentialFolderBelow, credentialPath } from "./credential-paths.ts";
+
+/** Every string in `v`, nested (objects and arrays), at most `max`. */
+export function stringsIn(v: unknown, max = 256): string[] {
+	const out: string[] = [];
+	const walk = (x: unknown, depth: number) => {
+		if (out.length >= max || depth > 8) return;
+		if (typeof x === "string") out.push(x);
+		else if (Array.isArray(x)) for (const y of x) walk(y, depth + 1);
+		else if (rec(x)) for (const y of Object.values(x)) walk(y, depth + 1);
+	};
+	walk(v, 0);
+	return out;
+}
+
+/** `$'…'` as bash reads it (the common escapes; \x and \0 octal). */
+const ansiC = (body: string) =>
+	body.replace(/\\(x[0-9a-fA-F]{1,2}|[0-7]{1,3}|.)/g, (_, e: string) => {
+		if (e[0] === "x") return String.fromCharCode(parseInt(e.slice(1), 16));
+		if (/^[0-7]/.test(e)) return String.fromCharCode(parseInt(e, 8));
+		return ({ n: "\n", t: "\t", r: "\r" } as Record<string, string>)[e] ?? e;
+	});
+
+/** A word's brace expansions (`a{b,c}d`: abd, acd), nested, at most 64; a word without a list is itself. */
+function braces(w: string, max = 64): string[] {
+	const open = w.indexOf("{");
+	if (open < 0) return [w];
+	let depth = 0;
+	const commas: number[] = [];
+	for (let i = open; i < w.length; i++) {
+		if (w[i] === "{") depth++;
+		else if (w[i] === "}" && --depth === 0) {
+			if (!commas.length) return braces(w.slice(i + 1), max).map((r) => w.slice(0, i + 1) + r);
+			const parts = [open, ...commas, i].slice(0, -1).map((at, j) => w.slice(at + 1, [...commas, i][j]));
+			const out: string[] = [];
+			for (const part of parts) for (const x of braces(w.slice(0, open) + part + w.slice(i + 1), max)) if (out.length < max) out.push(x);
+			return out;
+		} else if (w[i] === "," && depth === 1) commas.push(i);
+	}
+	return [w];
+}
 
 /**
  * The credential files a command names: its words read as paths against `cwd` (quotes and
@@ -182,10 +239,17 @@ export { canonical, credentialFolder, credentialPath } from "./credential-paths.
  */
 export function credentialsInCommand(cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): string[] { // env-read-ok: HOME and credentialPath's names
 	const home = env.HOME || os.homedir();
+	let me = "";
+	try {
+		me = os.userInfo().username;
+	} catch {}
 	const words = cmd
+		.replace(/\$'((?:[^'\\]|\\.)*)'/g, (_, b: string) => ansiC(b).replace(/[\s;&|<>()`=]/g, ""))
 		.replace(/\$\{HOME\}|\$HOME\b/g, home)
 		.split(/[\s;&|<>()`=]+/)
 		.map((w) => w.replace(/["'\\]/g, ""))
+		.flatMap((w) => braces(w))
+		.map((w) => (me && (w === `~${me}` || w.startsWith(`~${me}/`)) ? `~${w.slice(me.length + 1)}` : w))
 		.filter((w) => w && /[./~*?[]/.test(w) && !w.startsWith("-"));
 	const out: string[] = [];
 	for (const w of words.slice(0, 512)) {
@@ -220,7 +284,7 @@ const CANCELLED: Answer = { result: { outcome: { outcome: "cancelled" } } };
 
 const isQuestion = (params: any) => String(params?.toolCall?.toolCallId ?? "").startsWith("interaction_");
 /** A tool call that says what it does (a kind, an input, locations): an action, whatever its id. */
-const actionShaped = (tc: any) => !!(tc && ((typeof tc.kind === "string" && tc.kind) || (rec(tc.rawInput) && Object.keys(tc.rawInput).length) || (Array.isArray(tc.locations) && tc.locations.length)));
+const actionShaped = (tc: any) => !!(tc && ((typeof tc.kind === "string" && tc.kind) || (rec(tc.rawInput) && Object.keys(tc.rawInput).length) || (Array.isArray(tc.locations) && tc.locations.length) || (Array.isArray(tc.content) && tc.content.some((e: any) => rec(e)?.type === "diff"))));
 
 /** A dialog that resolves undefined when the turn is aborted (or there is no UI). */
 async function dialog<T>(c: ApprovalContext, f: (ui: ApprovalUi, opts: { signal?: AbortSignal }) => Promise<T>): Promise<T | undefined> {
@@ -334,7 +398,8 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 	const env = c.env ?? process.env; // env-read-ok: credentialPath's names only
 	const cmd = commandOf(tc);
 	const kind = typeof tc.kind === "string" && tc.kind ? tc.kind : cmd ? "execute" : "other";
-	const known = pathsOf(tc).paths;
+	const { paths: known, complete } = pathsOf(tc);
+	const home = env.HOME || os.homedir();
 	/** Confirmed: allowed (note `✓ you allowed: what`); else rejected (`✗ you declined: what`, or `noUi` without a UI). */
 	const confirmed = async (header: string, body: string, what: string, noUi: string): Promise<Decision> => {
 		if (!c.hasUI) return reject(noUi, what);
@@ -343,7 +408,7 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 
 	// credential files: never read, changed or named by a command
 	const creds = known.filter((p) => {
-		const abs = resolvePath(p, c.cwd);
+		const abs = resolvePath(p, c.cwd, home);
 		return !!abs && credentialPath(abs, env);
 	});
 	if (creds.length) return reject("refused (a protected credential file)", clip(creds[0], 120));
@@ -352,11 +417,20 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 	// settings.json in its agent dir may be read, as in Deckhand
 	if (READ_KINDS.has(kind)) {
 		const folder = known.find((p) => {
-			const abs = resolvePath(p, c.cwd);
+			const abs = resolvePath(p, c.cwd, home);
 			return !!abs && credentialFolder(abs, env) && (kind === "search" || fs.statSync(abs, { throwIfNoEntry: false })?.isFile() !== true);
 		});
 		if (folder) return reject("refused (a folder with credentials in it)", clip(folder, 120));
+		// a search above one would reach it (a home-wide grep)
+		if (kind === "search")
+			for (const p of known) {
+				const abs = resolvePath(p, c.cwd, home);
+				const below = abs && credentialFolderBelow(abs, env);
+				if (below) return reject(`refused (would search ${below})`, clip(p, 120));
+			}
 	}
+	// read-only: a path Deckhand cannot read could be anything
+	if (c.readonly && !complete) return reject("refused (read-only session; a path Deckhand cannot read)");
 	if (cmd) {
 		const named = credentialsInCommand(cmd, commandCwd(tc) ? resolvePath(commandCwd(tc)!, c.cwd) ?? c.cwd : c.cwd, env);
 		if (named.length) return reject("refused (the command names a protected credential file)", shownCommand(cmd));
@@ -368,6 +442,9 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 		if (!cmd) {
 			// read-only cannot tell whether it mutates: refused; otherwise it runs, as pi's own tools do
 			if (c.readonly) return reject("refused (read-only session)");
+			// credentials named in what agy did say of it (its title, every string of its input)
+			for (const text of [String(tc.title ?? ""), ...stringsIn(tc.rawInput)])
+				if (credentialsInCommand(text, c.cwd, env).length) return reject("refused (the command names a protected credential file)", title);
 			// guardrails' block rules against what agy did say of it (its title, its input)
 			const rules = loadRules(configPaths(c.cwd)).rules;
 			for (const text of [String(tc.title ?? ""), JSON.stringify(tc.rawInput ?? {})]) if (text && commandVerdict(text, false, rules).block) return reject("blocked by guardrails", title);

@@ -80,6 +80,7 @@ interface Where {
 	codexAuth: string;
 	agyDirs: string[];
 	agyProfiles: string[];
+	agyData: string[];
 }
 
 // env-read-ok: HOME, PI_CODING_AGENT_DIR, CLAUDE_CONFIG_DIR, CODEX_HOME by name
@@ -101,6 +102,7 @@ function whereOf(env: NodeJS.ProcessEnv): Where {
 		codexAuth: codexEnv ? path.join(codexEnv, "auth.json") : path.join(home, ".codex", "auth.json"),
 		agyDirs: profileDirs(root, env).flatMap(both),
 		agyProfiles: both(path.join(root, "profiles")),
+		agyData: both(root),
 	};
 }
 
@@ -181,15 +183,47 @@ export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env):
 }
 
 /**
- * Whether `p` is a folder that holds credentials, or lies inside one: pi's agent dir, a Codex
- * home, an agy profile (Deckhand's profiles folder included), any `.ssh`. A read or a search there
- * is refused whole (what it would list or match is not known in advance).
+ * Whether `p` is a folder that holds credentials, or lies inside one: a Codex home, an agy profile
+ * (Deckhand's profiles folder included), any `.ssh`, and pi's agent dir at its top and in its
+ * sign-in folders (`intercom/`, a secret folder by name): not in `extensions/` and the like, where
+ * each file is judged by its name (credentialPath), as in the core. A read of such a folder (a
+ * listing) or a search in it is refused whole: what it would list or match is not known.
  */
 export function credentialFolder(p: string, env: NodeJS.ProcessEnv = process.env): boolean { // env-read-ok: whereOf's names
 	const w = whereOf(env);
 	for (const c of both(path.resolve(p))) {
 		if (c.split("/").some((part) => part.toLowerCase() === ".ssh")) return true;
-		for (const d of [...w.agentDirs, ...w.codexHomes, ...w.agyDirs, ...w.agyProfiles]) if (!homeOrAbove(d, w) && (c === d || under(c, d))) return true;
+		for (const d of [...w.codexHomes, ...w.agyDirs, ...w.agyProfiles]) if (!homeOrAbove(d, w) && (c === d || under(c, d))) return true;
+		for (const ad of w.agentDirs) {
+			if (homeOrAbove(ad, w)) continue;
+			if (c === ad) return true;
+			if (!under(c, ad)) continue;
+			const parts = c.slice(ad.length + 1).toLowerCase().split("/");
+			if (parts[0] === "intercom" || parts.some(secretFolder)) return true;
+		}
 	}
 	return false;
+}
+
+/**
+ * The first folder holding credentials that a search rooted at `root` would reach (it lies below
+ * the root): pi's agent dir, a Codex home, Deckhand's antigravity data folder and every agy
+ * profile, `~/.ssh`. Undefined when none does. Shown with `~` for the home folder.
+ */
+export function credentialFolderBelow(root: string, env: NodeJS.ProcessEnv = process.env): string | undefined { // env-read-ok: whereOf's names
+	const w = whereOf(env);
+	const named: [string, string][] = [
+		...w.agentDirs.map((d) => [d, "pi's credential folder"] as [string, string]),
+		...w.codexHomes.map((d) => [d, "Codex's folder"] as [string, string]),
+		...w.agyData.map((d) => [d, "Deckhand's Antigravity folder"] as [string, string]),
+		...w.agyDirs.map((d) => [d, "an Antigravity profile"] as [string, string]),
+		...both(path.join(w.home, ".ssh")).map((d) => [d, "the SSH folder"] as [string, string]),
+	];
+	const shown = (d: string) => {
+		const h = w.homes.find((x) => under(d, x));
+		return h ? `~${d.slice(h.length)}` : d;
+	};
+	for (const r of both(path.resolve(root)))
+		for (const [d, what] of named) if (!homeOrAbove(d, w) && under(d, r)) return `${what} ${shown(d)}`;
+	return undefined;
 }

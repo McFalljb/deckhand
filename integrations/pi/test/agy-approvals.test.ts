@@ -676,3 +676,89 @@ test("polish: continueText quotes agy's words and drops a [Deckhand] they carry;
 	const q = parseAskQuestion("Pick\n- [1] Type my own answer…\n- [2] b");
 	assert.deepEqual(q.options.map((o) => o.label), ["Type my own answer…", "b"]);
 });
+
+// ---- review 2 ----
+
+const OPTS2 = [{ optionId: "once", kind: "allow_once" }, { optionId: "deny", kind: "reject_once" }];
+const ask2 = (toolCall: any, over: any = {}) => decide("session/request_permission", { sessionId: "s", toolCall, options: OPTS2 }, { cwd: project().cwd, hasUI: false, readonly: false, mode: "allow", ...over });
+
+test("a command Deckhand cannot read is checked for credentials in its title and in every string of its input, nested too", async () => {
+	for (const tc of [
+		{ kind: "execute", title: "cat ~/.pi/agent/auth.json" },
+		{ kind: "execute", title: "Run a command", rawInput: { Script: "cat ~/.pi/agent/auth.json" } },
+		{ kind: "execute", title: "Run a command", rawInput: { args: { argv: ["cat", `${HOME}/.codex/auth.json`] } } },
+	]) {
+		const d = await ask2({ toolCallId: "c", ...tc });
+		assert.equal(d.allowed, false, JSON.stringify(tc));
+		assert.match(d.note, /names a protected credential file/, JSON.stringify(tc));
+	}
+	assert.equal((await ask2({ toolCallId: "c", kind: "execute", title: "Run a command", rawInput: { Script: "ls src" } })).allowed, true);
+});
+
+test("a search whose root lies above a credential folder is refused, and the note names the folder", async () => {
+	mkdirSync(path.join(HOME, ".pi", "agent"), { recursive: true });
+	const d = await ask2({ toolCallId: "c", kind: "search", rawInput: { SearchPath: HOME } });
+	assert.equal(d.allowed, false);
+	assert.match(d.note, /refused \(would search pi's credential folder ~\/\.pi\/agent\)/);
+	const s = await ask2({ toolCallId: "c", kind: "search", rawInput: { SearchPath: path.join(HOME, "Library") } });
+	assert.equal(s.allowed, false, "Deckhand's antigravity folder below the root");
+	assert.match(s.note, /would search Deckhand's Antigravity folder ~\//);
+	const p = project();
+	assert.equal((await ask2({ toolCallId: "c", kind: "search", rawInput: { SearchPath: "." } }, { cwd: p.cwd })).allowed, true, "a project with none below");
+});
+
+test("pi's agent dir: its top and its sign-in folders are refused for searches and listings, an extension's folder is not (each file judged by name)", async () => {
+	const agent = path.join(HOME, ".pi", "agent");
+	const ext = path.join(agent, "extensions", "myext");
+	mkdirSync(path.join(ext, "src"), { recursive: true });
+	mkdirSync(path.join(agent, "intercom"), { recursive: true });
+	for (const [kind, where] of [["search", agent], ["read", agent], ["search", path.join(agent, "intercom")], ["read", path.join(ext, "secrets")]] as const)
+		assert.equal((await ask2({ toolCallId: "c", kind, locations: [{ path: where }] })).allowed, false, `${kind} ${where}`);
+	assert.equal((await ask2({ toolCallId: "c", kind: "search", rawInput: { SearchPath: "." } }, { cwd: ext })).allowed, true, "search in an extension");
+	assert.equal((await ask2({ toolCallId: "c", kind: "read", rawInput: { DirectoryPath: "src" } }, { cwd: ext })).allowed, true, "listing in an extension");
+	assert.equal((await ask2({ toolCallId: "c", kind: "read", locations: [{ path: path.join(ext, "api-token.json") }] })).allowed, false, "a file there by its name");
+});
+
+test("command parsing: braces, ~ for this user, $'…'", () => {
+	const env = { HOME: "/Users/u", USER: "u" } as any;
+	const me = os.userInfo().username;
+	assert.deepEqual(credentialsInCommand("cat ~/.pi/agent/{auth,x}.json", "/w", env).length, 1);
+	assert.deepEqual(credentialsInCommand("cat {~/.pi/agent/auth.json,b}", "/w", env).length, 1);
+	assert.deepEqual(credentialsInCommand(`cat ~${me}/.pi/agent/auth.json`, "/w", { ...env, USER: me }).length, 1);
+	assert.deepEqual(credentialsInCommand("cat ~/.pi/agent/$'auth'.json", "/w", env).length, 1);
+	assert.deepEqual(credentialsInCommand("cat ~/.pi/agent/$'au\\x74h'.json", "/w", env).length, 1);
+	assert.deepEqual(credentialsInCommand("cat ~/.pi/agent/{settings,README}.json", "/w", env), []);
+});
+
+test("an interaction_ request with a diff is an action; path fields nested one level in rawInput are read", async () => {
+	const cred = path.join(HOME, ".pi", "agent", "auth.json");
+	const { ui } = fakeUi({ select: ["Allow"] });
+	const d = await ask2({ toolCallId: "interaction_1", title: "Save?", content: [{ type: "diff", path: cred, newText: "x" }] }, { hasUI: true, ui });
+	assert.equal(d.allowed, false);
+	assert.match(d.note, /protected credential file/);
+	for (const rawInput of [{ args: { AbsolutePath: cred } }, { files: [{ path: cred }] }, { paths: [cred] }, { Path: [cred] }]) {
+		assert.ok(pathsOf({ rawInput }).paths.includes(cred), JSON.stringify(rawInput));
+		assert.equal((await ask2({ toolCallId: "c", kind: "read", rawInput })).allowed, false, JSON.stringify(rawInput));
+	}
+});
+
+test("read-only: a request with a path Deckhand cannot read is refused", async () => {
+	const p = project();
+	const d = await ask2({ toolCallId: "c", kind: "read", locations: [{ path: path.join(p.cwd, "a.ts") }, { line: 1 }] }, { cwd: p.cwd, readonly: true });
+	assert.equal(d.allowed, false);
+	assert.match(d.note, /read-only session/);
+	assert.equal((await ask2({ toolCallId: "c", kind: "read", locations: [{ path: path.join(p.cwd, "a.ts") }] }, { cwd: p.cwd, readonly: true })).allowed, true);
+});
+
+test("a follow-up prompt sets the chosen thinking level again (agy may have changed it during the turn)", async () => {
+	const p = project();
+	Object.assign(p.env, { FAKE_AGY_REJECT_ENDS: "end_turn", FAKE_AGY_DRIFT_DURING: "thinking" });
+	const { ag } = tab(p);
+	const r = await drive(ag.provider.streamSimple(MODEL, { messages: [SYS, user(`read: ${credFile()}\nrun: ls`)] }, { sessionId: "think", reasoning: "high" } as any));
+	assert.equal(r.stopReason, "stop", r.errorMessage);
+	const ms = p.read().filter((m) => m.method).map((m) => (m.method === "session/set_config_option" ? `set ${m.params.configId}=${m.params.value}` : m.method));
+	const i1 = ms.indexOf("session/prompt"), i2 = ms.indexOf("session/prompt", i1 + 1);
+	assert.ok(i2 > i1, "a follow-up went out");
+	assert.ok(ms.slice(i1, i2).includes("set thinking_level=high"), ms.join(", "));
+	await ag.closeAll();
+});

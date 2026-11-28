@@ -665,10 +665,11 @@ export function createAntigravity(o: AntigravityOptions) {
 				question = undefined;
 				if (follow) {
 					// a follow-up prompt (after a refusal, an answer) as the first: agy's default mode set
-					// again (it may have left it), refused if it cannot be, and the chosen model
+					// again (it may have left it), refused if it cannot be, the chosen model and thinking
 					try {
 						await agy.setMode("default");
 						await agy.selectModel(model.id);
+						await agy.selectThinking(options.reasoning);
 					} catch (e) {
 						record(false);
 						answer.msg.usage = usageOf(usage);

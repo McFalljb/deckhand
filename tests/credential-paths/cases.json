@@ -1,5 +1,5 @@
 {
-  "about": "Credential paths by name, for the core's settings_credential (src/agy_accounts_test.odin) and pi's credentialPath (integrations/pi/test/agy-approvals.test.ts) alike. ~ is HOME (a temp folder; PI_CODING_AGENT_DIR, CLAUDE_CONFIG_DIR and CODEX_HOME unset), @data is Deckhand's antigravity data folder (~/Library/Application Support/Deckhand/antigravity). files are made first (empty). Hard links are the core's alone and not here.",
+  "about": "Credential paths by name, for the core's settings_credential (src/agy_accounts_test.odin) and pi's credentialPath (integrations/pi/test/agy-approvals.test.ts) alike. ~ is HOME (a temp folder; PI_CODING_AGENT_DIR, CLAUDE_CONFIG_DIR and CODEX_HOME unset), @data is Deckhand's antigravity data folder (~/Library/Application Support/Deckhand/antigravity). files are made first (empty). Hard links are the core's alone and not here. ~/.ssh/id_rsa is false by name: .ssh is guarded as a folder (a listing, a search, a command's glob), not file by file, on both sides (docs/HARNESSES.md §3a).",
   "files": [
     "~/.claude/.credentials.json",
     "~/old-claude/.claude.json",
@@ -23,6 +23,13 @@
     { "path": "~/.pi/agent/extensions/x/api-token.json", "credential": true },
     { "path": "~/.pi/agent/extensions/x/.npmrc", "credential": true },
     { "path": "~/.pi/agent/settings.json", "credential": false },
+    { "path": "~/.pi/agent/extensions/x/.env.example", "credential": true },
+    { "path": "~/.pi/agent/extensions/x/id_rsa.pub", "credential": true },
+    { "path": "~/.pi/agent/extensions/x/tokens.md", "credential": false },
+    { "path": "~/.pi/agent/extensions/x/token.txt", "credential": true },
+    { "path": "~/.pi/agent/extensions/x/Api-Token.JSON", "credential": true },
+    { "path": "~/.ssh/id_rsa", "credential": false },
+    { "path": "~/proj/.env.example", "credential": false },
     { "path": "~/.pi/agent/extensions/x/index.ts", "credential": false },
     { "path": "~/.pi/agent/extensions/x/token.ts", "credential": false },
     { "path": "~/.pi/agent/sessions/a.jsonl", "credential": false },

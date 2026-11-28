@@ -61,6 +61,7 @@ const RECONNECT_MIN = 1000;
 const RECONNECT_MAX = 15000;
 const HIDDEN_STALE = 30000; // hidden longer than this: the socket is suspect (phones drop them silently)
 const COMMAND_TIMEOUT = 30000;
+const TAKE_FOR = 20000; // a View here's redials say take this long after the tap, then a plain hello
 
 export class Link {
   readonly store = new Store();
@@ -80,7 +81,10 @@ export class Link {
   private retryTimer = 0;
   private hiddenAt = 0;
   private hold = false; // displaced, unpaired or stopped: no reconnect until asked
-  private take = false; // the user asked for the view: each hello says take until one is answered
+  // when the user asked for the view (View here, Take back, just paired; 0: not): each hello says
+  // take until one is answered, for TAKE_FOR at most and not once the page was hidden, so a redial
+  // of the back-off, the network coming back or the phone waking never takes it without a tap
+  private takeAt = 0;
   private statusNow: LinkStatus = { kind: "connecting" };
 
   private hooks: LinkHooks;
@@ -101,7 +105,7 @@ export class Link {
   // take: the user started it (just paired): the view comes here even from the Mac's window.
   start(take = false): void {
     this.hold = false;
-    this.take = take;
+    this.takeAt = take ? Date.now() : 0;
     this.connect();
   }
 
@@ -109,7 +113,7 @@ export class Link {
   // Mac's window too. A connect of the link's own (a page load, a redial) never takes it from there.
   takeBack(): void {
     this.hold = false;
-    this.take = true;
+    this.takeAt = Date.now();
     this.retryMs = RECONNECT_MIN;
     this.connect();
   }
@@ -187,7 +191,8 @@ export class Link {
         this.unpaired();
         return;
       }
-      ws.send(jsonFrame(helloMessage(key, this.take)));
+      if (this.takeAt && Date.now() - this.takeAt > TAKE_FOR) this.takeAt = 0;
+      ws.send(jsonFrame(helloMessage(key, this.takeAt > 0)));
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws || !(ev.data instanceof ArrayBuffer)) return;
@@ -274,6 +279,7 @@ export class Link {
   private onVisibility(): void {
     if (document.visibilityState === "hidden") {
       this.hiddenAt = Date.now();
+      this.takeAt = 0; // a tap's take ends with the page out of sight
       return;
     }
     const away = this.hiddenAt ? Date.now() - this.hiddenAt : 0;
@@ -383,7 +389,7 @@ export class Link {
     }
     if (core) this.core = core;
     this.helloDone = true;
-    this.take = false; // answered: the view is here (or the Mac kept it: web.taken follows)
+    this.takeAt = 0; // answered: the view is here (or the Mac kept it: web.taken follows)
     this.store.clear();
     this.sendJson({ type: "state.subscribe" });
   }

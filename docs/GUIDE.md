@@ -2560,7 +2560,9 @@ with **View here**. Tap **View here** to show them in the browser: the Mac's win
 **Viewed in a browser** with **Take Back**. The first connect right after you pair a browser
 shows them there at once. With no Mac window open, a browser shows the sessions as soon as it
 connects. When the window, another machine or another browser takes the view from a browser, the
-browser shows **Take back**. Your sessions keep running either way.
+browser shows **Take back**. When the browser has lost Deckhand altogether (web access turned
+off, Deckhand stopped), it shows **Disconnected** with **Try again here**, which connects again
+and shows the sessions in the browser. Your sessions keep running either way.
 
 While a browser has the view, an agent's commands on browser tabs fail, as when another machine
 views this one.

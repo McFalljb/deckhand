@@ -1704,8 +1704,9 @@ notification also shows as the core's own banner. `open_url` should open only on
 
 **One link per core.** The newest connection wins, as for a hub, with one exception: a browser
 takes the view from this Mac's attached window only when its hello says `"take":true`, which a
-browser sends only on its user's action (**View here**, **Take back**, the first connect after
-pairing). A hello without it (a page load, a reconnect, the phone waking, a restarted core) while
+browser sends only on its user's action (**View here**, **Take back**, **Try again here**, the
+first connect after pairing) and on its redials until a hello is answered, for 20 s after the tap
+at most and not once the page was hidden. A hello without it (a page load, a reconnect, the phone waking, a restarted core) while
 the window is attached is not attached: it gets its hello's result, then
 `{"type":"web.taken","by":"window","name":""}`, the link closes, and the window keeps the view.
 A page from before `take` sees this core's new `core` id in that result and reloads, getting the

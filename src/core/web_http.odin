@@ -633,6 +633,8 @@ web_relay :: proc(fd: Sock_Fd, epoch: u64, key: string, early: []u8, id, name: s
 	defer delete(inb)
 	append(&inb, ..early)
 	// the hello first, with this browser's key: refused, nothing was attached or sent
+	take: bool // its "take": its user asked for the view (window_link.odin: web_viewing_elsewhere)
+	hello_id: string
 	{
 		deadline := time.tick_add(time.tick_now(), WEB_READ_MS * time.Millisecond)
 		f: Ws_Frame
@@ -657,7 +659,7 @@ web_relay :: proc(fd: Sock_Fd, epoch: u64, key: string, early: []u8, id, name: s
 		key: string
 		hello: []u8
 		why := "the first message is not a binary hello"
-		if f.op == .Binary do key, hello, why = web_hello_key(f.payload, context.temp_allocator)
+		if f.op == .Binary do key, hello, take, hello_id, why = web_hello_key(f.payload, context.temp_allocator)
 		if why == "" && !web_key_ok(id, key) do why = "not this browser's key"
 		if why != "" {
 			log_ln("Deckhand: a browser's link refused:", why) // never the key
@@ -671,7 +673,7 @@ web_relay :: proc(fd: Sock_Fd, epoch: u64, key: string, early: []u8, id, name: s
 			return
 		}
 	}
-	web_arrived(sp[1], id, name) // the main thread attaches it as the window's link (window_sock.odin)
+	web_arrived(sp[1], id, name, take, hello_id) // the main thread attaches it as the window's link (window_sock.odin)
 	outb := make([dynamic]u8, heap) // from the core
 	defer delete(outb)
 	chunk := make([]u8, 64 << 10, heap)
@@ -764,24 +766,28 @@ web_refuse :: proc(fd: Sock_Fd, code: u16) {
 }
 
 // The browser's first message (pure): one frame on channel 0, a JSON hello with "key". out: the
-// same hello without the key, framed, for the core (allocator); why: refused.
-web_hello_key :: proc(msg: []u8, allocator := context.allocator) -> (key: string, out: []u8, why: string) {
-	if p := ws_frame_problem(msg); p != "" do return "", nil, p
+// same hello without the key, framed, for the core (allocator); take: its "take" is true (its user
+// asked for the view: View here, Take back; docs/PROTOCOL.md §5b); id: its id (allocator); why:
+// refused.
+web_hello_key :: proc(msg: []u8, allocator := context.allocator) -> (key: string, out: []u8, take: bool, id: string, why: string) {
+	if p := ws_frame_problem(msg); p != "" do return "", nil, false, "", p
 	f, _, _ := cw.next_frame(msg)
-	if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do return "", nil, "the first message is not the hello"
+	if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do return "", nil, false, "", "the first message is not the hello"
 	v, err := jg.parse_string(string(f.payload), .JSON, true, context.temp_allocator)
-	if err != nil do return "", nil, "the hello is not JSON"
+	if err != nil do return "", nil, false, "", "the hello is not JSON"
 	o, ok := v.(json.Object)
-	if !ok do return "", nil, "the hello is not an object"
-	if t, _ := o["type"].(json.String); t != "hello" do return "", nil, "the first message is not the hello"
+	if !ok do return "", nil, false, "", "the hello is not an object"
+	if t, _ := o["type"].(json.String); t != "hello" do return "", nil, false, "", "the first message is not the hello"
 	k, kok := o["key"].(json.String)
-	if !kok || k == "" do return "", nil, "the hello has no key"
+	if !kok || k == "" do return "", nil, false, "", "the hello has no key"
 	delete_key(&o, "key")
 	body, merr := json.marshal(o, allocator = context.temp_allocator)
-	if merr != nil do return "", nil, "the hello could not be passed on"
+	if merr != nil do return "", nil, false, "", "the hello could not be passed on"
 	buf := make([dynamic]u8, allocator)
 	cw.encode(&buf, cw.JSON_CHANNEL, .Data, body)
-	return strings.clone(k, allocator), buf[:], ""
+	take = bool(o["take"].(json.Boolean) or_else false)
+	id = strings.clone(string(o["id"].(json.String) or_else ""), allocator)
+	return strings.clone(k, allocator), buf[:], take, id, ""
 }
 
 // One unmasked message to the browser. False: the socket failed.

@@ -1337,9 +1337,14 @@ WINDOW_REPLY_WAIT := 250 * time.Millisecond
 
 // Attaches the window that said its framed hello on fd (window_sock.odin checked it): the link's
 // transport is the socket, leftover the bytes its hello's reader read past the line. A window
-// already attached goes first (one window at a time; the newer is the one the user sees).
-// Main thread.
-core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, hub := false, from := "", web := false, web_device := "") -> bool {
+// already attached goes first (one window at a time; the newer is the one the user sees), except
+// that a browser takes the view from this Mac's window only when its user asked (web_take: its
+// hello's "take"; web_viewing_elsewhere). Main thread.
+core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, hub := false, from := "", web := false, web_device := "", web_take := false, web_hello_id := "") -> bool {
+	if web && !web_take && window_link_is_window() {
+		web_viewing_elsewhere(fd, web_hello_id, from)
+		return false
+	}
 	// the newest connection wins (§10.4, decided 2026-11-09): the one it replaces is told who took
 	// it, and waits for its user's Take back rather than reconnecting (they would take turns)
 	if link != nil {
@@ -1387,12 +1392,30 @@ link_kind_name :: proc(hub, web: bool) -> string {return hub ? "hub" : web ? "br
 // A browser's link is let go for another: it is told who took it (by: window, machine or
 // browser; name: that machine's or browser's), and waits for its user's Take back.
 @(private = "file")
-link_web_taken :: proc(by, name: string) {
+link_web_taken :: proc(by, name: string) {link_send(web_taken_json(by, name))}
+
+@(private = "file")
+web_taken_json :: proc(by, name: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"v":%d,"type":"web.taken","by":"%s","name":`, PROTOCOL_VERSION, by)
 	json_quote(&b, name)
 	strings.write_byte(&b, '}')
-	link_send(strings.to_string(b))
+	return strings.to_string(b)
+}
+
+// A browser that connected on its own (its hello without "take": a page load, a reconnect) while
+// this Mac's window is attached: it is not attached, the window keeps the view. It gets its hello's
+// result (a page from an older core sees the new core's id and loads again) and web.taken by the
+// window, the "Your Mac is showing these sessions" screen with View here (a hello with "take").
+// fd is the core's end of its relay's socketpair; the caller closes it.
+@(private = "file")
+web_viewing_elsewhere :: proc(fd: Sock_Fd, hello_id, name: string) {
+	log_ln("Deckhand: a browser connected while the window is attached: it views elsewhere until its user takes the view")
+	out := make([dynamic]u8, context.temp_allocator)
+	hello := reply_json(hello_id, {ok = true, data = web_hello_data(name)}, 0)
+	cw.encode(&out, cw.JSON_CHANNEL, .Data, transmute([]u8)hello)
+	cw.encode(&out, cw.JSON_CHANNEL, .Data, transmute([]u8)web_taken_json("window", ""))
+	sock_write_all(fd, out[:])
 }
 
 // The data of the result a browser's hello gets (docs/PROTOCOL.md §5b): what the hello reply

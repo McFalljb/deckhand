@@ -68,6 +68,8 @@ Window_Arrival :: struct {
 	from:     string, // heap: that machine's name (a browser's: its name)
 	web:      bool, // a paired browser (web_http.odin's relay): fd is the core's end of its socketpair
 	device:   string, // heap: the browser's device id
+	take:     bool, // the browser's hello said "take": its user asked for the view (web_http.odin)
+	hello_id: string, // heap: the browser's hello's id
 }
 
 @(private = "file")
@@ -346,7 +348,7 @@ window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.
 
 // A paired browser's WebSocket is up (web_http.odin's relay thread): fd, the core's end of its
 // socketpair, waits for the main thread as a window's does. Closed if the door is shut.
-web_arrived :: proc(fd: Sock_Fd, device, name: string) {
+web_arrived :: proc(fd: Sock_Fd, device, name: string, take := false, hello_id := "") {
 	heap := runtime.heap_allocator()
 	sync.lock(&door.mu)
 	if !door.on {
@@ -355,7 +357,7 @@ web_arrived :: proc(fd: Sock_Fd, device, name: string) {
 		return
 	}
 	if door.arrived == nil do door.arrived = make([dynamic]Window_Arrival, heap)
-	append(&door.arrived, Window_Arrival{fd = fd, web = true, from = strings.clone(name, heap), device = strings.clone(device, heap)})
+	append(&door.arrived, Window_Arrival{fd = fd, web = true, from = strings.clone(name, heap), device = strings.clone(device, heap), take = take, hello_id = strings.clone(hello_id, heap)})
 	sync.unlock(&door.mu)
 	if platform.wake != nil do platform.wake()
 }
@@ -384,7 +386,7 @@ window_door_tick :: proc() {
 		// Checked and attached as one step (web_device_hold): an unpair waits, then kicks it.
 		live := true
 		if a.web do live = web_device_hold(a.device, now)
-		attached := live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device)
+		attached := live && i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from, a.web, a.device, a.take, a.hello_id)
 		if a.web do web_device_release()
 		if attached {
 			if a.web do rescan_when_active() // a browser shows sessions started outside Deckhand too (commands.odin)
@@ -401,6 +403,7 @@ window_door_tick :: proc() {
 		delete(a.version, heap)
 		delete(a.from, heap)
 		delete(a.device, heap)
+		delete(a.hello_id, heap)
 	}
 	delete(got)
 }
@@ -447,6 +450,7 @@ window_door_stop :: proc() {
 		delete(a.version, runtime.heap_allocator())
 		delete(a.from, runtime.heap_allocator())
 		delete(a.device, runtime.heap_allocator())
+		delete(a.hello_id, runtime.heap_allocator())
 	}
 	delete(got)
 	if window_link_is_sock() do core_detach_window()

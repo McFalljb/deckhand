@@ -26,6 +26,18 @@ the user on 2026-11-09 (decision 8 in §2: the M6 release gate).
 Status (2026-11-11): M1–M4 and M6 are merged: M6-A to F (#69, #70, #71, #74, #75, #81, #82) and
 L1–L4 (#68, #73, #76, #77). M5 and M7 are still to do.
 
+Note (2026-11-27, after 0.8): the window closed with "Deckhand lost its background core" while the
+core ran: one failed reconnect (the core attached the new link, which ended within ~70 ms, most
+likely "sent no state") gave up at once, and why went only to the app's stderr (`/dev/null`). The
+window now retries with a backoff and gives up only when no core answers for 15 s or
+`RECONNECTS_MAX` attempts in a minute are spent, logs to `run/window.log`, and raises its soft
+open-file limit; its FSEvents stream no longer uses WatchRoot (a descriptor per path part, ~12 a
+folder: EMFILE at 25 folders under launchd's 256), the roots are stat'd instead. **§5.3's per-read
+peer check is kept as written**: treating EINVAL or another pid as "unknown, keep going" would
+accept exactly the bytes it exists to refuse (a short-lived process holding the core's end that
+wrote, then exited, gives EINVAL), and nothing else was found touching the core's end. Its
+refusals now say what was seen (`peer_change_text`), so a recurrence can be told apart.
+
 Revision 6: §10.3 (M4 in PRs, checked against `main` 2a3bd0b and the M3-G and M3-H branches).
 **M4 no longer waits for D0:** the DR checks anchor on the self-signed identity (§5.4). Decisions
 6 and 7 in §2; the D0 and M4 rows and the order in §10; R2, R5, Q8.

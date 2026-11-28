@@ -299,17 +299,25 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   `cancelled`. The policy matches a pi tab's for pi's own tools (`lib/guardrails.ts`, which just
   run): allowed with no dialog, except, in this order (refusals are a note, never a dialog):
   - a path (locations, diffs, rawInput `TargetFile`/`AbsolutePath`/`path`/…) that is a
-    credential file, or a command whose words name one: rejected. `credentialPath` mirrors the
-    core's `credential_path` (`src/core/settings_files.odin`) by its name rules (pi's sign-ins and
-    private files in its agent dir; Claude's `.credentials.json`/`.claude.json*`; Codex's
-    `auth.json` in `.codex` or `CODEX_HOME`), and agy's sign-in files: `acp_token.json`,
-    `oauth_creds.json` and `google_accounts.json` by name anywhere, and `antigravity-acp/settings.json`
-    (the sign-in method) of any agy profile (`profileDirs` in `lib/agy-accounts.ts`: anything under
-    Deckhand's `profiles/`, each account's profile including a `dir` used in place, removed folders
-    and agy's default profile while marked, any marked folder). The rest of a profile (agy's plans,
-    conversations) is allowed, narrower than the core's `agy_credential`, which keeps Deckhand's
-    own file views out of all of it. The core's Claude/Codex account-folder and hard-link rules are
-    not repeated. The approvals mode is pi-only (`/antigravity approvals`), not a Settings row;
+    credential file, or a command whose words name one: rejected. Every readable path is checked,
+    however many and whatever else the call holds; an id-only request adds the tracked call's
+    paths and command to its own. `credentialPath` (`lib/credential-paths.ts`) is the core's
+    `credential_path` rule for rule, by name, never by a file's mode: pi's sign-ins in its agent dir
+    (`auth.json`, `oauth.json`, `mcp-auth.json`, `models-store.json`, `cursor-sdk*.json`,
+    `intercom/`) and, below it, secret folders on every part and secret-looking names
+    (`secretFolder`, `secretLookingName`: `.ssh`, `.aws`, `secrets/`, `.env*`, `id_*`, `*.pem`, …);
+    Claude's and Codex's sign-ins and state (their config folders but their own config, and any
+    folder holding Claude's marks); agy's tokens by name anywhere and every agy profile but the
+    user's config in it (`GEMINI.md`, `AGENTS.md`, skills), a profile nested in that config
+    included. `tests/credential-paths/cases.json` is read by both sides' tests. Not repeated: the
+    core's hard links, and Claude or Codex accounts that only Deckhand's own lists name. A search
+    in, or a read of a folder (not a file) in, pi's agent dir, a Codex home, an agy profile or a
+    `.ssh` is rejected too (`credentialFolder`). In a command, quotes and backslashes inside a word
+    are dropped, `$HOME`/`${HOME}`/`~` expanded, and a glob in a folder that holds credentials
+    counts; a path relative to a folder the command moves to (`cd ~/.pi/agent && cat auth.json`)
+    is not seen (best effort). A command Deckhand cannot read is checked against guardrails' block
+    rules by its title and input. After Esc every request is `cancelled`. The approvals mode is
+    pi-only (`/antigravity approvals`), not a Settings row;
   - `switch_mode`: rejected;
   - a command (kind `execute`, or rawInput `CommandLine`/`command_line`/`commandLine`/`command`, as
     t3code normalizes): guardrails' `checkCommand` with the tab's folder and PI_KIT_READONLY (the

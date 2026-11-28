@@ -486,3 +486,44 @@ agy_accounts_nested_profile :: proc(t: ^testing.T) {
 	testing.expect(t, core.agy_credential(fmt.tprintf("%s/antigravity-acp/settings.json", inner)), "a profile inside the skills folder")
 	testing.expect(t, core.agy_credential(fmt.tprintf("%s/antigravity-acp/conversation_summaries.db", inner)))
 }
+
+// Credential paths by name, as pi's antigravity extension has them too: tests/credential-paths/
+// cases.json, which integrations/pi/test/agy-approvals.test.ts reads as well.
+@(test)
+agy_accounts_credential_paths_fixture :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	data, err := os.read_entire_file("tests/credential-paths/cases.json", context.temp_allocator)
+	testing.expect(t, err == nil, "the fixture")
+	if err != nil do return
+	v, jerr := json.parse(data, allocator = context.temp_allocator)
+	testing.expect(t, jerr == nil)
+	env := ag_reset()
+	defer ag_done(env)
+	old_agent, had_agent := os.lookup_env("PI_CODING_AGENT_DIR", context.temp_allocator)
+	old_claude, had_claude := os.lookup_env("CLAUDE_CONFIG_DIR", context.temp_allocator)
+	old_codex, had_codex := os.lookup_env("CODEX_HOME", context.temp_allocator)
+	os.unset_env("PI_CODING_AGENT_DIR")
+	os.unset_env("CLAUDE_CONFIG_DIR")
+	os.unset_env("CODEX_HOME")
+	defer {
+		if had_agent do os.set_env("PI_CODING_AGENT_DIR", old_agent)
+		if had_claude do os.set_env("CLAUDE_CONFIG_DIR", old_claude)
+		if had_codex do os.set_env("CODEX_HOME", old_codex)
+	}
+	expand :: proc(p: string, env: Ag_Env) -> string {
+		if strings.has_prefix(p, "~/") do return fmt.tprintf("%s/%s", env.home, p[2:])
+		if strings.has_prefix(p, "@data/") do return fmt.tprintf("%s/%s", env.root, p[6:])
+		return p
+	}
+	o := v.(json.Object)
+	for f in o["files"].(json.Array) do ag_write(expand(string(f.(json.String)), env), "")
+	core.agy_accounts_refresh()
+	cases := o["cases"].(json.Array)
+	testing.expect(t, len(cases) > 20)
+	for cv in cases {
+		c := cv.(json.Object)
+		p := expand(string(c["path"].(json.String)), env)
+		want := bool(c["credential"].(json.Boolean))
+		testing.expectf(t, core.settings_credential(p) == want, "%s: %v, want %v", string(c["path"].(json.String)), !want, want)
+	}
+}

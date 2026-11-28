@@ -304,11 +304,12 @@ never keeps a standing permission. Deckhand asks you only where you asked it to.
   guardrails extension off.
 - **A read-only session** (a read-only job) refuses every edit, every command that changes
   something, and agy's other tools (MCP tools, subagents); reads and searches still run.
-- **Credential files** are never read or changed: pi's sign-ins, Claude Code's and Codex's, and
-  agy's own sign-in files in any Antigravity profile (`acp_token.json`, `oauth_creds.json`,
-  `google_accounts.json` and the profile's `antigravity-acp/settings.json`). A command that names
-  one is refused too. The rest of a profile (agy's plans and conversations) is agy's, and it may
-  write there.
+- **Credential files** are never read or changed, by the same rule as Deckhand's own file views:
+  pi's sign-ins and any secret-looking file in its agent folder, Claude Code's and Codex's, and
+  everything in an Antigravity profile but your own config there (`GEMINI.md`, `AGENTS.md`,
+  skills). A command that names one is refused too, and so is a search of one of those folders
+  (or `.ssh`). This is a best effort for commands: one that first moves to such a folder
+  (`cd ~/.pi/agent && cat auth.json`) is not caught.
 - **agy asking to leave its default mode** is refused, so its requests keep coming to Deckhand.
 - With **`/antigravity approvals ask`**, every action is asked first.
 

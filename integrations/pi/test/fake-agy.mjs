@@ -27,6 +27,8 @@ import readline from "node:readline";
 import { spawn as spawnChild } from "node:child_process";
 
 const env = process.env;
+// FAKE_AGY_USAGE=1: each permission-shaped turn reports this usage (a follow-up adds up)
+const FAKE_USAGE = env.FAKE_AGY_USAGE === "1" ? { inputTokens: 100, outputTokens: 10, cachedReadTokens: 5 } : undefined;
 const log = (x) => env.FAKE_AGY_LOG && fs.appendFileSync(env.FAKE_AGY_LOG, `${JSON.stringify(x)}\n`);
 // how it ends: on stdin's end it exits, unless FAKE_AGY_HOLD_ON=1 (then it also ignores SIGTERM)
 const HOLD_ON = env.FAKE_AGY_HOLD_ON === "1";
@@ -244,11 +246,11 @@ function serve() {
 				update(sid, { sessionUpdate: "tool_call_update", toolCallId, status: r?.outcome?.optionId === "once" ? "completed" : "failed" });
 				if (env.FAKE_AGY_REJECT_ENDS && r?.outcome?.optionId !== "once") {
 					s.pendingAsks = asks.slice(i + 1);
-					return end(env.FAKE_AGY_REJECT_ENDS);
+					return end(env.FAKE_AGY_REJECT_ENDS, FAKE_USAGE);
 				}
 			}
 			update(sid, { sessionUpdate: "agent_message_chunk", content: { type: "text", text: prefix + out.join("\n") } });
-			return end("end_turn");
+			return end("end_turn", FAKE_USAGE);
 		}
 		if (/elicitpick/.test(said)) {
 			const r = await ask("session/elicitation", { sessionId: sid, mode: "form", message: "2 questions", requestedSchema: { type: "object", properties: { color: { type: "string", title: "Which color?", enum: ["red", "blue"] }, sure: { type: "boolean", title: "Sure?" }, n: { type: "integer", title: "How many?" } }, required: ["color"] } });

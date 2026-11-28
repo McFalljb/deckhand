@@ -861,12 +861,14 @@ agy_marked_cached :: proc(d: string) -> bool {
 }
 
 // An agy file Deckhand never lists, reads, watches or opens (settings_credential): any file named
-// acp_token.json (agy's saved sign-in), and everything in an agy profile but the user's own config
+// acp_token.json (agy's saved sign-in), oauth_creds.json or google_accounts.json, and everything in an agy profile but the user's own config
 // (config_entry): sign-ins, conversations, databases, logs, settings. Profiles: every one of
 // agy_profile_dirs, and any folder that holds agy's marks. HOME or above is never one.
 // p: clean and absolute.
 agy_credential :: proc(p: string) -> bool {
-	if strings.equal_fold(filepath.base(p), "acp_token.json") do return true
+	base := filepath.base(p)
+	// agy's file sign-in and Gemini CLI's OAuth files, by name anywhere (pi's AGY_TOKEN_FILES)
+	for f in ([3]string{"acp_token.json", "oauth_creds.json", "google_accounts.json"}) do if strings.equal_fold(base, f) do return true
 	h := agy_home_now()
 	homes := [2]string{h, fs_real(h)}
 	home_or_above :: proc(d: string, homes: [2]string) -> bool {

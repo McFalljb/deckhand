@@ -59,14 +59,16 @@ export const OWN_ANSWER = "Type my own answer…";
 
 /** The follow-up prompt after a refused action: what was refused and why (the decision's note). */
 export function continueText(note: string): string {
-	const what = note.replace(/^✗\s*/, "").trim();
-	return `[Deckhand] This was refused: ${what}. It can't be done here. Carry on with the remaining steps and report what you did and didn't do.`;
+	// agy's own words (a title) quoted, so they read as data; never one that poses as Deckhand's
+	const what = note.replace(/^✗\s*/, "").replace(/\[deckhand\]\s*/gi, "").trim();
+	return `[Deckhand] This was refused: ${JSON.stringify(what)}. It can't be done here. Carry on with the remaining steps and report what you did and didn't do.`;
 }
 
 /** agy's ask_question tool call (agy 1.5.18: title "Run ask_question"; its choices follow in its message). */
 export function isAskQuestion(u: any): boolean {
-	const named = (v: unknown) => typeof v === "string" && /\bask_?question\b/i.test(v);
-	return named(u?.title) || named(u?.rawInput?.toolName) || named(u?.rawInput?.name) || named(u?._meta?.toolName);
+	const tool = (v: unknown) => typeof v === "string" && /^ask_?question$/i.test(v.trim());
+	const title = typeof u?.title === "string" ? u.title.trim().replace(/^run\s+/i, "").replace(/\?$/, "") : undefined;
+	return tool(title) || tool(u?.rawInput?.toolName) || tool(u?.rawInput?.name) || tool(u?._meta?.toolName);
 }
 
 /**
@@ -82,7 +84,7 @@ export function parseAskQuestion(text: string, input?: any): { question: string;
 	const q0 = Array.isArray(input?.questions) ? input.questions[0] : input;
 	const raw = Array.isArray(q0?.options) ? q0.options : undefined;
 	if (raw?.length) {
-		const options = raw.map((x: any) => (typeof x === "string" ? x : x?.label ?? x?.name ?? x?.value)).filter((x: unknown) => typeof x === "string" && x.trim()).slice(0, 20).map(opt);
+		const options = raw.map((x: any) => (typeof x === "string" ? x : x?.label ?? x?.name ?? x?.value)).filter((x: unknown) => typeof x === "string" && x.trim()).slice(0, MAX_CHOICES).map(opt);
 		if (options.length) return { question: clip1(q0?.question ?? q0?.title ?? "", 200), options };
 	}
 	const lines = String(text ?? "").split("\n");
@@ -91,24 +93,37 @@ export function parseAskQuestion(text: string, input?: any): { question: string;
 	for (const line of lines) {
 		const m = /^\s*(?:[-*]\s*)?\[(\d+)\]\s*(.+?)\s*$/.exec(line);
 		if (m) {
-			if (options.length < 20) options.push(opt(m[2]));
+			if (options.length < MAX_CHOICES) options.push(opt(m[2]));
 		} else if (!options.length && line.trim()) question = line.trim();
 	}
 	return { question: clip1(question, 200), options };
 }
 
+const MAX_CHOICES = 50;
+
 /** The user's answer to an ask_question: a choice, or their own words; undefined if dismissed. */
 async function pickAnswer(ui: any, q: ReturnType<typeof parseAskQuestion>, signal?: AbortSignal): Promise<string | undefined> {
-	const labels = [...q.options.map((o) => o.label), OWN_ANSWER];
+	// each label once (a repeated one numbered), so a pick names one choice; "Type my own answer…"
+	// is the last entry, known by its place, never by a choice that reads the same
+	const count = new Map<string, number>();
+	for (const o of q.options) count.set(o.label, (count.get(o.label) ?? 0) + 1);
+	const seen = new Map<string, number>();
+	const labels = q.options.map((o) => {
+		const k = (seen.get(o.label) ?? 0) + 1;
+		seen.set(o.label, k);
+		return count.get(o.label)! > 1 || o.label === OWN_ANSWER ? `${o.label} (${k})` : o.label;
+	});
+	const all = [...labels, OWN_ANSWER];
 	const title = `Antigravity asks: ${q.question || "pick one"}`;
 	try {
-		const pick = await ui.select(title, labels, { signal });
+		const pick = await ui.select(title, all, { signal });
 		if (pick === undefined) return undefined;
-		if (pick === OWN_ANSWER) {
+		const i = all.lastIndexOf(pick);
+		if (i === all.length - 1) {
 			const own = await ui.input?.(title, "", { signal });
 			return typeof own === "string" && own.trim() ? own.trim() : undefined;
 		}
-		return q.options[labels.indexOf(pick)]?.answer;
+		return i >= 0 ? q.options[i]?.answer : undefined;
 	} catch {
 		return undefined;
 	}
@@ -541,6 +556,11 @@ export function createAntigravity(o: AntigravityOptions) {
 		let modeNoted = false;
 		let aborted = false;
 		let waiting = false;
+		// this turn's own signal: pi's stop (Esc), and the turn's end, close its dialogs
+		const turnAc = new AbortController();
+		const turnSignal = turnAc.signal;
+		if (signal?.aborted) turnAc.abort();
+		else signal?.addEventListener("abort", () => turnAc.abort(), { once: true });
 		const onAbort = () => {
 			aborted = true;
 			st!.agy?.cancel();
@@ -630,7 +650,7 @@ export function createAntigravity(o: AntigravityOptions) {
 				},
 				answer: async (method: string, params: any) => {
 					const c = o.approvals?.() ?? { cwd: o.cwd(), hasUI: false, readonly: readonlySession(), mode: "allow" as const };
-					const d = await decide(method, params, { ...c, signal });
+					const d = await decide(method, params, { ...c, signal: turnSignal });
 					if (answer.msg.stopReason === "pending") answer.note(d.note); // the turn may have ended while a dialog was open
 					refused = d.refusedBy ? d : undefined;
 					return d.answer;
@@ -639,9 +659,22 @@ export function createAntigravity(o: AntigravityOptions) {
 			let response: any;
 			let blocks: unknown[] = payload.prompt ?? plan.blocks;
 			let continued = 0, answered = 0;
-			for (;;) {
+			const usage = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cachedWriteTokens: 0 };
+			for (let follow = false; ; follow = true) {
 				refused = undefined;
 				question = undefined;
+				if (follow) {
+					// a follow-up prompt (after a refusal, an answer) as the first: agy's default mode set
+					// again (it may have left it), refused if it cannot be, and the chosen model
+					try {
+						await agy.setMode("default");
+						await agy.selectModel(model.id);
+					} catch (e) {
+						record(false);
+						answer.msg.usage = usageOf(usage);
+						return answer.finish("error", explain((e as Error).message));
+					}
+				}
 				try {
 					dispatched = true;
 					const turn = agy.prompt(blocks);
@@ -662,6 +695,7 @@ export function createAntigravity(o: AntigravityOptions) {
 					record(false);
 					return answer.finish("aborted", "Request was aborted");
 				}
+				for (const k of Object.keys(usage) as (keyof typeof usage)[]) if (typeof response?.usage?.[k] === "number") usage[k] += response.usage[k];
 				const stopped = response?.stopReason === "end_turn" || response?.stopReason === "cancelled";
 				// agy 1.5.18 ends its turn on a refused action (end_turn at once, or cancelled) and waits
 				// for the next prompt: it is asked to carry on without it, up to AUTO_CONTINUES times;
@@ -687,8 +721,13 @@ export function createAntigravity(o: AntigravityOptions) {
 					const c = o.approvals?.();
 					const q = parseAskQuestion(question.text, question.input);
 					if (c?.hasUI && c.ui && q.options.length) {
-						const pick = await pickAnswer(c.ui, q, signal);
-						if (pick !== undefined && !signal?.aborted) {
+						const pick = await pickAnswer(c.ui, q, turnSignal);
+						if (signal?.aborted) {
+							record(true); // agy's turn ended; only the picker was stopped
+							answer.msg.usage = usageOf(usage);
+							return answer.finish("aborted", "Request was aborted");
+						}
+						if (pick !== undefined) {
 							answered++;
 							answer.note(`? ${clip1(q.question || "Antigravity asks", 80)} → ${clip1(pick, 80)}`);
 							answer.gap();
@@ -700,7 +739,7 @@ export function createAntigravity(o: AntigravityOptions) {
 				}
 				break;
 			}
-			answer.msg.usage = usageOf(response?.usage);
+			answer.msg.usage = usageOf(usage);
 			const reason = response?.stopReason;
 			const ok = reason === "end_turn" || reason === "max_tokens" || reason === "max_turn_requests";
 			record(ok);
@@ -711,6 +750,7 @@ export function createAntigravity(o: AntigravityOptions) {
 			return answer.finish("error", `Antigravity ended the turn (${clip1(reason ?? "no stop reason", 40)})`);
 		} finally {
 			record(false);
+			turnAc.abort(); // a dialog still open for this turn closes with it
 			signal?.removeEventListener("abort", onAbort);
 			st.sink = undefined;
 			st.busy = false;

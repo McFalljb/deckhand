@@ -12,8 +12,11 @@
 //   - read-only sessions (PI_KIT_READONLY=1) reject every edit, delete and move, every command
 //     Deckhand cannot read, and every call of a kind that is not a read, search, fetch or think
 //     (MCP tools, subagents: they may write).
-//   - a read or edit of a protected credential file (credentialPath below), or a command naming one,
-//     is rejected, with a note and no dialog.
+//   - a read or edit of a protected credential file (lib/credential-paths.ts credentialPath: the
+//     core's rule), or a command naming one, is rejected, with a note and no dialog; so is a search
+//     in (or a folder read of) a folder that holds credentials (credentialFolder). Every readable
+//     path is checked. A command Deckhand cannot read is checked against guardrails' block rules
+//     by its title and input.
 //   - agy asking to change its mode (kind switch_mode) is rejected: Deckhand keeps it in `default`,
 //     so its requests keep coming here.
 // - `ask` (per account, /antigravity approvals ask): everything that is not rejected above is
@@ -24,16 +27,17 @@
 // - Every answer adds one line to the thinking (note): "✓ ran: npm test", "✗ blocked by guardrails:
 //   rm -rf …". Commands in notes go through guardrails' redact() and are clipped; no file contents.
 //
-// A dialog is dismissed when the turn is aborted (the signal): the request is then answered
-// `cancelled`, as ACP asks of a client after session/cancel.
+// A dialog is dismissed when the turn is aborted or ends (the turn's own signal): the request is
+// then answered `cancelled`, as ACP asks of a client after session/cancel; every request after Esc
+// is `cancelled` too. An `interaction_` request shaped as an action is judged as one.
 //
 // This is a gate on what agy asks, not a sandbox: what agy does without asking is never seen here.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { type AgentAnswer, answerAgentRequest } from "./acp.ts";
-import { checkCommand as guardrailsCheck, redact } from "./guardrails.ts";
-import { dataRoot, profileDirs, profileMarked } from "./agy-accounts.ts";
+import { checkCommand as guardrailsCheck, commandVerdict, configPaths, loadRules, redact } from "./guardrails.ts";
+import { credentialFolder, credentialPath } from "./credential-paths.ts";
 
 export type ApprovalMode = "allow" | "ask";
 export const APPROVAL_MODES: readonly ApprovalMode[] = ["allow", "ask"];
@@ -91,8 +95,12 @@ const MAX_PATHS = 256;
 const rec = (v: unknown): Record<string, any> | undefined => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : undefined);
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : undefined);
 
+/** One line of agy's text for a note or a label: control characters (escapes, bidi marks) out, clipped. */
 export const clip = (s: unknown, n = 120) => {
-	const t = String(s ?? "").replace(/\s+/g, " ").trim();
+	const t = String(s ?? "")
+		.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
 	return t.length > n ? `${t.slice(0, n - 1)}…` : t;
 };
 /** A command as it may appear in a note: secrets redacted, one line, clipped. */
@@ -121,10 +129,11 @@ export function commandCwd(toolCall: any): string | undefined {
 }
 
 /**
- * Every path a tool call names (locations, diffs, its rawInput's path fields), each as agy sent it,
- * or "unknown" when a part names one Deckhand cannot read (as t3code's acpChangedPathsOfToolCall).
+ * Every path a tool call names (locations, diffs, its rawInput's path fields), each as agy sent
+ * it, and whether every part that names one could be read (`complete`). The readable ones are
+ * always all there, however many: each is checked.
  */
-export function pathsOf(toolCall: any): string[] | "unknown" {
+export function pathsOf(toolCall: any): { paths: string[]; complete: boolean } {
 	const out = new Set<string>();
 	let complete = true;
 	const want = (v: unknown) => {
@@ -143,7 +152,7 @@ export function pathsOf(toolCall: any): string[] | "unknown" {
 		}
 	const input = rec(toolCall?.rawInput);
 	if (input) for (const k of PATH_FIELDS) if (input[k] != null) want(input[k]);
-	return complete && out.size <= MAX_PATHS ? [...out] : "unknown";
+	return { paths: [...out], complete: complete && out.size <= MAX_PATHS };
 }
 
 /** `p` made absolute against `cwd` (`~` is the home folder); undefined when it cannot be read so. */
@@ -163,104 +172,32 @@ export function resolvePath(p: string, cwd: string, home = os.homedir()): string
 	return path.resolve(cwd, s);
 }
 
-/** The real path of `p`, or of its deepest existing folder with the rest appended; undefined on an error other than "not found". */
-export function canonical(p: string): string | undefined {
-	const rest: string[] = [];
-	let at = p;
-	for (;;) {
-		try {
-			return path.join(fs.realpathSync.native(at), ...rest);
-		} catch (e: any) {
-			if (e?.code !== "ENOENT") return undefined;
-		}
-		const up = path.dirname(at);
-		if (up === at) return undefined;
-		rest.unshift(path.basename(at));
-		at = up;
-	}
-}
-
-// ---- credential files (the core's credential_path, by name) ----
-
-// pi's own config files at the top of its agent dir: never credentials by their mode alone
-const AGENT_CONFIG_FILES = new Set(["settings.json", "models.json", "keybindings.json", "mcp.json", "modes.json", "agents.override.md", "agents.md", "claude.md", "system.md", "append_system.md"]);
-// agy's and Gemini's sign-ins by name anywhere: the ACP token (lib/agy-accounts.ts hasSavedLogin),
-// Gemini CLI's OAuth files
-const AGY_TOKEN_FILES = new Set(["acp_token.json", "oauth_creds.json", "google_accounts.json"]);
+export { canonical, credentialFolder, credentialPath } from "./credential-paths.ts";
 
 /**
- * Whether `p` (absolute, real or as written) is the file of an agy profile that holds its sign-in
- * method (`antigravity-acp/settings.json`; the tokens are refused by name anywhere). The rest of a
- * profile is agy's own (its planning files, conversations): allowed. Profiles: profileDirs (every
- * account's, agy's default and removed ones while marked), anything under Deckhand's profiles
- * folder, and any folder that holds agy's marks.
+ * The credential files a command names: its words read as paths against `cwd` (quotes and
+ * backslashes anywhere in a word dropped, $HOME, ${HOME} and ~ expanded), and a glob whose folder
+ * holds credentials (credentialFolder) counts as naming them. Best effort: a script, a variable or
+ * `cd … && cat auth.json` (a path relative to a folder the command moves to) hides them.
  */
-function agySignInSettings(p: string, env: NodeJS.ProcessEnv): boolean {
-	if (path.basename(p).toLowerCase() !== "settings.json" || path.basename(path.dirname(p)).toLowerCase() !== "antigravity-acp") return false;
-	const profile = path.dirname(path.dirname(p));
-	const root = dataRoot(env);
-	const profilesRoot = path.join(root, "profiles");
-	for (const c of new Set([profilesRoot, canonical(profilesRoot) ?? profilesRoot])) if (profile.startsWith(`${c}/`)) return true;
-	for (const d of profileDirs(root, env)) if (profile === d || profile === canonical(d)) return true;
-	return profileMarked(profile);
-}
-
-const expandHome = (d: string, home: string) => (d === "~" ? home : d.startsWith("~/") ? path.join(home, d.slice(2)) : d);
-
-/**
- * Whether `p` (absolute) is a credential file Deckhand never lets an agent read or change. Mirrors
- * the core's credential_path (src/core/settings_files.odin) by its name rules: pi's sign-ins in its
- * agent dir (auth.json, models-store.json, cursor-sdk*.json, intercom/, and any other private file
- * there but pi's config), Claude Code's (.credentials.json, .claude.json, .claude.json.*), Codex's
- * (auth.json in .codex or CODEX_HOME), plus agy's sign-in files: the tokens (AGY_TOKEN_FILES) by
- * name anywhere and each agy profile's antigravity-acp/settings.json (agySignInSettings, over
- * lib/agy-accounts.ts's accounts). Narrower than the core's agy_credential on purpose: agy may
- * write the rest of its own profile (the user's policy: as pi's own tools, which just run). The core also matches Claude's and Codex's account folders and
- * hard links; this is the subset an ACP request can be checked against cheaply. Names compare
- * case-insensitively, as on APFS (profile folders as written and as real paths).
- */
-export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env): boolean { // env-read-ok: HOME, PI_CODING_AGENT_DIR, CODEX_HOME by name
-	const home = env.HOME || os.homedir();
-	const candidates = new Set([path.resolve(p)]);
-	const real = canonical(path.resolve(p));
-	if (real) candidates.add(real);
-	for (const c of candidates) {
-		const lc = c.toLowerCase();
-		const base = path.basename(lc);
-		if (AGY_TOKEN_FILES.has(base)) return true;
-		if (agySignInSettings(c, env)) return true;
-		if (base === ".credentials.json" || base === ".claude.json" || base.startsWith(".claude.json.")) return true;
-		if (base === "auth.json" && path.basename(path.dirname(lc)) === ".codex") return true;
-		if (env.CODEX_HOME && base === "auth.json" && path.dirname(lc) === path.resolve(expandHome(env.CODEX_HOME, home)).toLowerCase()) return true;
-		const agentDir = path.resolve(expandHome(env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent"), home));
-		for (const ad of new Set([agentDir, canonical(agentDir) ?? agentDir])) {
-			const a = ad.toLowerCase();
-			if (!lc.startsWith(`${a}/`)) continue;
-			const rel = lc.slice(a.length + 1);
-			if (rel === "intercom" || rel.startsWith("intercom/")) return true;
-			if (!rel.includes("/")) {
-				if (rel === "auth.json" || rel === "models-store.json" || (rel.startsWith("cursor-sdk") && rel.endsWith(".json"))) return true;
-				if (AGENT_CONFIG_FILES.has(rel)) continue;
-			}
-			try {
-				const st = fs.statSync(c);
-				if (st.isFile() && (st.mode & 0o077) === 0) return true;
-			} catch {}
-		}
-	}
-	return false;
-}
-
-/** The credential files a command names (its words read as paths, against `cwd`). Best effort: a script or a variable hides them. */
 export function credentialsInCommand(cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): string[] { // env-read-ok: HOME and credentialPath's names
 	const home = env.HOME || os.homedir();
 	const words = cmd
-		.replace(/\$\{?HOME\}?/g, home)
+		.replace(/\$\{HOME\}|\$HOME\b/g, home)
 		.split(/[\s;&|<>()`=]+/)
-		.map((w) => w.replace(/^['"]+|['"]+$/g, ""))
-		.filter((w) => w && /[./~]/.test(w) && !w.startsWith("-"));
+		.map((w) => w.replace(/["'\\]/g, ""))
+		.filter((w) => w && /[./~*?[]/.test(w) && !w.startsWith("-"));
 	const out: string[] = [];
 	for (const w of words.slice(0, 512)) {
+		const glob = w.search(/[*?[]/);
+		if (glob >= 0) {
+			const dir = resolvePath(w.slice(0, glob).replace(/[^/]*$/, "") || ".", cwd, home);
+			// the folder holds credentials, or what the glob is made of names one there (`.claude.json*`),
+			// or any file there would be one (a Claude config folder's transcripts)
+			const lit = w.slice(w.lastIndexOf("/", glob) + 1).split("/")[0].replace(/[*?[\]]/g, "");
+			if (dir && (credentialFolder(dir, env) || (lit && credentialPath(path.join(dir, lit), env)) || credentialPath(path.join(dir, "deckhand-glob-probe"), env))) out.push(w);
+			continue;
+		}
 		const abs = resolvePath(w, cwd, home);
 		if (abs && credentialPath(abs, env)) out.push(w);
 	}
@@ -282,6 +219,8 @@ const rejectOnce = (params: any): Answer => {
 const CANCELLED: Answer = { result: { outcome: { outcome: "cancelled" } } };
 
 const isQuestion = (params: any) => String(params?.toolCall?.toolCallId ?? "").startsWith("interaction_");
+/** A tool call that says what it does (a kind, an input, locations): an action, whatever its id. */
+const actionShaped = (tc: any) => !!(tc && ((typeof tc.kind === "string" && tc.kind) || (rec(tc.rawInput) && Object.keys(tc.rawInput).length) || (Array.isArray(tc.locations) && tc.locations.length)));
 
 /** A dialog that resolves undefined when the turn is aborted (or there is no UI). */
 async function dialog<T>(c: ApprovalContext, f: (ui: ApprovalUi, opts: { signal?: AbortSignal }) => Promise<T>): Promise<T | undefined> {
@@ -295,19 +234,22 @@ async function dialog<T>(c: ApprovalContext, f: (ui: ApprovalUi, opts: { signal?
 }
 
 /** Unique labels for agy's options (its names; a repeated one numbered). */
+export const MAX_OPTIONS = 50;
 function labels(options: any[]): string[] {
-	const names = options.map((o) => clip(o?.name || o?.optionId, 200) || String(o?.optionId));
+	const names = options.map((o) => clip(o?.name || o?.optionId, 200) || clip(o?.optionId, 200));
+	const count = new Map<string, number>();
+	for (const n of names) count.set(n, (count.get(n) ?? 0) + 1);
 	const seen = new Map<string, number>();
 	return names.map((n) => {
 		const k = (seen.get(n) ?? 0) + 1;
 		seen.set(n, k);
-		return names.filter((x) => x === n).length > 1 ? `${n} (${k})` : n;
+		return count.get(n)! > 1 ? `${n} (${k})` : n;
 	});
 }
 
 async function answerQuestion(params: any, c: ApprovalContext): Promise<Decision> {
 	const q = clip(params?.toolCall?.title || "Antigravity asks", 200);
-	const options = (Array.isArray(params?.options) ? params.options : []).filter((o: any) => typeof o?.optionId === "string" && o.optionId.trim());
+	const options = (Array.isArray(params?.options) ? params.options : []).filter((o: any) => typeof o?.optionId === "string" && o.optionId.trim()).slice(0, MAX_OPTIONS);
 	if (!options.length) return { answer: CANCELLED, note: `✗ question not answered (no choices): ${q}`, allowed: false };
 	const ls = labels(options);
 	const pick = await dialog(c, (ui, o) => ui.select(`Antigravity asks: ${q}`, ls, o));
@@ -335,9 +277,9 @@ async function answerElicitation(params: any, c: ApprovalContext): Promise<Decis
 			f.type === "boolean"
 				? [{ label: "Yes", value: true }, { label: "No", value: false }]
 				: Array.isArray(f.oneOf)
-					? f.oneOf.filter((o: any) => typeof o?.const === "string").map((o: any) => ({ label: clip(o.title || o.const, 200), value: o.const }))
+					? f.oneOf.filter((o: any) => typeof o?.const === "string").slice(0, MAX_OPTIONS).map((o: any) => ({ label: clip(o.title || o.const, 200), value: o.const }))
 					: Array.isArray(f.enum)
-						? f.enum.filter((v: unknown) => typeof v === "string").map((v: string) => ({ label: clip(v, 200) || JSON.stringify(v), value: v }))
+						? f.enum.filter((v: unknown) => typeof v === "string").slice(0, MAX_OPTIONS).map((v: string) => ({ label: clip(v, 200) || JSON.stringify(v), value: v }))
 						: undefined;
 		let value: unknown;
 		if (choices) {
@@ -372,9 +314,17 @@ async function confirm(c: ApprovalContext, title: string, body: string): Promise
 
 /** The answer to one request agy made of the client, under the policy above. */
 export async function decide(method: string, params: any, c: ApprovalContext): Promise<Decision> {
+	// the turn was stopped (Esc): nothing more goes ahead
+	if (c.signal?.aborted) {
+		if (ELICITATION.has(method)) return { answer: { result: { action: "cancel" } }, note: "✗ stopped: a question", allowed: false };
+		if (method !== "session/request_permission") return { answer: answerAgentRequest(method, params), note: `✗ stopped: ${clip(method, 60)}`, allowed: false };
+		return { answer: CANCELLED, note: `✗ stopped: ${clip(params?.toolCall?.title || params?.toolCall?.kind || "an action")}`, allowed: false };
+	}
 	if (ELICITATION.has(method)) return answerElicitation(params, c);
 	if (method !== "session/request_permission") return { answer: answerAgentRequest(method, params), note: `✗ refused: ${clip(method, 60)} (Deckhand offers agy no ${method.split("/")[0]} access)`, allowed: false };
-	if (isQuestion(params)) return answerQuestion(params, c);
+	// a question is agy's choices; an interaction_ id with an action's shape (a kind, an input,
+	// locations) is judged as the action
+	if (isQuestion(params) && !actionShaped(params?.toolCall)) return answerQuestion(params, c);
 
 	const tc = params?.toolCall ?? {};
 	const title = clip(tc.title || tc.kind || "an action");
@@ -384,8 +334,7 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 	const env = c.env ?? process.env; // env-read-ok: credentialPath's names only
 	const cmd = commandOf(tc);
 	const kind = typeof tc.kind === "string" && tc.kind ? tc.kind : cmd ? "execute" : "other";
-	const paths = pathsOf(tc);
-	const known = paths === "unknown" ? [] : paths;
+	const known = pathsOf(tc).paths;
 	/** Confirmed: allowed (note `✓ you allowed: what`); else rejected (`✗ you declined: what`, or `noUi` without a UI). */
 	const confirmed = async (header: string, body: string, what: string, noUi: string): Promise<Decision> => {
 		if (!c.hasUI) return reject(noUi, what);
@@ -398,6 +347,16 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 		return !!abs && credentialPath(abs, env);
 	});
 	if (creds.length) return reject("refused (a protected credential file)", clip(creds[0], 120));
+	// a search in a folder that holds credentials, or a read of one of its folders (a listing):
+	// what it would match is not known. A file there is judged by its name (above): pi's own
+	// settings.json in its agent dir may be read, as in Deckhand
+	if (READ_KINDS.has(kind)) {
+		const folder = known.find((p) => {
+			const abs = resolvePath(p, c.cwd);
+			return !!abs && credentialFolder(abs, env) && (kind === "search" || fs.statSync(abs, { throwIfNoEntry: false })?.isFile() !== true);
+		});
+		if (folder) return reject("refused (a folder with credentials in it)", clip(folder, 120));
+	}
 	if (cmd) {
 		const named = credentialsInCommand(cmd, commandCwd(tc) ? resolvePath(commandCwd(tc)!, c.cwd) ?? c.cwd : c.cwd, env);
 		if (named.length) return reject("refused (the command names a protected credential file)", shownCommand(cmd));
@@ -409,6 +368,9 @@ export async function decide(method: string, params: any, c: ApprovalContext): P
 		if (!cmd) {
 			// read-only cannot tell whether it mutates: refused; otherwise it runs, as pi's own tools do
 			if (c.readonly) return reject("refused (read-only session)");
+			// guardrails' block rules against what agy did say of it (its title, its input)
+			const rules = loadRules(configPaths(c.cwd)).rules;
+			for (const text of [String(tc.title ?? ""), JSON.stringify(tc.rawInput ?? {})]) if (text && commandVerdict(text, false, rules).block) return reject("blocked by guardrails", title);
 			if (c.mode === "ask") return confirmed("Allow this Antigravity command?", `${title}\n\nDeckhand cannot read the command line agy sent.`, title, "refused (approvals: ask, and no UI)");
 			return allow(`ran: ${title} (a command Deckhand cannot read)`);
 		}
@@ -477,10 +439,13 @@ export class ToolCallTracker {
 		const t = typeof tc?.toolCallId === "string" ? this.calls.get(`${params.sessionId}\0${tc.toolCallId}`) : undefined;
 		if (!t) return params;
 		const own = { ...tc };
-		for (const k of ["title", "kind", "rawInput"]) if (own[k] === undefined && t[k] !== undefined) own[k] = t[k];
-		const tpaths = pathsOf({ locations: t.locations, content: t.content, rawInput: t.rawInput });
-		if (tpaths === "unknown") own.locations = [{ path: "" }];
-		else if (tpaths.length) own.locations = [...(Array.isArray(own.locations) ? own.locations : []), ...tpaths.map((p) => ({ path: p }))];
+		for (const k of ["title", "kind"]) if (own[k] === undefined && t[k] !== undefined) own[k] = t[k];
+		// the request's input, with what the tracked call said where it says nothing (a command, a path)
+		const ti = rec(t.rawInput), oi = rec(own.rawInput);
+		if (ti) own.rawInput = { ...ti, ...Object.fromEntries(Object.entries(oi ?? {}).filter(([, v]) => v !== undefined && v !== null && v !== "")) };
+		// the tracked call's readable paths added to the request's own (never in their place)
+		const tpaths = pathsOf({ locations: t.locations, content: t.content, rawInput: t.rawInput }).paths;
+		if (tpaths.length) own.locations = [...(Array.isArray(own.locations) ? own.locations : []), ...tpaths.map((p) => ({ path: p }))];
 		return { ...params, toolCall: own };
 	}
 }

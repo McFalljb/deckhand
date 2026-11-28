@@ -228,12 +228,13 @@ init_separate :: proc(note := "") -> bool {
 		platform_alert("Deckhand can't start", "Deckhand can't find your home folder, so it has nowhere to keep its files")
 		os.exit(1)
 	}
+	window_log_open() // <run>/window.log: the app's stderr is /dev/null (window_log.odin)
 	why := client_core_connect(core.home_root)
 	// a leftover Deckhand process holds the data dir's lock (#78): the user may end it, then the core starts
 	if why != "" && !core.autotest_active && instance_offer_end(why, core.instance_holder_now(core.home_root)) do why = client_core_connect(core.home_root)
 	if why != "" && client_core_offer_previous() do why = client_core_connect(core.home_root)
 	if why != "" {
-		fmt.eprintln("Deckhand:", why)
+		wlog("Deckhand: cannot start the background core:", why)
 		if core.autotest_active {
 			fmt.println("[autotest] core refused:", why)
 			os.exit(3)
@@ -245,6 +246,7 @@ init_separate :: proc(note := "") -> bool {
 		}
 		os.exit(1)
 	}
+	wlog(fmt.tprintf("attached to the background core, pid %d", client.core_pid))
 	if core.autotest_active do fmt.printfln("[autotest] core: attached to pid %d", client.core_pid)
 	if note != "" do toast_show(note)
 	if client.replaced_other_login {
@@ -1599,6 +1601,7 @@ main :: proc() {
 		os.exit(2)
 	}
 	core.app_context = context
+	fd_limit_raise() // launchd's soft limit of 256 is too few for the window (fd_limit.odin)
 	// from the Dock or Finder: the login shell's environment, before any thread (login_env.odin)
 	core.login_env_startup()
 	when core.TEST_HOOKS {

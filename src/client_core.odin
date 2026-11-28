@@ -40,7 +40,7 @@ import "trust"
 CLIENT_WAIT :: 250 * time.Millisecond
 CORE_START_WAIT :: 15 * time.Second
 CORE_RELAUNCH_EVERY :: time.Second // while no core answers (client_core_dial)
-RECONNECTS_MAX :: 3 // reconnects in RECONNECTS_PER: past it the window gives up (client_core_tick)
+RECONNECTS_MAX :: 6 // reconnect attempts (failed ones too) in RECONNECTS_PER: past it the window gives up (client_core_tick)
 RECONNECTS_PER :: 60 * time.Second
 
 // The longest a command waited for its result over core.sock this run (the 250 ms bound: Q9), and
@@ -52,6 +52,11 @@ client_wait_gave_up: int
 client_peer: trust.Peer
 @(private = "file")
 got_full: bool
+@(private = "file")
+client_peer_refused: trust.Peer // the peer a read saw when the check refused it (sock_open's peer_check)
+
+@(private = "file")
+client_peer_refused_text :: proc() -> string {return core.peer_change_text(client_peer, client_peer_refused)}
 
 // The link is core.sock: the core is another process.
 client_separate :: proc() -> bool {return client.sock != nil}
@@ -146,7 +151,7 @@ client_core_connect :: proc(data: string) -> string {
 	client.results = make(map[string]core.Result, heap)
 	client.abandoned = make(map[string]bool, heap)
 	client.tab_facts_sent = make(map[u64]string, heap)
-	hello, why := client_core_dial(data)
+	hello, why, _ := client_core_dial(data)
 	if why != "" do return why
 	to: string
 	if to, why = client_core_handover_to(hello, data); why != "" do return why
@@ -156,7 +161,7 @@ client_core_connect :: proc(data: string) -> string {
 		if why = client_core_handover(to); why != "" {
 			if hello.skew != .Core_Older && hello.skew != .Ok do return why
 			// it works as it is: stay with it
-		} else if _, why = client_core_dial(data, launch = false); why != "" {
+		} else if _, why, _ = client_core_dial(data, launch = false); why != "" {
 			return why
 		}
 	}
@@ -191,9 +196,12 @@ client_core_abandon :: proc() {
 // link goes, the window dials again (or launches a core), and the replica, its terminal copies
 // and the facts it sent start over from a fresh state.full. Blocks the main thread while it dials
 // (a core that just died is usually back within a second; 15 s at most). "" = attached again.
-// Main thread, outside the frame reader (the frame and the hidden window's timer call it).
-client_core_reconnect :: proc() -> string {
-	if !client.lost || core.app_quitting do return ""
+// final: the dial waited its 15 s and no core said its hello (client_core_tick gives up then; any
+// other failure, a launch or install error included, is tried again). A link that came up but sent no state is closed, so the core
+// lets it go too. Main thread, outside the frame reader (the frame and the hidden window's timer
+// call it).
+client_core_reconnect :: proc() -> (why: string, final: bool) {
+	if !client.lost || core.app_quitting do return "", false
 	heap := runtime.heap_allocator()
 	for k, r in client.results {
 		core.result_free(r)
@@ -209,18 +217,23 @@ client_core_reconnect :: proc() -> string {
 	got_full = false
 	old := client.sock // the dead link stays client.sock until a new one is up (client_separate holds)
 	// never a handover here: the core that answers is the supervisor's or a successor's
-	if _, why := client_core_dial(core.home_root); why != "" do return why
+	timed_out: bool
+	if _, why, timed_out = client_core_dial(core.home_root); why != "" do return why, timed_out
 	cw.sock_destroy(old)
 	free(old, heap)
 	client.lost = false
-	why := client_core_subscribe()
+	why = client_core_subscribe()
+	if why != "" && !client.lost {
+		cw.sock_close(client.sock) // it never sent state: the core sees the end and lets it go
+		client.lost = true
+	}
 	if why == "" && core.autotest_active do fmt.printfln("[autotest] core: reattached to pid %d", client.core_pid)
 	if why == "" && client.replaced_other_login {
 		client.replaced_other_login = false
 		toast_show(CORE_OTHER_LOGIN_TOAST)
 	}
 	app.redraw = true
-	return why
+	return why, false
 }
 
 // The link is up: subscribe, wait for state.full (≤ 15 s), send the window's facts.
@@ -229,7 +242,10 @@ client_core_subscribe :: proc() -> string {
 	client_send_raw(core.window_msg_subscribe())
 	deadline := time.tick_add(time.tick_now(), CORE_START_WAIT)
 	for !got_full && !client.lost && time.tick_diff(time.tick_now(), deadline) > 0 do client_io(50)
-	if !got_full do return "Deckhand's background core sent no state"
+	if !got_full {
+		if client.lost do return fmt.tprintf("Deckhand's background core sent no state (the connection ended: %s)", client_link_end_text())
+		return "Deckhand's background core sent no state within 15 s"
+	}
 	client_facts()
 	flash_quiet() // the statuses that came with it are not news (ui.odin status_flash)
 	return ""
@@ -238,11 +254,13 @@ client_core_subscribe :: proc() -> string {
 // Dials core.sock until a core with a window token answers its hello, for up to CORE_START_WAIT,
 // launching one every CORE_RELAUNCH_EVERY while none does (unless !launch: a handover's successor
 // is the old core's to start): a core that is still stopping (its handover and save, under
-// core.lock) makes the first launch exit at once. why == "": client.sock is the link.
+// core.lock) makes the first launch exit at once. why == "": client.sock is the link. timed_out:
+// it waited its whole CORE_START_WAIT and no core said its hello (the one final failure for a
+// reconnect: a launch, install or runtime-dir error, or a hello that failed, is tried again).
 @(private = "file")
-client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, why: string) {
+client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, why: string, timed_out: bool) {
 	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
-	if rwhy != "" do return {}, rwhy
+	if rwhy != "" do return {}, rwhy, false
 	path := fmt.tprintf("%s/%s", run, core.CORE_SOCK)
 	deadline := time.tick_add(time.tick_now(), CORE_START_WAIT)
 	last_launch: time.Tick
@@ -277,12 +295,12 @@ client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, wh
 		if r := core.core_refused_take(run); r != "" do refused = r
 		if launch && (last_launch == {} || time.tick_since(last_launch) >= CORE_RELAUNCH_EVERY) {
 			last_launch = time.tick_now()
-			if why = client_core_launch(run, data); why != "" do return
+			if why = client_launch_hook(run, data, false); why != "" do return
 		}
 		if time.tick_diff(time.tick_now(), deadline) <= 0 {
 			why = launch ? "Deckhand's background core did not start within 15 s" : "Deckhand's new background core did not start within 15 s"
 			if refused != "" do why = fmt.tprintf("%s. It said: %s", why, strings.trim_right(refused, "."))
-			return {}, why
+			return {}, why, true
 		}
 		time.sleep(20 * time.Millisecond)
 	}
@@ -334,7 +352,7 @@ client_core_replace_other_login :: proc(pid: i32, start: i64, replaced: ^bool, s
 		replaced^ = true
 		return ""
 	}
-	fmt.eprintln("Deckhand: background core: pid", pid, "runs in a GUI login that has ended; stopping it and starting one here")
+	wlog("Deckhand: background core: pid", pid, "runs in a GUI login that has ended; stopping it and starting one here")
 	if core.autotest_active do fmt.printfln("[autotest] core: replacing pid %d from another login", pid)
 	if !stop(pid, start, CORE_OTHER_LOGIN_STOP_WAIT) {
 		return fmt.tprintf("A Deckhand core from an earlier login (pid %d) could not be stopped. Quit it in Activity Monitor (deckhand-core-serve), then open Deckhand again", pid)
@@ -372,7 +390,7 @@ client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> (hello: Core_Hello, 
 		if left <= 0 || !core.sock_wait_readable(fd, left) do return {}, "the background core did not answer the hello"
 		n := core.sock_read(fd, chunk[:])
 		if n <= 0 do return {}, "the background core closed the connection"
-		if trust.peer_still(peer, trust.peer_read(fd)) != .Allow do return {}, "the process on core.sock changed"
+		if now := trust.peer_read(fd); trust.peer_still(peer, now) != .Allow do return {}, fmt.tprintf("the process on core.sock changed (%s)", core.peer_change_text(peer, now))
 		append(&buf, ..chunk[:n])
 		nl = strings.index_byte(string(buf[:]), '\n')
 		if len(buf) > 1 << 20 do return {}, "the background core's hello reply is too long"
@@ -386,8 +404,12 @@ client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> (hello: Core_Hello, 
 	client_peer = peer
 	client.core_pid = peer.pid
 	client.sock = new(cw.Sock_Transport, runtime.heap_allocator())
+	client_peer_refused = {}
 	cw.sock_open(client.sock, fd, peer_check = proc(fd: core.Sock_Fd, data: rawptr) -> bool {
-		return trust.peer_still((^trust.Peer)(data)^, trust.peer_read(fd)) == .Allow
+		now := trust.peer_read(fd)
+		if trust.peer_still((^trust.Peer)(data)^, now) == .Allow do return true
+		client_peer_refused = now // what was seen, for the log (client_link_end_text)
+		return false
 	}, peer_data = &client_peer, initial = buf[nl + 1:], allocator = runtime.heap_allocator())
 	return hello, ""
 }
@@ -405,7 +427,7 @@ client_core_handover_to :: proc(hello: Core_Hello, data: string) -> (to, why: st
 	case .Core_Older, .Core_Below_Min, .Core_Older_Generation:
 		// the user's Use previous core holds (core_use_previous_serve): keep the core it chose
 		if core.core_use_previous_serve(data) != "" {
-			fmt.eprintln("Deckhand: background core: keeping the previous core (Use previous core)")
+			wlog("Deckhand: background core: keeping the previous core (Use previous core)")
 			return "", hello.skew == .Core_Older ? "" : core.core_skew_message(hello.skew)
 		}
 	case .Core_Newer_Generation:
@@ -414,7 +436,7 @@ client_core_handover_to :: proc(hello: Core_Hello, data: string) -> (to, why: st
 	}
 	if bundled == "" do return "", core.core_skew_message(hello.skew)
 	if _, ok, iwhy := core.core_install(bundled, data); !ok {
-		fmt.eprintln("Deckhand: background core: cannot install this app's core:", iwhy)
+		wlog("Deckhand: background core: cannot install this app's core:", iwhy)
 		return "", hello.skew == .Ok || hello.skew == .Core_Older ? "" : core.core_skew_message(hello.skew)
 	}
 	return "current", ""
@@ -425,13 +447,13 @@ CORE_HANDOVER_WAIT :: 3 * time.Minute // its job runs get 2 min, then the handov
 // core_handover{to} on the link that is up (not subscribed yet), then the wait for the old core
 // to go: its connection ends. "" = handed over (the link is gone), else why not (the link stays).
 client_core_handover :: proc(to: string) -> string {
-	fmt.eprintln("Deckhand: handing the background core over to this app's (", to, ")")
+	wlog("Deckhand: handing the background core over to this app's (", to, ")")
 	if core.autotest_active do fmt.println("[autotest] core: handing over to", to)
 	client.handing_over = true
 	defer client.handing_over = false
 	r, _ := client_call_wait(core.Core_Handover{to = to}, 15 * time.Second)
 	if !r.ok && !client.lost { // gone already: it went ahead
-		fmt.eprintln("Deckhand: background core: the handover was refused:", r.error)
+		wlog("Deckhand: background core: the handover was refused:", r.error)
 		return fmt.tprintf("Deckhand's background core could not be updated: %s", r.error)
 	}
 	start := time.tick_now()
@@ -450,15 +472,24 @@ client_core_lost :: proc() {
 	if client.lost do return
 	client.lost = true
 	if client.handing_over do return // client_core_handover dials the new core
-	fmt.eprintln("Deckhand: the background core's connection ended:", cw.sock_reason(client.sock))
+	client_core_lost_why(fmt.tprintf("the background core's connection ended: %s", client_link_end_text()))
 	if core.autotest_active do fmt.println("[autotest] core: connection ended")
 	if core.app_quitting do app_request_quit()
+}
+
+// Why the link closed, in words: the transport's reason, and for a refused peer what was seen.
+client_link_end_text :: proc() -> string {
+	if client.sock == nil do return "no link"
+	r := cw.sock_reason(client.sock)
+	text := cw.sock_reason_text(r)
+	if r == .Peer_Changed do text = fmt.tprintf("%s (%s)", text, client_peer_refused_text())
+	return fmt.tprintf("%s, core pid %d", text, client.core_pid)
 }
 
 // window.request quit: the core ends on purpose, or let this window go for another; the window
 // quits too and never reconnects.
 client_core_quit :: proc(why: string) {
-	fmt.eprintln("Deckhand: the background core asked the window to quit:", why)
+	wlog("Deckhand: the background core asked the window to quit:", why)
 	if core.autotest_active do fmt.println("[autotest] core: quit:", why)
 	core.app_quitting = true
 	app_request_quit()
@@ -468,7 +499,7 @@ client_core_quit :: proc(why: string) {
 // connection winning (docs/plans/background-core.md §10.4). The connection ends next; the window
 // does not dial again until its user takes it back (client_core_tick asks).
 client_core_viewed :: proc(machine: string, browser := false) {
-	fmt.eprintln("Deckhand: the background core is viewed from", machine, browser ? "(a browser)" : "")
+	wlog(fmt.tprintf("Deckhand: the background core is viewed from %q%s", machine, browser ? " (a browser)" : ""))
 	client.viewed_browser = browser
 	if core.autotest_active do fmt.println("[autotest] core: viewed from", machine)
 	delete(client.viewed_from, runtime.heap_allocator())
@@ -482,7 +513,7 @@ client_ask: proc(title, text, yes, no: string) -> bool = client_ask_default
 client_ask_default :: proc(title, text, yes, no: string) -> bool {
 	when core.TEST_HOOKS {
 		if a := core.hook_env(.Ask_Answer); a == "yes" || a == "no" {
-			fmt.eprintln("Deckhand: answered by DECKHAND_ASK_ANSWER:", a == "yes" ? yes : no)
+			wlog("Deckhand: answered by DECKHAND_ASK_ANSWER:", a == "yes" ? yes : no)
 			return a == "yes"
 		}
 	}
@@ -497,7 +528,8 @@ client_ask_default :: proc(title, text, yes, no: string) -> bool {
 // One question per displacement: the alert's modal loop runs the window's timer, and so this proc
 // again. So viewed_from is taken before the question and `asking` makes those turns do nothing:
 // no second question, and no dial before the user answers.
-client_core_tick :: proc() {
+client_core_tick :: proc(at: time.Tick = {}) {
+	now := at == {} ? time.tick_now() : at
 	if !client.lost || core.app_quitting || client.gave_up || client.asking do return
 	if client.viewed_from != "" {
 		if core.autotest_active do return // test mode never shows the modal: the scene's log says it
@@ -505,7 +537,7 @@ client_core_tick :: proc() {
 		client.viewed_from = ""
 		defer delete(who, runtime.heap_allocator())
 		client.asking = true
-		fmt.eprintln("Deckhand: asking: Take Back or Quit (viewed from", who, ")")
+		wlog(fmt.tprintf("Deckhand: asking: Take Back or Quit (viewed from %q)", who))
 		take := client.viewed_browser ? client_ask("Viewed in a browser", fmt.tprintf("A browser (%s) is showing this Mac's sessions now, over web access. They keep running. Take them back to show them here (the browser's view lets go).", who), "Take Back", "Quit") : client_ask(fmt.tprintf("Viewed from %s", who), fmt.tprintf("Deckhand on %s is showing this Mac's sessions now. They keep running. Take them back to show them here (%s's view lets go).", who, who), "Take Back", "Quit")
 		client.asking = false
 		if !take {
@@ -513,16 +545,105 @@ client_core_tick :: proc() {
 			app_request_quit()
 			return
 		}
+		wlog("Take Back: dialling the background core again")
 		client.reconnects_since, client.reconnects = {}, 0
+		client_outage_reset()
 	}
-	if !reconnect_allowed(&client.reconnects_since, &client.reconnects, time.tick_now()) {
-		client_core_give_up(fmt.tprintf("its background core stopped more than %d times in a minute", RECONNECTS_MAX))
+	entered := time.tick_now()
+	defer client.tick_last = time.tick_add(now, time.tick_since(entered)) // this turn's end, on now's clock
+	// no turn for a while (the Mac slept, the window was stopped): the outage's 15 s start again,
+	// so a core that restarted meanwhile gets its full time
+	if client.lost_at != {} && client.tick_last != {} && time.tick_diff(client.tick_last, now) >= RECONNECT_PAUSE {
+		wlog(fmt.tprintf("no turn for %v (a sleep?): the reconnect's 15 s start again", time.tick_diff(client.tick_last, now)))
+		client.lost_at = now
+		if client.retry_at != {} do client.retry_at = now
+	}
+	// the reconnecting notice stays up until the outage ends (a refusal's note may replace it)
+	if client.retry_toasted && toast.text == "" do toast_show_sticky(RECONNECTING_TOAST)
+	if client.retry_at != {} && time.tick_diff(now, client.retry_at) > 0 do return // backing off
+	if client.lost_at == {} do client.lost_at = now
+	if !reconnect_allowed(&client.reconnects_since, &client.reconnects, now) {
+		client_core_give_up(fmt.tprintf("it tried to reach its background core %d times in a minute (the core stopped, or refused or dropped the window), the last time: %s", RECONNECTS_MAX, client.last_try_why != "" ? client.last_try_why : "the core stopped again"))
 		return
 	}
-	if why := client_core_reconnect(); why != "" do client_core_give_up(why)
+	n := client.reconnects
+	wlog(fmt.tprintf("reconnecting to the background core (attempt %d)", n))
+	started := time.tick_now()
+	why, final := client_reconnect_try()
+	if why == "" {
+		wlog(fmt.tprintf("reconnected to the background core, pid %d (attempt %d)", client.core_pid, n))
+		if client.retry_toasted do toast_show(RECONNECTED_TOAST)
+		client_outage_reset()
+		return
+	}
+	// how long this outage has lasted: since the link was lost, the attempt's own time included
+	out := time.tick_diff(client.lost_at, now) + time.tick_since(started)
+	wlog(fmt.tprintf("reconnect attempt %d failed: %s", n, why))
+	if final || out >= RECONNECT_FOR {
+		client_core_give_up(why)
+		return
+	}
+	delete(client.last_try_why, runtime.heap_allocator())
+	client.last_try_why = strings.clone(why, runtime.heap_allocator())
+	// a short backoff, doubling (RECONNECT_BACKOFF … RECONNECT_BACKOFF_MAX): never a tight loop
+	if client.retry_delay == 0 do client.retry_delay = RECONNECT_BACKOFF
+	else do client.retry_delay = min(client.retry_delay * 2, RECONNECT_BACKOFF_MAX)
+	client.retry_at = time.tick_add(now, client.retry_delay)
+	if !client.retry_toasted {
+		client.retry_toasted = true
+		toast_show_sticky(RECONNECTING_TOAST)
+	}
 }
 
-// At most RECONNECTS_MAX reconnects in any RECONNECTS_PER window that starts at the first one.
+RECONNECT_FOR :: CORE_START_WAIT // an outage the window waits out: no attempt in it attached
+RECONNECT_BACKOFF :: 250 * time.Millisecond // the wait after a failed attempt, doubled after each
+RECONNECT_BACKOFF_MAX :: 4 * time.Second
+RECONNECTING_TOAST :: "Reconnecting to Deckhand's background core…"
+RECONNECTED_TOAST :: "Reconnected to Deckhand's background core."
+RECONNECT_PAUSE :: 5 * time.Second // no tick for this long: a sleep or a stop, not an outage's time
+
+// While the link is lost: a ui command or a terminal's input is refused, not queued or replayed
+// (the core that comes back starts from a fresh state, and a stale command could land on another
+// tab). note: say so in a toast (a click's Set_Focus is refused quietly). ⌘S still saves the
+// buffer itself (lost_core_save, before this). True: refused.
+client_lost_refuse :: proc(note := true) -> bool {
+	if !client.lost || client.sock == nil || client.handing_over do return false
+	if note do toast_show(LOST_NOTE, true)
+	return true
+}
+
+// One reconnect attempt (client_core_reconnect; tests swap it): why it failed ("" = attached
+// again), and final: no core answered on core.sock at all (the dial waited CORE_START_WAIT).
+client_reconnect_try: proc() -> (why: string, final: bool) = client_core_reconnect
+
+// The retry state of an outage starts over (a reconnect worked, Take Back, tests).
+client_outage_reset :: proc() {
+	client.retry_at, client.lost_at, client.retry_delay, client.retry_toasted = {}, {}, 0, false
+	delete(client.last_try_why, runtime.heap_allocator())
+	client.last_try_why = ""
+	delete(client.lost_why, runtime.heap_allocator())
+	client.lost_why = ""
+}
+
+// The link ended (client_core_lost): why, as the window's log and a give-up's alert say it. The
+// first reason of an outage is kept (the later ones are its attempts').
+client_core_lost_why :: proc(why: string) {
+	wlog(why)
+	if client.lost_why == "" do client.lost_why = strings.clone(why, runtime.heap_allocator())
+}
+
+// Launches a core (client_core_launch; tests swap it).
+client_launch_hook: proc(run, data: string, from_tab: bool) -> string = client_core_launch
+
+// A command or a terminal's input while the link is lost: refused, not queued (client_lost_refuse).
+LOST_NOTE :: "Not connected to Deckhand's background core yet. Try again in a moment."
+
+// The give-up's alert (tests swap it).
+client_alert: proc(title, text, button: string) = proc(title, text, button: string) {platform_alert(title, text, button)}
+
+// At most RECONNECTS_MAX reconnects in any RECONNECTS_PER window that starts at the first one. The
+// budget needs no reset after a reconnect that stays up: the window restarts at the first
+// attempt past RECONNECTS_PER, so a link that stayed up a minute starts its next outage afresh.
 reconnect_allowed :: proc(since: ^time.Tick, count: ^int, now: time.Tick) -> bool {
 	if since^ == {} || time.tick_diff(since^, now) >= RECONNECTS_PER {
 		since^, count^ = now, 0
@@ -537,9 +658,14 @@ reconnect_allowed :: proc(since: ^time.Tick, count: ^int, now: time.Tick) -> boo
 @(private = "file")
 client_core_give_up :: proc(why: string) {
 	client.gave_up = true
-	fmt.eprintln("Deckhand: cannot reconnect to the background core:", why)
+	if toast.sticky do toast_clear()
+	lost := client.lost_why != "" ? fmt.tprintf(" (first, %s)", client.lost_why) : ""
+	wlog(fmt.tprintf("cannot reconnect to the background core: %s%s", why, lost))
 	if core.autotest_active do fmt.println("[autotest] core: gave up:", why)
-	else do platform_alert("Deckhand lost its background core", fmt.tprintf("Deckhand can't reach its background core: %s. Files with unsaved changes stay open so you can save them; then quit and open Deckhand again.", why), "OK")
+	else {
+		log_at := window_log_path() != "" ? fmt.tprintf(" What happened is in %s.", window_log_path()) : ""
+		client_alert("Deckhand lost its background core", core.redact_secrets(fmt.tprintf("Deckhand can't reach its background core: %s%s. Files with unsaved changes stay open so you can save them; then quit and open Deckhand again.%s", why, lost, log_at)), "OK")
+	}
 	app_request_quit()
 }
 
@@ -649,7 +775,7 @@ client_core_offer_previous :: proc() -> bool {
 	if !platform_ask("Deckhand's background core isn't starting", text, "Use Previous Core", "Quit") do return false
 	// sticky until another build is installed: the holder and this window launch previous
 	if why := core.core_use_previous_set(core.home_root); why != "" {
-		fmt.eprintln("Deckhand: background core: Use previous core:", why)
+		wlog("Deckhand: background core: Use previous core:", why)
 		return false
 	}
 	_, ok = core.holder_supervise_ask(run, "use_previous")

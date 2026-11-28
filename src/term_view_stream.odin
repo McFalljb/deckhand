@@ -497,6 +497,7 @@ term_view_input :: proc(v: ^Term_View, bytes: []u8) {
 		term_view_input_hook(v, bytes)
 		return
 	}
+	if client_lost_refuse() do return // reconnecting: not queued for a program that may be another by then
 	if v.channel == 0 || !client.attached do return
 	client_frame(v.channel, .Data, bytes)
 	client_pump() // written to the PTY now, as the window's own pty_write did

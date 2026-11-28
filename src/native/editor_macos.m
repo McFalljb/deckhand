@@ -17,15 +17,16 @@ static void on_events(ConstFSEventStreamRef s, void *info, size_t n, void *paths
 	for (size_t i = 0; i < n; i++) callback(p[i], (unsigned)flags[i]);
 }
 
-// Replaces the watched folders (n == 0 stops watching).
-void dh_fsw_set(const char **paths, int n, dh_fsw_cb cb) {
+// Replaces the watched folders (n == 0 stops watching). 0: watching (or stopped); 1: the stream
+// could not be made, 2: it could not be started.
+int dh_fsw_set(const char **paths, int n, dh_fsw_cb cb) {
 	if (stream) {
 		FSEventStreamStop(stream);
 		FSEventStreamInvalidate(stream);
 		FSEventStreamRelease(stream);
 		stream = NULL;
 	}
-	if (n == 0) return;
+	if (n == 0) return 0;
 	if (!queue) queue = dispatch_queue_create("deckhand.fswatch", DISPATCH_QUEUE_SERIAL);
 	callback = cb;
 	CFMutableArrayRef list = CFArrayCreateMutable(NULL, n, &kCFTypeArrayCallBacks);
@@ -36,12 +37,22 @@ void dh_fsw_set(const char **paths, int n, dh_fsw_cb cb) {
 			CFRelease(s);
 		}
 	}
+	// No kFSEventStreamCreateFlagWatchRoot: it opens a descriptor on every part of every watched
+	// path (about a dozen per folder), so 20-odd project folders ran launchd's soft limit of 256 out
+	// and the stream failed (EMFILE). A watched folder that moves or goes is seen by the window's
+	// stat of each one instead (editor_watch.odin's watch_roots_check), as kFSEventStreamEventFlagRootChanged.
 	stream = FSEventStreamCreate(NULL, on_events, NULL, list, kFSEventStreamEventIdSinceNow, 0.05,
-		kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagWatchRoot);
+		kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer);
 	CFRelease(list);
-	if (!stream) return;
+	if (!stream) return 1;
 	FSEventStreamSetDispatchQueue(stream, queue);
-	FSEventStreamStart(stream);
+	if (!FSEventStreamStart(stream)) {
+		FSEventStreamInvalidate(stream);
+		FSEventStreamRelease(stream);
+		stream = NULL;
+		return 2;
+	}
+	return 0;
 }
 
 // Moves path to the Trash. 0 on success. where (where_len bytes, NUL-terminated) gets the path

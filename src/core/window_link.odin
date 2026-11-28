@@ -514,7 +514,7 @@ window_link_pump :: proc() -> (capped: bool) {
 			err: cw.Recv_Error
 			f, err = cw.sock_recv(link.sock, context.temp_allocator)
 			if err == .Closed {
-				log_ln("Deckhand: the window's connection ended:", cw.sock_reason(link.sock))
+				log_ln(link_end_text(link_who(), cw.sock_reason(link.sock), link_refused_detail()))
 				core_detach_window() // the window went (or its peer changed): what it owed ends
 				break
 			}
@@ -579,7 +579,7 @@ link_take_credits :: proc() {
 // transport closes a peer past its cap. Called where nothing iterates the streams (pump, flush).
 @(private = "file")
 link_close_overflowed :: proc() {
-	log_ln("Deckhand: the window sent more than its link holds: it is closed")
+	log_ln("Deckhand:", link_who(), "sent more than its link holds: the core closed it")
 	core_detach_window(keep_transport = true) // in process the window keeps its end: its sends now fail (a few KiB kept)
 }
 
@@ -1348,7 +1348,7 @@ core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, h
 	// the newest connection wins (§10.4, decided 2026-11-09): the one it replaces is told who took
 	// it, and waits for its user's Take back rather than reconnecting (they would take turns)
 	if link != nil {
-		log_ln("Deckhand: a new", link_kind_name(hub, web), "attached: the previous", link_kind_name(link.hub, link.web), "is let go")
+		log_ln("Deckhand: a new", link_kind_name(hub, web), "attached,", link_who_text(hub, web, from, web_device, web ? 0 : peer.pid), "- the previous", link_kind_name(link.hub, link.web), "is let go:", link_who())
 		if link.web {
 			link_web_taken(hub ? "machine" : web ? "browser" : "window", hub || web ? from : "")
 		} else if link.hub {
@@ -1467,7 +1467,7 @@ window_link_web_device :: proc() -> string {return link != nil && link.web ? lin
 window_link_web_revoked :: proc(device: string) {
 	if link == nil || !link.web || link.web_device != device do return
 	link_send(fmt.tprintf(`{{"v":%d,"type":"web.revoked"}}`, PROTOCOL_VERSION))
-	log_ln("Deckhand: a revoked browser's link is let go")
+	log_ln("Deckhand: a revoked browser's link is let go:", link_who())
 	link_linger_start()
 	core_detach_window()
 }
@@ -1475,7 +1475,7 @@ window_link_web_revoked :: proc(device: string) {
 // Web access went off: the browser's link is let go (why: the log's).
 window_link_web_close :: proc(why: string) {
 	if link == nil || !link.web do return
-	log_ln("Deckhand: the browser's link is let go:", why)
+	log_ln("Deckhand: the browser's link is let go:", why, "-", link_who())
 	link_send(fmt.tprintf(`{{"v":%d,"type":"web.closed"}}`, PROTOCOL_VERSION))
 	link_linger_start()
 	core_detach_window()
@@ -1540,7 +1540,27 @@ link_linger_tick :: proc(all := false, max_reads := LINGER_READS) -> (reads: int
 // The bytes on the window's socket come from the process checked at accept (§5.3).
 @(private = "file")
 link_sock_peer_ok :: proc(fd: Sock_Fd, data: rawptr) -> bool {
-	return trust.peer_still((^trust.Peer)(data)^, trust.peer_read(fd)) == .Allow
+	now := trust.peer_read(fd)
+	if trust.peer_still((^trust.Peer)(data)^, now) == .Allow do return true
+	link_peer_refused = now // for the log line when the link ends (link_refused_detail)
+	return false
+}
+
+@(private = "file")
+link_peer_refused: trust.Peer
+
+// Which link is attached, for the log (link_log.odin).
+@(private = "file")
+link_who :: proc() -> string {
+	if link == nil do return "no link"
+	return link_who_text(link.hub, link.web, link.hub ? link.hub_from : link.web_name, link.web_device, link.sock != nil && !link.web ? link.sock_peer.pid : 0)
+}
+
+// A link closed for its peer (Peer_Changed): what the check saw instead.
+@(private = "file")
+link_refused_detail :: proc() -> string {
+	if link == nil || link.sock == nil || cw.sock_reason(link.sock) != .Peer_Changed do return ""
+	return peer_change_text(link.sock_peer, link_peer_refused)
 }
 
 // The window's socket for the core loop's poll: fd -1 with no window over core.sock; out: bytes
@@ -1555,7 +1575,7 @@ window_link_fd :: proc() -> (fd: Sock_Fd, out: bool) {
 window_link_io :: proc() {
 	if link == nil || link.sock == nil do return
 	if _, why := cw.sock_flush(link.sock); why != .None {
-		log_ln("Deckhand: the window's connection ended:", why)
+		log_ln(link_end_text(link_who(), why, link_refused_detail()))
 		core_detach_window()
 	}
 }

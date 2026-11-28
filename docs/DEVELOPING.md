@@ -569,8 +569,14 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
   unchanged (`core.replica_process`; runtime a window needs but State lacks goes in
   `State.live` and `Tab.live`, `src/core/core_live.odin`). Its commands go to the core and wait
   at most 250 ms for a result. If the connection ends, the window dials again and relaunches a
-  core if needed (at most 3 times a minute); only a core that said `window.request quit` first
-  ends the window. See `src/client_core.odin` and [PROTOCOL.md](PROTOCOL.md) §5a.
+  core if needed. A failed attempt (the core dropped the new link, sent no state, a hello or peer
+  check failed) is retried after a backoff (250 ms, doubling to 4 s; `client_core_tick`); the
+  window gives up only when no core answered within a dial's 15 s, the outage passed 15 s, or
+  `RECONNECTS_MAX` (6) attempts in a minute were spent. Only a core that said `window.request
+  quit` first ends the window at once. The window writes `run/window.log` (`src/window_log.odin`:
+  `core.Log_File`, stamped, `redact_secrets`, rotated at 1 MB into `.1`), because the app's stderr
+  is `/dev/null`; it raises its soft `RLIMIT_NOFILE` at start (`src/fd_limit.odin`), as the holder
+  does. See `src/client_core.odin` and [PROTOCOL.md](PROTOCOL.md) §5a.
 - **A core or holder from an ended login** (#202, `src/core/login_session.odin`). A process keeps
   the macOS audit session (the login) it started in, and one that outlives a logout keeps running
   in the dead login: its Mach bootstrap lookups fail (`141: Reentrancy avoided`), so what it
@@ -728,7 +734,7 @@ core/panes*.odin, panes_drag.odin, ui_panes.odin  split panes
 actions.odin        user-facing actions (label, shortcut, command): the palette, buttons, menus
 palette.odin, menubar.odin, ui_toolbar.odin, ui.odin  the palette, menu bar, top bar, Clay layout
 theme.odin, font.odin, text_*.odin, icons.odin, logos.odin  looks, text, icons
-native/             Obj-C and C shims: platform, CEF, frames, editor (FSEvents, Trash)
+native/             Obj-C and C shims: platform, CEF, frames, editor (FSEvents without WatchRoot: editor_watch.odin stats each root; Trash)
 platform*.odin, win_os.odin  what the window asks of the OS
 ghostty/            Odin bindings for libghostty-vt
 autotest.odin       DECKHAND_SCRIPT test mode

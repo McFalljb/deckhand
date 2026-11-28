@@ -263,7 +263,16 @@ start fresh.
 **When Deckhand Core stops by itself.** With no window, no tab's program running, no job run, no
 scheduled job and nothing running on another machine it is linked to (whose alerts it shows) for
 10 minutes, it saves and exits; opening Deckhand starts it again. If it
-crashes, the holder starts it again and the window reconnects. If it keeps crashing (or never
+crashes, the holder starts it again and the window reconnects. A reconnect that fails (the core
+answers but drops the window, or sends it nothing, or a core can't be launched for a moment) is
+tried again after a short wait (a quarter of a second, then longer). "Reconnecting to Deckhand's
+background core…" stays at the bottom of the window until it is back ("Reconnected", briefly).
+Meanwhile what needs the core (typing in a terminal, closing or renaming tabs, the Files tree,
+settings) is refused with "Not connected to Deckhand's background core yet. Try again in a
+moment." It is not kept for later; ⌘S still saves an open file. The window gives up only when no
+core answers for 15 seconds (a sleep of the Mac doesn't count) or six tries in a minute fail: then it
+says "Deckhand lost its background core", with the reason, how the connection ended, and where
+its log is; files with unsaved changes stay open so you can save them. If it keeps crashing (or never
 comes up), the window offers **Use Previous Core** (the one from before the last update) or **Run
 Sessions in Deckhand Itself**. The palette's **Use previous core** does the first at any time;
 that choice holds until you install another version.
@@ -2927,8 +2936,14 @@ whose program exited before it reported its conversation id is not saved. Start 
 it is stopped once. No sessions are lost.
 
 **Where are the logs?** `commands.log` in the data dir (every command and its result), and
-`run/core.log` and `run/holder.log` (what Deckhand Core and the session holder print). The
-window's errors go to the terminal you started Deckhand from. A pi session's own logs are pi's.
+`run/core.log` and `run/holder.log` (what Deckhand Core and the session holder print).
+`run/window.log` is the window's own: each time its link to the core ended and why, each
+reconnect and its result, a give-up's full reason, another machine or a browser taking the
+sessions, and the file watcher's failures. It is kept under 1 MB (the one before is
+`window.log.1`), and key-, token- and password-shaped text in it is redacted. When a window, a
+browser or another machine's link to the core ends, `core.log` says which one (its pid, or a
+browser's name and device), whether the core or the other side closed it, and why. A pi
+session's own logs are pi's.
 
 **Deckhand says it can't start its background core.** The message says why. **Use Previous Core**
 goes back to the core from before the last update; **Run Sessions in Deckhand Itself** turns off

@@ -28,8 +28,15 @@ Toast :: struct {
 	action: string, // the button's label ("" = none; a constant)
 	on_action: proc(arg: u64),
 	arg:   u64,
+	sticky: bool, // stays until replaced or cleared (the window's reconnecting notice)
 }
 toast: Toast
+
+// A toast that stays until another replaces it or toast_clear (client_core_tick's reconnecting).
+toast_show_sticky :: proc(text: string) {
+	toast_show(text)
+	toast.sticky = true
+}
 
 // A press on a toast's button: its release is the button's too.
 @(private = "file")
@@ -76,7 +83,7 @@ toast_clear :: proc() {
 // window is hidden or minimised (a separate core's, or a timer's) waits: its few seconds start
 // when the window shows.
 toast_tick :: proc() -> bool {
-	if toast.text == "" do return false
+	if toast.text == "" || toast.sticky do return false
 	if toast.until == {} {
 		if app_is_hidden() || window_minimised() do return false
 		toast.until = time.tick_add(time.tick_now(), toast.err ? TOAST_TIME_ERR : (toast.action != "" ? TOAST_TIME_ACTION : TOAST_TIME))

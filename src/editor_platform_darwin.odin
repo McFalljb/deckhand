@@ -17,16 +17,17 @@ foreign import pdeditor {
 
 @(default_calling_convention = "c")
 foreign pdeditor {
-	dh_fsw_set :: proc(paths: [^]cstring, n: c.int, cb: proc "c" (path: cstring, flags: u32)) ---
+	dh_fsw_set :: proc(paths: [^]cstring, n: c.int, cb: proc "c" (path: cstring, flags: u32)) -> c.int ---
 	dh_trash :: proc(path: cstring, where_: [^]u8, where_len: c.int) -> c.int ---
 	dh_reveal :: proc(path: cstring) ---
 }
 
-// Watches these folders (recursively); events arrive on another thread.
-fs_watch_set :: proc(folders: []string, cb: proc "c" (path: cstring, flags: u32)) {
+// Watches these folders (recursively); events arrive on another thread. False: the stream could
+// not be made or started (FSEvents says why in the unified log: EMFILE, a path it refused).
+fs_watch_set :: proc(folders: []string, cb: proc "c" (path: cstring, flags: u32)) -> bool {
 	cs := make([]cstring, len(folders), context.temp_allocator)
 	for f, i in folders do cs[i] = strings.clone_to_cstring(f, context.temp_allocator)
-	dh_fsw_set(raw_data(cs), c.int(len(cs)), cb)
+	return dh_fsw_set(raw_data(cs), c.int(len(cs)), cb) == 0
 }
 
 // Moves path to the Trash; where it went is core.fs_trash_where (restore_path).

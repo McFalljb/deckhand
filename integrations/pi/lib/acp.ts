@@ -1,0 +1,474 @@
+// A small client for the Agent Client Protocol (ACP: JSON-RPC 2.0, one message per line over a
+// child's stdio), enough to drive Google's Antigravity CLI (`agy acp`) from pi
+// (extensions/antigravity). Written for agy as t3code drives it (apps/server/src/provider/acp/
+// AntigravityAcpSupport.ts, packages/effect-acp), without its dependencies:
+//
+// - Identity: clientInfo `deckhand-pi`. Nothing here claims to be another client, sends a header,
+//   reads agy's stored sign-in or talks to Google: agy runs the whole turn (model, tools, its own
+//   system prompt) and keeps its credential itself.
+// - Capabilities: none. No fs (read or write) and no terminal, so agy uses its own tools, and every
+//   request it makes of the client is answered, by the connection's `answer` (a session's turn:
+//   lib/agy-approvals.ts, docs/HARNESSES.md §3a) or else declined (answerAgentRequest): permission
+//   requests rejected, ask_question (`interaction_…` tool calls) cancelled, elicitations declined,
+//   anything else "method not found".
+// - The request carries both ACP shapes (v2's `info`/`capabilities` and v1's `clientInfo`/
+//   `clientCapabilities`), as t3code's does; agy 1.5.18 answers `protocolVersion: 1` in the v1
+//   shape (agentInfo, agentCapabilities, some fields twice in snake_case), which is how it is read.
+//   (t3code's effect-acp notes older builds answering 2 with the v1 shape.)
+// - Version: agentInfo.version (1.5.18 reports a bare `1.5.18`; some builds `agy_acp_server_1.5.12`);
+//   below 1.5.1 is refused (older runtimes
+//   allowlist the editors their models serve: t3code OPEN_MODEL_ACCESS_RELEASE). Unparseable passes.
+// - agy prints its sign-in link on stdout or stderr when it has no sign-in ("Open the following
+//   link to authenticate the ACP server: <url>"); such a line is not JSON-RPC and means "sign in".
+import { type ChildProcess, spawn } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+export const CLIENT_INFO = { name: "deckhand-pi", title: "Deckhand (pi)", version: "0.1.0" } as const;
+export const AGY_MIN_VERSION = "1.5.1";
+export const AGY_RECOMMENDED_VERSION = "1.5.18";
+/** What /antigravity says when no agy is found (extensions/antigravity). */
+export const NOT_FOUND = `Antigravity CLI (agy) not found. Install it from https://antigravity.google/docs/getting-started (${AGY_RECOMMENDED_VERSION} or newer), or set its path with /antigravity path <abs path>`;
+/** Overrides the PATH lookup with an absolute path to agy (or a stand-in, in tests). */
+export const SIGN_IN_PREFIX = "Open the following link to authenticate the ACP server: ";
+const MAX_LINE = 16 * 1024 * 1024;
+
+/** agy's version as [major, minor, patch] (`agy_acp_server_1.5.12`, `v1.5.12`, `1.5.12`), else undefined. */
+export function parseAgyVersion(v: unknown): [number, number, number] | undefined {
+	const m = /^(?:v|agy_acp_server_)?(\d+)\.(\d+)\.(\d+)/.exec(typeof v === "string" ? v.trim() : "");
+	return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
+}
+
+/** Whether a reported version is below the minimum. An unparseable or missing one is not. */
+export function agyTooOld(v: unknown, min = AGY_MIN_VERSION): boolean {
+	const got = parseAgyVersion(v), want = parseAgyVersion(min)!;
+	if (!got) return false;
+	for (let i = 0; i < 3; i++) if (got[i] !== want[i]) return got[i] < want[i];
+	return false;
+}
+
+function executable(p: string): boolean {
+	try {
+		const st = fs.statSync(p);
+		if (!st.isFile()) return false;
+		fs.accessSync(p, fs.constants.X_OK);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Whether `p` can be agy's path setting: an absolute path to an executable file (never looked up). */
+export const usableAgyPath = (p: string | undefined): p is string => !!p && path.isAbsolute(p) && executable(p);
+
+/**
+ * The agy binary: `agy` on PATH, as t3code looks it up (`antigravity` may be the Antigravity IDE's
+ * launcher, so any other name is left to `/antigravity path`). A few stats, no process started. The user's own path setting (`/antigravity path`) comes first: the extension
+ * passes it as `configured` when it is usable.
+ */
+export function findAgy(env: NodeJS.ProcessEnv = process.env, configured?: string): string | undefined { // env-read-ok: findAgy reads PATH only
+	if (usableAgyPath(configured)) return configured;
+	const dirs = (env.PATH ?? "").split(path.delimiter).filter((d) => d && path.isAbsolute(d));
+	for (const d of dirs) if (executable(path.join(d, "agy"))) return path.join(d, "agy");
+	return undefined;
+}
+
+/** The environment agy runs with: pi's, without Deckhand's own variables. */
+export function agyEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv { // env-read-ok: agy's environment is pi's, DECKHAND_* taken out
+	return Object.fromEntries(Object.entries(env).filter(([k]) => !k.startsWith("DECKHAND_")));
+}
+
+/** Variables that pick agy's credential or profile, or change how it starts: never passed through (t3code removedEnvironmentKeys). */
+export const REMOVED_ENV = new Set([
+	"GEMINI_API_KEY",
+	"GOOGLE_API_KEY",
+	"GOOGLE_APPLICATION_CREDENTIALS",
+	"GOOGLE_CLOUD_PROJECT",
+	"GOOGLE_CLOUD_LOCATION",
+	"GOOGLE_CLOUD_QUOTA_PROJECT",
+	"GOOGLE_GENAI_USE_VERTEXAI",
+	"GCLOUD_PROJECT",
+	"CLOUDSDK_CORE_PROJECT",
+	"AGY_ACP_CCPA_PROJECT",
+	"AGY_ACP_ENABLE_OAUTH",
+	"GEMINI_HOME",
+	"AGY_ACP_FORCE_FILE_STORAGE",
+	"AGY_CLI_FORCE_FILE_TOKEN_STORAGE",
+	"AGY_CLI_DISABLE_AUTO_UPDATE",
+	"BROWSER",
+	"PYTHONUNBUFFERED",
+	"ELECTRON_RUN_AS_NODE",
+	"CHROME_CRASHPAD_PIPE_NAME",
+]);
+
+/**
+ * A variable that may hold another service's secret (pi's provider keys, cloud and forge tokens):
+ * never handed to agy, whose shell tools run with it. Matched case-insensitively by name.
+ */
+export const secretEnvName = (name: string) => {
+	const K = name.toUpperCase();
+	return (
+		/(^|_)(API_?KEYS?|KEYS?|TOKENS?|SECRETS?|PASSWORD|PASSWD|PASS|CREDENTIALS?|AUTH|DSN|COOKIES?|PRIVATE_KEY)$/.test(K) ||
+		/_ACCESS_KEY|_AUTH_TOKEN|AUTHTOKEN/.test(K) ||
+		K === "DATABASE_URL" ||
+		/^(AWS|AZURE|OPENAI|ANTHROPIC|GITHUB|GH|GITLAB|HF|HUGGINGFACE|MISTRAL|GROQ|XAI|OPENROUTER|DEEPSEEK|COHERE|CEREBRAS|ZAI|TOGETHER|FIREWORKS|PERPLEXITY|COPILOT|VERCEL|CLOUDFLARE|PI)_/.test(K)
+	);
+};
+
+/**
+ * pi's environment with nothing in it for agy to pick a sign-in by or to leak (REMOVED_ENV, any
+ * GOOGLE_* and gcloud's, Deckhand's own, anything secretEnvName takes for a secret): what an agy
+ * started without an account's environment (agyEnvFor) gets.
+ */
+export function scrubbedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv { // env-read-ok: agy's environment is pi's, filtered
+	const out: NodeJS.ProcessEnv = {};
+	for (const [k, v] of Object.entries(env)) {
+		const K = k.toUpperCase();
+		if (REMOVED_ENV.has(K) || K.startsWith("GOOGLE_") || K.startsWith("DECKHAND_") || K === "CLOUDSDK_CONFIG" || K.startsWith("CLOUDSDK_AUTH_") || secretEnvName(K)) continue;
+		out[k] = v;
+	}
+	return out;
+}
+
+/**
+ * The environment every agy Deckhand starts runs with: `env`, with its run folder as TMPDIR and
+ * agy's self-update off (agy updates itself during interactive runs; Deckhand never lets it, a
+ * session, a probe or the login alike).
+ */
+export function spawnEnv(env: NodeJS.ProcessEnv, runDir: string | undefined): NodeJS.ProcessEnv {
+	return { ...env, ...(runDir ? { TMPDIR: runDir } : {}), AGY_CLI_DISABLE_AUTO_UPDATE: "true" };
+}
+
+export class AcpError extends Error {
+	code?: number;
+	data?: unknown;
+	constructor(message: string, code?: number, data?: unknown) {
+		super(message);
+		this.code = code;
+		this.data = data;
+	}
+}
+/** agy has no sign-in (it printed its link, or answered auth_required). */
+export class SignInRequired extends AcpError {}
+
+/** ACP's auth_required error code. */
+export const AUTH_REQUIRED = -32000;
+
+export type AgentAnswer = { result?: unknown; error?: { code: number; message: string } };
+
+/**
+ * The answer to a request agy makes of the client when nothing else answers it (no turn running, a
+ * probe): every approval rejected (reject_once, else cancelled), a question (agy's ask_question:
+ * `interaction_…`, choices rather than approvals) cancelled, elicitations declined.
+ */
+export function answerAgentRequest(method: string, params: any): AgentAnswer {
+	if (method === "session/request_permission") {
+		const question = String(params?.toolCall?.toolCallId ?? "").startsWith("interaction_");
+		const reject = question ? undefined : (params?.options ?? []).find((o: any) => o?.kind === "reject_once" && typeof o.optionId === "string" && o.optionId.trim());
+		return { result: { outcome: reject ? { outcome: "selected", optionId: reject.optionId } : { outcome: "cancelled" } } };
+	}
+	if (method === "session/elicitation" || method === "_session/elicitation" || method === "elicitation/create") return { result: { action: "decline" } };
+	return { error: { code: -32601, message: `Method not found: ${method}` } };
+}
+
+/** A sign-in link in one line of agy's output, or undefined. */
+export function signInLink(line: string): string | undefined {
+	const s = line.trim();
+	if (s.startsWith(SIGN_IN_PREFIX)) return s.slice(SIGN_IN_PREFIX.length).trim();
+	return undefined;
+}
+
+/** How long closing waits: for agy to end after its stdin closed, then after SIGTERM (then SIGKILL). */
+export interface CloseTimes {
+	stdinWaitMs?: number;
+	termGraceMs?: number;
+}
+// About 3 s in all before SIGKILL: pi's session_shutdown waits for every agy to end (all at once),
+// and so does quitting pi. (It was 1 s + 5 s: an agy ignoring both stdin and SIGTERM held pi 6 s.)
+export const CLOSE_STDIN_WAIT_MS = 1000;
+export const CLOSE_TERM_GRACE_MS = 2000;
+
+// agy runs as the leader of its own process group (spawned detached), so what it starts (its
+// tools, its language servers) is ended with it: every signal below goes to the whole group.
+
+/** Signals agy's process group (`pid` leads it). Never a bare pid: that one may be reused. */
+export function signalGroup(pid: number | undefined, sig: NodeJS.Signals): void {
+	if (!pid) return;
+	try {
+		process.kill(-pid, sig);
+	} catch {}
+}
+
+/** Whether process group `pid` still has members (its leader, or what it left behind). */
+export function groupAlive(pid: number | undefined): boolean {
+	if (!pid) return false;
+	try {
+		process.kill(-pid, 0);
+		return true;
+	} catch (e: any) {
+		return e?.code === "EPERM";
+	}
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const GROUP_GRACE_MS = 500;
+
+/** Ends what is left of a group whose leader has ended: SIGTERM, then SIGKILL after graceMs. Resolves once it is empty (or given up on). */
+export async function reapGroup(pid: number | undefined, graceMs = GROUP_GRACE_MS): Promise<void> {
+	if (!groupAlive(pid)) return;
+	signalGroup(pid, "SIGTERM");
+	for (const end = Date.now() + graceMs; groupAlive(pid) && Date.now() < end; ) await pause(25);
+	if (!groupAlive(pid)) return;
+	signalGroup(pid, "SIGKILL");
+	for (const end = Date.now() + 1000; groupAlive(pid) && Date.now() < end; ) await pause(25);
+}
+
+/**
+ * Ends a child gently: its stdin first (agy ends its session and exits: 1.5.18 within 200 ms),
+ * SIGTERM if it is still there after stdinWaitMs, SIGKILL only after a further termGraceMs.
+ */
+export async function endChild(child: ChildProcess, exited: Promise<unknown>, t: CloseTimes = {}): Promise<void> {
+	const running = () => child.exitCode === null && child.signalCode === null;
+	if (!running()) return;
+	let gone = false;
+	void exited.then(() => (gone = true));
+	const wait = (ms: number) =>
+		new Promise<void>((r) => {
+			const timer = setTimeout(r, ms);
+			void exited.then(() => {
+				clearTimeout(timer);
+				r();
+			});
+		});
+	try {
+		child.stdin?.end();
+	} catch {}
+	await wait(t.stdinWaitMs ?? CLOSE_STDIN_WAIT_MS);
+	if (gone || !running()) return;
+	signalGroup(child.pid, "SIGTERM");
+	await wait(t.termGraceMs ?? CLOSE_TERM_GRACE_MS);
+	if (gone || !running()) return;
+	signalGroup(child.pid, "SIGKILL");
+	await exited;
+}
+
+/** A process's own TMPDIR folder (lib/agy-accounts.ts runDir): marked with agy's pid while it runs, removed when it ends. */
+export function markRun(dir: string | undefined, pid: number | undefined) {
+	if (!dir || !pid) return;
+	try {
+		fs.writeFileSync(path.join(dir, "agy.pid"), String(pid), { mode: 0o600 });
+	} catch {}
+}
+export function endRun(dir: string | undefined) {
+	if (!dir) return;
+	try {
+		fs.rmSync(dir, { recursive: true, force: true });
+	} catch {}
+}
+
+export interface AcpConnectionOptions {
+	cwd: string;
+	/** Makes this process's own TMPDIR folder, right before agy starts (never on a path that does not start it): its TMPDIR, marked with its pid, removed when it ends. */
+	makeRunDir?: () => string;
+	env?: NodeJS.ProcessEnv;
+	/** Each session/update notification's params. */
+	onUpdate?: (params: any) => void;
+	/** Answers a request agy made of the client (it may wait for the user); answerAgentRequest when absent, or when it throws. */
+	answer?: (method: string, params: any) => AgentAnswer | Promise<AgentAnswer>;
+	/** Each request agy made of the client, after it was answered (method, params, the answer). */
+	onAgentRequest?: (method: string, params: any, answer: unknown) => void;
+	/** agy printed a sign-in link. */
+	onSignIn?: (url: string) => void;
+	/** The process ended (after start). */
+	onExit?: (code: number | null, signal: NodeJS.Signals | null) => void;
+	spawnImpl?: typeof spawn;
+}
+
+type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; method: string };
+
+/** One agy process and its JSON-RPC stream. */
+export class AcpConnection {
+	readonly command: string;
+	readonly args: string[];
+	private child?: ChildProcess;
+	private nextId = 1;
+	private pending = new Map<number, Pending>();
+	private buf = "";
+	private ended?: Error;
+	private opts: AcpConnectionOptions;
+	readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+	/** Resolves once agy's group is empty and its run folder removed (after exit). */
+	private reaped: Promise<void> = Promise.resolve();
+	private markExited!: (x: { code: number | null; signal: NodeJS.Signals | null }) => void;
+
+	constructor(command: string, args: string[], opts: AcpConnectionOptions) {
+		this.command = command;
+		this.args = args;
+		this.opts = opts;
+		this.exited = new Promise((r) => (this.markExited = r));
+	}
+
+	get alive(): boolean {
+		return !!this.child && !this.ended;
+	}
+
+	start(): void {
+		const runDir = this.opts.makeRunDir?.();
+		const env = this.opts.env ?? scrubbedEnv();
+		let child: ChildProcess;
+		try {
+			child = (this.opts.spawnImpl ?? spawn)(this.command, this.args, { cwd: this.opts.cwd, env: spawnEnv(env, runDir), stdio: ["pipe", "pipe", "pipe"], detached: true });
+		} catch (e) {
+			endRun(runDir);
+			throw e;
+		}
+		this.child = child;
+		markRun(runDir, child.pid);
+		child.stdout!.setEncoding("utf8");
+		child.stdout!.on("data", (s: string) => this.onData(s));
+		let errBuf = "";
+		child.stderr!.setEncoding("utf8");
+		child.stderr!.on("data", (s: string) => {
+			// only sign-in links are read; the rest of agy's log stays out of pi
+			const lines = (errBuf + s).split("\n");
+			errBuf = (lines.pop() ?? "").slice(-MAX_LINE);
+			for (const l of lines) this.noticeLink(l);
+		});
+		child.stdin!.on("error", () => {}); // EPIPE after a crash: reported by "exit"
+		child.on("error", (e) => {
+			this.fail(new AcpError(`Antigravity (agy) could not start: ${e.message}`));
+			if (child.pid === undefined) endRun(runDir);
+		});
+		child.on("exit", (code, signal) => {
+			// what agy left running in its group ends too; its run folder goes once the group is empty
+			this.reaped = reapGroup(child.pid).then(() => endRun(runDir));
+			this.fail(new AcpError(`Antigravity (agy) ended${code !== null ? ` with exit code ${code}` : signal ? ` (${signal})` : ""}`));
+			this.markExited({ code, signal });
+			this.opts.onExit?.(code, signal);
+		});
+	}
+
+	private noticeLink(line: string) {
+		const url = signInLink(line);
+		if (url) this.opts.onSignIn?.(url);
+	}
+
+	private onData(s: string) {
+		this.buf += s;
+		if (this.buf.length > MAX_LINE && !this.buf.includes("\n")) {
+			this.buf = "";
+			this.fail(new AcpError("Antigravity (agy) sent a line that is too long"));
+			this.close();
+			return;
+		}
+		let i: number;
+		while ((i = this.buf.indexOf("\n")) >= 0) {
+			const line = this.buf.slice(0, i).replace(/\r$/, "");
+			this.buf = this.buf.slice(i + 1);
+			this.onLine(line);
+		}
+	}
+
+	private onLine(line: string) {
+		if (!line.trim()) return;
+		let msg: any;
+		try {
+			msg = JSON.parse(line);
+		} catch {
+			this.noticeLink(line); // agy's own text on stdout: only its sign-in link means anything
+			return;
+		}
+		if (!msg || typeof msg !== "object" || msg.jsonrpc !== "2.0") return;
+		if (typeof msg.method === "string" && msg.id !== undefined && msg.id !== null) {
+			// answered when the answer is ready (a dialog may be open meanwhile; agy goes on sending updates)
+			const { method, params, id } = msg;
+			const fallback = () => answerAgentRequest(method, params);
+			let pending: AgentAnswer | Promise<AgentAnswer>;
+			try {
+				pending = this.opts.answer ? this.opts.answer(method, params) : fallback();
+			} catch {
+				pending = fallback();
+			}
+			void Promise.resolve(pending)
+				.catch(fallback)
+				.then((answer) => {
+					this.write({ jsonrpc: "2.0", id, ...answer });
+					this.opts.onAgentRequest?.(method, params, answer.result ?? answer.error);
+				});
+			return;
+		}
+		if (typeof msg.method === "string") {
+			if (msg.method === "session/update") this.opts.onUpdate?.(msg.params);
+			return;
+		}
+		const p = typeof msg.id === "number" ? this.pending.get(msg.id) : undefined;
+		if (!p) return;
+		this.pending.delete(msg.id);
+		if (msg.error) {
+			const e = msg.error;
+			const Err = e?.code === AUTH_REQUIRED ? SignInRequired : AcpError;
+			p.reject(new Err(`Antigravity: ${typeof e?.message === "string" && e.message ? e.message : "request failed"} (${p.method})`, e?.code, e?.data));
+		} else p.resolve(msg.result ?? {});
+	}
+
+	private write(msg: unknown) {
+		if (!this.child || this.ended) return;
+		this.child.stdin!.write(`${JSON.stringify(msg)}\n`);
+	}
+
+	/** One request; rejects on its error, the process's end, or `timeoutMs`. */
+	request(method: string, params: unknown, timeoutMs = 0): Promise<any> {
+		if (this.ended) return Promise.reject(this.ended);
+		if (!this.child) return Promise.reject(new AcpError("Antigravity (agy) is not started"));
+		const id = this.nextId++;
+		return new Promise((resolve, reject) => {
+			let timer: NodeJS.Timeout | undefined;
+			const done = (f: (x: any) => void) => (x: any) => {
+				if (timer) clearTimeout(timer);
+				f(x);
+			};
+			this.pending.set(id, { resolve: done(resolve), reject: done(reject), method });
+			if (timeoutMs > 0)
+				timer = setTimeout(() => {
+					if (this.pending.delete(id)) reject(new AcpError(`Antigravity (agy) did not answer ${method} in ${Math.round(timeoutMs / 1000)} s`));
+				}, timeoutMs);
+			this.write({ jsonrpc: "2.0", id, method, params });
+		});
+	}
+
+	notify(method: string, params: unknown): void {
+		this.write({ jsonrpc: "2.0", method, params });
+	}
+
+	private fail(e: Error) {
+		if (this.ended) return;
+		this.ended = e;
+		for (const p of this.pending.values()) p.reject(e);
+		this.pending.clear();
+	}
+
+	/** SIGTERM now, synchronously (pi is exiting). */
+	killNow(): void {
+		this.fail(new AcpError("Antigravity (agy) was stopped"));
+		signalGroup(this.child?.pid, "SIGTERM"); // the whole group, at once; its run folder is left to the next sweep
+	}
+
+	/** Ends the process gently (endChild): stdin, then SIGTERM, then SIGKILL. */
+	close(t: CloseTimes = {}): Promise<void> {
+		const child = this.child;
+		this.fail(new AcpError("Antigravity (agy) was stopped"));
+		if (!child) return Promise.resolve();
+		return endChild(child, this.exited, t).then(() => this.reaped);
+	}
+}
+
+/** initialize's request: v2's fields plus v1's (clientCapabilities, clientInfo), as agy accepts. */
+export function initializeParams() {
+	return {
+		protocolVersion: 2,
+		info: CLIENT_INFO,
+		capabilities: {},
+		clientInfo: CLIENT_INFO,
+		clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+	};
+}

@@ -517,6 +517,10 @@ Command :: union {
 	Rename_Claude_Account,
 	Remove_Claude_Account,
 	Set_Claude_Account_Default,
+	Add_Antigravity_Account,
+	Rename_Antigravity_Account,
+	Remove_Antigravity_Account,
+	Set_Antigravity_Account_Default,
 	Claude_Rename,
 	Add_Project,
 	Select_Project,
@@ -828,6 +832,10 @@ Command :: union {
 	Claude_Reload_Watch,
 	Claude_Reload_Kick,
 	Claude_Restart_Anyway,
+	// Install agy… (agy_install.odin)
+	Install_Agy,
+	Agy_Install_Step,
+	Agy_Install_Done,
 }
 
 // Widgets that can take keyboard focus (editor_*: the editor's find,
@@ -1412,6 +1420,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Rescan:
 		if scan_thread != nil do return fail("a rescan is already running"), false
 		claude_accounts_refresh() // Claude Code's config folders again, then each one's projects/ (claude_disk.odin)
+		agy_accounts_refresh() // and agy's profiles (agy_accounts.odin)
 		claude_scan_prepare()
 		scan_thread = thread.create_and_start_with_poly_data(request_id, scan_worker)
 		rescan_at = time.tick_now()
@@ -1431,6 +1440,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		codex_recheck() // and Codex (codex.odin)
 		pi_recheck() // and pi (harness.odin)
 		claude_accounts_refresh() // and CLAUDE_CONFIG_DIR may name another default (claude_accounts.odin)
+		agy_accounts_refresh() // and ~/.gemini, agy's default profile (agy_accounts.odin)
 		harness_checklist_forget() // the coding agents checklist looks again when it next shows (harness_manifest.odin)
 		err := ""
 		if c.ok {
@@ -2017,6 +2027,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			}
 		}
 		return r, ch
+	case Add_Antigravity_Account, Rename_Antigravity_Account, Remove_Antigravity_Account, Set_Antigravity_Account_Default:
+		return agy_account_apply(cmd, caller) // agy_accounts.odin: accounts.json, under its lock
 	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
 		return claude_extra_apply(cmd, caller, request_id) // claude_panels.odin
 	case Claude_Model_Report:
@@ -2049,6 +2061,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return mark_all_read_apply(caller, request_id)
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
 		return update_apply(cmd, caller)
+	case Install_Agy, Agy_Install_Step, Agy_Install_Done:
+		return agy_install_apply(cmd, caller) // agy_install.odin
 	case Set_Home_Dir, Set_Folder, Setup_Sheet:
 		return folders_apply(cmd, caller)
 	case Job_List, Job_Runs, Job_Run_Now, Job_Stop, Jobs_Pause, Jobs_Resume, Job_Create, Job_Save, Job_Mark_Read, Job_Set_Enabled, Job_Delete, Job_Open, Set_Pi_Path, Set_Job_Limits, Jobs_Sync, Jobs_Tick, Job_Run_Done, Jobs_Env:
@@ -2351,6 +2365,9 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok && x.skip_permissions == y.skip_permissions && x.harness == y.harness
 	case Update_Install:
 		_, ok := b.(Update_Install)
+		return ok
+	case Install_Agy:
+		_, ok := b.(Install_Agy)
 		return ok
 	case Reload_File:
 		y, ok := b.(Reload_File)

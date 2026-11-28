@@ -603,7 +603,7 @@ export default function (pi: ExtensionAPI) {
 		const requestId = String(req?.requestId ?? "");
 		const answer = (o: { result: R } | { error: string }) => pi.events.emit(`${CONTROL_EVENT}:reply:${requestId}`, o);
 		if (!requestId) return answer({ error: "a requestId is required" });
-		// the browser tools' commands only, and never on Home's own tab (as desk_run)
+		// the browser, app and desk_show tools' commands only (BROWSER_COMMANDS), and never on Home's own tab (as desk_run)
 		const why = browserRefusal(req?.command) ?? refusal(req.command, undefined, own());
 		if (why) return answer({ error: why });
 		const ac = new AbortController();

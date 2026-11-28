@@ -13,6 +13,7 @@ written to `~/.pi`, and pi outside Deckhand runs exactly as before. It needs pi 
 | `desk` | Atlas's tools: `desk_state`, `desk_run`, `desk_prompt`, `desk_wait`, `desk_watch`, `desk_events`, `app_call`, `app_screenshot`, `app_input`, `app_events` | also `DECKHAND_CONTROL_TOKEN` (Home only) |
 | `browser` | `browser_*` (read and act), `desk_show` (show the user a file in a tab next to the pi tab: Markdown rendered, others in the editor) and a pi tab's `app_*` tools, for its own session's tabs | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
 | `panels` | The Todos (rpiv-todo), Subagents (pi-subagents) and Shells (`kit:shell:rows`) panels | `DECKHAND_SOCKET` + `DECKHAND_TOKEN`, TUI |
+| `antigravity` | Google Antigravity through the user's own `agy acp` (ACP): a provider per account (`antigravity`, `antigravity-<name>`, each with its own agy profile and sign-in method) and their models in `/model`, `/antigravity` (status, add, login, logout, remove, models, approvals, path; `/antigravity login` alone signs in the default account); the `antigravity` tool (hand a self-contained task to a fresh agy session; agy says whether an account is signed in, never a file check); the default account signs in and runs in agy's keychain, the others in their own profiles; agy's approvals answered as pi's own tools are (allowed once; guardrails rules, read-only and credential files as in `lib/agy-approvals.ts`; `/antigravity approvals ask` confirms everything; [HARNESSES.md §3a](../../docs/HARNESSES.md#3a-antigravity-in-pi-tabs-preview)) | an agy binary found (the path set by `/antigravity path`, else `agy` on `PATH`); otherwise only `/antigravity` (where to get agy; setting its path turns the rest on in the same session) |
 | `guardrails` | Optional, on by default. pi-kit's guardrails: the user's ask/block rules on shell commands (pi-kit's config files), read-only with `PI_KIT_READONLY=1`, secrets redacted from tool output, `/guardrails` | always; steps back for another guardrails (below) |
 | `shell` | Optional, on by default. pi-kit's shell: `bash_bg`, `monitor`, `wake_later`, `shell_stop`, `shell_list`, `/shells`; rows on `kit:shell:rows` (the Shells panel, the bridge's blockers) | not in read-only sessions |
 | `notes` | Optional, off by default. pi-kit's notes reminder: past `PI_KIT_NOTES_REMIND_PERCENT` (75) of the context, one note to update the session note (in `PI_KIT_NOTES_DIR` when set) | not in pi-subagents children |
@@ -70,9 +71,10 @@ blocks edits, writes and mutating bash.
 
 ## Tests
 
-`node --test test/unit.test.ts test/deckhand.test.ts test/kit.test.ts test/optional.test.ts test/conflicts.test.ts test/mode.test.ts`
+`node --test test/unit.test.ts test/deckhand.test.ts test/kit.test.ts test/optional.test.ts test/conflicts.test.ts test/mode.test.ts test/antigravity.test.ts test/agy-approvals.test.ts`
 (Node 22.18 or newer strips the types; no `node_modules`, no pi). `./build.sh test` runs them.
-They never start pi. `kit.test.ts` is pi-kit's tests of the guardrails and shell code;
+They never start pi, or a real agy: `antigravity.test.ts` drives the ACP client, sign-in and provider
+against `test/fake-agy.mjs`, a stand-in agy, and `agy-approvals.test.ts` the approvals. `kit.test.ts` is pi-kit's tests of the guardrails and shell code;
 `conflicts.test.ts` loads the extensions into a model of pi's own name rules (`test/pi-rules.ts`,
 from pi's source: a tool or flag name registered by two extensions while loading stops pi).
 `mode.test.ts` loads the bridge and a stand-in sidebar into that model against a fake Deckhand on a

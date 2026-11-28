@@ -1195,6 +1195,7 @@ confirm_pending :: proc(token: string) {
 		case core.Machine_Remove: cmd = core.Machine_Remove{no = c.no, confirm = token}
 		case core.Set_Machines_Reachable: cmd = core.Set_Machines_Reachable{on = c.on, confirm = token}
 		case core.Set_Web_Access: cmd = core.Set_Web_Access{on = c.on, confirm = token}
+		case core.Install_Agy: cmd = core.Install_Agy{confirm = token}
 		}
 		if p.caller.kind == .UI && !p.caller.hub do closed_tab_answered(p.command, true) // the user's own close: ⇧⌘T (closed_tabs.odin)
 		ui_do(cmd)

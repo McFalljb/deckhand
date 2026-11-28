@@ -377,6 +377,13 @@ harness_step_event :: proc(e: ^sapp.Event) -> bool {
 // A Coding agents row's button: the sheet's checklist. False: not such a row.
 harness_settings_button :: proc(path: string) -> bool {
 	if !strings.has_prefix(path, core.HARNESS_SETTINGS_ROW) do return false
+	// Antigravity's Install agy… / Update agy…: the core asks first (the bar), then downloads
+	if it := core.harness_item(path[len(core.HARNESS_SETTINGS_ROW):]); it != nil && core.HARNESS_MANIFEST[it.row].detect == .Agy {
+		if offer, _ := core.agy_install_offer(it^); offer != .None {
+			ui_do_menu(core.Install_Agy{}, offer == .Update ? "Update agy" : "Install agy") // asks first; a refusal is shown
+			return true
+		}
+	}
 	ui_do(core.Setup_Sheet{open = true})
 	return true
 }

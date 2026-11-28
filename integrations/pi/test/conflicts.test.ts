@@ -5,8 +5,9 @@
 // /guardrails to another copy; the required desk and browser register at session_start and win by
 // load order (`-e` first).
 // node --test test/conflicts.test.ts (Node 22.18+ strips the types; never runs pi).
+import { assertTempData } from "./temp-home.ts"; // first: HOME and XDG_DATA_HOME in a temp folder (antigravity's data dir)
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -71,14 +72,24 @@ test("pi's rule: two extensions that register one tool name while loading stop p
 });
 
 test("no bundled extension registers a tool or flag while loading (pi would refuse to start next to an extension with the same name)", async () => {
-	for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c" }, {}])
-		for (const name of ["bridge", "desk", "browser", "panels", "guardrails", "shell", "notes"])
-			await withEnv(env, async () => {
-				const pi = piRules();
-				await pi.load(ourPath(name), await ours(name));
-				const [x] = pi.extensions;
-				assert.deepEqual([...x.tools.keys(), ...x.flags.keys()], [], `${name} with ${Object.keys(env).join(", ") || "no Deckhand variables"}`);
-			});
+	// antigravity active: a stand-in agy on PATH, never started while loading
+	const bin = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-bin-"));
+	symlinkSync(path.join(ROOT, "test/fake-agy.mjs"), path.join(bin, "agy"));
+	assertTempData();
+	try {
+		// the stand-in agy first on PATH in every case: a test never finds (or starts) the real one
+		const PATH = `${bin}:/usr/bin:/bin`;
+		for (const env of [{ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", PATH }, { DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", DECKHAND_CONTROL_TOKEN: "c", PATH }, { PATH }, { PATH: bin }])
+			for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"])
+				await withEnv(env, async () => {
+					const pi = piRules();
+					await pi.load(ourPath(name), await ours(name));
+					const [x] = pi.extensions;
+					assert.deepEqual([...x.tools.keys(), ...x.flags.keys()], [], `${name} with ${Object.keys(env).join(", ") || "no Deckhand variables"}`);
+				});
+	} finally {
+		rmSync(bin, { recursive: true, force: true });
+	}
 });
 
 test("shell: next to a stand-in pi-kit shell from the user's settings, pi starts with one copy of each tool (theirs) and one /shells; ours says so", async () => {
@@ -170,9 +181,11 @@ test("loadedTools, loadedCommands: who else provides a name; nothing when pi can
 });
 
 test("overlap: ours next to pi-kit's own extensions (shell, guardrails, notes, desk, desk-browser, desk-bridge), pi starts", { skip: noKit }, async () => {
-	await withEnv({ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t" }, async () => {
+	const bin = mkdtempSync(path.join(os.tmpdir(), "deckhand-agy-bin-"));
+	symlinkSync(path.join(ROOT, "test/fake-agy.mjs"), path.join(bin, "agy"));
+	await withEnv({ DECKHAND_SOCKET: "/nonexistent/x.sock", DECKHAND_TOKEN: "t", PATH: `${bin}:/usr/bin:/bin` }, async () => {
 		const pi = piRules();
-		for (const name of ["bridge", "desk", "browser", "panels", "guardrails", "shell", "notes"]) await pi.load(ourPath(name), await ours(name));
+		for (const name of ["bridge", "desk", "browser", "panels", "antigravity", "guardrails", "shell", "notes"]) await pi.load(ourPath(name), await ours(name));
 		// (pi-kit's sidebar registers only /sidebar, a name Deckhand does not use; it needs more of pi-tui than the stub)
 		for (const name of ["shell", "guardrails", "notes", "desk", "desk-browser", "desk-bridge"]) {
 			const file = path.join(KIT, name, "index.ts");

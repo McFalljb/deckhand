@@ -326,6 +326,11 @@ ACTIONS := [?]Action {
 		if action_folder == "" do return nil, false
 		return core.Add_Claude_Account{dir = action_folder, harness = .Codex}, true
 	}},
+	// Settings → Antigravity accounts → Add account…: an agy profile folder, used in place (agy_accounts.odin)
+	{id = "agy_account_add", pick_folder = true, make = proc() -> (core.Command, bool) {
+		if action_folder == "" do return nil, false
+		return core.Add_Antigravity_Account{dir = action_folder}, true
+	}},
 	// the setup sheet's "Choose…" buttons: the picked folder goes into the sheet
 	{id = "setup_pick_main", label = "Choose another folder…", no_palette = true, pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder != "" do setup_picked(false, action_folder)

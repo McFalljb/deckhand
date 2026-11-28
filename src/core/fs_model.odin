@@ -1056,6 +1056,7 @@ fs_credential_place_paths :: proc() -> []string {
 	append(&places, pi_agent_dir())
 	for d in claude_config_dirs() do append(&places, d)
 	for d in claude_account_dirs(harness = .Codex) do append(&places, d)
+	for d in agy_profile_dirs() do append(&places, d) // every Antigravity profile (agy_accounts.odin)
 	if a := codex_auth_file(); a != "" do append(&places, filepath.dir(a))
 	out := make([dynamic]string, context.temp_allocator)
 	for pl in places do for x in ([2]string{strings.trim_right(pl, "/"), fs_real(pl)}) {
@@ -1071,7 +1072,7 @@ fs_credential_place_paths :: proc() -> []string {
 // folder (.credentials.json or .claude.json in it). Not by where it is (fs_credential_place).
 fs_credential_holder :: proc(d: string) -> bool {
 	if strings.equal_fold(filepath.base(d), ".codex") && os.exists(strings.concatenate({d, "/auth.json"}, context.temp_allocator)) do return true
-	return claude_marked_folder(d)
+	return claude_marked_folder(d) || (!user_home_dir(d) && agy_marked_cached(d)) // an agy profile (agy_accounts.odin)
 }
 
 fs_reveal_path :: proc(path: string, caller: Caller) -> string {

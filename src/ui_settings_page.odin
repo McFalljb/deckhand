@@ -259,7 +259,8 @@ sp_edit_commit :: proc() {
 		if h, ok := flags_edit_harness(spage.edit.target); ok do r = ui_run(core.Set_Harness_Flags{harness = h, flags = name})
 	case .Rename_Account:
 		if name == "" do break
-		if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, harness = .Codex})
+		if strings.has_prefix(spage.edit.target, core.AGY_ACCOUNT_ROW) do r = ui_run(core.Rename_Antigravity_Account{account = spage.edit.target[len(core.AGY_ACCOUNT_ROW):], label = name})
+		else if strings.has_prefix(spage.edit.target, core.CODEX_ACCOUNT_ROW) do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CODEX_ACCOUNT_ROW):], label = name, harness = .Codex})
 		else do r = ui_run(core.Rename_Claude_Account{account = spage.edit.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name, harness = .Claude})
 	case .New_File, .New_Folder, .Rename_File:
 		if err := files_name_error(name); err != "" {
@@ -1099,6 +1100,8 @@ sp_setting :: proc(s: ^core.Setting, rows: []core.Settings_File_Row) {
 			for r in rows do if strings.has_prefix(r.path, s.row) do sp_list_row(r)
 		case "codex_accounts":
 			for r in rows do if r.group == "codex-accounts" do sp_list_row(r)
+		case "agy_accounts":
+			for r in rows do if r.group == "agy-accounts" do sp_list_row(r)
 		case "codex_plugins": // read-only (codex_plugins.odin): a heading, then the names
 			used := false // only once Codex has a home here (its files' rows are there)
 			for r in rows do if r.group == "codex" || strings.has_prefix(r.group, "codex:") do used = true

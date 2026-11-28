@@ -41,6 +41,9 @@ Setup_State :: struct {
 	accounts:     []Setup_Account,
 	acct_default: int, // index into accounts
 	acct_msg:     string, // the last add's warning or error ("" = none)
+	agy_show:     bool, // the Antigravity accounts step is shown
+	agy_accounts: []Setup_Account,
+	agy_default:  int, // index into agy_accounts
 }
 
 // What the core tells the first-run sheet.

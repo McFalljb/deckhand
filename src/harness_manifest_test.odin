@@ -87,7 +87,10 @@ harness_manifest_rows_are_whole :: proc(t: ^testing.T) {
 		switch r.kind {
 		case .Built_In:    testing.expectf(t, r.install == "" && r.need == .Required, "%s ships in Deckhand: nothing to install", r.id)
 		case .Harness:     testing.expectf(t, r.install != "", "%s has an install command", r.id)
-		case .Third_Party: testing.expectf(t, r.install != "" && r.detect == .Pi_Package, "%s is installed by its package manager", r.id)
+		case .Third_Party:
+			// agy: no checklist command (Install agy… is the Settings row's own: agy_install.odin; agy is never run)
+			if r.detect == .Agy do testing.expectf(t, r.install == "" && r.update_any == "", "%s is never installed by Deckhand", r.id)
+			else do testing.expectf(t, r.install != "" && r.detect == .Pi_Package, "%s is installed by its package manager", r.id)
 		}
 	}
 	testing.expect_value(t, row_of("pi").min_version, "1.4.0")
@@ -797,4 +800,63 @@ harness_run_keeps_the_sheet :: proc(t: ^testing.T) {
 	core.harness_run.status = .Done
 	testing.expect(t, core.run_command(core.Set_Focus{widget = ""}, ui).ok, "after the run")
 	setup_ui.step = 0
+}
+
+@(test)
+harness_antigravity_row :: proc(t: ^testing.T) {
+	root := hm_dir("agy")
+	r := row_of("antigravity")
+	testing.expect_value(t, r.name, "Antigravity (through pi)")
+	testing.expect_value(t, r.harness, core.Harness.Pi)
+	// missing: the install line and Google's link, no action, no command
+	f := facts_both(root)
+	items := core.harness_checklist(f)
+	it := item_of(items, "antigravity")
+	testing.expectf(t, it.state == .Missing && it.action == .None && it.command == "" && !it.runnable, "missing: %v", it)
+	testing.expect_value(t, core.harness_item_text(it), "Not installed: install agy 1.5.18+ from https://antigravity.google/docs/getting-started")
+	// found, version as agy last reported it
+	f.agy_bin, f.agy_version = "/u/.local/bin/agy", "1.5.18"
+	it = item_of(core.harness_checklist(f), "antigravity")
+	testing.expectf(t, it.state == .Ok && it.version == "1.5.18" && it.where_ == "/u/.local/bin/agy" && it.action == .None, "found: %v", it)
+	f.agy_version = ""
+	testing.expect_value(t, core.harness_item_text(item_of(core.harness_checklist(f), "antigravity")), "version unknown")
+	f.agy_version = "1.5.0"
+	it = item_of(core.harness_checklist(f), "antigravity")
+	testing.expectf(t, it.state == .Too_Old && it.action == .None && strings.contains(it.note, "1.5.18"), "too old: %v", it)
+	// pi missing: needs pi first
+	f.installed = {}
+	f.bin = {}
+	testing.expect_value(t, item_of(core.harness_checklist(f), "antigravity").state, core.Harness_Item_State.Needs_Harness)
+}
+
+@(test)
+harness_agy_detect :: proc(t: ^testing.T) {
+	root := hm_dir("agy-detect")
+	data := fmt.tprintf("%s/antigravity", root)
+	bin_dir := fmt.tprintf("%s/bin", root)
+	saved := fmt.tprintf("%s/saved/agy", root)
+	hm_write(fmt.tprintf("%s/agy", bin_dir), "#!/bin/sh\nexit 1\n", 0o755)
+	hm_write(saved, "#!/bin/sh\nexit 1\n", 0o755)
+	hm_write(fmt.tprintf("%s/notes", data), "", 0o600)
+	bin, v := core.agy_detect(data, bin_dir)
+	testing.expect_value(t, bin, fmt.tprintf("%s/agy", bin_dir))
+	testing.expect_value(t, v, "")
+	// the saved path first, when it is an executable file
+	hm_write(fmt.tprintf("%s/accounts.json", data), fmt.tprintf(`{{"agyPath":"%s","accounts":[]}}`, saved), 0o600)
+	bin, _ = core.agy_detect(data, bin_dir)
+	testing.expect_value(t, bin, saved)
+	hm_write(fmt.tprintf("%s/accounts.json", data), `{"agyPath":"/nowhere/agy","accounts":[]}`, 0o600)
+	bin, _ = core.agy_detect(data, bin_dir)
+	testing.expect_value(t, bin, fmt.tprintf("%s/agy", bin_dir))
+	// the version agy reported, only while the binary is the one it was seen as
+	_, st := core.path_stat(bin)
+	hm_write(fmt.tprintf("%s/agy-seen.json", data), fmt.tprintf(`{{"path":"%s","size":%d,"mtime":%d,"version":"1.5.18"}}`, bin, st.size, st.mtime / 1_000_000_000), 0o600)
+	_, v = core.agy_detect(data, bin_dir)
+	testing.expect_value(t, v, "1.5.18")
+	hm_write(fmt.tprintf("%s/agy-seen.json", data), fmt.tprintf(`{{"path":"%s","size":%d,"mtime":%d,"version":"1.5.18"}}`, bin, st.size + 1, st.mtime / 1_000_000_000), 0o600)
+	_, v = core.agy_detect(data, bin_dir)
+	testing.expect_value(t, v, "")
+	// nothing on the PATH, nothing saved: none
+	bin, v = core.agy_detect(fmt.tprintf("%s/none", root), fmt.tprintf("%s/empty", root))
+	testing.expect(t, bin == "" && v == "")
 }

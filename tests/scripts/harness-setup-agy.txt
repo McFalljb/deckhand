@@ -1,0 +1,34 @@
+# Install agy… (agy_install.odin; tests/scripts/harness-setup.sh, run 6): pi installed, no agy. The
+# Settings page's Antigravity row offers Install agy…; the click asks first (the bar names what is
+# fetched, from where, what is checked and where it goes); confirmed, it installs from the scene's
+# file: release into the scene's fake ~/.local/bin (DECKHAND_TEST_AGY_SIGNED stands in for Google's
+# signature: the fixture is a shell script, never run). accounts.json's agyPath already names that
+# path, so the row then shows the version from agy-seen.json, and offers nothing.
+wait 1500
+assert_state focus.id setup
+assert_state focus.agents.7.id antigravity
+assert_state focus.agents.7.state missing
+assert_state focus.agents.7.action none
+key escape
+eventually
+assert_state focus.kind terminal
+key comma cmd
+wait 300
+clickid spi @Agents
+wait 500
+eventually
+assert_drawn Install agy…
+assert_drawn Not installed
+clickid spi @harness:antigravity
+eventually
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.summary Install agy, Google's Antigravity CLI? Deckhand asks antigravity-cli-auto-updater-974169037036.us-central1.run.app for the latest version and downloads its .tar.gz from storage.googleapis.com/antigravity-public/antigravity-cli/, checks its SHA-512 against Google's, that agy is signed by Developer ID Application: Google LLC (EQHXZ8M8AV) and notarized by Apple, then puts it at ~/.local/bin/agy. Deckhand does not run agy or change your shell profiles.
+shot harness-setup/agy-confirm-dark
+clickid confirm_yes
+eventually 30000
+assert_toast agy 1.5.18 is at ~/.local/bin/agy
+eventually
+assert_not_drawn Install agy…
+assert_drawn 1.5.18
+shot harness-setup/agy-installed-dark
+quit

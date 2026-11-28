@@ -171,7 +171,13 @@ Deckhand finds more than one Claude Code account):
    anywhere; a folder without Claude Code's files is added with a warning (Claude Code makes them
    at its first sign-in there). Nothing is written until **Done**, which saves the same list the
    Settings page edits. With one account (or none) there is no such step.
-4. **Your folders**: the layout as a small tree. **Done** makes the missing folders, empty, and
+4. **Antigravity accounts**, only when two or more are found (see
+   [Antigravity accounts](#antigravity-accounts)): the same list for pi's Antigravity accounts:
+   a checkbox each (Deckhand's own **Default** profile is always kept), its name (click to change
+   it), its folder, and **Default** (the account pi's `antigravity` tool and the `/antigravity`
+   commands use when you name none). **Add** and **Add folder…** add an agy profile folder; one
+   without agy's files is added with a warning. **Done** sends the same changes as Settings.
+5. **Your folders**: the layout as a small tree. **Done** makes the missing folders, empty, and
    closes the sheet. Nothing already there is moved or changed. The step also says whether
    Claude Code is installed (Deckhand looks for `claude`, never runs it): Claude tabs need it,
    nothing else does; with one account it names its folder. It says the same of Codex. With two or
@@ -208,6 +214,128 @@ installed in pi; another extension that publishes those panels itself takes them
 If you already have pi-kit installed, it works next to Deckhand's integration: its own
 Deckhand parts (`desk-bridge`, `desk`, `desk-browser`) stay inactive in Deckhand's tabs, and its
 sidebar hands its sections to Deckhand's right column.
+
+#### Google Antigravity in pi tabs (preview)
+
+With Google's Antigravity CLI installed (`agy` on your `PATH`, or another path set with
+`/antigravity path`; version 1.5.1 or newer, 1.5.18 recommended), a pi tab can use your Antigravity models. Without it, only
+**`/antigravity`** is there: it links to Google's download page for agy and offers to set agy's
+path (Settings › Coding agents can also install it for you: **Install agy…**, see
+[Coding agents](#coding-agents)); once it is set, the rest turns on in the same tab. Deckhand runs your own agy for each pi session (`agy acp`) and agy does the whole
+turn: its model, its tools, its own instructions. Deckhand never reads or stores your Google
+sign-in; agy keeps it.
+
+**Setting up.** Type **`/antigravity`**: it shows whether agy was found and its version, and each
+account with its sign-in method, whether it is signed in and how many models it has, then a menu to
+add an account, sign in, sign out or remove one. For one Google account with an Antigravity plan,
+**`/antigravity login`** is all you need: it shows a Google link, you sign in there and paste the
+code the Antigravity page shows. Then **`/model`** lists your models.
+
+**Handing a task to Antigravity.** With agy installed, every pi tab's model (any
+provider) also has an **`antigravity`** tool: it hands a self-contained task to a fresh
+Antigravity session in the tab's folder, on the account it names (else `default`), and gets
+Antigravity's final answer back; you see its progress while it works. Antigravity sees nothing
+of the conversation but the task, its actions are approved as in a tab (see **Approvals** below;
+the answer lists what was refused), and Esc cancels it.
+
+**Accounts.** Each account is its own provider in `/model`: `antigravity` for the default account,
+`antigravity-<name>` for the others (for example **Gemini 3.8 Pro (Antigravity: work)**). You pick
+an account by picking its model; Deckhand never switches accounts by itself, not even when one runs
+out of quota. Each account has its own agy profile, so its sign-in and history stay separate; your
+`~/.gemini` skills, `AGENTS.md` and `GEMINI.md` are linked into every profile Deckhand makes.
+Deckhand also finds the agy profiles you already have and lists them in Settings (see
+[Antigravity accounts](#antigravity-accounts)); those are used where they are, never copied.
+
+- **`/antigravity add <name> [method]`** adds an account. The methods: `oauth-personal` (a Google
+  account, the default), `oauth-business` (Gemini Enterprise; asks for the GCP project and
+  location), `gemini-api-key` (a Gemini API key), `agent-platform` (Agent Platform / Vertex AI: an
+  API key, or a project and location with your Application Default Credentials).
+- **`/antigravity login <name>`** signs an account in. For an API key, run **`/login
+  antigravity-<name>`** instead: pi asks for the key without showing it and keeps it in its own
+  credential store, as it does every API key; it is never written to Deckhand's files.
+- **`/antigravity logout <name>`** signs out (agy forgets the saved sign-in; the history stays).
+  One Google account holds the macOS keychain sign-in, which agy outside Deckhand uses too:
+  signing it out signs that out. Another Google account with no sign-in of its own is not used
+  until `/antigravity login <name>` gives it one (for agy's own `~/.gemini`, that sign-in file is
+  what agy outside Deckhand then uses too).
+  For an API key, `/logout` and pick the account's provider.
+- **`/antigravity remove <name>`** removes an account, its profile and its history, after asking
+  (without a window to ask in, add `--yes`). The default account stays. An account whose folder
+  Deckhand found or you added is only taken off the list: its folder is never deleted. The
+  account that holds the macOS keychain sign-in is signed out of the keychain first; if agy
+  cannot sign it out, the account stays, and `--force` removes it anyway (the next account to use
+  the keychain then has that sign-in). Settings does not remove that account: its row says to use
+  `/antigravity remove` in a pi tab.
+- **`/antigravity models <name>`** lists an account's models again. You rarely need it: `/model`
+  shows each account's models from the last list as soon as pi starts, and a list over 10 minutes
+  old is refreshed quietly in the background. An account found signed out there keeps its models,
+  and `/antigravity status` says `sign in: /antigravity login <name>`. Deckhand never starts a
+  sign-in by itself. But in a turn of the keychain account (or a Gemini Enterprise one), agy
+  itself may open a browser to sign in when it finds none. The other Google accounts, and every
+  background listing, are told there is no browser, so they never do.
+- **`/antigravity approvals ask [name]`** makes Deckhand ask you before every action of that
+  account's agy; **`/antigravity approvals allow [name]`** goes back to the default.
+  **`/antigravity approvals`** alone shows each account's setting.
+- **`/antigravity path /full/path/to/agy`** runs that agy instead of the one on your `PATH` (it must
+  be an executable file); **`/antigravity path`** alone goes back to your `PATH`. It works before
+  Deckhand has found any agy, and the accounts and models appear without restarting the tab.
+
+An API key or Google variable in pi's environment (`GEMINI_API_KEY`, `GOOGLE_API_KEY`,
+`GOOGLE_CLOUD_PROJECT` and the like) never reaches agy, so it cannot bill a key instead of your
+plan. Accounts are kept in `~/Library/Application Support/Deckhand/antigravity`
+(`~/.local/share/deckhand/antigravity` on Linux). If Google answers that the account needs a plan,
+the error links to https://antigravity.google/docs/plans; if an account is not signed in, the error
+names the command to run.
+
+**Using it.**
+
+- The answer streams as text; agy's thinking, the tools it runs and its plan show as thinking, and
+  what it is doing shows in the status line. pi's own tools are not used: agy uses its own.
+- agy keeps the conversation itself. When pi compacts, it keeps a short note instead of a summary.
+  Deckhand goes on in agy's session only when it holds exactly the conversation you see. If another
+  model answered earlier, you went back in `/tree`, `/fork`ed or `/resume`d an older branch, or
+  another pi session is using that agy session, Deckhand starts a new agy session and gives it the
+  conversation so far as text. If pi retries a message that had already reached agy, agy is told
+  so.
+
+**Approvals.** agy runs in its `default` mode, where it asks before it edits a file or runs a
+command, and Deckhand answers each time, the way a pi tab treats pi's own tools: the action just
+runs, with no question, wherever the file is. Deckhand approves it for that one time only, so agy
+never keeps a standing permission. Deckhand asks you only where you asked it to. The exceptions:
+
+- **Commands** go through your guardrails rules (the same `ask` and `block` rules as pi's own
+  shell commands, from pi's guardrails config and the project's `.pi/guardrails.json`): a `block`
+  rule refuses the command, an `ask` rule asks you first. Your rules apply even with the optional
+  guardrails extension off.
+- **A read-only session** (a read-only job) refuses every edit, every command that changes
+  something, and agy's other tools (MCP tools, subagents); reads and searches still run.
+- **Credential files** are never read or changed, by the same rule as Deckhand's own file views:
+  pi's sign-ins and any secret-looking file in its agent folder, Claude Code's and Codex's, and
+  everything in an Antigravity profile but your own config there (`GEMINI.md`, `AGENTS.md`,
+  skills). A command that names one is refused too, and so is a search of one of those folders
+  (or `.ssh`). This is a best effort for commands: one that first moves to such a folder
+  (`cd ~/.pi/agent && cat auth.json`) is not caught.
+- **agy asking to leave its default mode** is refused, so its requests keep coming to Deckhand.
+- With **`/antigravity approvals ask`**, every action is asked first.
+
+A refusal is a line in the thinking, never a question. Where Deckhand would ask but cannot (pi in
+print or JSON mode, or the `antigravity` tool used where there is no window to ask in), which is
+only for your `ask` rules and `ask` mode, the action is refused. When agy asks you a question, Deckhand shows
+its choices in a menu, or asks for the answer; without a window the question goes unanswered.
+agy sometimes asks in its answer instead (a numbered list of choices) and waits: Deckhand then
+shows those choices in a menu too, with **Type my own answer…**, and sends your pick to agy at
+once. Without a window, or if you close the menu, the status says **Antigravity is waiting for
+your answer**: your next message is the answer.
+
+agy stops its turn when Deckhand refuses an action. Deckhand then asks it to carry on without that
+action and to report what it did and didn't do. The rest of the answer follows in the same reply,
+and a line in the thinking says so. Deckhand asks at most 3 times per message, and never after you
+said no yourself or pressed Esc. Then the answer just says agy stopped.
+Each approval shows as one line in the thinking, for example `✓ ran: npm test`, `✓ allowed: edit
+app.ts`, `✓ you allowed: npm publish` or `✗ blocked by guardrails: rm -rf build`; secrets in a
+command are hidden. Stopping the turn (Esc) while Deckhand is asking dismisses the question and
+refuses the action. This guards what agy asks to do. It is not a sandbox: what agy does without
+asking is not seen.
 
 ## How Deckhand runs
 
@@ -1223,6 +1351,55 @@ folders again; with one account there is only a quiet **More accounts…** row);
 also has its own settings files. Agents may start Claude
 under an account you configured, never a folder of their own.
 
+#### Antigravity accounts
+
+pi's [Antigravity accounts](#google-antigravity-in-pi-tabs-preview) are listed beside Claude's, in
+Settings › Coding agents › **Antigravity**, once agy is installed (or there are several). An
+account is an **agy profile**, the folder agy keeps its sign-in, settings and
+conversations in (`~/.gemini` for agy itself), with its sign-in method. The list is one file Deckhand and pi share,
+`~/Library/Application Support/Deckhand/antigravity/accounts.json`: change it in Settings or with
+`/antigravity` in a pi tab, and each sees the other's change. It holds names and folders, never a
+secret.
+
+- **Default** is Deckhand's own profile (in that folder's `profiles/default`). It is always
+  there and cannot be removed.
+- Deckhand **finds** your existing agy profiles by looking (no file is opened): agy's own default
+  (`~/.gemini`), `~/.gemini*` and `~/.config/gemini*` (or `$XDG_CONFIG_HOME/gemini*`), when agy
+  itself has run in them (at most 32). A `~/.gemini` with only the Antigravity app's files is not
+  listed, but Deckhand protects it like an agy profile. Names come from the
+  folder (`~/.gemini-work` → **Work**). Found folders are used where they are: never copied,
+  moved or deleted.
+- **Add account…** (or the palette's **Add Antigravity account…**) adds any folder with a folder
+  picker; not your home folder, nor one that holds a project, the main, chats or data folder, a
+  Claude Code config folder or a Codex home.
+- Each row shows the sign-in method, whether it is signed in (Deckhand only checks that agy's
+  sign-in file is there; it never reads it), how many models agy listed for it last, and its
+  folder. **Rename…** changes its name in lists (its provider in `/model` keeps its id),
+  **Make default** picks the account pi's `antigravity` tool and the `/antigravity` commands use
+  when you name none, **Remove…** takes it off the list (its folder is untouched and is not found
+  again; add it again to bring it back). **Scan again** looks for profiles again. With one
+  account there is only a quiet **More accounts…** row.
+- **Signing in** is in a pi tab: `/antigravity login <name>` (the row says which). New accounts
+  appear in pi's `/model` after the tab's next start or `/reload`.
+- **The keychain.** agy signs a Google account in to one entry in the macOS keychain that every
+  profile shares, unless it is told to keep the sign-in in the profile. One account uses the
+  keychain: the default account (unless another one already does), as plain `agy` on this Mac
+  does. It signs in and runs there, so a sign-in you already have keeps working after pi or
+  Deckhand restarts. Its row says **signed in through the system keychain (not checked)**. Every
+  other account signs in to its own profile. Deckhand never reads the keychain and never decides
+  from a file whether you are signed in: agy is asked each time, and only when agy says there is
+  no sign-in are you asked to sign in. agy 1.5.18 falls back to the keychain's sign-in for an
+  account with none of its own, so a second Google account would run, and be billed, as your
+  keychain account. Deckhand refuses that: the row says **no sign-in of its own**, and pi says
+  `Antigravity account "work" has no sign-in of its own (it would run as default's). Run
+  /antigravity login work.` until you do. An account with its own sign-in file always uses it,
+  even if it once held the keychain. Removing the keychain account signs it out of the keychain
+  first.
+
+Every Antigravity profile, found, added or Deckhand's own, is kept out of the editor, Files,
+Settings' file lists and every agent: an agent cannot open, show, copy or list its sign-in or
+conversations, by any name. A profile's `GEMINI.md`, `AGENTS.md` and skills stay yours to edit.
+
 **New Claude tab** opens a Claude tab in the session on screen instead (a pi session's, or a
 Claude session's, or a chat's); the project's **…** menu has it too (in the project's open session, or a new
 pi session when none is open). When you quit with Claude sessions or tabs open, they come back on
@@ -1838,6 +2015,29 @@ One card per coding agent: **pi**, **Claude Code** and **Codex**. Each starts wi
 recommended items. **Install…**, **Update…** and **Show…** open the setup sheet's coding agents
 step, where the command shows and runs. **Refresh** looks again. pi's card shows only when pi is
 installed; Claude Code's files once it has been used.
+
+pi's card also has **Antigravity (through pi)**: whether Google's Antigravity CLI (agy) is there
+for pi's Antigravity models (see [Google Antigravity in pi tabs](#google-antigravity-in-pi-tabs-preview)).
+Deckhand finds it the way pi does: the path set with `/antigravity path`, else `agy` on your
+`PATH`, and shows the version agy last reported in a pi tab. It never runs agy to look.
+
+On a Mac the row offers **Install agy…** when agy is missing, and **Update agy…** when the agy
+it found is `~/.local/bin/agy` (where Google's installer puts it) and older than 1.5.18; an agy
+installed anywhere else is yours to update the way you installed it. Nothing happens until you
+confirm: the bar says what Deckhand fetches and from where (Google's release list at
+`antigravity-cli-auto-updater-974169037036.us-central1.run.app`, then the `.tar.gz` it names under
+`storage.googleapis.com/antigravity-public/antigravity-cli/`), what it checks and where agy goes.
+Then, while the row shows each step, Deckhand downloads into a private folder in `~/.local/bin`,
+checks the download's SHA-512 against Google's list, that it holds exactly one program, that the
+program is signed with Google LLC's Developer ID (team EQHXZ8M8AV) and that macOS accepts it as
+notarized by Apple, and only then puts it at `~/.local/bin/agy` (an install never replaces a
+file that is already there; an update replaces only the file it found, unchanged since you
+clicked). Any failed check stops it with the reason on the row and nothing installed. Deckhand
+never runs agy, nor Google's `agy install` (which edits your shell profiles), and never uses
+`sudo`. Afterwards the row shows the new version. When `~/.local/bin` is not on your tabs'
+`PATH`, the row says so: set agy's path with `/antigravity path` in a pi tab. (The command is
+`install_agy`; only you, at this Mac.) Without the button, install agy 1.5.18 or newer from
+Google's getting-started page.
 
 **pi.** Its files: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),
 `modes.json`, `keybindings.json`, `mcp.json`, your global instructions file (`AGENTS.md` or

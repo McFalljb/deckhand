@@ -242,6 +242,25 @@ fs_copy_credentials_and_git :: proc(t: ^testing.T) {
 		testing.expect(t, !os.exists(fmt.tprintf("%s/dst2", proj)), "nothing written")
 		arena_done(a2)
 	}
+	// a folder holding an agy profile no account names (a backup of one): its sign-in is never
+	// copied, the user's copy leaves it out and anyone else's is refused
+	cwrite(fmt.tprintf("%s/agyb/old-agy/antigravity-acp/acp_token.json", proj), `{"t":"x"}`)
+	cwrite(fmt.tprintf("%s/agyb/old-agy/antigravity-acp/installation_id", proj), "id")
+	cwrite(fmt.tprintf("%s/agyb/notes.txt", proj), "n")
+	planA, eA, aA := copy_now(fmt.tprintf("%s/agyb", proj), fmt.tprintf("%s/agyb2", proj), UI_HERE)
+	defer arena_done(aA)
+	testing.expect_value(t, eA, "")
+	testing.expect_value(t, cread(fmt.tprintf("%s/agyb2/notes.txt", proj)), "n")
+	testing.expect(t, !os.exists(fmt.tprintf("%s/agyb2/old-agy/antigravity-acp/acp_token.json", proj)), "agy's sign-in is not copied")
+	testing.expect(t, strings.contains(copy_skipped_text(planA.skipped), "old-agy/antigravity-acp/acp_token.json: a credential"), copy_skipped_text(planA.skipped))
+	_, eB, aB := copy_now(fmt.tprintf("%s/agyb", proj), fmt.tprintf("%s/agyb3", proj), Caller{kind = .Control})
+	defer arena_done(aB)
+	testing.expect(t, eB != "" && !os.exists(fmt.tprintf("%s/agyb3", proj)), eB)
+	// the token by its name in an ordinary folder, too
+	cwrite(fmt.tprintf("%s/agyc/acp_token.json", proj), "{}")
+	_, eC, aC := copy_now(fmt.tprintf("%s/agyc", proj), fmt.tprintf("%s/agyc2", proj), Caller{kind = .Script})
+	defer arena_done(aC)
+	testing.expect_value(t, eC, fmt.tprintf(FS_COPY_CREDENTIAL, "acp_token.json"))
 	// a key by its name (what file_read refuses) too, and the credential itself at the top
 	cwrite(fmt.tprintf("%s/k/server.pem", proj), "k")
 	_, e3, a3 := copy_now(fmt.tprintf("%s/k", proj), fmt.tprintf("%s/k2", proj), Caller{kind = .Control})

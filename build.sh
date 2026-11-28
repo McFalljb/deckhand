@@ -299,7 +299,7 @@ case "$MODE" in
     # the agents' isolated-world script: the focus check and the sensitive-field rule (fake DOM)
     if command -v node >/dev/null; then node tests/browser_act_js_test.mjs; else echo "browser_act_js_test: skipped (no node)"; fi
     # the pi integration's unit tests (integrations/pi; Node 22.18+ strips the types; never runs pi)
-    if command -v node >/dev/null; then (cd integrations/pi && node --test test/unit.test.ts test/deckhand.test.ts test/kit.test.ts test/optional.test.ts test/conflicts.test.ts test/mode.test.ts) >build/pi-integration-tests.log 2>&1 || { tail -40 build/pi-integration-tests.log; echo "integrations/pi tests failed (build/pi-integration-tests.log)"; exit 1; }; grep -E '^# (pass|fail)|^ℹ (pass|fail)' build/pi-integration-tests.log; else echo "integrations/pi tests: skipped (no node)"; fi
+    if command -v node >/dev/null; then (cd integrations/pi && node --test test/unit.test.ts test/deckhand.test.ts test/kit.test.ts test/optional.test.ts test/conflicts.test.ts test/mode.test.ts test/antigravity.test.ts test/agy-approvals.test.ts) >build/pi-integration-tests.log 2>&1 || { tail -40 build/pi-integration-tests.log; echo "integrations/pi tests failed (build/pi-integration-tests.log)"; exit 1; }; grep -E '^# (pass|fail)|^ℹ (pass|fail)' build/pi-integration-tests.log; else echo "integrations/pi tests: skipped (no node)"; fi
     # the page reader's walk (text, outline): frames, boxless containers, shadow slots (fake DOM)
     if command -v node >/dev/null; then node tests/browser_read_js_test.mjs; else echo "browser_read_js_test: skipped (no node)"; fi
     odin test tests -out:build/deckhand-tests

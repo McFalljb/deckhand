@@ -17,6 +17,7 @@ package core
 //
 // Rows and their sources are listed in docs/HARNESSES.md §6.
 
+import "base:runtime"
 import "core:encoding/json"
 import jg "../jsonguard"
 import "core:fmt"
@@ -41,6 +42,7 @@ Harness_Detect :: enum u8 {
 	Binary, // the harness's binary: on the PATH new tabs get and its install folders
 	Integration, // Deckhand's bundled integration for the harness (pi: integrations/pi; Claude: the plugin)
 	Pi_Package, // a pi package in ~/.pi/agent/settings.json `packages` (detect_arg: the npm name)
+	Agy, // Google's Antigravity CLI for pi's bundled antigravity extension (agy_detect): stat and two small JSON reads, never run
 }
 
 // Where a harness's binary links to decides how it updates.
@@ -140,6 +142,11 @@ HARNESS_MANIFEST := [?]Harness_Row {
 		install = "{pi} install npm:@juicesharp/rpiv-btw@2.15.0",
 		why = "/btw: ask a side question without adding it to the conversation",
 		source = "https://www.npmjs.com/package/@juicesharp/rpiv-btw",
+	},
+	{
+		harness = .Pi, id = "antigravity", name = "Antigravity (through pi)", kind = .Third_Party, need = .Recommended, min_version = AGY_MIN_VERSION, detect = .Agy,
+		why = "Optional: Google Antigravity models in pi tabs, through your own agy CLI (the bundled antigravity extension)",
+		source = "https://antigravity.google/docs/getting-started (Google's own installer; on a Mac, Settings' Install agy… does its steps with more checks and never runs agy: agy_install.odin)",
 	},
 	{
 		harness = .Claude, id = "claude", name = "Claude Code", kind = .Harness, need = .Required, min_version = CLAUDE_MIN_VERSION, detect = .Binary,
@@ -488,6 +495,8 @@ Harness_Facts :: struct {
 	packages:  map[string]Pi_Package_Found, // pi packages by name (temp)
 	codex_signed_out: bool, // `codex login status` said signed out (codex.odin)
 	asking:    [Harness]bool, // counts as installed only because the login shell has not answered yet (harness_installed)
+	agy_bin:     string, // agy as pi's antigravity extension would find it ("" = none: agy_detect)
+	agy_version: string, // the version it last reported to the extension ("" = unknown)
 }
 
 harness_facts_now :: proc() -> Harness_Facts {
@@ -521,6 +530,7 @@ harness_facts_now :: proc() -> Harness_Facts {
 	}
 	project := settings_project_cwd() // the project on screen's .pi/settings.json too
 	for r in HARNESS_MANIFEST do if r.detect == .Pi_Package do f.packages[r.detect_arg] = pi_package_find(f.agent_dir, r.detect_arg, project)
+	f.agy_bin, f.agy_version = agy_detect()
 	return f
 }
 
@@ -574,6 +584,17 @@ harness_checklist :: proc(f: Harness_Facts) -> []Harness_Item {
 		case .Third_Party:
 			if !f.installed[h] || (h == .Pi && harness_old(f, .Pi)) {
 				it.state = .Needs_Harness
+				break
+			}
+			if r.detect == .Agy {
+				// shown only: Google's installer, never run by Deckhand (no action, no command)
+				switch {
+				case f.agy_bin == "":
+					it.state = .Missing
+				case:
+					it.state, it.version, it.where_ = .Ok, f.agy_version, f.agy_bin
+					if it.version != "" && claude_version_below(it.version, r.min_version) do it.state, it.note = .Too_Old, fmt.tprintf("Update agy to %s or newer with Google's installer: %s", AGY_RECOMMENDED_VERSION, AGY_INSTALL_URL)
+				}
 				break
 			}
 			pk := f.packages[r.detect_arg]
@@ -647,12 +668,17 @@ harness_checklist_refresh :: proc(full := false, bump := true) {
 	}
 	f := harness_facts_probe != nil ? harness_facts_probe() : harness_facts_now()
 	items_asking = harness_facts_probe == nil && harness_lookup_asking()
-	for s in items_strings do delete(s)
+	// the cache is the core's, on the heap: never the caller's allocator (a request's, a test's),
+	// which a later refresh would free with another
+	heap := runtime.heap_allocator()
+	if items_strings.allocator.procedure != heap.procedure do items_strings = make([dynamic]string, heap) // (left by an older caller: not ours to free)
+	if harness_items.allocator.procedure != heap.procedure do harness_items = make([dynamic]Harness_Item, heap)
+	for s in items_strings do delete(s, heap)
 	clear(&items_strings)
 	clear(&harness_items)
 	keep :: proc(s: string) -> string {
 		if s == "" do return ""
-		c := strings.clone(s)
+		c := strings.clone(s, runtime.heap_allocator())
 		append(&items_strings, c)
 		return c
 	}
@@ -708,7 +734,7 @@ HARNESS_STATE_NAMES := [Harness_Item_State]string {
 harness_item_text :: proc(it: Harness_Item) -> string {
 	r := HARNESS_MANIFEST[it.row]
 	switch it.state {
-	case .Missing:       return "Not installed"
+	case .Missing:       return r.detect == .Agy ? AGY_MISSING_TEXT : "Not installed"
 	case .Needs_Harness: return fmt.tprintf("Needs %s first", HARNESS_MANIFEST[harness_first_row(r.harness)].name)
 	case .Built_In:      return "Built in"
 	case .Unchecked:     return it.note != "" && r.kind == .Harness ? it.note : "Found, version not checked"
@@ -742,7 +768,9 @@ harness_settings_rows :: proc() -> []Settings_File_Row {
 			case .Built_In:    label = "  Deckhand integration"
 			case .Third_Party: label = fmt.tprintf("  %s", r.name)
 			}
-			append(&out, Settings_File_Row{group = "agents", label = label, detail = harness_item_text(it), path = strings.concatenate({HARNESS_SETTINGS_ROW, r.id}, context.temp_allocator), button = button})
+			detail := harness_item_text(it)
+			if r.detect == .Agy do button, detail = agy_settings_row(it) // Install agy… / Update agy… (agy_install.odin)
+			append(&out, Settings_File_Row{group = "agents", label = label, detail = detail, path = strings.concatenate({HARNESS_SETTINGS_ROW, r.id}, context.temp_allocator), button = button})
 		}
 	}
 	return out[:]

@@ -325,7 +325,7 @@ web_setting_shown :: proc(s: ^Setting, rows: []Settings_File_Row) -> bool {
 @(private = "file")
 web_setting_items :: proc(b: ^strings.Builder, s: ^Setting, rows: []Settings_File_Row) {
 	n := 0
-	item :: proc(b: ^strings.Builder, n: ^int, r: Settings_File_Row, acts: []string, arg: string, codex := false) {
+	item :: proc(b: ^strings.Builder, n: ^int, r: Settings_File_Row, acts: []string, arg: string, codex := false, agy := false) {
 		if n^ > 0 do strings.write_byte(b, ',')
 		n^ += 1
 		strings.write_string(b, `{"label":`)
@@ -341,7 +341,9 @@ web_setting_items :: proc(b: ^strings.Builder, s: ^Setting, rows: []Settings_Fil
 		}
 		strings.write_string(b, `],"arg":`)
 		json_quote(b, arg)
-		fmt.sbprintf(b, `,"codex":%v}}`, codex)
+		fmt.sbprintf(b, `,"codex":%v`, codex)
+		if agy do strings.write_string(b, `,"agy":true`) // an Antigravity account's row (agy_accounts.odin)
+		strings.write_byte(b, '}')
 	}
 	acts := make([dynamic]string, context.temp_allocator)
 	switch s.id {
@@ -375,6 +377,21 @@ web_setting_items :: proc(b: ^strings.Builder, s: ^Setting, rows: []Settings_Fil
 			case r.button == "Add…": append(&acts, "add")
 			}
 			item(b, &n, r, acts[:], arg, codex)
+		}
+	case "agy_accounts": // agy_accounts.odin: the arg is the account's name
+		for r in rows do if r.group == "agy-accounts" {
+			clear(&acts)
+			arg := ""
+			switch {
+			case strings.has_prefix(r.path, AGY_ACCOUNT_ROW):
+				arg = r.path[len(AGY_ACCOUNT_ROW):]
+				append(&acts, "rename")
+				if r.make_default do append(&acts, "default")
+				if r.remove do append(&acts, "remove")
+			case r.path == AGY_ACCOUNT_SCAN_ROW: append(&acts, "scan")
+			case r.button == "Add…": append(&acts, "add")
+			}
+			item(b, &n, r, acts[:], arg, agy = true)
 		}
 	case "main_folder":
 		for r in rows do if r.path == FOLDER_MAIN_ROW do item(b, &n, r, []string{"change"}, "")

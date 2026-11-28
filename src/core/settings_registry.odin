@@ -120,6 +120,7 @@ SETTINGS := [?]Setting {
 	{id = "claude_usage_statusline", section = .Agents, card = "Claude Code", label = "Show Claude usage (wraps your status line)", hint = "Plan limits in the USAGE section from each tab's status line; yours still shows", keywords = "usage limits quota status line statusline 5h weekly rate", kind = .Switch, action = "claude_usage_statusline", command = "set_claude_usage", applies = .Next_Start},
 	{id = "claude_usage_background", section = .Agents, card = "Claude Code", label = "Check Claude usage in the background (starts claude briefly)", hint = "While the USAGE section shows and no tab gave newer numbers; never a prompt", keywords = "usage limits quota background get_usage headless", kind = .Switch, action = "claude_usage_background", command = "set_claude_usage"},
 	{id = "claude_default_flags", section = .Agents, card = "Claude Code", label = "Default flags…", hint = "Before a tab's own flags, in the tabs you start", keywords = "claude flags default model permission mode mcp config command line arguments", kind = .Button, action = "claude_default_flags", command = "set_harness_flags"},
+	{id = "agy_accounts", section = .Agents, card = "Antigravity", label = "Add Antigravity account…", hint = "An agy profile folder (its --gemini-dir), used in place; sign in from a pi tab with /antigravity login", keywords = "antigravity agy gemini google accounts profile default rename remove scan", kind = .List, action = "agy_account_add", command = "add_antigravity_account", row = "deckhand:agy-account"},
 	{id = "codex_status", section = .Agents, card = "Codex", label = "Codex", hint = "Its version", keywords = "codex openai install update version checklist", kind = .Status, command = "setup_sheet", row = HARNESS_SETTINGS_ROW},
 	{id = "codex_accounts", section = .Agents, card = "Codex", label = "Add Codex account…", hint = "Another Codex home (CODEX_HOME); sign in on Codex's screen in its first tab", keywords = "accounts codex home default rename remove login sign in", kind = .List, action = "codex_account_add", command = "add_claude_account", row = "deckhand:codex-account"},
 	{id = "codex_plugins", section = .Agents, card = "Codex", label = "Plugins", hint = "Installed in plugins/cache, by folder name. Install or remove them in Codex", keywords = "codex plugins marketplace extensions", kind = .List, row = CODEX_PLUGIN_ROW, read_only = true},
@@ -174,6 +175,7 @@ SETTINGS_FILE_GROUPS := [?]Setting_File_Group {
 	{"claude-accounts", .Agents, "Claude Code"},
 	{"claude-plugin", .Agents, "Claude Code"},
 	{"claude-mcp", .Agents, "Claude Code"},
+	{"agy-accounts", .Agents, "Antigravity"},
 	{"codex", .Agents, "Codex"},
 	{"codex:", .Agents, "Codex"}, // one per account once there are several
 	{"codex-accounts", .Agents, "Codex"},

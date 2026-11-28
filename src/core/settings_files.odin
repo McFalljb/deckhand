@@ -118,7 +118,8 @@ credential_path :: proc(p: string) -> bool {
 	}
 	// Claude Code's credentials, account state, transcripts (claude_reload.odin); Codex's sign-in,
 	// sessions/ transcripts and state (codex.odin)
-	return claude_credential(p) || codex_credential(p)
+	// agy's sign-ins, conversations and state in every Antigravity profile (agy_accounts.odin)
+	return claude_credential(p) || codex_credential(p) || agy_credential(p)
 }
 
 // Folders (names in lower case) whose files are secrets: named for them, or where tools keep
@@ -181,6 +182,7 @@ credential_ids :: proc() -> []Cred_Id {
 	for f in PI_SIGN_IN_FILES do add(&out, fmt.tprintf("%s/%s", ad, f))
 	for p in claude_credential_files() do add(&out, p) // .credentials.json, .claude.json
 	for p in codex_credential_files() do add(&out, p) // Codex's auth.json (codex.odin)
+	for p in agy_credential_files() do add(&out, p) // agy's saved sign-ins (agy_accounts.odin)
 	for dir in ([2]string{ad, fmt.tprintf("%s/intercom", ad)}) {
 		entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
 		if err != nil do continue
@@ -554,6 +556,9 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		}
 		add(&out, {group = "codex-accounts", label = len(caccts) > 1 ? "Add account…" : "More accounts…", detail = "another Codex home (CODEX_HOME): sign in on Codex's screen in its first tab, or run CODEX_HOME=<home> codex login", path = CODEX_ACCOUNT_ADD_ROW, button = "Add…"})
 	}
+	// Antigravity's accounts (agy_accounts.odin), once agy is there or several are: each one's row,
+	// Add account… (an agy profile folder, used in place) and Scan again
+	agy_settings_rows(&out)
 	// Coding agents (ui_harness.odin): the harness checklist's states; Install…/Update… open the sheet
 	for r in harness_settings_rows() do add(&out, r)
 	// Machines over SSH (machines.odin): always there, so turning it off never looks like the
@@ -1082,6 +1087,7 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "folders": return "Folders"
 	case "claude":  return "Claude Code (global)"
 	case "claude-accounts": return "Claude accounts"
+	case "agy-accounts": return "Antigravity accounts"
 	case "codex-accounts": return "Codex accounts"
 	case "agents":  return "Coding agents"
 	case "machines": return "Machines"

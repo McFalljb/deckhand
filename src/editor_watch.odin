@@ -30,6 +30,9 @@ Watch :: struct {
 	roots_at:  time.Tick, // the last watch_roots_check
 	retry_at:  time.Tick, // the watcher failed: not tried again before this
 	retry_for: time.Duration, // ...and the wait after the next failure
+	fails:     int, // failures not logged yet (watch_fail_log)
+	fail_said: time.Tick, // when a failure was last logged
+	fails_all: int, // failures since the watcher last worked
 }
 
 // A watched folder's identity: gone, or moved (another folder at its path) shows as a change.
@@ -43,6 +46,7 @@ Watch_Root_Id :: struct {
 WATCH_ROOTS_EVERY :: 2 * time.Second // how often each watched folder is checked for a move
 WATCH_RETRY_FIRST :: time.Second // a watcher that failed is tried again after this, doubling
 WATCH_RETRY_MAX :: time.Minute
+WATCH_FAIL_LOG_EVERY :: time.Minute // the watcher's failures are logged at most this often
 FSE_ROOT_CHANGED :: u32(0x20) // kFSEventStreamEventFlagRootChanged (a structural change: fs_model.odin)
 
 @(private = "file")
@@ -107,18 +111,25 @@ watch_sync :: proc(at: time.Tick = {}) {
 	if same do for f, i in keep do if f != watch.last_set[i] do same = false
 	if same do return
 	// a watcher that failed waits out its backoff: never a tight loop of failing streams
-	if watch.retry_at != {} && time.tick_diff(now, watch.retry_at) < 0 do return
+	if watch.retry_at != {} && time.tick_diff(now, watch.retry_at) > 0 do return
 	for f in watch.last_set do delete(f)
 	clear(&watch.last_set)
 	clear(&watch.last_ids)
 	if !watch_set_hook(keep[:], on_change) {
 		watch.retry_for = watch.retry_for == 0 ? WATCH_RETRY_FIRST : min(watch.retry_for * 2, WATCH_RETRY_MAX)
 		watch.retry_at = time.tick_add(now, watch.retry_for)
-		wlog(fmt.tprintf("file watcher: FSEvents could not watch %d folder(s); tried again in %v (the editor's stat poll still follows open files)", len(keep), watch.retry_for))
+		watch.fails += 1
+		watch.fails_all += 1
+		// the first failure, then at most one line a minute with how many: a loop can't fill the log
+		if watch.fail_said == {} || time.tick_diff(watch.fail_said, now) >= WATCH_FAIL_LOG_EVERY {
+			more := watch.fails > 1 ? fmt.tprintf(" (%d failures since the last line)", watch.fails) : ""
+			wlog(fmt.tprintf("file watcher: FSEvents could not watch %d folder(s)%s; tried again in %v (the editor's stat poll still follows open files)", len(keep), more, watch.retry_for))
+			watch.fails, watch.fail_said = 0, now
+		}
 		return // last_set stays empty: the next sync after the wait tries again
 	}
-	if watch.retry_for != 0 do wlog(fmt.tprintf("file watcher: watching %d folder(s) again", len(keep)))
-	watch.retry_at, watch.retry_for = {}, 0
+	if watch.fails_all > 0 do wlog(fmt.tprintf("file watcher: watching %d folder(s) again, after %d failure(s)", len(keep), watch.fails_all))
+	watch.retry_at, watch.retry_for, watch.fails, watch.fail_said, watch.fails_all = {}, 0, 0, {}, 0
 	for f in keep {
 		append(&watch.last_set, strings.clone(f))
 		append(&watch.last_ids, watch_root_id(f))
@@ -134,7 +145,8 @@ watch_root_id :: proc(path: string) -> Watch_Root_Id {
 
 // Every WATCH_ROOTS_EVERY: a watched folder that went, came back or is another folder now (a
 // rename or move of it, or of a folder above it) is reported as FSEvents' RootChanged would be.
-// Main thread (editor_tick); a stat per watched folder.
+// Main thread (editor_tick); a stat per watched folder. Known limit: a watched folder on a network
+// mount that stops answering blocks that stat (and the frame) as the editor's own stat poll would.
 watch_roots_check :: proc(now: time.Tick) {
 	if len(watch.last_set) == 0 || time.tick_diff(watch.roots_at, now) < WATCH_ROOTS_EVERY do return
 	watch.roots_at = now
@@ -295,7 +307,7 @@ watch_folders_for_test :: proc(folder: string) -> string {
 	was := len(watch.folders) > 0 ? strings.clone(watch.folders[0], context.temp_allocator) : ""
 	for f in watch.folders do delete(f)
 	clear(&watch.folders)
-	watch.retry_at, watch.retry_for = {}, 0
+	watch.retry_at, watch.retry_for, watch.fails, watch.fail_said, watch.fails_all = {}, 0, 0, {}, 0
 	if folder != "" do append(&watch.folders, strings.clone(folder))
 	watch_sync()
 	return was

@@ -522,3 +522,15 @@ window_door_pids_for_test :: proc(own, holder: i32) {
 	sync.guard(&door.mu)
 	door.own_pid, door.holder_pid = own, holder
 }
+
+when TEST_HOOKS {
+	// Tests: the door opened or shut (window_token_publish's), and a window's arrival as its
+	// hello's reader would leave it (window_arrived) for window_door_tick.
+	window_door_on_for_test :: proc(on: bool) {
+		sync.guard(&door.mu)
+		door.on = on
+	}
+	window_arrived_for_test :: proc(fd: Sock_Fd, peer: trust.Peer) {
+		window_arrived(fd, {}, nil, peer, "", false, "")
+	}
+}

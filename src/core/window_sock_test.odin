@@ -173,6 +173,53 @@ web_hello_without_take_leaves_the_window :: proc(t: ^testing.T) {
 	testing.expect(t, window_link_web(), "the browser's link")
 }
 
+// The door's batch (window_door_tick): a window and a browser that connected on its own arrive in
+// the same turn, the browser last. The window wins, and the browser gets its hello's result (with
+// its hello's id, passed through web_arrived) and web.taken by the window, not a bare close. A
+// browser with "take" in such a batch takes the view (its "take" passed through too).
+@(test)
+window_door_batch_prefers_the_window :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	web_reset_for_test()
+	defer web_reset_for_test()
+	now := time.to_unix_seconds(time.now())
+	code, _ := web_code_open(now)
+	_, tok, _ := web_pair_try(code, "Phone", now)
+	dev, _, ok := web_token_device(tok, now)
+	testing.expect(t, ok, "a paired browser")
+	window_door_on_for_test(true)
+	defer window_door_on_for_test(false)
+	defer core_detach_window()
+
+	win: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &win) == .OK)
+	ws: cw.Sock_Transport
+	cw.sock_open(&ws, win[1])
+	defer cw.sock_destroy(&ws)
+	web: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web) == .OK)
+	window_arrived_for_test(win[0], trust.peer_read(win[0]))
+	web_arrived(web[0], dev, "Phone", false, "h7")
+	window_door_tick()
+	testing.expect(t, window_link_is_window(), "the window wins the batch")
+	got := read_json_frames(web[1])
+	posix.close(web[1])
+	testing.expectf(t, len(got) == 2, "the hello's result and web.taken: %v", got)
+	if len(got) == 2 {
+		testing.expect_value(t, json_path(got[0], "id"), "h7")
+		testing.expect_value(t, json_path(got[1], "type"), "web.taken")
+		testing.expect_value(t, json_path(got[1], "by"), "window")
+	}
+
+	// its user's View here: take passes through the door and takes the view
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web) == .OK)
+	defer posix.close(web[1])
+	web_arrived(web[0], dev, "Phone", true, "h8")
+	window_door_tick()
+	testing.expect(t, window_link_web(), "take: the browser's link")
+	testing.expect(t, window_heard(&ws, "viewed_from"), "the window: Viewed in a browser")
+}
+
 // The JSON frames waiting on fd (its writer already wrote them), as text.
 @(private = "file")
 read_json_frames :: proc(fd: posix.FD) -> []string {

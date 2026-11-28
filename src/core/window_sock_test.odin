@@ -3,6 +3,7 @@ package core
 // The window's door over core.sock and its side of it (window_sock.odin; §10.3 M4-C), with fake
 // identities: the "peers" are this test binary, over a socketpair.
 
+import "base:runtime"
 import "core:os"
 import "core:fmt"
 import "core:strings"
@@ -114,6 +115,139 @@ window_request_bound_over_the_socket :: proc(t: ^testing.T) {
 	ok = window_open_url("https://example.com")
 	thread_join_answer(th)
 	testing.expect(t, ok, "answered in time: opened")
+}
+
+// A browser that connects on its own (a page load, a reconnect: its hello has no "take") while
+// this Mac's window is attached does not take the view from it: the window stays attached, and
+// the browser gets its hello's result and web.taken by the window (View here). With "take" (its
+// user's View here) it takes the view as before; with no window attached it attaches as before.
+@(test)
+web_hello_without_take_leaves_the_window :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator() // the hello's data reads the build once (core_build)
+	win: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &win) == .OK)
+	testing.expect(t, core_attach_window_sock(win[0], nil, trust.peer_read(win[0])))
+	defer core_detach_window()
+	ws: cw.Sock_Transport
+	cw.sock_open(&ws, win[1])
+	defer cw.sock_destroy(&ws)
+	web: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web) == .OK)
+	attached := core_attach_window_sock(web[0], nil, {}, from = "Phone", web = true, web_device = "dev1", web_hello_id = "hello")
+	if !attached do posix.close(web[0])
+	testing.expect(t, !attached, "not attached")
+	testing.expect(t, window_link_is_window(), "the window stays attached")
+	got := read_json_frames(web[1])
+	posix.close(web[1])
+	testing.expectf(t, len(got) == 2, "the hello's result and web.taken: %v", got)
+	if len(got) == 2 {
+		testing.expect_value(t, json_path(got[0], "type"), "result")
+		testing.expect_value(t, json_path(got[0], "id"), "hello")
+		testing.expect(t, strings.contains(got[0], `"ok":true`) && strings.contains(got[0], `"web":true`), got[0])
+		testing.expect_value(t, json_path(got[1], "type"), "web.taken")
+		testing.expect_value(t, json_path(got[1], "by"), "window")
+	}
+	// the window heard nothing of it
+	testing.expect(t, !window_heard(&ws, "viewed_from"), "no Viewed in a browser")
+
+	// its user's View here: "take" takes the view, the window is told (Viewed in a browser)
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web) == .OK)
+	defer posix.close(web[1])
+	testing.expect(t, core_attach_window_sock(web[0], nil, {}, from = "Phone", web = true, web_device = "dev1", web_take = true, web_hello_id = "hello"), "take: attached")
+	testing.expect(t, window_link_web(), "the browser's link")
+	testing.expect(t, window_heard(&ws, "viewed_from"), "the window: Viewed in a browser")
+
+	// another browser's own reconnect still replaces a browser (its own link the core has not seen go)
+	web2: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web2) == .OK)
+	defer posix.close(web2[1])
+	testing.expect(t, core_attach_window_sock(web2[0], nil, {}, from = "Phone", web = true, web_device = "dev1", web_hello_id = "hello"), "browser over browser: attached")
+	testing.expect_value(t, window_link_web_device(), "dev1")
+
+	// no window attached: a browser's own connect attaches
+	core_detach_window()
+	web3: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web3) == .OK)
+	defer posix.close(web3[1])
+	testing.expect(t, core_attach_window_sock(web3[0], nil, {}, from = "Phone", web = true, web_device = "dev1", web_hello_id = "hello"), "no window: attached")
+	testing.expect(t, window_link_web(), "the browser's link")
+}
+
+// The door's batch (window_door_tick): a window and a browser that connected on its own arrive in
+// the same turn, the browser last. The window wins, and the browser gets its hello's result (with
+// its hello's id, passed through web_arrived) and web.taken by the window, not a bare close. A
+// browser with "take" in such a batch takes the view (its "take" passed through too).
+@(test)
+window_door_batch_prefers_the_window :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	web_reset_for_test()
+	defer web_reset_for_test()
+	now := time.to_unix_seconds(time.now())
+	code, _ := web_code_open(now)
+	_, tok, _ := web_pair_try(code, "Phone", now)
+	dev, _, ok := web_token_device(tok, now)
+	testing.expect(t, ok, "a paired browser")
+	window_door_on_for_test(true)
+	defer window_door_on_for_test(false)
+	defer core_detach_window()
+
+	win: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &win) == .OK)
+	ws: cw.Sock_Transport
+	cw.sock_open(&ws, win[1])
+	defer cw.sock_destroy(&ws)
+	web: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web) == .OK)
+	window_arrived_for_test(win[0], trust.peer_read(win[0]))
+	web_arrived(web[0], dev, "Phone", false, "h7")
+	window_door_tick()
+	testing.expect(t, window_link_is_window(), "the window wins the batch")
+	got := read_json_frames(web[1])
+	posix.close(web[1])
+	testing.expectf(t, len(got) == 2, "the hello's result and web.taken: %v", got)
+	if len(got) == 2 {
+		testing.expect_value(t, json_path(got[0], "id"), "h7")
+		testing.expect_value(t, json_path(got[1], "type"), "web.taken")
+		testing.expect_value(t, json_path(got[1], "by"), "window")
+	}
+
+	// its user's View here: take passes through the door and takes the view
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &web) == .OK)
+	defer posix.close(web[1])
+	web_arrived(web[0], dev, "Phone", true, "h8")
+	window_door_tick()
+	testing.expect(t, window_link_web(), "take: the browser's link")
+	testing.expect(t, window_heard(&ws, "viewed_from"), "the window: Viewed in a browser")
+}
+
+// The JSON frames waiting on fd (its writer already wrote them), as text.
+@(private = "file")
+read_json_frames :: proc(fd: posix.FD) -> []string {
+	buf: [64 << 10]u8
+	posix.fcntl(fd, .SETFL, posix.fcntl(fd, .GETFL) | posix.O_NONBLOCK)
+	n := posix.read(fd, &buf[0], len(buf))
+	out := make([dynamic]string, context.temp_allocator)
+	rest := buf[:max(n, 0)]
+	for len(rest) > 0 {
+		f, used, err := cw.next_frame(rest)
+		if err != .None || used == 0 do break
+		append(&out, strings.clone(string(f.payload), context.temp_allocator))
+		rest = rest[used:]
+	}
+	return out[:]
+}
+
+// The window's end got a message with this text within a short wait.
+@(private = "file")
+window_heard :: proc(ws: ^cw.Sock_Transport, what: string) -> bool {
+	deadline := time.tick_add(time.tick_now(), 300 * time.Millisecond)
+	for time.tick_diff(time.tick_now(), deadline) > 0 {
+		cw.sock_wait(ws, 10)
+		f, e := cw.sock_recv(ws, context.temp_allocator)
+		if e != .None do continue
+		if strings.contains(string(f.payload), what) do return true
+	}
+	return false
 }
 
 @(private = "file")

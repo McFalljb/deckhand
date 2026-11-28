@@ -349,9 +349,11 @@ web_hello_key_taken :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	k := strings.repeat("ab", 32, context.temp_allocator)
 	msg := hello_frame(0, fmt.tprintf(`{{"v":1,"id":"hello","type":"hello","framed":true,"peer":"web","snapshot":["vt"],"key":"%s"}}`, k))
-	key, out, why := web_hello_key(msg, context.temp_allocator)
+	key, out, take, id, why := web_hello_key(msg, context.temp_allocator)
 	testing.expect_value(t, why, "")
 	testing.expect_value(t, key, k)
+	testing.expect(t, !take, "no take: the browser's own connect")
+	testing.expect_value(t, id, "hello")
 	testing.expect_value(t, ws_frame_problem(out), "")
 	f, _, _ := cw.next_frame(out)
 	testing.expect(t, f.channel == 0 && f.kind == u8(cw.Kind.Data), "one JSON frame")
@@ -363,6 +365,18 @@ web_hello_key_taken :: proc(t: ^testing.T) {
 	testing.expect(t, o["type"].(json.String) == "hello" && o["peer"].(json.String) == "web" && o["framed"].(json.Boolean), "the rest kept")
 	sn, _ := o["snapshot"].(json.Array)
 	testing.expect(t, len(sn) == 1, "the snapshot list kept")
+	// "take" (its user asked for the view): true only as a JSON true, and passed on to the core
+	for c in ([]struct {
+		hello: string,
+		take:  bool,
+	}{{`{"type":"hello","take":true,"key":"x"}`, true}, {`{"type":"hello","take":false,"key":"x"}`, false}, {`{"type":"hello","take":"yes","key":"x"}`, false}, {`{"type":"hello","take":1,"key":"x"}`, false}}) {
+		_, out2, take2, id2, why2 := web_hello_key(hello_frame(0, c.hello), context.temp_allocator)
+		testing.expect_value(t, why2, "")
+		testing.expectf(t, take2 == c.take, "%s: take %v", c.hello, take2)
+		testing.expect_value(t, id2, "")
+		f2, _, _ := cw.next_frame(out2)
+		testing.expect(t, strings.contains(string(f2.payload), `"take"`), "take kept for the core")
+	}
 	for bad in ([]string{
 		`{"v":1,"type":"hello"}`, // no key
 		`{"v":1,"type":"state.subscribe","key":"` + "x" + `"}`, // not a hello
@@ -370,12 +384,12 @@ web_hello_key_taken :: proc(t: ^testing.T) {
 		`not json`,
 		`[1,2]`,
 	}) {
-		_, _, why = web_hello_key(hello_frame(0, bad), context.temp_allocator)
+		_, _, _, _, why = web_hello_key(hello_frame(0, bad), context.temp_allocator)
 		testing.expectf(t, why != "", "%s refused", bad)
 	}
-	_, _, why = web_hello_key(hello_frame(3, `{"type":"hello","key":"x"}`), context.temp_allocator)
+	_, _, _, _, why = web_hello_key(hello_frame(3, `{"type":"hello","key":"x"}`), context.temp_allocator)
 	testing.expect(t, why != "", "not channel 0")
-	_, _, why = web_hello_key(msg[:len(msg) - 1], context.temp_allocator)
+	_, _, _, _, why = web_hello_key(msg[:len(msg) - 1], context.temp_allocator)
 	testing.expect(t, why != "", "not one whole frame")
 }
 

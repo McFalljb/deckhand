@@ -26,7 +26,9 @@ import { storageGet, storageRemove } from "../ui/dom.ts";
 const PHONE = "(max-width: 760px)";
 const NO_OVERLAY: Overlay = { menu: null, palette: false, bell: false, sheet: null, link: null, copy: null, job: null, peek: null, atlas: false, panels: null, select: null };
 
-type Screen = { kind: "pair" } | { kind: "away"; title: string; text: string; button: string; act: () => void } | { kind: "main" };
+// away's n: each time it is shown (its key: a new one starts with its button not busy)
+type Screen = { kind: "pair" } | { kind: "away"; n: number; title: string; text: string; button: string; act: () => void } | { kind: "main" };
+let awayShown = 0;
 
 export function start(root: HTMLElement) {
   render(<Root />, root);
@@ -74,19 +76,34 @@ function Root() {
         setScreen((x) => (x.kind === "away" ? { kind: "main" } : x));
         break;
       case "displaced":
-        setScreen({
-          kind: "away",
-          title: s.by || "Viewed at the Mac",
-          text: "Your sessions keep running. Take them back to show them here (the other window lets go).",
-          button: "Take back",
-          act: () => link.takeBack(),
-        });
+        // by "": this Mac's window has the view (it took it back, or it was there when this page
+        // connected on its own: a connect never takes it from the Mac without the user)
+        setScreen(
+          s.by
+            ? {
+                kind: "away",
+                n: ++awayShown,
+                title: s.by,
+                text: "Your sessions keep running. Take them back to show them here (the other window lets go).",
+                button: "Take back",
+                act: () => link.takeBack(),
+              }
+            : {
+                kind: "away",
+                n: ++awayShown,
+                title: "Your Mac is showing these sessions",
+                text: "Your sessions keep running. View them here to show them in this browser (the Mac window lets go).",
+                button: "View here",
+                act: () => link.takeBack(),
+              },
+        );
         break;
       case "unpaired":
         setScreen({ kind: "pair" });
         break;
       case "stopped":
-        setScreen({ kind: "away", title: "Disconnected", text: s.why, button: "Try again", act: () => link.takeBack() });
+        // Try again is the user's: it takes the view here, from the Mac's window too
+        setScreen({ kind: "away", n: ++awayShown, title: "Disconnected", text: s.why, button: "Try again here", act: () => link.takeBack() });
         break;
     }
     tick(0);
@@ -199,11 +216,11 @@ function Root() {
         <PairHost
           onPaired={() => {
             setScreen({ kind: "main" });
-            link.start();
+            link.start(true); // just paired: the user wants the sessions here
           }}
         />
       ) : screen.kind === "away" ? (
-        <Away s={screen} />
+        <Away key={screen.n} s={screen} />
       ) : (
         <Main />
       )}

@@ -295,7 +295,7 @@ client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, wh
 		if r := core.core_refused_take(run); r != "" do refused = r
 		if launch && (last_launch == {} || time.tick_since(last_launch) >= CORE_RELAUNCH_EVERY) {
 			last_launch = time.tick_now()
-			if why = client_core_launch(run, data); why != "" do return
+			if why = client_launch_hook(run, data, false); why != "" do return
 		}
 		if time.tick_diff(time.tick_now(), deadline) <= 0 {
 			why = launch ? "Deckhand's background core did not start within 15 s" : "Deckhand's new background core did not start within 15 s"
@@ -607,6 +607,12 @@ client_core_lost_why :: proc(why: string) {
 	wlog(why)
 	if client.lost_why == "" do client.lost_why = strings.clone(why, runtime.heap_allocator())
 }
+
+// Launches a core (client_core_launch; tests swap it).
+client_launch_hook: proc(run, data: string, from_tab: bool) -> string = client_core_launch
+
+// A command or a terminal's input while the link is lost: refused, not queued (client_lost_refuse).
+LOST_NOTE :: "Not connected to Deckhand's background core yet. Try again in a moment."
 
 // The give-up's alert (tests swap it).
 client_alert: proc(title, text, button: string) = proc(title, text, button: string) {platform_alert(title, text, button)}

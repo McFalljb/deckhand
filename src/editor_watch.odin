@@ -79,7 +79,8 @@ watch_folder :: proc(folder: string) {
 // Watching is recursive, so only folders inside projects are watched, never
 // the home folder or one above it: an open file outside every project (or in
 // such a folder) is followed by the stat poll alone.
-watch_sync :: proc() {
+watch_sync :: proc(at: time.Tick = {}) {
+	now := at == {} ? time.tick_now() : at
 	want := make([dynamic]string, context.temp_allocator)
 	home := core.fs_real(os.get_env("HOME", context.temp_allocator))
 	too_wide :: proc(f, home: string) -> bool {
@@ -106,13 +107,13 @@ watch_sync :: proc() {
 	if same do for f, i in keep do if f != watch.last_set[i] do same = false
 	if same do return
 	// a watcher that failed waits out its backoff: never a tight loop of failing streams
-	if watch.retry_at != {} && time.tick_diff(time.tick_now(), watch.retry_at) < 0 do return
+	if watch.retry_at != {} && time.tick_diff(now, watch.retry_at) < 0 do return
 	for f in watch.last_set do delete(f)
 	clear(&watch.last_set)
 	clear(&watch.last_ids)
-	if !fs_watch_set(keep[:], on_change) {
+	if !watch_set_hook(keep[:], on_change) {
 		watch.retry_for = watch.retry_for == 0 ? WATCH_RETRY_FIRST : min(watch.retry_for * 2, WATCH_RETRY_MAX)
-		watch.retry_at = time.tick_add(time.tick_now(), watch.retry_for)
+		watch.retry_at = time.tick_add(now, watch.retry_for)
 		wlog(fmt.tprintf("file watcher: FSEvents could not watch %d folder(s); tried again in %v (the editor's stat poll still follows open files)", len(keep), watch.retry_for))
 		return // last_set stays empty: the next sync after the wait tries again
 	}
@@ -146,6 +147,19 @@ watch_roots_check :: proc(now: time.Tick) {
 		sync.mutex_unlock(&watch.lock)
 		sync.atomic_store(&watch.any, true)
 	}
+}
+
+// The platform watcher's set (fs_watch_set; tests swap it).
+watch_set_hook: proc(folders: []string, cb: proc "c" (path: cstring, flags: u32)) -> bool = fs_watch_set
+
+// Tests: the watcher's backoff (0: none), and the queued changes dropped.
+watch_retry_for_test :: proc() -> time.Duration {return watch.retry_for}
+watch_pending_clear_for_test :: proc() {
+	sync.mutex_lock(&watch.lock)
+	for e in watch.pending do delete(e.path, runtime.heap_allocator())
+	clear(&watch.pending)
+	sync.atomic_store(&watch.any, false)
+	sync.mutex_unlock(&watch.lock)
 }
 
 // What the platform watcher watches now (recursively).

@@ -206,3 +206,55 @@ reconnect_give_up_logged :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(text, "[REDACTED]"), "redacted: %q", text)
 	testing.expectf(t, strings.contains(fake.alert, "closed by the other side"), "the alert has the transport's reason: %q", fake.alert)
 }
+
+// A launch or install that fails (a transient error: the bundle being replaced, a full disk) is
+// one failed attempt, tried again; only a dial that waited its 15 s with no core is final.
+// Runs the real reconnect and dial over an empty, private runtime dir: no core is reached.
+@(test)
+reconnect_launch_error_retries :: proc(t: ^testing.T) {
+	@(static) launches: int
+	launches = 0
+	run := test_dir("rl-run")
+	saved_env := os.get_env("DECKHAND_RUNTIME_DIR", context.temp_allocator)
+	os.set_env("DECKHAND_RUNTIME_DIR", run)
+	defer os.set_env("DECKHAND_RUNTIME_DIR", saved_env)
+	saved_launch, saved_alert := client_launch_hook, client_alert
+	defer client_launch_hook, client_alert = saved_launch, saved_alert
+	client_launch_hook = proc(run, data: string, from_tab: bool) -> string {
+		launches += 1
+		return "cannot install Deckhand Core.app: the disk is full"
+	}
+	client_alert = proc(title, text, button: string) {}
+	saved_sock := client.sock
+	client.sock = nil
+	defer client.sock = saved_sock
+	client.lost, client.gave_up, client.asking, core.app_quitting = true, false, false, false
+	client.reconnects, client.reconnects_since = 0, {}
+	client_outage_reset()
+	defer {
+		client.lost, client.gave_up = false, false
+		client.reconnects, client.reconnects_since = 0, {}
+		client_outage_reset()
+	}
+	why, final := client_core_reconnect()
+	testing.expect_value(t, launches, 1)
+	testing.expectf(t, strings.contains(why, "disk is full"), "why: %q", why)
+	testing.expect(t, !final, "a launch error is not final")
+	client_core_tick(time.tick_now())
+	testing.expect(t, !client.gave_up, "the window stays and tries again")
+	testing.expect(t, client.lost)
+}
+
+// An outage whose clock jumped (the Mac slept, no tick ran): its 15 s start again on wake, so a
+// window that slept through a core restart is not given up on at its first try after.
+@(test)
+reconnect_outage_survives_sleep :: proc(t: ^testing.T) {
+	restore := reconnect_fake(2, "Deckhand's background core sent no state")
+	defer restore()
+	t0 := time.tick_now()
+	client_core_tick(t0) // fails: the outage starts at t0
+	testing.expect(t, !client.gave_up)
+	client_core_tick(time.tick_add(t0, 40 * time.Second)) // the next tick, after a sleep: fails again
+	testing.expect(t, !client.gave_up, "not given up across a sleep: its 15 s start again")
+	testing.expect_value(t, fake.tries, 2)
+}

@@ -3,9 +3,12 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+
+import "core"
 
 // The file watcher on 40 project folders under launchd's soft limit of 256 descriptors: it
 // starts, and takes few descriptors (kFSEventStreamCreateFlagWatchRoot took about a dozen per
@@ -57,7 +60,10 @@ watch_root_moved_is_reported :: proc(t: ^testing.T) {
 	dir := fmt.tprintf("%s/proj", base)
 	os.make_directory_all(dir)
 	saved := watch_folders_for_test(dir)
-	defer watch_folders_for_test(saved)
+	defer {
+		watch_folders_for_test(saved)
+		watch_pending_clear_for_test()
+	}
 	testing.expect_value(t, len(watched_folders()), 1)
 	testing.expect(t, os.rename(dir, fmt.tprintf("%s/proj-moved", base)) == nil)
 	watch_roots_check(time.tick_add(time.tick_now(), 3 * WATCH_ROOTS_EVERY))
@@ -65,4 +71,54 @@ watch_root_moved_is_reported :: proc(t: ^testing.T) {
 	found := false
 	for p, i in paths do if p == dir && flags[i] & FSE_ROOT_CHANGED != 0 do found = true
 	testing.expectf(t, found, "RootChanged for %s: %v", dir, paths)
+}
+
+// A watcher that fails waits out its backoff: no retry before retry_at, exactly one after it, and
+// a success resets the backoff. Its failures are logged once, then at most once a minute.
+@(test)
+watch_failure_backs_off :: proc(t: ^testing.T) {
+	@(static) sets, fails: int
+	sets, fails = 0, 1000
+	saved_hook := watch_set_hook
+	defer watch_set_hook = saved_hook
+	watch_set_hook = proc(folders: []string, cb: proc "c" (path: cstring, flags: u32)) -> bool {
+		sets += 1
+		return sets > fails
+	}
+	saved_log := window_log
+	window_log = {}
+	defer {
+		core.log_file_close(&window_log)
+		window_log = saved_log
+	}
+	path := fmt.tprintf("%s/window.log", test_dir("watch-backoff"))
+	testing.expect(t, core.log_file_open(&window_log, path))
+	dir := test_dir("watch-backoff-proj")
+	saved := watch_folders_for_test(dir) // the first try: fails
+	defer {
+		watch_set_hook = saved_hook
+		watch_folders_for_test(saved)
+		watch_pending_clear_for_test()
+	}
+	testing.expect_value(t, sets, 1)
+	t0 := time.tick_now()
+	for i in 1 ..= 9 do watch_sync(time.tick_add(t0, time.Duration(i) * 100 * time.Millisecond))
+	testing.expect_value(t, sets, 1) // within the first second: no retry, however often it syncs
+	watch_sync(time.tick_add(t0, WATCH_RETRY_FIRST + 50 * time.Millisecond))
+	testing.expect_value(t, sets, 2) // past it: exactly one
+	watch_sync(time.tick_add(t0, WATCH_RETRY_FIRST + 60 * time.Millisecond))
+	testing.expect_value(t, sets, 2)
+	// many more failures within the minute: the log has one line for them, not one each
+	at := time.tick_add(t0, 10 * time.Second)
+	for _ in 0 ..< 20 {
+		watch_sync(at)
+		at = time.tick_add(at, watch_retry_for_test() + time.Millisecond)
+		if time.tick_diff(t0, at) > 50 * time.Second do break
+	}
+	b, _ := os.read_entire_file(path, context.temp_allocator)
+	lines := strings.count(string(b), "file watcher: FSEvents could not watch")
+	testing.expectf(t, lines >= 1 && lines <= 2, "failure lines in a minute: %d\n%s", lines, string(b))
+	fails = sets // the next one works
+	watch_sync(time.tick_add(at, WATCH_RETRY_MAX + time.Second))
+	testing.expect_value(t, watch_retry_for_test(), time.Duration(0))
 }

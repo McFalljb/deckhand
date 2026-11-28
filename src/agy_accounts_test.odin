@@ -69,7 +69,7 @@ ag_write :: proc(path, text: string, mode: posix.mode_t = {.IRUSR, .IWUSR}) {
 // An agy profile: its installation id, and a file sign-in (unreadable: never read) when signed.
 @(private = "file")
 ag_profile :: proc(dir: string, signed := false, cli := false) {
-	ag_write(fmt.tprintf("%s/%s/installation_id", dir, cli ? "antigravity" : "antigravity-acp"), "id\n")
+	ag_write(fmt.tprintf("%s/%s/installation_id", dir, cli ? "antigravity-cli" : "antigravity-acp"), "id\n")
 	ag_write(fmt.tprintf("%s/antigravity-acp/conversation_summaries.db", dir), "db")
 	ag_write(fmt.tprintf("%s/GEMINI.md", dir), "# rules\n", {.IRUSR, .IWUSR, .IRGRP, .IROTH})
 	if signed do ag_write(fmt.tprintf("%s/antigravity-acp/acp_token.json", dir), `{"secret":"never read"}`, {})
@@ -142,8 +142,33 @@ agy_accounts_found_by_stat :: proc(t: ^testing.T) {
 	core.agy_accounts_refresh()
 	_, after := core.path_stat(fmt.tprintf("%s/accounts.json", env.root))
 	testing.expect(t, before.inode == after.inode && before.mtime == after.mtime, "not written again")
-	// GEMINI_HOME (as tabs get it) names agy's default: ~/.gemini then is a file account like the rest
+	// agy 1.5.18 reads no GEMINI_HOME: its default profile is ~/.gemini whatever the variable says
+	os.set_env("GEMINI_HOME", fmt.tprintf("%s/elsewhere", h))
+	defer os.unset_env("GEMINI_HOME")
 	testing.expect(t, core.agy_default_home() == fmt.tprintf("%s/.gemini", h))
+}
+
+// ~/.gemini holding only the Antigravity IDE's app data (antigravity/installation_id,
+// conversation_summaries.db) and config/: not an account, but guarded as an agy profile.
+@(test)
+agy_accounts_ide_folder :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	env := ag_reset()
+	defer ag_done(env)
+	g := fmt.tprintf("%s/.gemini", env.home)
+	ag_write(fmt.tprintf("%s/antigravity/installation_id", g), "id\n")
+	ag_write(fmt.tprintf("%s/antigravity/conversation_summaries.db", g), "db")
+	ag_write(fmt.tprintf("%s/config/mcp_config.json", g), "{}")
+	core.agy_accounts_refresh()
+	_, found := ag_find("gemini")
+	testing.expect(t, !found, "the IDE's folder is not an account")
+	d, _ := ag_find("default")
+	testing.expect(t, d.keyring, "the default keeps the keychain")
+	testing.expect(t, !core.agy_profile_marked(g) && core.agy_profile_guarded(g))
+	guarded := false
+	for x in core.agy_profile_dirs() do if x == g do guarded = true
+	testing.expect(t, guarded, "~/.gemini guarded")
+	testing.expect(t, core.agy_credential(fmt.tprintf("%s/oauth_creds.json", g)), "a token name in it refused")
 }
 
 // At most one keyring account: the default holds it until an entry has storage "keyring" (then only

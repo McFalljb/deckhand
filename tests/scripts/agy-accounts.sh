@@ -16,8 +16,8 @@ cd "$ROOT"
 W="$ROOT/build/agy-accounts"
 rm -rf "$W" build/shots/agy-accounts
 H="$W/home"
-mkdir -p "$H/proj" "$W/data" "$H/.gemini/antigravity" "$H/.gemini-work/antigravity-acp" "$H/.config/gemini-lab/antigravity-acp" "$W/outside/Team agy/antigravity-acp"
-for d in "$H/.gemini/antigravity" "$H/.gemini-work/antigravity-acp" "$H/.config/gemini-lab/antigravity-acp" "$W/outside/Team agy/antigravity-acp"; do printf 'fake-id\n' > "$d/installation_id"; done
+mkdir -p "$H/proj" "$W/data" "$H/.gemini/antigravity-cli" "$H/.gemini-work/antigravity-acp" "$H/.config/gemini-lab/antigravity-acp" "$W/outside/Team agy/antigravity-acp"
+for d in "$H/.gemini/antigravity-cli" "$H/.gemini-work/antigravity-acp" "$H/.config/gemini-lab/antigravity-acp" "$W/outside/Team agy/antigravity-acp"; do printf 'fake-id\n' > "$d/installation_id"; done
 printf '{"fake":"never read"}\n' > "$H/.gemini-work/antigravity-acp/acp_token.json"
 chmod 000 "$H/.gemini-work/antigravity-acp/acp_token.json"
 RUN=$(mktemp -d "${TMPDIR:-/tmp}/pdag.XXXXXX") # a short runtime dir: the socket path must fit sun_path
@@ -43,7 +43,7 @@ assert \"lab\" not in a and sys.argv[2] in o[\"removedDirs\"], o
 assert any(x.get(\"source\")==\"added\" and x[\"dir\"]==sys.argv[3] for x in o[\"accounts\"]), a
 " "$A" "$H/.config/gemini-lab" "$W/outside/Team agy"'
 chk "no lock or temp file left" '[ "$(lsq "$W/data/antigravity")" = "accounts.json " ]'
-chk "the profiles untouched" '[ "$(lsq "$H/.gemini-work/antigravity-acp")" = "acp_token.json installation_id " ] && [ "$(lsq "$H/.gemini")" = "antigravity " ] && [ "$(lsq "$W/outside/Team agy")" = "antigravity-acp " ]'
+chk "the profiles untouched" '[ "$(lsq "$H/.gemini-work/antigravity-acp")" = "acp_token.json installation_id " ] && [ "$(lsq "$H/.gemini")" = "antigravity-cli " ] && [ "$(lsq "$W/outside/Team agy")" = "antigravity-acp " ]'
 chk "the sign-in file never changed (mode 000: never read)" '[ "$(stat -f %Lp "$H/.gemini-work/antigravity-acp/acp_token.json")" = 0 ]'
 chmod 600 "$H/.gemini-work/antigravity-acp/acp_token.json"
 if [ $fail = 1 ]; then echo "agy-accounts scene failed (log: $W/run.log)"; exit 1; fi

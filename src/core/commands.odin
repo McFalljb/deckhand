@@ -1437,7 +1437,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		codex_recheck() // and Codex (codex.odin)
 		pi_recheck() // and pi (harness.odin)
 		claude_accounts_refresh() // and CLAUDE_CONFIG_DIR may name another default (claude_accounts.odin)
-		agy_accounts_refresh() // and GEMINI_HOME agy's default profile (agy_accounts.odin)
+		agy_accounts_refresh() // and ~/.gemini, agy's default profile (agy_accounts.odin)
 		harness_checklist_forget() // the coding agents checklist looks again when it next shows (harness_manifest.odin)
 		err := ""
 		if c.ok {

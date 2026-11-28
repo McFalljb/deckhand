@@ -219,7 +219,7 @@ const expandHome = (d: string, home: string) => (d === "~" ? home : d.startsWith
  * hard links; this is the subset an ACP request can be checked against cheaply. Names compare
  * case-insensitively, as on APFS (profile folders as written and as real paths).
  */
-export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env): boolean { // env-read-ok: HOME, PI_CODING_AGENT_DIR, CODEX_HOME, GEMINI_HOME by name
+export function credentialPath(p: string, env: NodeJS.ProcessEnv = process.env): boolean { // env-read-ok: HOME, PI_CODING_AGENT_DIR, CODEX_HOME by name
 	const home = env.HOME || os.homedir();
 	const candidates = new Set([path.resolve(p)]);
 	const real = canonical(path.resolve(p));

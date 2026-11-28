@@ -1295,8 +1295,8 @@ under an account you configured, never a folder of their own.
 
 pi's [Antigravity accounts](#google-antigravity-in-pi-tabs-preview) are listed beside Claude's, in
 Settings › Coding agents › **Antigravity**, once agy is installed (or there are several). An
-account is an **agy profile**, the folder agy's `GEMINI_HOME` names (its sign-in, settings and
-conversations), with its sign-in method. The list is one file Deckhand and pi share,
+account is an **agy profile**, the folder agy keeps its sign-in, settings and
+conversations in (`~/.gemini` for agy itself), with its sign-in method. The list is one file Deckhand and pi share,
 `~/Library/Application Support/Deckhand/antigravity/accounts.json`: change it in Settings or with
 `/antigravity` in a pi tab, and each sees the other's change. It holds names and folders, never a
 secret.
@@ -1304,8 +1304,9 @@ secret.
 - **Default** is Deckhand's own profile (in that folder's `profiles/default`). It is always
   there and cannot be removed.
 - Deckhand **finds** your existing agy profiles by looking (no file is opened): agy's own default
-  (`~/.gemini`, or `GEMINI_HOME` from your login shell), `~/.gemini*` and `~/.config/gemini*` (or
-  `$XDG_CONFIG_HOME/gemini*`), when they hold agy's files (at most 32). Names come from the
+  (`~/.gemini`), `~/.gemini*` and `~/.config/gemini*` (or `$XDG_CONFIG_HOME/gemini*`), when agy
+  itself has run in them (at most 32). A `~/.gemini` with only the Antigravity app's files is not
+  listed, but Deckhand protects it like an agy profile. Names come from the
   folder (`~/.gemini-work` → **Work**). Found folders are used where they are: never copied,
   moved or deleted.
 - **Add account…** (or the palette's **Add Antigravity account…**) adds any folder with a folder

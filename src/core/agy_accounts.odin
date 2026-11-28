@@ -2,7 +2,7 @@ package core
 
 // Antigravity accounts (docs/HARNESSES.md §3a "Accounts", docs/GUIDE.md "Antigravity accounts"),
 // the model of claude_accounts.odin for pi's bundled antigravity extension. An account is an agy
-// profile (what agy's GEMINI_HOME / --gemini-dir names: its sign-in, settings, conversations) with
+// profile (the folder agy's --gemini-dir names: its sign-in, settings, conversations) with
 // a sign-in method; the extension gives each one a pi provider (`antigravity`, `antigravity-<name>`).
 //
 // Who owns the list: one file, <data dir>/antigravity/accounts.json (lib/agy-accounts.ts). The core
@@ -26,9 +26,12 @@ package core
 // Where accounts come from: the implicit `default` (<root>/profiles/default, always listed, never
 // removed); the file's entries; profiles under <root>/profiles/ the file does not name; folders
 // found by stat only, never opening a file (agy_accounts_refresh): agy's own default profile
-// (GEMINI_HOME as tabs get it, else ~/.gemini), ~/.gemini* and ~/.config/gemini* (or
-// $XDG_CONFIG_HOME/gemini*) holding agy's marks (AGY_PROFILE_MARKS), at most 32, written into the
-// file (source "found") unless the user removed them.
+// (~/.gemini: agy 1.5.18 reads no variable for it, GEMINI_HOME included; only --gemini-dir moves
+// it), ~/.gemini* and ~/.config/gemini* (or $XDG_CONFIG_HOME/gemini*) holding agy's marks
+// (AGY_PROFILE_MARKS), at most 32, written into the file (source "found") unless the user removed
+// them. agy's app data in a profile is `antigravity-acp/` (agy acp) or `antigravity-cli/` (its
+// interactive CLI); `antigravity/` in ~/.gemini is the Antigravity IDE's, which does not make a
+// folder an account but is guarded like one (AGY_GUARD_MARKS).
 //
 // Keyring or file. agy 1.5.18 signs a Google account in to one OS keychain entry shared by every
 // profile, unless AGY_CLI_FORCE_FILE_TOKEN_STORAGE is set ("Using file-based token storage because
@@ -137,9 +140,13 @@ AGY_ACCOUNTS_MAX :: 64
 AGY_FILE_MAX :: 256 * 1024
 
 // What makes a folder an agy profile (stat only): its file sign-in, or the installation id agy
-// writes on its first run (the ACP server's app data, or the CLI's own).
+// writes into its app data on its first run (the ACP server's, antigravity-acp/, or its
+// interactive CLI's, antigravity-cli/).
 AGY_TOKEN_FILE :: "antigravity-acp/acp_token.json"
-AGY_PROFILE_MARKS := [3]string{AGY_TOKEN_FILE, "antigravity-acp/installation_id", "antigravity/installation_id"}
+AGY_PROFILE_MARKS := [3]string{AGY_TOKEN_FILE, "antigravity-acp/installation_id", "antigravity-cli/installation_id"}
+// What Deckhand guards as an agy profile: those, and the Antigravity IDE's app data (~/.gemini/
+// antigravity/), never an account by itself.
+AGY_GUARD_MARKS := [4]string{AGY_TOKEN_FILE, "antigravity-acp/installation_id", "antigravity-cli/installation_id", "antigravity/installation_id"}
 
 // ---- folders ----
 
@@ -162,17 +169,24 @@ clean_abs :: proc(d: string) -> string {
 	return strings.trim_right(c, "/") == "" ? "/" : c
 }
 
-// agy's own default profile: GEMINI_HOME as tabs get it (absolute), else ~/.gemini. Temp.
+// agy's own default profile: ~/.gemini (agy 1.5.18 has no variable for it: GEMINI_HOME,
+// GEMINI_DIR, GEMINI_CLI_HOME and XDG_CONFIG_HOME leave it there). Temp.
 agy_default_home :: proc() -> string {
-	if g, ok := env_lookup(child_base_env(), "GEMINI_HOME"); ok && filepath.is_abs(g) do return clean_abs(g)
 	h := agy_home_now()
 	return h != "" ? strings.concatenate({h, "/.gemini"}, context.temp_allocator) : ""
 }
 
-// Whether folder d holds agy's marks (stat only; never read).
+// Whether folder d holds agy's marks (stat only; never read): an account to find.
 agy_profile_marked :: proc(d: string) -> bool {
 	if d == "" do return false
 	for m in AGY_PROFILE_MARKS do if path_kind(strings.concatenate({d, "/", m}, context.temp_allocator)) == .File do return true
+	return false
+}
+
+// Whether folder d is guarded as an agy profile (agy's marks, or the Antigravity IDE's app data).
+agy_profile_guarded :: proc(d: string) -> bool {
+	if d == "" do return false
+	for m in AGY_GUARD_MARKS do if path_kind(strings.concatenate({d, "/", m}, context.temp_allocator)) == .File do return true
 	return false
 }
 
@@ -802,8 +816,8 @@ agy_profile_dirs :: proc() -> []string {
 		add(&c.list, agy_profiles_root(), h)
 		for a in accts do add(&c.list, a.dir, h)
 		for d in found_dirs do add(&c.list, d, h)
-		for d in file_load().removed do if agy_profile_marked(d) do add(&c.list, d, h)
-		if d := agy_default_home(); agy_profile_marked(d) do add(&c.list, d, h)
+		for d in file_load().removed do if agy_profile_guarded(d) do add(&c.list, d, h)
+		if d := agy_default_home(); agy_profile_guarded(d) do add(&c.list, d, h)
 		c.frame, c.gen, c.ok = frame, agy_accounts_gen, true
 	}
 	out := make([]string, len(c.list), context.temp_allocator)
@@ -837,7 +851,7 @@ agy_marked_cached :: proc(d: string) -> bool {
 		marks_at = time.tick_now()
 	}
 	if v, ok := marks[d]; ok do return v
-	v := agy_profile_marked(d)
+	v := agy_profile_guarded(d)
 	if marks == nil do marks = make(map[string]bool, runtime.heap_allocator())
 	if len(marks) < 4096 do marks[strings.clone(d, runtime.heap_allocator())] = v
 	return v
@@ -1142,10 +1156,10 @@ agy_settings_rows :: proc(out: ^[dynamic]Settings_File_Row) {
 	accts := agy_accounts()
 	if len(accts) > 1 {
 		for a in accts do append(out, Settings_File_Row{group = "agy-accounts", label = a.label, detail = agy_account_detail(a), path = strings.concatenate({AGY_ACCOUNT_ROW, a.name}, context.temp_allocator), button = "Rename…", remove = a.source != .Default, make_default = !a.chosen})
-		append(out, Settings_File_Row{group = "agy-accounts", label = "Add account…", detail = "an agy profile folder (GEMINI_HOME), used in place", path = AGY_ACCOUNT_ADD_ROW, button = "Add…"})
+		append(out, Settings_File_Row{group = "agy-accounts", label = "Add account…", detail = "an agy profile folder (its --gemini-dir), used in place", path = AGY_ACCOUNT_ADD_ROW, button = "Add…"})
 		append(out, Settings_File_Row{group = "agy-accounts", label = "Scan again", detail = "look for agy profiles in ~/.gemini*, ~/.config/gemini*", path = AGY_ACCOUNT_SCAN_ROW, button = "Scan"})
 	} else {
-		append(out, Settings_File_Row{group = "agy-accounts", label = "More accounts…", detail = "another agy profile folder (GEMINI_HOME)", path = AGY_ACCOUNT_MORE_ROW, button = "Add…"})
+		append(out, Settings_File_Row{group = "agy-accounts", label = "More accounts…", detail = "another agy profile folder (its --gemini-dir)", path = AGY_ACCOUNT_MORE_ROW, button = "Add…"})
 	}
 }
 

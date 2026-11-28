@@ -572,7 +572,7 @@ accounts_body :: proc(w: f32) {
 	u := &setup_ui
 	agy := agy_step()
 	if agy {
-		para("An Antigravity account is an agy profile folder (what agy's GEMINI_HOME names), for Google Antigravity in pi tabs. Folders are used where they are; you sign in from a pi tab (/antigravity login <name>).", th.text_secondary)
+		para("An Antigravity account is an agy profile folder (what agy's --gemini-dir names), for Google Antigravity in pi tabs. Folders are used where they are; you sign in from a pi tab (/antigravity login <name>).", th.text_secondary)
 		para("Tick the ones pi should offer; click a name to change it. pi's antigravity tool uses the default when no account is named.", th.text_muted)
 	} else {
 		para("An account is a Claude Code config folder (what CLAUDE_CONFIG_DIR names). API-key, Bedrock or Vertex sign-ins come from your environment and need no folder.", th.text_secondary)
@@ -756,7 +756,7 @@ setup_tip :: proc(h: Hit_Setup) -> (string, string) {
 		return "Offer this account in Deckhand (unticked: left out; its folder is not touched)", ""
 	case .Acct_Label:   return "Rename (its name in Deckhand only)", "Enter"
 	case .Acct_Default: return agy_step() ? "pi's antigravity tool and /antigravity commands use this account when none is named" : "New Claude sessions start in this account unless their project last used another", ""
-	case .Acct_Path:    return agy_step() ? "An agy profile folder anywhere (what agy's GEMINI_HOME names)" : "A Claude Code config folder anywhere (what CLAUDE_CONFIG_DIR names)", "Enter"
+	case .Acct_Path:    return agy_step() ? "An agy profile folder anywhere (what agy's --gemini-dir names)" : "A Claude Code config folder anywhere (what CLAUDE_CONFIG_DIR names)", "Enter"
 	case .Acct_Add:     return "Add the folder typed here", "Enter"
 	case .Acct_Pick:    return agy_step() ? "Pick an agy profile folder (hidden folders: ⇧⌘.)" : "Pick a Claude Code config folder (hidden folders: ⇧⌘.)", ""
 	case .Agent_Action, .Agent_Copy: return harness_step_tip(h), ""

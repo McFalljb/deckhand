@@ -2,7 +2,8 @@
 // (apps/server/src/provider/antigravityAuthSupport.ts; docs/user/providers-antigravity.md "Sign-in
 // methods", "Multiple accounts and removal"):
 //
-// - Each account has a private profile, agy's GEMINI_HOME, so sign-ins, hooks and MCP settings of
+// - Each account has a private profile (the folder agy's --gemini-dir names; agy 1.5.18 reads no
+//   GEMINI_HOME or other variable for it), so sign-ins, hooks and MCP settings of
 //   one never reach another or the user's own `~/.gemini`; the user's global skills and rules are
 //   linked in (linkUserConfig). agy runs with `acp --gemini-dir <profile> --app-data-dir
 //   antigravity-acp`, and its sign-in method in `<profile>/antigravity-acp/settings.json`.
@@ -10,7 +11,8 @@
 //   `antigravity-<name>`. The user picks an account by picking its model; nothing here ever
 //   switches accounts by itself (t3code leaves that out on purpose: providers' terms).
 // - agy's environment is pi's without the variables that choose a credential or a profile behind
-//   the account's back (GEMINI_API_KEY, GOOGLE_*, GEMINI_HOME, BROWSER…: t3code's list), so an API
+//   the account's back (GEMINI_API_KEY, GOOGLE_*, BROWSER…: t3code's list; GEMINI_HOME too, which
+//   agy 1.5.18 ignores but older or other builds may not), so an API
 //   key in the shell never bills instead of the subscription. An API-key account's key comes from
 //   pi's own credential store (`/login antigravity-<name>`, a masked prompt; pi keeps it in
 //   auth.json, 0600, as every pi API key) and reaches agy only in its process environment.
@@ -396,18 +398,22 @@ export const profileOf = (root: string, a: Pick<Account, "name" | "dir">): Profi
 	return { geminiHome, acpDir, tmpDir: path.join(acpDir, "tmp"), inPlace };
 };
 
-/** The files whose presence marks a folder as an agy profile (the core's AGY_PROFILE_MARKS). */
-export const PROFILE_MARKS = ["antigravity-acp/acp_token.json", "antigravity-acp/installation_id", "antigravity/installation_id"] as const;
+/**
+ * The files whose presence marks a folder as an agy profile to guard (the core's AGY_GUARD_MARKS):
+ * agy's app data (antigravity-acp/ for agy acp, antigravity-cli/ for its interactive CLI) and the
+ * Antigravity IDE's (~/.gemini/antigravity/).
+ */
+export const PROFILE_MARKS = ["antigravity-acp/acp_token.json", "antigravity-acp/installation_id", "antigravity-cli/installation_id", "antigravity/installation_id"] as const;
 /** Whether folder `d` holds agy's marks (a profile agy has run in). */
 export const profileMarked = (d: string) => PROFILE_MARKS.some((m) => fs.statSync(path.join(d, m), { throwIfNoEntry: false })?.isFile() === true);
 
 /**
  * Every agy profile Deckhand guards, as the core's agy_profile_dirs: `<root>/profiles` (all of
  * it), each account's profile (a folder used in place included), a removed account's folder and
- * agy's default profile (GEMINI_HOME, else ~/.gemini) while they hold agy's marks. HOME or above is
+ * agy's default profile (~/.gemini: agy 1.5.18 reads no variable for it) while they hold agy's marks. HOME or above is
  * never one. Absolute, as written (callers compare real paths too).
  */
-export function profileDirs(root: string, env: NodeJS.ProcessEnv = process.env): string[] { // env-read-ok: profileDirs reads HOME and GEMINI_HOME
+export function profileDirs(root: string, env: NodeJS.ProcessEnv = process.env): string[] { // env-read-ok: profileDirs reads HOME only
 	const home = path.resolve(env.HOME || os.homedir());
 	const out = new Set<string>();
 	const add = (d: string | undefined) => {
@@ -420,7 +426,7 @@ export function profileDirs(root: string, env: NodeJS.ProcessEnv = process.env):
 	for (const a of loadAccounts(root)) add(profileOf(root, a).geminiHome);
 	const raw = readRaw(root);
 	for (const d of Array.isArray(raw.removedDirs) ? raw.removedDirs : []) if (typeof d === "string" && path.isAbsolute(d) && profileMarked(d)) add(d);
-	const def = env.GEMINI_HOME && path.isAbsolute(env.GEMINI_HOME) ? env.GEMINI_HOME : path.join(home, ".gemini");
+	const def = path.join(home, ".gemini");
 	if (profileMarked(def)) add(def);
 	return [...out];
 }
@@ -684,7 +690,6 @@ export function agyEnvFor(a: Account, p: Profile, apiKey: string | undefined, ba
 		...(key && a.method === "gemini-api-key" ? { GEMINI_API_KEY: key } : {}),
 		...(key && a.method === "agent-platform" ? { GOOGLE_API_KEY: key } : {}),
 		...(a.method === "oauth-personal" && !a.keyring ? { SSH_CONNECTION: base.SSH_CONNECTION || "127.0.0.1 0 127.0.0.1 0" } : {}),
-		GEMINI_HOME: p.geminiHome,
 		...(a.keyring ? {} : { AGY_CLI_FORCE_FILE_TOKEN_STORAGE: "1" }),
 		AGY_CLI_DISABLE_AUTO_UPDATE: "true",
 		PYTHONUNBUFFERED: "1",

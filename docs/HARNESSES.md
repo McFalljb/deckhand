@@ -196,10 +196,16 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   when the pid is gone, or empty and older than 2 s; taken over by rename to `.stale-…` and an
   inode check), waits at most 200 ms (else "try again"), re-reads inside the lock, never writes
   over a file that is not a JSON object, and writes temp + rename. Discovery is by stat only,
-  never opening a file: agy's default profile (`GEMINI_HOME` as tabs get it, else `~/.gemini`),
-  `~/.gemini*`, `~/.config/gemini*` (or `$XDG_CONFIG_HOME/gemini*`), folders holding
-  `antigravity-acp/acp_token.json` (agy's file sign-in) or an `installation_id` under
-  `antigravity-acp/` or `antigravity/` (agy writes one on its first run), at most 32; new ones are
+  never opening a file: agy's default profile (`~/.gemini`: agy 1.5.18 has no variable for it;
+  the string `GEMINI_HOME` is not in its binary, and `GEMINI_DIR`, `GEMINI_CLI_HOME`,
+  `XDG_CONFIG_HOME` and `ANTIGRAVITY_GEMINI_DIR` do not move it either; only `--gemini-dir`
+  does), `~/.gemini*`, `~/.config/gemini*` (or `$XDG_CONFIG_HOME/gemini*`), folders holding
+  `antigravity-acp/acp_token.json` (agy's file sign-in) or an `installation_id` in agy's app data:
+  `antigravity-acp/` (`agy acp`, as Deckhand runs it) or `antigravity-cli/` (agy's interactive
+  CLI's default). agy writes one on its first run. At most 32. `~/.gemini/antigravity/` (with
+  `installation_id` and `conversation_summaries.db`) is the Antigravity IDE's: it does not make a
+  folder an account, but such a folder is guarded like a profile (the core's `AGY_GUARD_MARKS`,
+  `PROFILE_MARKS` in `lib/agy-accounts.ts`). New ones are
   written in as `source: "found"` unless in `removedDirs`; a found one whose folder is gone is
   dropped. Unlisted folders under `profiles/` are listed too. Signed in by stat, a display hint
   only (nothing is gated on it: agy is always asked, `authenticate`, and only its own answer means
@@ -225,9 +231,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   chats or data folder, nor be, be inside or hold a Claude config folder or Codex home.
 - **agy's environment** (`agyEnvFor`): pi's, without t3code's list (`GEMINI_API_KEY`,
   `GOOGLE_API_KEY`, `GOOGLE_CLOUD_*`, `GOOGLE_GENAI_USE_VERTEXAI`,
-  `GCLOUD_PROJECT`, `CLOUDSDK_CORE_PROJECT`, `AGY_ACP_*`, `GEMINI_HOME`, `BROWSER`, …, matched
-  case-insensitively), any other `GOOGLE_*` and `DECKHAND_*`; then `GEMINI_HOME` (the profile),
-  `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1` (file mode), `AGY_CLI_DISABLE_AUTO_UPDATE=true`, `TMPDIR`
+  `GCLOUD_PROJECT`, `CLOUDSDK_CORE_PROJECT`, `AGY_ACP_*`, `GEMINI_HOME` (ignored by agy 1.5.18, scrubbed for
+  other builds), `BROWSER`, …, matched case-insensitively), any other `GOOGLE_*` and `DECKHAND_*`;
+  then (the profile is `--gemini-dir`, never a variable) `AGY_CLI_FORCE_FILE_TOKEN_STORAGE=1` (file mode), `AGY_CLI_DISABLE_AUTO_UPDATE=true`, `TMPDIR`
   (the process's own folder, below), and the account's key as `GEMINI_API_KEY` (`gemini-api-key`)
   or `GOOGLE_API_KEY` (`agent-platform`). A Google account (`oauth-personal`) in file mode also gets
   `SSH_CONNECTION=127.0.0.1 0 127.0.0.1 0`, so agy never opens a browser by itself when it has no

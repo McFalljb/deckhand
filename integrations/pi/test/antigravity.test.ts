@@ -2262,3 +2262,45 @@ test("models at start: a cache file that is not a list is ignored; an API-key ac
 		});
 	});
 });
+
+test("logout of the keychain account: the accounts that share its sign-in are named and confirmed first (refused without a UI unless --yes); one with its own sign-in is not asked about", async () => {
+	const f = fake();
+	const a = accountsEnv({ FAKE_AGY_LOG: f.log });
+	mkdirSync(a.root, { recursive: true });
+	const own = mkdtempSync(path.join(TMP_ROOT, "own-signin-"));
+	mkdirSync(path.join(own, "antigravity-acp"), { recursive: true });
+	writeFileSync(path.join(own, "antigravity-acp", "acp_token.json"), "{}");
+	writeFileSync(path.join(a.root, "accounts.json"), JSON.stringify({ accounts: [{ name: "personal", method: "oauth-personal" }, { name: "solo", method: "oauth-personal", dir: own, source: "added" }, { name: "key", method: "gemini-api-key" }] }));
+	await withEnv(a.env, async () => {
+		const pi = await loadExtension();
+		await pi.start();
+		const logouts = () => f.read().filter((m) => m.method === "logout").length;
+		const text = "This signs out default and personal (they share the macOS keychain sign-in). Use /antigravity login personal to give personal its own.";
+		// declined: nothing signed out
+		const asked: string[] = [];
+		const c1 = cmdCtx(pi);
+		c1.ctx.ui.confirm = async (_t: string, body: string) => (asked.push(body), false);
+		await run(pi, "antigravity", "logout", c1.ctx);
+		assert.deepEqual(asked, [text]);
+		assert.equal(logouts(), 0);
+		// no UI: refused with the same line, and how to go ahead
+		const c2 = cmdCtx(pi);
+		c2.ctx.hasUI = false;
+		await run(pi, "antigravity", "logout default", c2.ctx);
+		assert.equal(c2.notes.at(-1), `${text} To sign them all out, run /antigravity logout default --yes`);
+		assert.equal(logouts(), 0);
+		await run(pi, "antigravity", "logout default --yes", c2.ctx);
+		assert.equal(logouts(), 1);
+		assert.equal(c2.notes.at(-1), 'Signed out of Antigravity (account "default" and personal, which shared it, its sign-in in the system keychain, which agy outside Deckhand uses too); its history is kept');
+		// confirmed (a UI): signed out
+		const c3 = cmdCtx(pi);
+		await run(pi, "antigravity", "logout", c3.ctx);
+		assert.equal(logouts(), 2);
+		// a file account's own sign-out asks nothing
+		const c4 = cmdCtx(pi);
+		c4.ctx.ui.confirm = async () => assert.fail("not asked");
+		await run(pi, "antigravity", "logout solo", c4.ctx);
+		await run(pi, "antigravity", "logout personal", c4.ctx);
+		assert.equal(logouts(), 4);
+	});
+});

@@ -282,7 +282,9 @@ sign-in; pi keeps its transcript. Deckhand never reads agy's credentials or call
   provider, method, sign-in state and model count; "signed in" is the existence of agy's
   `acp_token.json`, which is never read, or a key in pi's store) and, with a UI, a menu;
   `add <name> [method]`, `login`, `logout` (agy's ACP `logout`, when advertised; the history
-  stays), `remove` (confirmed; its provider unregistered and its profile deleted; `default` stays)
+  stays; the keychain account's clears the one keychain entry, so the other Google accounts with
+  no sign-in file of their own, which agy signs in from it, are named in a confirm first; without
+  a UI it is refused unless `--yes`), `remove` (confirmed; its provider unregistered and its profile deleted; `default` stays)
   `models [name]`, `approvals [allow|ask] [name]` (shows or sets the account's approvals mode) and `path [/abs/agy]` (sets agy's path after the same check, or with no
   argument clears it; every account's provider then runs the new binary). `/antigravity login`
   with no name signs in the default account. Gemini Enterprise

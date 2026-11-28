@@ -254,6 +254,9 @@ Deckhand also finds the agy profiles you already have and lists them in Settings
   antigravity-<name>`** instead: pi asks for the key without showing it and keeps it in its own
   credential store, as it does every API key; it is never written to Deckhand's files.
 - **`/antigravity logout <name>`** signs out (agy forgets the saved sign-in; the history stays).
+  Google accounts with no sign-in of their own share the macOS keychain sign-in. Signing out the
+  account that holds it signs them all out, so Deckhand names them and asks first (without a
+  window, add `--yes`). `/antigravity login <name>` gives an account its own sign-in.
   For an API key, `/logout` and pick the account's provider.
 - **`/antigravity remove <name>`** removes an account, its profile and its history, after asking
   (without a window to ask in, add `--yes`). The default account stays. An account whose folder

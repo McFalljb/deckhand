@@ -427,19 +427,33 @@ export default function antigravity(pi: ExtensionAPI) {
 		}
 	};
 
-	const logout = async (ctx: ExtensionContext, name?: string) => {
+	const logout = async (ctx: ExtensionContext, name?: string, yes = false) => {
 		const a = accountOf(name);
 		if (!a) return fail(ctx, `No Antigravity account "${name}"`);
+		// the keychain account's sign-out clears the one keychain entry, which every Google account
+		// without a sign-in of its own also signs in with: named first, confirmed (or --yes)
+		const shared = a.keyring ? keychainUsers(a) : [];
+		if (shared.length && !yes) {
+			const line = sharedSignOutText(a, shared);
+			if (!ctx.hasUI) return ctx.ui.notify(`${line} To sign them all out, run /antigravity logout ${a.name} --yes`, "warning");
+			if (!(await ctx.ui.confirm(`Sign out of Antigravity?`, line))) return;
+		}
 		await live.get(a.name)?.ag.closeAll();
+		for (const x of shared) await live.get(x.name)?.ag.closeAll();
 		if (usesKey(a)) return ctx.ui.notify(`Run /logout and pick ${providerIdOf(a.name)}: pi removes the stored key. The account and its history stay.`, "info");
 		if (!usesKeyOrBrowser(a)) return ctx.ui.notify(`The account "${a.name}" uses Application Default Credentials: nothing is saved to sign out of (gcloud auth application-default revoke)`, "info");
 		try {
 			await agyLogout({ agyPath, cwd, ...launchOf(a, undefined) });
-			ctx.ui.notify(`Signed out of Antigravity (account "${a.name}"${a.keyring ? ", its sign-in in the system keychain, which agy outside Deckhand uses too" : ""}); its history is kept`, "info");
+			ctx.ui.notify(`Signed out of Antigravity (account "${a.name}"${shared.length ? ` and ${listNames(shared)}, which shared it` : ""}${a.keyring ? ", its sign-in in the system keychain, which agy outside Deckhand uses too" : ""}); its history is kept`, "info");
 		} catch (e) {
 			fail(ctx, explainError((e as Error).message, a));
 		}
 	};
+	/** The other Google accounts with no sign-in of their own, so signed in from the keychain account's (agy reads its file, else the keychain). */
+	const keychainUsers = (k: Account) => accountsNow().filter((x) => x.name !== k.name && x.method === "oauth-personal" && !x.keyring && !hasSavedLogin(profileOf(root, x)));
+	const listNames = (l: Account[]) => (l.length === 1 ? l[0].name : `${l.slice(0, -1).map((x) => x.name).join(", ")} and ${l.at(-1)!.name}`);
+	const sharedSignOutText = (k: Account, l: Account[]) =>
+		`This signs out ${listNames([k, ...l])} (they share the macOS keychain sign-in). Use /antigravity login ${l[0].name} to give ${l.length === 1 ? l[0].name : "an account"} its own.`;
 	const usesKeyOrBrowser = (a: Account) => usesKey(a) || a.method === "oauth-personal" || a.method === "oauth-business";
 
 	const remove = async (ctx: ExtensionContext, name?: string, yes = false) => {
@@ -611,7 +625,7 @@ export default function antigravity(pi: ExtensionAPI) {
 				case "login":
 					return login(ctx, name);
 				case "logout":
-					return logout(ctx, name);
+					return name === "--yes" ? logout(ctx, undefined, true) : logout(ctx, name, method === "--yes");
 				case "remove":
 					return remove(ctx, name, method === "--yes");
 				case "models":

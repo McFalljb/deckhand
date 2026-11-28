@@ -76,6 +76,14 @@ Client :: struct {
 	gave_up:   bool, // ...and no reconnect will be tried (client_core_give_up)
 	reconnects: int, // reconnects since reconnects_since (reconnect_allowed)
 	reconnects_since: time.Tick,
+	// one outage (client_core_tick): when the link was lost, the next attempt's time and backoff,
+	// the reconnecting toast said, and why the last attempt and the link itself ended (heap)
+	lost_at:        time.Tick,
+	retry_at:       time.Tick,
+	retry_delay:    time.Duration,
+	retry_toasted:  bool,
+	last_try_why:   string,
+	lost_why:       string,
 	handing_over: bool, // a core handover at attach: its connection's end is expected (client_core.odin)
 	viewed_from: string, // another machine's Deckhand took the core (window.request viewed_from; heap): no reconnect until Take back
 	viewed_browser: bool, // ...a paired browser did (web access): viewed_from is its name

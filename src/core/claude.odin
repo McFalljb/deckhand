@@ -510,7 +510,7 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		dir := claude_account_dir(ct.account, .Claude)
 		insert, wrapped, wrap := usage_claude_inject(args, cli, dir, cwd)
 		append(&argv, ..insert)
-		sources, _ := usage_setting_sources(args)
+		sources, _ := usage_claude_sources(args)
 		usage_claude_tab_started(tab_id, dir, cwd, wrap, sources)
 		fallback = usage_claude_fallback_env(dir, cwd, sources, wrap) // its own status line when Deckhand does not answer
 		args = wrapped

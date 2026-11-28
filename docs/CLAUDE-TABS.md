@@ -737,7 +737,12 @@ lines (Claude Code 2.1.332). There is no status line text without a command.
   the account's, the first of those that says (*status line off (disableAllHooks)*). The tab's
   last `--setting-sources` (or `=`; a comma-separated list of `user`, `project`, `local`) leaves
   out the files it does not name, here and for the user's status line; a value Claude Code would
-  refuse leaves the tab unwrapped (*a tab's --setting-sources could not be read*). MDM profiles and
+  refuse leaves the tab unwrapped (*a tab's --setting-sources could not be read*). A restricted
+  session (`--restricted` in the tab's flags or the Default flags line, or `CLAUDE_CODE_RESTRICTED`
+  1, true, yes or on in the environment a tab gets) reads none of the three, as Claude Code
+  2.1.332 does: no status line of the user's and an empty fallback. A tab a restarted core finds
+  gets the sources of its saved flags with the Default flags line as they are now, never more than
+  its saved flags alone allow. MDM profiles and
   server-managed settings are not seen: a status line set there wins silently, and the row gets
   no live numbers. A change of those settings after the tab started is not seen until it
   restarts.
@@ -756,7 +761,9 @@ lines (Claude Code 2.1.332). There is no status line text without a command.
   connect, 0.8 s for the answer). When Deckhand does not answer (a core restart or handover, a
   slow answer, the account removed) it runs `DECKHAND_STATUSLINE_USER`, the user's command as
   resolved at the tab's start, which `claude_start` sets in a wrapped tab's environment (each
-  start resolves it again). That trusts nothing new: it is the user's own settings' command,
+  start resolves it again; always set, empty when there is none). It and
+  `DECKHAND_STATUSLINE_DEPTH` are Deckhand's names (`DESK_SET_ENV`): never inherited by a tab
+  (a Deckhand started from a Claude tab) nor taken from the login shell. That trusts nothing new: it is the user's own settings' command,
   which Claude Code would run itself, and it reaches only processes of that tab, whose agent can
   read those settings anyway. Deckhand answering "none" (`{}`) wins over it. Outside a Deckhand
   tab with neither, it prints nothing and exits 0.

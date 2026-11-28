@@ -32,6 +32,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:math"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
@@ -110,6 +111,29 @@ usage_setting_sources :: proc(args: []string) -> (src: Usage_Sources, ok: bool) 
 		}
 	}
 	return
+}
+
+// The settings files a Claude tab started with these (effective) flags reads: its
+// --setting-sources, and none at all in a restricted session (--restricted, or a truthy
+// CLAUDE_CODE_RESTRICTED in the environment a tab gets: Claude Code 2.1.332 reads only managed
+// settings and --settings then). ok false: a --setting-sources Claude Code would refuse.
+usage_claude_sources :: proc(args: []string) -> (src: Usage_Sources, ok: bool) {
+	src, ok = usage_setting_sources(args)
+	if !ok do return
+	if slice.contains(args, "--restricted") || usage_claude_restricted_env() do src = {}
+	return
+}
+
+// CLAUDE_CODE_RESTRICTED as a Claude tab would get it (child_env: the shell environment as
+// refreshed, the scrubs applied), truthy as Claude Code reads it: 1, true, yes or on, in any case,
+// spaces trimmed.
+@(private = "file")
+usage_claude_restricted_env :: proc() -> bool {
+	for e in child_env(nil) do if strings.has_prefix(e, "CLAUDE_CODE_RESTRICTED=") {
+		v := strings.to_lower(strings.trim_space(e[len("CLAUDE_CODE_RESTRICTED="):]), context.temp_allocator)
+		return v == "1" || v == "true" || v == "yes" || v == "on"
+	}
+	return false
 }
 
 @(private = "file")
@@ -334,13 +358,14 @@ usage_claude_user_statusline :: proc(dir, cwd: string, sources := USAGE_SOURCES_
 
 // The environment a wrapped tab gets for its own status line, which `deckhand statusline` runs
 // only when Deckhand does not answer (a core restart or handover, a slow answer, the account
-// removed): DECKHAND_STATUSLINE_USER=<command>, as resolved at this start ("" = none). Nothing
+// removed): DECKHAND_STATUSLINE_USER=<command>, as resolved at this start (empty when there is
+// none, so the name is always Deckhand's own; "" = not wrapped: nothing set). Nothing
 // new is trusted: the command is the user's own settings', which Claude Code would run itself,
 // and only Claude Code's status line run (its process's environment, set here) reads it.
 usage_claude_fallback_env :: proc(dir, cwd: string, sources: Usage_Sources, wrap: Usage_Wrap) -> string {
 	if wrap != .Wrapped do return ""
 	sl, ok := usage_claude_user_statusline(dir, cwd, sources)
-	if !ok || strings.contains_rune(sl.command, 0) do return ""
+	if !ok || strings.contains_rune(sl.command, 0) do return "DECKHAND_STATUSLINE_USER=" // set, empty: never one inherited
 	return strings.concatenate({"DECKHAND_STATUSLINE_USER=", sl.command}, context.temp_allocator)
 }
 
@@ -376,7 +401,7 @@ usage_claude_inject :: proc(args: []string, cli, dir, cwd: string) -> (insert: [
 	out_args = args
 	if !usage_claude_statusline_on() do return nil, args, .Off
 	if cli == "" do return nil, args, .No_Cli
-	sources, sok := usage_setting_sources(args)
+	sources, sok := usage_claude_sources(args)
 	if !sok do return nil, args, .Bad_Sources
 	managed := usage_managed_objects()
 	for o in managed {
@@ -496,9 +521,13 @@ usage_claude_report_apply :: proc(c: Claude_Usage_Report) -> (Result, bool) {
 		// a tab started by an earlier core: its folder as claude_start picks it (its own, a
 		// worktree or a subfolder, while it is one; else its session's), its saved flags' sources
 		// (an agent's start had none: all of them)
+		// sources: claude_start's (its saved flags with the Default flags line), and never more than
+		// its saved flags alone allow, the defaults having perhaps changed since (fail closed)
 		cwd := tab.cwd != "" && os.is_dir(tab.cwd) ? tab.cwd : (s != nil ? s.cwd : "")
-		src, sok := usage_setting_sources(ct.args)
-		usage_claude_tab_started(c.tab_id, dir, cwd, sok ? .Wrapped : .Bad_Sources, sok ? src : {})
+		with, wok := usage_claude_sources(claude_with_defaults(ct.args))
+		own, ook := usage_claude_sources(ct.args)
+		sok := wok && ook
+		usage_claude_tab_started(c.tab_id, dir, cwd, sok ? .Wrapped : .Bad_Sources, sok ? with & own : {})
 	}
 	t := &usage_tabs[c.tab_id]
 	cwd, sources := t.cwd, t.sources

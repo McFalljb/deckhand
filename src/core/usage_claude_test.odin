@@ -659,10 +659,10 @@ usage_claude_ours_exactly :: proc(t: ^testing.T) {
 usage_claude_fallback_command :: proc(t: ^testing.T) {
 	def := uc_reset()
 	defer uc_done()
-	testing.expect_value(t, usage_claude_fallback_env(def, "", USAGE_SOURCES_ALL, .Wrapped), "")
+	testing.expect_value(t, usage_claude_fallback_env(def, "", USAGE_SOURCES_ALL, .Wrapped), "DECKHAND_STATUSLINE_USER=") // always set on a wrapped tab: never an inherited one
 	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"my-line --x"}}`)
 	testing.expect_value(t, usage_claude_fallback_env(def, "", USAGE_SOURCES_ALL, .Wrapped), "DECKHAND_STATUSLINE_USER=my-line --x")
-	testing.expect_value(t, usage_claude_fallback_env(def, "", {.Project}, .Wrapped), "")
+	testing.expect_value(t, usage_claude_fallback_env(def, "", {.Project}, .Wrapped), "DECKHAND_STATUSLINE_USER=")
 	for w in ([]Usage_Wrap{.Off, .Managed, .Hooks_Off, .Own_Settings, .Bad_Sources, .No_Cli}) do testing.expect_value(t, usage_claude_fallback_env(def, "", USAGE_SOURCES_ALL, w), "")
 	// the background read's environment: no auto-update or marketplace install either
 	s := usage_claude_script(def)
@@ -681,6 +681,76 @@ usage_claude_settings_fifo :: proc(t: ^testing.T) {
 	os.remove(path)
 	testing.expect(t, posix.mkfifo(strings.clone_to_cstring(path, context.temp_allocator), {.IRUSR, .IWUSR}) == .OK)
 	testing.expect(t, usage_settings_object(path) == nil)
+}
+
+
+// Review 2 #1: a tab a restarted core finds reads the sources it started with: its saved flags
+// with the Default flags line (claude_start's), and never more than its saved flags alone allow
+// (the defaults may have changed since).
+@(test)
+usage_claude_restore_reads_default_flags :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	r := run_command(Set_Harness_Flags{harness = .Claude, flags = "--setting-sources user"}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	defer run_command(Set_Harness_Flags{harness = .Claude, flags = ""}, {kind = .UI})
+	proj := uc_dir("restore-defaults")
+	uc_write(fmt.tprintf("%s/.claude/settings.json", proj), `{"statusLine":{"type":"command","command":"project-line"}}`)
+	id := uc_tab(proj, "")
+	usage_claude_tabs_reset_for_test() // started by an earlier core
+	rep, _ := uc_report(id, 10, 0)
+	testing.expect(t, rep.ok, rep.error)
+	testing.expect_value(t, rep.data, "{}")
+	// its saved flags narrower than the defaults now: the narrower wins
+	run_command(Set_Harness_Flags{harness = .Claude, flags = ""}, {kind = .UI})
+	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"user-line"}}`)
+	id2 := uc_tab(proj, "", {"--setting-sources", "user"})
+	rep, _ = uc_report(id2, 10, 0)
+	testing.expect_value(t, rep.data, `{"command":"user-line"}`)
+}
+
+// Review 2 #2: --restricted (in the tab's flags or the Default flags line) and a truthy
+// CLAUDE_CODE_RESTRICTED in the tab's environment leave out user, project and local settings
+// (Claude Code 2.1.332 qNs): no status line of the user's, no fallback, at a start and after a
+// core restart.
+@(test)
+usage_claude_restricted_reads_no_settings :: proc(t: ^testing.T) {
+	def := uc_reset()
+	defer uc_done()
+	proj := uc_dir("restricted")
+	uc_write(fmt.tprintf("%s/settings.json", def), `{"statusLine":{"type":"command","command":"user-line","padding":3}}`)
+	src, ok := usage_claude_sources({"--restricted"})
+	testing.expect(t, ok)
+	testing.expect_value(t, src, Usage_Sources{})
+	insert, _, wrap := usage_claude_inject({"--restricted"}, "/x/cli", def, proj)
+	testing.expect_value(t, wrap, Usage_Wrap.Wrapped)
+	testing.expect(t, len(insert) == 2 && !strings.contains(insert[1], "padding"), insert[1] if len(insert) == 2 else "")
+	testing.expect_value(t, usage_claude_fallback_env(def, proj, src, wrap), "DECKHAND_STATUSLINE_USER=")
+	id := uc_tab(proj, "", {"--restricted"})
+	rep, _ := uc_report(id, 10, 0)
+	testing.expect_value(t, rep.data, "{}")
+	// the Default flags line's
+	run_command(Set_Harness_Flags{harness = .Claude, flags = "--restricted"}, {kind = .UI})
+	id2 := uc_tab(proj, "")
+	rep, _ = uc_report(id2, 10, 0)
+	run_command(Set_Harness_Flags{harness = .Claude, flags = ""}, {kind = .UI})
+	testing.expect_value(t, rep.data, "{}")
+	// the environment's, as Claude Code reads it (1, true, yes, on; any case, spaces trimmed)
+	for v in ([]string{"1", "TRUE", " yes ", "on"}) {
+		os.set_env("CLAUDE_CODE_RESTRICTED", v)
+		src, _ = usage_claude_sources(nil)
+		testing.expectf(t, src == {}, "CLAUDE_CODE_RESTRICTED=%q: %v", v, src)
+		id3 := uc_tab(proj, "")
+		rep, _ = uc_report(id3, 10, 0)
+		testing.expectf(t, rep.data == "{}", "CLAUDE_CODE_RESTRICTED=%q after a restart: %s", v, rep.data)
+	}
+	os.set_env("CLAUDE_CODE_RESTRICTED", "0")
+	src, _ = usage_claude_sources(nil)
+	testing.expect_value(t, src, USAGE_SOURCES_ALL)
+	os.unset_env("CLAUDE_CODE_RESTRICTED")
+	// a wrapped tab always gets the name, empty when there is no command
+	testing.expect_value(t, usage_claude_fallback_env(def, proj, USAGE_SOURCES_ALL, .Wrapped), "DECKHAND_STATUSLINE_USER=user-line")
+	testing.expect_value(t, usage_claude_fallback_env(def, proj, {.Project}, .Wrapped), "DECKHAND_STATUSLINE_USER=")
 }
 
 }

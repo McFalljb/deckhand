@@ -110,7 +110,7 @@ function helloOf(ws: FakeSocket): any {
 // A browser's own connects (the page's start, a redial) never take the view from the Mac's window:
 // their hello has no "take". Only its user's View here (or Take back), or the first connect after
 // pairing, says "take": true; a redial after that says it again only until a hello was answered.
-test("take: only on the user's action", () => {
+test("take: only on the user's action", async () => {
   timers.length = 0; // the earlier tests' links' redials
   const statuses: any[] = [];
   const link = new Link({ up: () => {}, status: (s: any) => statuses.push(s) } as any);
@@ -130,6 +130,7 @@ test("take: only on the user's action", () => {
   assert.equal(helloOf(ws).take, true, "View here takes");
   // it fails before its hello is answered: the redial still takes
   ws.onclose!({ code: 1006 });
+  await new Promise((r) => setImmediate(r)); // refused before the hello: whoami, then the redial
   timers.at(-1)!.fn();
   ws = sockets.at(-1)!;
   assert.equal(helloOf(ws).take, true, "a redial of View here");

@@ -13,9 +13,12 @@ export const PROTOCOL_VERSION = 1;
 // upgrade (a bad one is refused there, 401 or 403); the hello carries this page's key, which the
 // core checks before it attaches the link (a wrong one: close code CLOSE_KEY). The reply is a
 // `result` with this id: data {core, version, generation, features, methods, name, machine,
-// snapshot, build, web, framed}.
-export function helloMessage(key: string): object {
-  return { v: PROTOCOL_VERSION, id: "hello", type: "hello", framed: true, peer: "web", snapshot: ["vt"], key };
+// snapshot, build, web, framed}. take: its user asked for the view (View here, Take back, the
+// first connect after pairing); without it the core leaves the Mac's window attached and says
+// web.taken by the window instead.
+export function helloMessage(key: string, take = false): object {
+  const m = { v: PROTOCOL_VERSION, id: "hello", type: "hello", framed: true, peer: "web", snapshot: ["vt"], key };
+  return take ? { ...m, take: true } : m;
 }
 
 // The core's close code for a hello without this browser's key: pair again.
@@ -77,6 +80,7 @@ export class Link {
   private retryTimer = 0;
   private hiddenAt = 0;
   private hold = false; // displaced, unpaired or stopped: no reconnect until asked
+  private take = false; // the user asked for the view: each hello says take until one is answered
   private statusNow: LinkStatus = { kind: "connecting" };
 
   private hooks: LinkHooks;
@@ -94,14 +98,18 @@ export class Link {
     return this.helloDone && this.ws?.readyState === WebSocket.OPEN;
   }
 
-  start(): void {
+  // take: the user started it (just paired): the view comes here even from the Mac's window.
+  start(take = false): void {
     this.hold = false;
+    this.take = take;
     this.connect();
   }
 
-  // Take back: the newest link wins at the core, so dialling again takes the view.
+  // View here (Take back): a hello with take, so the core gives this browser the view, from the
+  // Mac's window too. A connect of the link's own (a page load, a redial) never takes it from there.
   takeBack(): void {
     this.hold = false;
+    this.take = true;
     this.retryMs = RECONNECT_MIN;
     this.connect();
   }
@@ -179,7 +187,7 @@ export class Link {
         this.unpaired();
         return;
       }
-      ws.send(jsonFrame(helloMessage(key)));
+      ws.send(jsonFrame(helloMessage(key, this.take)));
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws || !(ev.data instanceof ArrayBuffer)) return;
@@ -375,6 +383,7 @@ export class Link {
     }
     if (core) this.core = core;
     this.helloDone = true;
+    this.take = false; // answered: the view is here (or the Mac kept it: web.taken follows)
     this.store.clear();
     this.sendJson({ type: "state.subscribe" });
   }

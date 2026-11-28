@@ -74,13 +74,25 @@ function Root() {
         setScreen((x) => (x.kind === "away" ? { kind: "main" } : x));
         break;
       case "displaced":
-        setScreen({
-          kind: "away",
-          title: s.by || "Viewed at the Mac",
-          text: "Your sessions keep running. Take them back to show them here (the other window lets go).",
-          button: "Take back",
-          act: () => link.takeBack(),
-        });
+        // by "": this Mac's window has the view (it took it back, or it was there when this page
+        // connected on its own: a connect never takes it from the Mac without the user)
+        setScreen(
+          s.by
+            ? {
+                kind: "away",
+                title: s.by,
+                text: "Your sessions keep running. Take them back to show them here (the other window lets go).",
+                button: "Take back",
+                act: () => link.takeBack(),
+              }
+            : {
+                kind: "away",
+                title: "Your Mac is showing these sessions",
+                text: "Your sessions keep running. View them here to show them in this browser (the Mac window lets go).",
+                button: "View here",
+                act: () => link.takeBack(),
+              },
+        );
         break;
       case "unpaired":
         setScreen({ kind: "pair" });
@@ -199,7 +211,7 @@ function Root() {
         <PairHost
           onPaired={() => {
             setScreen({ kind: "main" });
-            link.start();
+            link.start(true); // just paired: the user wants the sessions here
           }}
         />
       ) : screen.kind === "away" ? (

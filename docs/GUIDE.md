@@ -2553,10 +2553,14 @@ push notifications to a browser yet.
 
 ### One view at a time
 
-A core shows its sessions in one place at a time. A browser that opens takes the view from the
-Mac's window, which then shows **Viewed in a browser** with **Take Back**; the same happens to a
-browser when the window, another machine or another browser takes the view, and the browser
-shows **Take back**. Your sessions keep running either way.
+A core shows its sessions in one place at a time. While the Mac's window shows them, a browser
+that opens or reconnects on its own (a page load, a network change, the phone waking, Deckhand
+restarting after an update) leaves them there and shows **Your Mac is showing these sessions**
+with **View here**. Tap **View here** to show them in the browser: the Mac's window then shows
+**Viewed in a browser** with **Take Back**. The first connect right after you pair a browser
+shows them there at once. With no Mac window open, a browser shows the sessions as soon as it
+connects. When the window, another machine or another browser takes the view from a browser, the
+browser shows **Take back**. Your sessions keep running either way.
 
 While a browser has the view, an agent's commands on browser tabs fail, as when another machine
 views this one.

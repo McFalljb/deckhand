@@ -1679,8 +1679,9 @@ an event: `web_pair`'s result goes to its caller only.
    `[channel u32 LE][kind u8][len u32 LE][payload]`, channel 0 DATA a JSON message. A text
    message, a fragment, an unmasked frame, RSV bits, a message that is not exactly one frame or
    over 9 B + 16 MiB closes the link. The core pings every 30 s and closes a browser silent for 90 s.
-4. The browser's first message: `{"v":1,"id":"hello","type":"hello","key":<its key>}` (other
-   fields ignored), at most 16 KiB; anything else, or a wrong key, closes with `4401`. The
+4. The browser's first message: `{"v":1,"id":"hello","type":"hello","key":<its key>}`, with
+   `"take":true` when its user asked for the view (see *One link per core*; other fields
+   ignored), at most 16 KiB; anything else, or a wrong key, closes with `4401`. The
    core answers `{"type":"result","id":"hello","result":{"ok":true,"data":{"app":"deckhand",
    "caller":"ui","web":true,"framed":true,"name","generation","version","core","features",
    "methods","machine":{"name","os","arch"},"snapshot":["vt"],"build"}}}`; `methods` are the
@@ -1701,8 +1702,17 @@ file tabs read and save with `file_read` and `file_save`); of the
 sent (the rest answer as if no window were attached); it answers them with `window.reply`. A
 notification also shows as the core's own banner. `open_url` should open only on the user's tap.
 
-**One link per core.** The newest connection wins, as for a hub. A browser taking this Mac's
-window shows **Viewed in a browser** there with **Take Back**; a hub taken by it gets
+**One link per core.** The newest connection wins, as for a hub, with one exception: a browser
+takes the view from this Mac's attached window only when its hello says `"take":true`, which a
+browser sends only on its user's action (**View here**, **Take back**, the first connect after
+pairing). A hello without it (a page load, a reconnect, the phone waking, a restarted core) while
+the window is attached is not attached: it gets its hello's result, then
+`{"type":"web.taken","by":"window","name":""}`, the link closes, and the window keeps the view.
+A page from before `take` sees this core's new `core` id in that result and reloads, getting the
+current client (`index.html` is served `no-cache`, its assets by content hash).
+With no window attached, or a hub or another browser attached, a hello without `take` attaches
+as before. A browser taking this Mac's window shows **Viewed in a browser** there with
+**Take Back**; a hub taken by it gets
 `hub.taken` `by` `"a browser"`. A browser's link taken by another gets
 `{"type":"web.taken","by":"window"|"machine"|"browser","name"}` and should wait for its user's
 Take back. `{"type":"web.revoked"}`: its token was revoked; `{"type":"web.closed"}`: web access

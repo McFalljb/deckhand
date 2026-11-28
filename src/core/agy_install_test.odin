@@ -4,7 +4,8 @@ package core
 // manifest, a tarball made here), a temp folder in place of ~/.local/bin. Nothing is downloaded
 // from Google and nothing here runs agy (the fixture "agy" is a shell script, never started).
 // Every refusal leaves nothing at the install path (or the old agy as it was) and no private
-// folder behind. The real codesign refuses the unsigned, ad-hoc and Apple-signed fixtures; the
+// folder behind. On Linux (the core's CI job) the runs and the command are refused and do nothing
+// (ai_linux_refuses); the parsers run everywhere. The real codesign refuses the unsigned, ad-hoc and Apple-signed fixtures; the
 // success path stands in for Google's signature (Agy_Job.sign), and the parsers of codesign's and
 // spctl's answers are checked on their real shapes.
 
@@ -113,6 +114,34 @@ path_kind_l_test :: proc(p: string) -> Path_Kind {
 	st: posix.stat_t
 	if posix.lstat(strings.clone_to_cstring(p, context.temp_allocator), &st) != .OK do return .Missing
 	return posix.S_ISREG(st.st_mode) ? .File : .Other
+}
+
+// Off macOS: a run refuses before it reads anything and touches nothing (no folder made, an agy
+// already there as it was, an earlier run's leftovers left). No fixture: bsdtar's flags are macOS's.
+@(private = "file")
+ai_linux_refuses :: proc(t: ^testing.T, tag: string, update := false, loc := #caller_location) {
+	root := ai_dir(tag)
+	defer os.remove_all(root)
+	j := Agy_Job {
+		manifest_url = fmt.tprintf("file://%s/rel/manifests/%s.json", root, TP.name),
+		prefix = fmt.tprintf("file://%s/rel/antigravity-cli/", root),
+		dir = upath(root, "bin"),
+		test = true,
+		ua = "Deckhand/test",
+		platform = TP,
+		sign = proc(bin: string) -> string {return ""},
+	}
+	if update {
+		ai_write(upath(j.dir, "agy"), FAKE_AGY, 0o755)
+		ai_write(upath(j.dir, AGY_TEMP_PREFIX + "abc123", "agy.tar.gz"), "left over")
+		j.update, j.installed = true, "1.5.10"
+	}
+	v, err := agy_install_run(j)
+	testing.expectf(t, v == "" && err == "Install agy is for macOS only", "refused: %q %q", v, err, loc = loc)
+	if update {
+		testing.expect_value(t, ai_read(upath(j.dir, "agy")), FAKE_AGY, loc = loc)
+		testing.expect_value(t, ai_read(upath(j.dir, AGY_TEMP_PREFIX + "abc123", "agy.tar.gz")), "left over", loc = loc)
+	} else do testing.expectf(t, path_kind_l_test(j.dir) == .Missing, "no folder made", loc = loc)
 }
 
 // ---- the manifest, read strictly ----
@@ -239,6 +268,10 @@ agy_real_signature_refuses :: proc(t: ^testing.T) {
 
 @(test)
 agy_install_success :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin {
+		ai_linux_refuses(t, "ok")
+		return
+	}
 	root := ai_dir("ok")
 	defer os.remove_all(root)
 	j := ai_release(root, ai_src(root), {AGY_MEMBER})
@@ -274,6 +307,10 @@ agy_install_success :: proc(t: ^testing.T) {
 
 @(test)
 agy_install_refusals :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin {
+		ai_linux_refuses(t, "refuse")
+		return
+	}
 	root := ai_dir("refuse")
 	defer os.remove_all(root)
 	src := ai_src(root)
@@ -339,6 +376,10 @@ agy_install_refusals :: proc(t: ^testing.T) {
 
 @(test)
 agy_update_runs :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin {
+		ai_linux_refuses(t, "update", update = true)
+		return
+	}
 	root := ai_dir("update")
 	defer os.remove_all(root)
 	src := ai_src(root)
@@ -389,6 +430,10 @@ agy_update_runs :: proc(t: ^testing.T) {
 // A private folder an earlier run left is removed by the next run; others' files stay.
 @(test)
 agy_install_sweeps_leftovers :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin {
+		ai_linux_refuses(t, "sweep", update = true)
+		return
+	}
 	root := ai_dir("sweep")
 	defer os.remove_all(root)
 	j := ai_release(root, ai_src(root), {AGY_MEMBER})
@@ -466,6 +511,23 @@ agy_confirmation_says_what :: proc(t: ^testing.T) {
 // confirmed run installs from the fixture and the row says so.
 @(test)
 agy_install_command :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin {
+		// nothing offered: the user's command is refused without asking, nothing runs
+		// (a when block is no scope: its names are its own)
+		lroot := ai_dir("cmd")
+		defer os.remove_all(lroot)
+		lsaved := agy_test_dir
+		defer {
+			agy_test_dir = lsaved
+			agy_inst = {}
+		}
+		agy_test_dir = upath(lroot, "bin")
+		lr := run_command(Install_Agy{}, Caller{kind = .UI})
+		testing.expectf(t, !lr.ok && lr.error != "needs_confirmation" && lr.confirm_token == "", "refused: %v", lr)
+		testing.expect_value(t, agy_inst.phase, Agy_Install_Phase.None)
+		testing.expect(t, path_kind_l_test(upath(lroot, "bin", "agy")) == .Missing, "nothing installed")
+		return
+	}
 	root := ai_dir("cmd")
 	defer os.remove_all(root)
 	j := ai_release(root, ai_src(root), {AGY_MEMBER})

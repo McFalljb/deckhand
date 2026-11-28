@@ -421,6 +421,8 @@ agy_job_free :: proc(j: ^Agy_Job) {
 // report: each step as the row says it (nil: none).
 agy_install_run :: proc(j: Agy_Job, report: proc(step: string) = nil) -> (version: string, err: string) {
 	say :: proc(report: proc(step: string), s: string) {if report != nil do report(s)}
+	// macOS only (Google's signature, codesign, spctl, bsdtar's flags): nothing is touched elsewhere
+	when ODIN_OS != .Darwin do return "", "Install agy is for macOS only"
 	when ODIN_TEST {
 		// a guard on the tests themselves: never the developer's own ~/.local/bin
 		if home := account_home(); home != "" && strings.has_prefix(j.dir, upath(home, ".local")) do return "", "unit tests never install into ~/.local"
